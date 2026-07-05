@@ -16,6 +16,7 @@ import EnhancedDatePicker from "@/components/enhanced-date-picker";
 import { getAllRoutes, getAllBuses, getDriverById, updateDriver } from '@/lib/dataService';
 import { Route, Driver } from '@/lib/types';
 import RouteSelect from '@/components/RouteSelect';
+import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import { signalCollectionRefresh } from '@/hooks/useEventDrivenRefresh';
 
 type DriverFormData = {
@@ -118,7 +119,7 @@ export default function EditDriverPage({ params }: { params: Promise<{ id: strin
           address: foundDriver.address || foundDriver.location || '',
           status: foundDriver.status || 'active',
           approvedBy: foundDriver.approvedBy || '',
-          shift: foundDriver.shift === 'Morning & Evening' ? 'Both' : (foundDriver.shift || 'Both')
+          shift: foundDriver.shift || 'Both'
         };
 
         // If busAssigned is derived from ID, format it correctly
@@ -293,7 +294,7 @@ export default function EditDriverPage({ params }: { params: Promise<{ id: strin
 
         status: formData.status,
         employeeId: formData.employeeId,
-        shift: formData.shift === 'Morning & Evening' ? 'Both' : formData.shift,
+        shift: formData.shift,
         updatedAt: new Date().toISOString()
       };
 
@@ -319,11 +320,7 @@ export default function EditDriverPage({ params }: { params: Promise<{ id: strin
   };
 
   if (loading || authLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-[#010717]">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
-      </div>
-    );
+    return <PremiumPageLoader message="Loading driver profile..." subMessage="Preparing editing tools..." />;
   }
 
   if (!currentUser || !userData || !['admin', 'moderator'].includes(userData.role)) return null;
@@ -506,7 +503,7 @@ export default function EditDriverPage({ params }: { params: Promise<{ id: strin
                       Shift <span className="text-red-500">*</span>
                     </Label>
                     <Select
-                      value={formData.shift === 'Morning & Evening' ? 'Both' : formData.shift}
+                      value={formData.shift}
                       onValueChange={(value) => handleInputChange('shift', value)}
                     >
                       <SelectTrigger className="w-full h-9">

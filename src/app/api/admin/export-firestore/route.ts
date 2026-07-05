@@ -6,8 +6,7 @@ import { RateLimits } from '@/lib/security/rate-limiter';
 
 const COLLECTIONS_TO_EXPORT = [
     'users', 'students', 'drivers', 'buses', 'routes', 'moderators',
-    'applications', 'notifications', 'payments', 'config',
-    'systemConfig', 'systemSignals', 'admins'
+    'applications', 'notifications', 'payments', 'config', 'admins'
 ];
 
 function convertTimestamps(obj: any): any {

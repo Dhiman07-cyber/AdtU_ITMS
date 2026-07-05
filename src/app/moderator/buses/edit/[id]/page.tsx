@@ -12,6 +12,7 @@ import { Info } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { getAllRoutes, getBusById, getAllDrivers, getAllBuses } from "@/lib/dataService";
 import { useToast } from "@/contexts/toast-context";
+import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import { Route, Driver } from "@/lib/types";
 import { signalCollectionRefresh } from "@/hooks/useEventDrivenRefresh";
 
@@ -233,11 +234,7 @@ export default function EditBusPage({ params }: { params: Promise<{ id: string }
   };
 
   if (loading || authLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-[#010717]">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
-      </div>
-    );
+    return <PremiumPageLoader message="Loading bus details..." subMessage="Preparing editing tools..." />;
   }
 
   if (!currentUser || !userData || !['admin', 'moderator'].includes(userData.role)) return null;

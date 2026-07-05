@@ -3,7 +3,7 @@ import { adminAuth, adminDb } from '@/lib/firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
 import { v2 as cloudinary } from 'cloudinary';
 import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
-import { writeAuditInTransaction } from '@/lib/audit/audit-service';
+import { createAuditLogInTransaction } from '@/lib/services/audit.service';
 
 /** Thrown inside the rejection transaction when the request was already consumed (duplicate / retry). */
 class RequestGoneError extends Error {}
@@ -129,17 +129,23 @@ export async function POST(request: NextRequest) {
           throw new RequestGoneError();
         }
         transaction.delete(requestRef);
-        writeAuditInTransaction(transaction, {
+        createAuditLogInTransaction(transaction, {
+          category: 'renewals',
           action: 'renewal_request_rejected',
-          actor: { id: uid, role: adminDoc.exists ? 'admin' : 'moderator', name: rejectorData?.fullName || rejectorData?.name || rejectorName },
-          targetId: studentId,
+          summary: `Renewal request rejected: ${requestData?.studentName || ''}`,
+          severity: 'medium',
+          performedBy: uid,
+          performedByName: rejectorData?.fullName || rejectorData?.name || rejectorName,
+          performedByRole: (adminDoc.exists ? 'admin' : 'moderator') as any,
           targetType: 'renewal_request',
+          targetId: studentId,
           targetName: requestData?.studentName || '',
-          reason,
-          before: { requestId, requestStatus: 'pending', ...destroyedSnapshot },
-          after: { requestStatus: 'deleted' },
-          details: { requestId, rejectorName, rejectorId },
-          correlationId: requestId,
+          metadata: {
+            reason,
+            before: { requestId, requestStatus: 'pending', ...destroyedSnapshot },
+            after: { requestStatus: 'deleted' },
+            details: { requestId, rejectorName, rejectorId },
+          },
         });
       });
       console.log('✅ Renewal request document deleted');

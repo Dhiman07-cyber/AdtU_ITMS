@@ -1,4 +1,5 @@
 import type { BusData, StudentData } from '@/app/admin/smart-allocation/page';
+import { normalizeShift, areShiftsCompatible, getShiftLoad } from '@/lib/utils/shift-utils';
 
 interface ScoredBus extends BusData {
   score: number;
@@ -43,11 +44,14 @@ export class AllocationRanker {
     students: StudentData[],
     sourceBus: BusData
   ): ScoredBus {
-    // Calculate available seats
-    const availableSeats = bus.capacity - bus.currentMembers;
+    // CANONICAL PER-SHIFT CAPACITY: use the shift-specific load for available seats.
+    // Students being reassigned have a specific shift — gate against that trip only.
+    const studentShift = students.length > 0 ? students[0].shift : undefined;
+    const shiftLoad = getShiftLoad(bus as any, studentShift);
+    const availableSeats = bus.capacity - shiftLoad;
 
-    // Calculate new load after reassignment
-    const newMemberCount = bus.currentMembers + students.length;
+    // Calculate new load after reassignment (shift-specific)
+    const newMemberCount = shiftLoad + students.length;
     const newLoad = (newMemberCount / bus.capacity) * 100;
 
     // 1. Seat Availability Score (0-1)
@@ -134,13 +138,17 @@ export class AllocationRanker {
     students: StudentData[],
     sourceBus: BusData
   ): number {
+    // Use canonical shift-utils for comparison
+    const busShift = normalizeShift(bus.shift);
+    const sourceShift = normalizeShift(sourceBus.shift);
+
     // Check if shifts match
-    if (bus.shift === sourceBus.shift) {
+    if (areShiftsCompatible(busShift, sourceShift)) {
       return 1;
     }
 
     // Check if bus serves both shifts
-    if (bus.shift === 'both' || sourceBus.shift === 'both') {
+    if (busShift === 'Both' || sourceShift === 'Both') {
       return 0.75;
     }
 
@@ -148,7 +156,7 @@ export class AllocationRanker {
     const studentShifts = students.map(s => s.shift).filter(Boolean);
     if (studentShifts.length > 0) {
       const matchingShifts = studentShifts.filter(shift =>
-        shift === bus.shift || bus.shift === 'both'
+        areShiftsCompatible(shift, busShift)
       );
       return matchingShifts.length / studentShifts.length;
     }
@@ -162,20 +170,29 @@ export class AllocationRanker {
     studentCount: number,
     sourceBus: BusData
   ): number {
+    // CANONICAL PER-SHIFT CAPACITY: use shift-specific load for overload calculations.
+    // Use the larger trip load as a conservative estimate for the source bus,
+    // since we may not know the exact shift of all students being moved.
+    const sourceShiftLoad = Math.max(
+      getShiftLoad(sourceBus as any, 'Morning'),
+      getShiftLoad(sourceBus as any, 'Evening')
+    );
+    const targetShiftLoad = getShiftLoad(bus as any, 'Morning');
+
     // Calculate current overload of source bus
     const sourceOverload = Math.max(
       0,
-      (sourceBus.currentMembers / sourceBus.capacity) - 0.9
+      (sourceShiftLoad / sourceBus.capacity) - 0.9
     );
 
     // Calculate reduction in overload after moving students
-    const newSourceMembers = sourceBus.currentMembers - studentCount;
+    const newSourceMembers = sourceShiftLoad - studentCount;
     const newSourceLoad = newSourceMembers / sourceBus.capacity;
     const newSourceOverload = Math.max(0, newSourceLoad - 0.9);
 
     // Calculate increase in target bus load
-    const targetCurrentLoad = bus.currentMembers / bus.capacity;
-    const targetNewMembers = bus.currentMembers + studentCount;
+    const targetCurrentLoad = targetShiftLoad / bus.capacity;
+    const targetNewMembers = targetShiftLoad + studentCount;
     const targetNewLoad = targetNewMembers / bus.capacity;
 
     // Penalize if target bus would become overloaded
@@ -217,7 +234,11 @@ export class AllocationRanker {
     for (const bus of rankedBuses) {
       if (remainingStudents.length === 0) break;
 
-      const availableSeats = bus.capacity - bus.currentMembers;
+      // CANONICAL PER-SHIFT CAPACITY: use the first student's shift for available seats
+      const busShiftLoad = remainingStudents.length > 0
+        ? getShiftLoad(bus as any, remainingStudents[0].shift)
+        : 0;
+      const availableSeats = bus.capacity - busShiftLoad;
       if (availableSeats <= 0) continue;
 
       // Check which students can be assigned to this bus
@@ -284,7 +305,10 @@ export class AllocationRanker {
 
     for (const [busId, bus] of buses) {
       const change = busChanges.get(busId) || 0;
-      const newMembers = bus.currentMembers + change;
+      // CANONICAL PER-SHIFT CAPACITY: use shift-specific load for metrics.
+      // Use the larger of morning/evening as the representative load for metrics.
+      const shiftLoad = getShiftLoad(bus as any, 'Morning');
+      const newMembers = shiftLoad + change;
       const load = (newMembers / bus.capacity) * 100;
 
       totalLoad += load;

@@ -3,9 +3,8 @@ import { adminAuth, adminDb } from '@/lib/firebase-admin';
 import { NotificationService } from '@/lib/notifications/NotificationService';
 import { NotificationTarget } from '@/lib/notifications/types';
 import { getSystemConfig, updateSystemConfig } from '@/lib/system-config-service';
-import { sanitizeMapProviderInput } from '@/lib/maps/system-config-map-schema';
 
-// GET: Retrieve system config from Firestore
+// GET: Retrieve system config from Firestore (public — no sensitive data)
 export async function GET(req: NextRequest) {
     try {
         const config = await getSystemConfig();
@@ -54,13 +53,8 @@ export async function POST(req: NextRequest) {
             );
         }
 
-        if (rawConfig.mapProvider !== undefined) {
-            const safe = sanitizeMapProviderInput(rawConfig.mapProvider);
-            if (safe === undefined) {
-                return NextResponse.json({ message: 'Invalid configuration data' }, { status: 400 });
-            }
-            rawConfig.mapProvider = safe;
-        }
+        // Force mapProvider to 'guwahati'
+        rawConfig.mapProvider = 'guwahati';
 
         const config = rawConfig;
 

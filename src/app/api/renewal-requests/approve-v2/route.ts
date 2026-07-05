@@ -7,8 +7,9 @@ import { deleteAsset, extractPublicId } from '@/lib/cloudinary-server';
 import { getDeadlineConfig } from '@/lib/deadline-config-service';
 import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
 import { buildCapacityDelta } from '@/lib/busCapacityService';
+import { getShiftLoad } from '@/lib/utils/shift-utils';
 import { wasSeatReleased } from '@/lib/config/capacity-flags';
-import { writeAuditInTransaction, type AuditActorRole } from '@/lib/audit/audit-service';
+import { createAuditLogInTransaction, type AuditActorRole } from '@/lib/services/audit.service';
 import { CapacityFullError } from '@/lib/errors/sentinel-errors';
 import { safeErrorMessage } from '@/lib/security/safe-error';
 
@@ -110,7 +111,10 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Assigned bus not found for renewal' }, { status: 409 });
       }
       const preBusData = preBusSnap.data() || {};
-      if ((preBusData.currentMembers || 0) >= (preBusData.capacity || 55)) {
+      // CANONICAL PER-SHIFT CAPACITY GATE: gate on the student's own trip counter,
+      // never on the combined currentMembers total.
+      const preShiftLoad = getShiftLoad(preBusData, savedStudentData.shift);
+      if (preShiftLoad >= (preBusData.capacity || 55)) {
         return NextResponse.json({
           error: 'Original bus is full',
           message: "This student's seat was released at soft block and the original bus is now full. Reassign the student to a bus with capacity (or increase capacity) before approving this renewal.",
@@ -143,8 +147,10 @@ export async function POST(request: NextRequest) {
         if (reclaimBusRef) {
           if (!reclaimBusDoc!.exists) throw new Error('Assigned bus not found for renewal');
           const reclaimBusData = reclaimBusDoc!.data();
-          // Atomic ceiling enforcement — closes the last-seat race with the pre-check.
-          if ((reclaimBusData?.currentMembers || 0) >= (reclaimBusData?.capacity || 55)) {
+          // CANONICAL PER-SHIFT CAPACITY GATE: atomic ceiling enforcement — closes
+          // the last-seat race with the pre-check. Gate on the student's shift only.
+          const reclaimShiftLoad = getShiftLoad(reclaimBusData, savedStudentData.shift);
+          if (reclaimShiftLoad >= (reclaimBusData?.capacity || 55)) {
             throw new CapacityFullError();
           }
           busDelta = buildCapacityDelta(reclaimBusData, savedStudentData.shift, 1);
@@ -192,30 +198,36 @@ export async function POST(request: NextRequest) {
         // ── Tier A audit (in-transaction): the renewal approval — including the
         //    seat reclaim and entitlement reactivation — commits if and only if
         //    this audit row commits. Replaces the former best-effort post-task log.
-        writeAuditInTransaction(transaction, {
+        createAuditLogInTransaction(transaction, {
+          category: 'renewals',
           action: 'renewal_request_approved',
-          actor: { id: approverUserId, role: approverData.role as AuditActorRole, name: approverData.fullName },
-          targetId: studentId,
+          summary: `Renewal request approved: ${studentName}`,
+          severity: 'high',
+          performedBy: approverUserId,
+          performedByName: approverData.fullName,
+          performedByRole: approverData.role as any,
           targetType: 'student',
+          targetId: studentId,
           targetName: studentName,
-          reason: seatWasReleased ? 'renewal_with_seat_reclaim' : 'renewal_approval',
-          before: {
-            requestId,
-            requestStatus: 'pending',
-            seatWasReleased,
-            previousValidUntil: savedStudentData.validUntil ?? null,
-            previousStatus: freshStudentData.status ?? null,
+          metadata: {
+            reason: seatWasReleased ? 'renewal_with_seat_reclaim' : 'renewal_approval',
+            before: {
+              requestId,
+              requestStatus: 'pending',
+              seatWasReleased,
+              previousValidUntil: savedStudentData.validUntil ?? null,
+              previousStatus: freshStudentData.status ?? null,
+            },
+            after: {
+              requestStatus: 'approved',
+              status: 'active',
+              validUntil: newValidUntil.toISOString(),
+              sessionEndYear: newSessionEndYear,
+              durationYears: totalDuration,
+              seatReclaimedBusId: (reclaimBusRef && busDelta) ? renewalBusId : null,
+            },
+            details: { requestId, paymentId, paymentMode: isOnlineRenewal ? 'online' : 'offline', totalFee, durationYears },
           },
-          after: {
-            requestStatus: 'approved',
-            status: 'active',
-            validUntil: newValidUntil.toISOString(),
-            sessionEndYear: newSessionEndYear,
-            durationYears: totalDuration,
-            seatReclaimedBusId: (reclaimBusRef && busDelta) ? renewalBusId : null,
-          },
-          details: { requestId, paymentId, paymentMode: isOnlineRenewal ? 'online' : 'offline', totalFee, durationYears },
-          correlationId: requestId,
         });
       });
     } catch (txErr: any) {

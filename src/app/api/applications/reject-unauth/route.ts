@@ -3,7 +3,7 @@ import { adminAuth, adminDb } from '@/lib/firebase-admin';
 import { v2 as cloudinary } from 'cloudinary';
 import { sendApplicationRejectedNotification } from '@/lib/services/admin-email.service';
 import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
-import { writeAuditInTransaction } from '@/lib/audit/audit-service';
+import { createAuditLogInTransaction } from '@/lib/services/audit.service';
 import { Application } from '@/lib/types/application';
 import { ApplicationGoneError } from '@/lib/errors/sentinel-errors';
 
@@ -107,17 +107,23 @@ export async function POST(request: NextRequest) {
           throw new ApplicationGoneError();
         }
         transaction.delete(applicationRef);
-        writeAuditInTransaction(transaction, {
+        createAuditLogInTransaction(transaction, {
+          category: 'applications',
           action: 'application_rejected',
-          actor: { id: moderatorUid, role: adminDoc.exists ? 'admin' : 'moderator', name: moderatorData?.fullName || moderatorData?.name || 'Moderator' },
-          targetId: appData.applicantUid,
+          summary: `Application rejected: ${formData.fullName || ''}`,
+          severity: 'medium',
+          performedBy: moderatorUid,
+          performedByName: moderatorData?.fullName || moderatorData?.name || 'Moderator',
+          performedByRole: (adminDoc.exists ? 'admin' : 'moderator') as any,
           targetType: 'application',
+          targetId: appData.applicantUid,
           targetName: formData.fullName || '',
-          reason,
-          before: { applicationId: studentUid, applicationState: 'submitted', ...destroyedSnapshot },
-          after: { applicationState: 'deleted' },
-          details: { applicationId: studentUid, rejectorName: moderatorData?.fullName || moderatorData?.name || 'Moderator', rejectorId: moderatorUid, channel: 'unauthenticated' },
-          correlationId: studentUid,
+          metadata: {
+            reason,
+            before: { applicationId: studentUid, applicationState: 'submitted', ...destroyedSnapshot },
+            after: { applicationState: 'deleted' },
+            details: { applicationId: studentUid, rejectorName: moderatorData?.fullName || moderatorData?.name || 'Moderator', rejectorId: moderatorUid, channel: 'unauthenticated' },
+          },
         });
       });
       applicationDeleted = true;

@@ -6,7 +6,8 @@ import { withSecurity } from '@/lib/security/api-security';
 import { ReassignStudentsSchema } from '@/lib/security/validation-schemas';
 import { RateLimits } from '@/lib/security/rate-limiter';
 import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
-import { writeAuditInTransaction, recordOperationalEvent, type AuditActorRole } from '@/lib/audit/audit-service';
+import { createAuditLogInTransaction, createAuditLog, type AuditActorRole } from '@/lib/services/audit.service';
+import { getShiftDeltas, normalizeShift } from '@/lib/utils/shift-utils';
 import crypto from 'crypto';
 
 type ReassignmentAssignment = {
@@ -15,7 +16,7 @@ type ReassignmentAssignment = {
     fromBusId: string;
     toBusId: string;
     toBusNumber: string;
-    shift: 'Morning' | 'Evening' | 'Morning & Evening' | 'Both';
+    shift: 'Morning' | 'Evening' | 'Both';
     stopId?: string;
     stopName?: string;
 };
@@ -107,7 +108,7 @@ export const POST = withSecurity<ReassignStudentsBody>(
                 effectiveAssignments.length = 0;
 
                 for (const assignment of assignments) {
-                    const { studentId, fromBusId, toBusId, shift } = assignment;
+                    const { studentId, fromBusId, toBusId, shift: targetShift } = assignment;
                     const studentRef = adminDb.collection('students').doc(studentId);
                     const studentSnap = studentSnapshots.get(studentId);
 
@@ -118,7 +119,8 @@ export const POST = withSecurity<ReassignStudentsBody>(
                     const studentData = studentSnap.data()!;
                     const currentBusId = studentData.busId || '';
 
-                    if (currentBusId === toBusId) {
+                    if (currentBusId === toBusId && studentData.shift === targetShift) {
+                        // Already on the target bus with the correct shift — pure no-op
                         continue;
                     }
 
@@ -135,8 +137,16 @@ export const POST = withSecurity<ReassignStudentsBody>(
                     }
                     const targetBusData = targetBusSnap.data()!;
 
+                    // ── Original Shift: what is currently stored on the student in Firestore.
+                    // MUST be used for source-bus decrement.
+                    // Normalise to canonical form; default to 'Morning' if missing.
+                    const originalShift = normalizeShift(studentData.shift || 'Morning') as 'Morning' | 'Evening';
+
+                    // ── Target Shift: what the moderator has selected for the student.
+                    // MUST be persisted on the student document and used for dest-bus increment.
                     const studentUpdateData: Record<string, unknown> = {
                         busId: toBusId,
+                        shift: targetShift,          // ← persist the new shift
                         routeId: targetBusData.route?.routeId || targetBusData.routeId || '',
                         updatedAt: FieldValue.serverTimestamp(),
                     };
@@ -144,17 +154,25 @@ export const POST = withSecurity<ReassignStudentsBody>(
                     if (assignment.stopName) studentUpdateData.stopName = assignment.stopName;
                     transaction.update(studentRef, studentUpdateData);
 
-                    if (!busLoadChanges.has(fromBusId)) busLoadChanges.set(fromBusId, { morningDelta: 0, eveningDelta: 0 });
-                    const sourceChanges = busLoadChanges.get(fromBusId)!;
-                    if (shift === 'Morning') sourceChanges.morningDelta--;
-                    else sourceChanges.eveningDelta--;
+                    // Source bus: DECREMENT using ORIGINAL shift
+                    // Only decrement if the student was actually on the source bus
+                    // (skip if student has no current bus assignment)
+                    if (currentBusId && currentBusId === fromBusId) {
+                        if (!busLoadChanges.has(fromBusId)) busLoadChanges.set(fromBusId, { morningDelta: 0, eveningDelta: 0 });
+                        const sourceChanges = busLoadChanges.get(fromBusId)!;
+                        const srcDeltas = getShiftDeltas(originalShift);
+                        if (srcDeltas.affectsMorning) sourceChanges.morningDelta--;
+                        if (srcDeltas.affectsEvening) sourceChanges.eveningDelta--;
+                    }
 
+                    // Destination bus: INCREMENT using TARGET shift
                     if (!busLoadChanges.has(toBusId)) busLoadChanges.set(toBusId, { morningDelta: 0, eveningDelta: 0 });
                     const targetChanges = busLoadChanges.get(toBusId)!;
-                    if (shift === 'Morning') targetChanges.morningDelta++;
-                    else targetChanges.eveningDelta++;
+                    const dstDeltas = getShiftDeltas(targetShift);
+                    if (dstDeltas.affectsMorning) targetChanges.morningDelta++;
+                    if (dstDeltas.affectsEvening) targetChanges.eveningDelta++;
 
-                    effectiveAssignments.push(assignment);
+                    effectiveAssignments.push({ ...assignment, _originalShift: originalShift } as any);
                 }
 
                 for (const [busId, deltas] of busLoadChanges.entries()) {
@@ -170,10 +188,26 @@ export const POST = withSecurity<ReassignStudentsBody>(
                     const newEvening = Math.max(0, (currentLoad.eveningCount || 0) + deltas.eveningDelta);
                     const capacity = Number(busData.capacity || busData.capacitySeats || 0);
 
-                    if (capacity > 0 && (newMorning + newEvening) > capacity) {
-                        throw new ReassignmentValidationError(`Bus ${busId} would exceed capacity`, 409);
+                    // ── CANONICAL CAPACITY MODEL (per-shift, independent trips) ──
+                    // Morning and Evening are separate physical trips sharing the same
+                    // seat count. Each shift is gated INDEPENDENTLY against capacity.
+                    // NEVER gate on morningCount + eveningCount > capacity.
+                    if (capacity > 0) {
+                        if (deltas.morningDelta > 0 && newMorning > capacity) {
+                            throw new ReassignmentValidationError(
+                                `Bus ${busData.busNumber || busId} Morning trip would exceed capacity (${newMorning}/${capacity})`,
+                                409
+                            );
+                        }
+                        if (deltas.eveningDelta > 0 && newEvening > capacity) {
+                            throw new ReassignmentValidationError(
+                                `Bus ${busData.busNumber || busId} Evening trip would exceed capacity (${newEvening}/${capacity})`,
+                                409
+                            );
+                        }
                     }
 
+                    // currentMembers is a DERIVED statistic: always morningCount + eveningCount.
                     transaction.update(busRef, {
                         'load.morningCount': newMorning,
                         'load.eveningCount': newEvening,
@@ -187,16 +221,20 @@ export const POST = withSecurity<ReassignStudentsBody>(
                 //    survives even if the detailed Supabase rollback snapshot below
                 //    fails to write. Skipped for pure no-ops (no effective moves).
                 if (effectiveAssignments.length > 0) {
-                    writeAuditInTransaction(transaction, {
+                    createAuditLogInTransaction(transaction, {
                         action: 'students_reassigned',
-                        actor: { id: currentUserUid, role: (currentUserRole as AuditActorRole) || 'system', name: actorLabel },
+                        performedBy: currentUserUid,
+                        performedByName: actorLabel,
+                        performedByRole: (currentUserRole as AuditActorRole) || 'system',
                         targetId: sourceBusId || effectiveAssignments[0].fromBusId,
                         targetType: 'bus',
                         targetName: sourceBusId || '',
-                        reason: 'student_reassignment',
-                        before: { sourceBusId },
-                        after: { movedCount: effectiveAssignments.length },
-                        details: {
+                        category: 'reassignments',
+                        summary: `Reassigned ${effectiveAssignments.length} student(s) from ${sourceBusId || ''}`,
+                        severity: 'medium',
+                        metadata: {
+                            before: { sourceBusId },
+                            after: { movedCount: effectiveAssignments.length },
                             operationId,
                             sourceBusId,
                             assignments: effectiveAssignments.map((a) => ({
@@ -205,8 +243,8 @@ export const POST = withSecurity<ReassignStudentsBody>(
                                 to: a.toBusId,
                                 shift: a.shift,
                             })),
+                            correlationId: operationId,
                         },
-                        correlationId: operationId,
                     });
                 }
             });
@@ -249,11 +287,14 @@ export const POST = withSecurity<ReassignStudentsBody>(
 
             const changes: Array<Record<string, unknown>> = [];
             for (const a of effectiveAssignments) {
+                const anyA = a as any;
                 changes.push({
                     docPath: `students/${a.studentId}`,
                     collection: 'students',
                     docId: a.studentId,
-                    before: { busId: a.fromBusId, studentName: a.studentName, shift: a.shift },
+                    // before: original state (oldShift = what was in Firestore before this op)
+                    before: { busId: a.fromBusId, studentName: a.studentName, shift: anyA._originalShift || a.shift },
+                    // after: new state (shift = targetShift persisted in transaction)
                     after: { busId: a.toBusId, studentName: a.studentName, shift: a.shift },
                 });
             }
@@ -312,19 +353,23 @@ export const POST = withSecurity<ReassignStudentsBody>(
             // operationId would be impossible — so make the gap DETECTABLE (Tier B)
             // rather than swallowing it in a console warning.
             console.error('Failed to create Supabase reassignment rollback snapshot:', auditError);
-            await recordOperationalEvent({
+            await createAuditLog({
                 action: 'reassignment_rollback_snapshot_failed',
-                actor: { id: currentUserUid, role: (currentUserRole as AuditActorRole) || 'system', name: actorLabel },
+                performedBy: currentUserUid,
+                performedByName: actorLabel,
+                performedByRole: (currentUserRole as AuditActorRole) || 'system',
                 targetId: sourceBusId || '',
                 targetType: 'bus',
-                reason: 'supabase_log_write_failed',
-                details: {
+                category: 'reassignments',
+                summary: 'Reassignment rollback snapshot failed',
+                severity: 'medium',
+                metadata: {
                     operationId,
                     movedCount: effectiveAssignments.length,
                     error: auditError instanceof Error ? auditError.message : String(auditError),
                     impact: 'reassignment committed but rollback snapshot missing — manual reversal only',
+                    correlationId: operationId,
                 },
-                correlationId: operationId,
             });
         }
 

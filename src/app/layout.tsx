@@ -9,7 +9,6 @@ import { suppressConsoleWarnings } from '@/lib/console-suppress';
 import SimpleErrorBoundary from '@/components/simple-error-boundary';
 import AppShell from '@/components/AppShell';
 import MobileErrorHandler from '@/components/MobileErrorHandler';
-import MobileInitialSplash from '@/components/MobileInitialSplash';
 import SmoothScrollProvider from '@/components/smooth-scroll-provider';
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import { Analytics as VercelAnalytics } from "@vercel/analytics/next";
@@ -77,7 +76,6 @@ export default function RootLayout({
 
       <head />
       <body className="min-h-dvh bg-background text-foreground" suppressHydrationWarning>
-        <MobileInitialSplash />
         <MobileErrorHandler />
         <SimpleErrorBoundary>
           <ThemeProvider>

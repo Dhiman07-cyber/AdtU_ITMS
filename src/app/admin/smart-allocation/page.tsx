@@ -71,13 +71,14 @@ import { StopBusMapper } from "@/lib/services/stop-bus-mapper";
 import { ReassignmentService } from "@/lib/services/reassignment-service";
 import { AllocationRanker } from "@/lib/services/allocation-ranker";
 
-// Overload Detection Utilities
 import {
   detectOverloadedShift,
   filterStudentsByOverloadedShift,
   getShiftDisplayName,
   type OverloadedShift,
 } from "@/lib/utils/overload-detection";
+import { normalizeShift, getShiftDeltas, type CanonicalShift } from "@/lib/utils/shift-utils";
+
 
 // Types
 export interface BusData {
@@ -554,7 +555,8 @@ export default function SmartAllocationPage() {
     } else if (shiftFilter === "evening") {
       filtered = filtered.filter((bus) => {
         const s = bus.shift?.toLowerCase();
-        return s === "both";
+        // Evening students can ride Evening-only buses OR Both-shift buses
+        return s === "evening" || s === "both";
       });
     }
 
@@ -1265,15 +1267,29 @@ export default function SmartAllocationPage() {
           onSuccess={(result) => {
             // Store revert buffer for undo
             const revertData: RevertBufferData = {
-              affectedStudents: result.assignments.map((assignment) => ({
-                uid: assignment.studentId,
-                oldBusId: result.fromBusId,
-                newBusId: assignment.targetBusId,
-                oldRouteId: selectedBus?.routeId || "",
-                newRouteId: "", // Not used for revert
-                stopId: students.find((s) => s.id === assignment.studentId)?.stopId || "",
-                shift: assignment.shift,
-              })),
+              affectedStudents: result.assignments.map((assignment) => {
+                // Find the student's original shift BEFORE reassignment.
+                // The students array still holds the pre-reassignment state because
+                // state is refreshed only after fetchBusData() completes below.
+                const originalStudent = students.find((s) => s.id === assignment.studentId);
+                return {
+                  uid: assignment.studentId,
+                  oldBusId: result.fromBusId,
+                  newBusId: assignment.targetBusId,
+                  oldRouteId: selectedBus?.routeId || "",
+                  newRouteId: "",
+                  stopId: originalStudent?.stopId || "",
+                  stopName: (originalStudent as any)?.stopName || "",
+                  // shift = Target Shift (what the student now has)
+                  shift: assignment.shift,
+                  // oldShift = Original Shift (what the student had before reassignment)
+                  // Falls back to assignment.shift if the original could not be found
+                  // (worst case: undo will still correctly update bus counters for same-shift reassignments)
+                  oldShift: (originalStudent?.shift
+                    ? (originalStudent.shift.charAt(0).toUpperCase() + originalStudent.shift.slice(1).toLowerCase()) as CanonicalShift
+                    : assignment.shift),
+                };
+              }),
               busUpdates: [],
               timestamp: new Date(),
             };
@@ -1318,34 +1334,31 @@ export default function SmartAllocationPage() {
 
               // Calculate the reverse deltas for each bus
               for (const student of revertBuffer.affectedStudents) {
-                // For the OLD bus (where student is going BACK to), INCREMENT
+                // For the OLD bus (where student is going BACK to):
+                // INCREMENT using ORIGINAL shift (student.oldShift).
+                // For the NEW bus (where student was moved to):
+                // DECREMENT using TARGET shift (student.shift).
                 if (!busLoadChanges.has(student.oldBusId)) {
-                  busLoadChanges.set(student.oldBusId, {
-                    morningDelta: 0,
-                    eveningDelta: 0,
-                  });
+                  busLoadChanges.set(student.oldBusId, { morningDelta: 0, eveningDelta: 0 });
                 }
-                // For the NEW bus (where student was moved to), DECREMENT
                 if (!busLoadChanges.has(student.newBusId)) {
-                  busLoadChanges.set(student.newBusId, {
-                    morningDelta: 0,
-                    eveningDelta: 0,
-                  });
+                  busLoadChanges.set(student.newBusId, { morningDelta: 0, eveningDelta: 0 });
                 }
 
                 const oldBusChanges = busLoadChanges.get(student.oldBusId)!;
                 const newBusChanges = busLoadChanges.get(student.newBusId)!;
 
-                // Reverse the changes: student goes back from newBus to oldBus
-                // Use case-insensitive comparison
-                const shiftLower = student.shift?.toLowerCase() || "morning";
-                if (shiftLower === "morning") {
-                  oldBusChanges.morningDelta += 1; // Add back to old bus
-                  newBusChanges.morningDelta -= 1; // Remove from new bus
-                } else {
-                  oldBusChanges.eveningDelta += 1; // Add back to old bus
-                  newBusChanges.eveningDelta -= 1; // Remove from new bus
-                }
+                // Revert source bus (old bus) — increment with ORIGINAL shift
+                const originalShift = normalizeShift(student.oldShift || student.shift);
+                const oldDeltas = getShiftDeltas(originalShift);
+                if (oldDeltas.affectsMorning) oldBusChanges.morningDelta += 1;
+                if (oldDeltas.affectsEvening) oldBusChanges.eveningDelta += 1;
+
+                // Revert destination bus (new bus) — decrement with TARGET shift
+                const targetShift = normalizeShift(student.shift);
+                const newDeltas = getShiftDeltas(targetShift);
+                if (newDeltas.affectsMorning) newBusChanges.morningDelta -= 1;
+                if (newDeltas.affectsEvening) newBusChanges.eveningDelta -= 1;
               }
 
               // First, read all affected bus documents (must be done before writes)
@@ -1391,17 +1404,22 @@ export default function SmartAllocationPage() {
                 }
               }
 
-              // Revert student documents
+              // Revert student documents — restore busId, routeId, shift, AND stopId/stopName
               for (const student of revertBuffer.affectedStudents) {
                 const studentRef = doc(db, "students", student.uid);
                 transaction.update(studentRef, {
                   busId: student.oldBusId,
                   routeId: student.oldRouteId,
+                  // Restore the original shift the student had before reassignment.
+                  shift: student.oldShift || student.shift,
+                  // Restore the original stop the student had before reassignment.
+                  stopId: student.stopId || '',
+                  stopName: student.stopName || '',
                   updatedAt: serverTimestamp(),
                 });
 
                 console.log(
-                  `🔄 Reverting student ${student.uid}: busId ${student.newBusId}→${student.oldBusId}`,
+                  `🔄 Reverting student ${student.uid}: busId ${student.newBusId}→${student.oldBusId}, shift ${student.shift}→${student.oldShift || student.shift}`,
                 );
               }
             });

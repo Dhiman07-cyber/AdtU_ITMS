@@ -2,14 +2,7 @@
 
 import type { ComponentProps } from "react";
 import dynamic from "next/dynamic";
-import { useSystemConfig } from "@/contexts/SystemConfigContext";
-import { engineFromMapProvider } from "@/lib/maps/map-provider-types";
 import MapErrorBoundary from "./MapErrorBoundary";
-
-const GoogleDriverMap = dynamic(() => import("@/components/maps/GoogleDriverMap"), {
-    ssr: false,
-    loading: () => <div className="w-full h-full bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-800 dark:to-gray-900 rounded-3xl animate-pulse" />,
-});
 
 const GuwahatiDriverMap = dynamic(() => import("@/components/maps/GuwahatiDriverMap"), {
     ssr: false,
@@ -39,18 +32,11 @@ export type LiveTrackingDriverMapProps = {
  * Admin-controlled map engine for driver live tracking.
  */
 export default function LiveTrackingDriverMap(props: LiveTrackingDriverMapProps) {
-    const { config } = useSystemConfig();
-    const engine = engineFromMapProvider(config?.mapProvider);
-
     return (
         <MapErrorBoundary>
-            {engine === "google" ? (
-                <GoogleDriverMap {...props} />
-            ) : (
-                <GuwahatiDriverMap
-                    {...props}
-                />
-            )}
+            <GuwahatiDriverMap
+                {...props}
+            />
         </MapErrorBoundary>
     );
 }

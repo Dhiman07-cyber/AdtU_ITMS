@@ -136,8 +136,8 @@ export default function AddStudentPaymentSection({
                                             <SelectValue placeholder="Select Shift" />
                                         </SelectTrigger>
                                         <SelectContent>
-                                            <SelectItem value="Morning Shift">Morning Shift</SelectItem>
-                                            <SelectItem value="Evening Shift">Evening Shift</SelectItem>
+                                            <SelectItem value="Morning">Morning Shift</SelectItem>
+                                            <SelectItem value="Evening">Evening Shift</SelectItem>
                                         </SelectContent>
                                     </Select>
                                 </div>

@@ -48,6 +48,7 @@ import { DEFAULT_BUS_FEE } from '@/config/runtime';
 import { PremiumPageLoader } from '@/components/LoadingSpinner';
 import { DeadlineConfig } from '@/lib/types/deadline-config';
 import { deriveAcademicLifecycle } from '@/lib/utils/deadline-computation';
+import { useSidebar } from '@/components/AppShell';
 
 // ============================================================================
 // TYPES
@@ -55,53 +56,7 @@ import { deriveAcademicLifecycle } from '@/lib/utils/deadline-computation';
 
 
 
-interface UIConfig {
-    description: string;
-    version: string;
-    lastUpdated: string;
-    contactInfo: {
-        description: string;
-        officeName: string;
-        phone: string;
-        email: string;
-        officeHours: string;
-        address: string;
-        visitInstructions: string;
-    };
-    applicationProcess: {
-        description: string;
-        steps: Array<{
-            num: number;
-            title: string;
-            desc: string;
-            icon: string;
-            color: string;
-        }>;
-        importantNotes: Array<{
-            icon: string;
-            text: string;
-        }>;
-    };
-    statistics: {
-        description: string;
-        items: Array<{
-            label: string;
-            value: string;
-            icon: string;
-            gradient: string;
-        }>;
-    };
-    landingPage: {
-        description: string;
-        heroTitle: string;
-        heroSubtitle: string;
-        ctaTitle: string;
-        ctaSubtitle: string;
-        contactTitle: string;
-        contactSubtitle: string;
-        supportText: string;
-    };
-}
+// Removed UIConfig since onboarding and landing pages config are removed
 
 interface TermsSection {
     id: string;
@@ -151,7 +106,7 @@ const getOrdinal = (day: number): string => {
     }
 };
 
-type TabType = 'system' | 'deadline' | 'onboarding' | 'landing' | 'terms' | 'privacy';
+type TabType = 'system' | 'deadline' | 'terms' | 'privacy';
 
 // ============================================================================
 // FIELD COMPONENTS
@@ -318,7 +273,7 @@ function TabButton({
         <button
             type="button"
             onClick={onClick}
-            className={`flex-1 flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 min-w-fit ${active
+            className={`flex-1 flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 min-w-fit cursor-pointer ${active
                 ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/25'
                 : 'bg-white/5 text-gray-400 hover:bg-white/10 hover:text-white'
                 }`}
@@ -343,6 +298,8 @@ export default function SystemRenewalConfigPage() {
     const { currentUser, userData, loading: authLoading } = useAuth();
     const { showToast } = useToast();
     const router = useRouter();
+    const sidebarContext = useSidebar();
+    const isCollapsed = sidebarContext?.collapsed ?? false;
 
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
@@ -355,7 +312,7 @@ export default function SystemRenewalConfigPage() {
         busFee: number;
         paymentExport: { startYear: number; interval: number };
         version?: string;
-        mapProvider?: 'osm' | 'carto' | 'google' | 'guwahati';
+        mapProvider?: 'guwahati';
     }>({
         appName: 'AdtU Bus Services',
         busFee: DEFAULT_BUS_FEE,
@@ -368,7 +325,7 @@ export default function SystemRenewalConfigPage() {
         busFee: number;
         paymentExport: { startYear: number; interval: number };
         version?: string;
-        mapProvider?: 'osm' | 'carto' | 'google' | 'guwahati';
+        mapProvider?: 'guwahati';
     }>({
         appName: 'AdtU Bus Services',
         busFee: DEFAULT_BUS_FEE,
@@ -440,53 +397,7 @@ export default function SystemRenewalConfigPage() {
         softBlockTime: null,
         hardDeleteTime: null
     });
-    const [softBlockWarning, setSoftBlockWarning] = useState('');
-    const [originalSoftBlockWarning, setOriginalSoftBlockWarning] = useState('');
-    const [hardDeleteWarning, setHardDeleteWarning] = useState('');
-    const [originalHardDeleteWarning, setOriginalHardDeleteWarning] = useState('');
-
-    // UI Config State
-    const [originalUIConfig, setOriginalUIConfig] = useState<UIConfig | null>(null);
-    const [contactInfo, setContactInfo] = useState({
-        officeName: '',
-        phone: '',
-        email: '',
-        officeHours: '',
-        address: '',
-        visitInstructions: ''
-    });
-    const [originalContactInfo, setOriginalContactInfo] = useState({
-        officeName: '',
-        phone: '',
-        email: '',
-        officeHours: '',
-        address: '',
-        visitInstructions: ''
-    });
-    const [applicationSteps, setApplicationSteps] = useState<any[]>([]);
-    const [originalApplicationSteps, setOriginalApplicationSteps] = useState<any[]>([]);
-    const [importantNotes, setImportantNotes] = useState<any[]>([]);
-    const [originalImportantNotes, setOriginalImportantNotes] = useState<any[]>([]);
-    const [statistics, setStatistics] = useState<any[]>([]);
-    const [originalStatistics, setOriginalStatistics] = useState<any[]>([]);
-    const [landingPage, setLandingPage] = useState({
-        heroTitle: '',
-        heroSubtitle: '',
-        ctaTitle: '',
-        ctaSubtitle: '',
-        contactTitle: '',
-        contactSubtitle: '',
-        supportText: ''
-    });
-    const [originalLandingPage, setOriginalLandingPage] = useState({
-        heroTitle: '',
-        heroSubtitle: '',
-        ctaTitle: '',
-        ctaSubtitle: '',
-        contactTitle: '',
-        contactSubtitle: '',
-        supportText: ''
-    });
+    // Warning and UI config states removed since they are no longer editable or used
 
     // Terms Config State
     const [termsConfig, setTermsConfig] = useState<TermsConfig>({
@@ -510,9 +421,8 @@ export default function SystemRenewalConfigPage() {
             setLoading(true);
 
             // Fetch all configs in parallel to drastically improve load time
-            const [deadlineResponse, uiResponse, systemResponse, termsResponse, privacyResponse] = await Promise.all([
+            const [deadlineResponse, systemResponse, termsResponse, privacyResponse] = await Promise.all([
                 fetch('/api/settings/deadline-config'),
-                fetch('/api/settings/ui-config'),
                 fetch('/api/settings/system-config'),
                 fetch('/api/settings/terms-config'),
                 fetch('/api/settings/privacy-config')
@@ -549,39 +459,6 @@ export default function SystemRenewalConfigPage() {
                 };
                 setTimes(editableTimes);
                 setOriginalTimes({ ...editableTimes });
-
-                setSoftBlockWarning(config.softBlock.warningText);
-                setOriginalSoftBlockWarning(config.softBlock.warningText);
-                setHardDeleteWarning(config.hardDelete.criticalWarningText);
-                setOriginalHardDeleteWarning(config.hardDelete.criticalWarningText);
-            }
-
-            // Process UI config
-            if (uiResponse.ok) {
-                const uiData = await uiResponse.json();
-                const uiConfig = uiData.config as UIConfig;
-                setOriginalUIConfig(uiConfig);
-
-                if (uiConfig.contactInfo) {
-                    setContactInfo(uiConfig.contactInfo);
-                    setOriginalContactInfo({ ...uiConfig.contactInfo });
-                }
-                if (uiConfig.applicationProcess?.steps) {
-                    setApplicationSteps(uiConfig.applicationProcess.steps);
-                    setOriginalApplicationSteps([...uiConfig.applicationProcess.steps]);
-                }
-                if (uiConfig.applicationProcess?.importantNotes) {
-                    setImportantNotes(uiConfig.applicationProcess.importantNotes);
-                    setOriginalImportantNotes([...uiConfig.applicationProcess.importantNotes]);
-                }
-                if (uiConfig.statistics?.items) {
-                    setStatistics(uiConfig.statistics.items);
-                    setOriginalStatistics([...uiConfig.statistics.items]);
-                }
-                if (uiConfig.landingPage) {
-                    setLandingPage(uiConfig.landingPage);
-                    setOriginalLandingPage({ ...uiConfig.landingPage });
-                }
             }
 
             // Process system config
@@ -596,11 +473,7 @@ export default function SystemRenewalConfigPage() {
                         interval: config.paymentExport?.interval || 1
                     },
                     version: config.version || 'v2.4.0',
-                    // Treat legacy providers as Guwahati Map in the admin UI (we keep legacy values compatible,
-                    // but we don't show them as selectable options anymore).
-                    mapProvider: (config.mapProvider === 'osm' || config.mapProvider === 'carto')
-                        ? 'guwahati'
-                        : (config.mapProvider || 'guwahati')
+                    mapProvider: 'guwahati' as const
                 };
                 setSystemConfig(newSystemConfig);
                 setOriginalSystemConfig(newSystemConfig);
@@ -642,18 +515,8 @@ export default function SystemRenewalConfigPage() {
     const hasDeadlineChanges = useCallback(() => {
         return dates.academicSessionStart?.month !== originalDates.academicSessionStart?.month ||
             dates.academicSessionStart?.day !== originalDates.academicSessionStart?.day ||
-            dates.urgentWarningDays !== originalDates.urgentWarningDays ||
-            softBlockWarning !== originalSoftBlockWarning ||
-            hardDeleteWarning !== originalHardDeleteWarning;
-    }, [dates, originalDates, softBlockWarning, originalSoftBlockWarning, hardDeleteWarning, originalHardDeleteWarning]);
-
-    const hasUIChanges = useCallback(() => {
-        return JSON.stringify(contactInfo) !== JSON.stringify(originalContactInfo) ||
-            JSON.stringify(applicationSteps) !== JSON.stringify(originalApplicationSteps) ||
-            JSON.stringify(importantNotes) !== JSON.stringify(originalImportantNotes) ||
-            JSON.stringify(statistics) !== JSON.stringify(originalStatistics) ||
-            JSON.stringify(landingPage) !== JSON.stringify(originalLandingPage);
-    }, [contactInfo, originalContactInfo, applicationSteps, originalApplicationSteps, importantNotes, originalImportantNotes, statistics, originalStatistics, landingPage, originalLandingPage]);
+            dates.urgentWarningDays !== originalDates.urgentWarningDays;
+    }, [dates, originalDates]);
 
     const hasTermsChanges = useCallback(() => {
         return JSON.stringify(termsConfig) !== JSON.stringify(originalTermsConfig);
@@ -663,7 +526,7 @@ export default function SystemRenewalConfigPage() {
         return JSON.stringify(privacyConfig) !== JSON.stringify(originalPrivacyConfig);
     }, [privacyConfig, originalPrivacyConfig]);
 
-    const hasChanges = hasSystemChanges() || hasDeadlineChanges() || hasUIChanges() || hasTermsChanges() || hasPrivacyChanges();
+    const hasChanges = hasSystemChanges() || hasDeadlineChanges() || hasTermsChanges() || hasPrivacyChanges();
 
     const handleSave = async () => {
         if (!currentUser) return;
@@ -679,7 +542,7 @@ export default function SystemRenewalConfigPage() {
                     busFee: { amount: systemConfig.busFee },
                     paymentExport: systemConfig.paymentExport,
                     version: systemConfig.version,
-                    mapProvider: systemConfig.mapProvider
+                    mapProvider: 'guwahati' as const
                 };
 
                 const systemResponse = await fetch('/api/settings/system-config', {
@@ -702,11 +565,11 @@ export default function SystemRenewalConfigPage() {
                     academicSessionStart: startConfig,
                     softBlock: {
                         ...originalDeadlineConfig.softBlock,
-                        warningText: softBlockWarning
+                        warningText: originalDeadlineConfig.softBlock?.warningText || "Your bus service has expired. Please renew."
                     },
                     hardDelete: {
                         ...originalDeadlineConfig.hardDelete,
-                        criticalWarningText: hardDeleteWarning
+                        criticalWarningText: originalDeadlineConfig.hardDelete?.criticalWarningText || "Warning: Account will be permanently deleted."
                     },
                     urgentWarningThreshold: {
                         ...originalDeadlineConfig.urgentWarningThreshold,
@@ -732,41 +595,7 @@ export default function SystemRenewalConfigPage() {
                 setOriginalDeadlineConfig(updatedDeadlineConfig);
                 setOriginalDates({ ...dates });
                 setOriginalTimes({ ...times });
-                setOriginalSoftBlockWarning(softBlockWarning);
-                setOriginalHardDeleteWarning(hardDeleteWarning);
             }
-
-            // Save UI config if changed
-            if (hasUIChanges()) {
-                const updatedUIConfig = {
-                    contactInfo,
-                    applicationProcess: {
-                        description: "Steps required to complete the bus service application process",
-                        steps: applicationSteps,
-                        importantNotes: importantNotes
-                    },
-                    statistics: {
-                        description: "Platform statistics shown on the landing page",
-                        items: statistics
-                    },
-                    landingPage
-                };
-
-                const uiResponse = await fetch('/api/settings/ui-config', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                    body: JSON.stringify({ config: updatedUIConfig })
-                });
-                if (!uiResponse.ok) throw new Error('Failed to save UI configuration');
-
-                setOriginalContactInfo({ ...contactInfo });
-                setOriginalApplicationSteps([...applicationSteps]);
-                setOriginalImportantNotes([...importantNotes]);
-                setOriginalStatistics([...statistics]);
-                setOriginalLandingPage({ ...landingPage });
-            }
-
-
 
             // Save Terms config if changed
             if (hasTermsChanges()) {
@@ -804,13 +633,6 @@ export default function SystemRenewalConfigPage() {
         setSystemConfig({ ...originalSystemConfig });
         setDates({ ...originalDates });
         setTimes({ ...originalTimes });
-        setSoftBlockWarning(originalSoftBlockWarning);
-        setHardDeleteWarning(originalHardDeleteWarning);
-        setContactInfo({ ...originalContactInfo });
-        setApplicationSteps([...originalApplicationSteps]);
-        setImportantNotes([...originalImportantNotes]);
-        setStatistics([...originalStatistics]);
-        setLandingPage({ ...originalLandingPage });
         if (originalTermsConfig) {
             setTermsConfig(JSON.parse(JSON.stringify(originalTermsConfig)));
         }
@@ -866,18 +688,6 @@ export default function SystemRenewalConfigPage() {
                             icon={<Calendar className="h-4 w-4" />}
                             label="Deadline Config"
                             badge={hasDeadlineChanges() ? '•' : undefined}
-                        />
-                        <TabButton
-                            active={activeTab === 'onboarding'}
-                            onClick={() => setActiveTab('onboarding')}
-                            icon={<Layers className="h-4 w-4" />}
-                            label="Application Info"
-                        />
-                        <TabButton
-                            active={activeTab === 'landing'}
-                            onClick={() => setActiveTab('landing')}
-                            icon={<Home className="h-4 w-4" />}
-                            label="Landing Page"
                         />
                         <TabButton
                             active={activeTab === 'terms'}
@@ -978,38 +788,7 @@ export default function SystemRenewalConfigPage() {
                                                 <p className="text-xs text-gray-500 mb-4">
                                                     This name appears in the navbar, page titles, and system emails.
                                                 </p>
-                                                <div className="space-y-4 pt-4 border-t border-white/10">
-                                                    <div className="flex items-center justify-between">
-                                                        <Label className="text-sm font-medium text-gray-300 flex items-center gap-2">
-                                                            <MapPin className="h-4 w-4 text-emerald-400" />
-                                                            Live tracking map
-                                                        </Label>
-                                                        <div className="flex items-center h-6">
-                                                            <span className={`px-2 py-0.5 text-[10px] font-medium bg-amber-500/20 text-amber-400 rounded transition-opacity duration-200 ${(systemConfig.mapProvider !== originalSystemConfig.mapProvider) ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
-                                                                Modified
-                                                            </span>
-                                                        </div>
-                                                    </div>
-                                                    <div className="flex flex-col sm:flex-row gap-2 p-1 bg-white/5 rounded-xl border border-white/10">
-                                                        <button
-                                                            type="button"
-                                                            onClick={(_e) => setSystemConfig(prev => ({ ...prev, mapProvider: 'guwahati' }))}
-                                                            className={`flex-1 py-2 text-sm font-medium rounded-lg transition-all ${systemConfig.mapProvider === 'guwahati' ? 'bg-indigo-600 text-white shadow-lg' : 'text-gray-400 hover:text-white hover:bg-white/5'}`}
-                                                        >
-                                                            Guwahati Map (default)
-                                                        </button>
-                                                        <button
-                                                            type="button"
-                                                            onClick={(_e) => setSystemConfig(prev => ({ ...prev, mapProvider: 'google' }))}
-                                                            className={`flex-1 py-2 text-sm font-medium rounded-lg transition-all ${systemConfig.mapProvider === 'google' ? 'bg-emerald-600 text-white shadow-lg' : 'text-gray-400 hover:text-white hover:bg-white/5'}`}
-                                                        >
-                                                            Google Maps
-                                                        </button>
-                                                    </div>
-                                                    <p className="text-xs text-gray-500 mt-2 hover:text-gray-300 transition-colors">
-                                                        Guwahati Map uses a university-hosted PMTiles basemap from Supabase Storage (public bucket). Google Maps uses server env <code className="text-gray-400">GOOGLE_MAPS_API_KEY</code> (HTTP referrer–restricted). Set <code className="text-gray-400">DISABLE_GOOGLE_MAPS=1</code> to force fallback without changing admin UI.
-                                                    </p>
-                                                </div>
+                                                {/* Map provider is locked to guwahati.pmtiles vector map */}
                                             </div>
                                         </section>
                                     </div>
@@ -1029,7 +808,7 @@ export default function SystemRenewalConfigPage() {
                                         <div>
                                             <h4 className="text-sm font-semibold text-white">Academic Calendar Locked</h4>
                                             <p className="text-xs text-gray-400 mt-1">
-                                                Active students, soft-blocked students, or verified upcoming applications exist in the system. 
+                                                Active students, soft-blocked students, or verified upcoming applications exist in the system.
                                                 The Academic Session Start date cannot be modified to prevent data corruption.
                                             </p>
                                         </div>
@@ -1038,9 +817,9 @@ export default function SystemRenewalConfigPage() {
 
                                 {(() => {
                                     const startVal = dates.academicSessionStart;
-                                    
+
                                     const displaySessionStart = startVal ? `${MONTH_NAMES[startVal.month - 1]} ${startVal.day}` : 'July 1st';
-                                    const displaySessionInterval = startVal 
+                                    const displaySessionInterval = startVal
                                         ? `${startVal.day} ${MONTH_NAMES[startVal.month - 1].slice(0, 3)} → ${dates.academicYearEnd ? `${dates.academicYearEnd.day} ${MONTH_NAMES[dates.academicYearEnd.month - 1].slice(0, 3)}` : '30 Jun'}`
                                         : '1 Jul → 30 Jun';
 
@@ -1071,11 +850,20 @@ export default function SystemRenewalConfigPage() {
                                     return (
                                         <div className="bg-[#0E0F12] border border-white/10 rounded-2xl p-5 md:bg-transparent md:border-none md:p-0 md:rounded-none">
                                             <div className="space-y-6 md:space-y-0 md:grid md:grid-cols-2 md:gap-6">
-                                                
+
                                                 {/* Card 1: Academic Session */}
                                                 <section className="space-y-4 md:space-y-0 md:p-6 md:bg-[#0E0F12] md:rounded-2xl md:border md:border-white/10 flex flex-col justify-between">
                                                     <div>
                                                         <SectionHeader icon={<Calendar className="h-5 w-5 text-emerald-400" />} title="Academic Session" />
+
+                                                        {/* Center-aligned Interval Card within the section */}
+                                                        <div className="mb-4 p-3 bg-white/5 rounded-xl border border-white/5 flex flex-col items-center justify-center text-center">
+                                                            <span className="text-xs text-gray-400">Current Academic Session Interval</span>
+                                                            <p className="text-lg font-bold text-white mt-1">
+                                                                {displaySessionInterval}
+                                                            </p>
+                                                        </div>
+
                                                         <div className="pt-4 md:pt-0">
                                                             <MonthDayPicker
                                                                 id="academicSessionStart"
@@ -1091,18 +879,12 @@ export default function SystemRenewalConfigPage() {
                                                             )}
                                                         </div>
                                                     </div>
-                                                    <div className="mt-4 pt-4 border-t border-white/5">
-                                                        <span className="text-xs text-gray-400">Current Academic Session Interval</span>
-                                                        <p className="text-lg font-bold text-white mt-1 bg-white/5 px-3 py-2 rounded-xl border border-white/5 w-fit">
-                                                            {displaySessionInterval}
-                                                        </p>
-                                                    </div>
                                                 </section>
 
                                                 {/* Card 2: Renewal Timeline */}
                                                 <section className="space-y-4 md:space-y-0 md:p-6 md:bg-[#0E0F12] md:rounded-2xl md:border md:border-white/10 flex flex-col justify-between">
                                                     <div>
-                                                        <SectionHeader icon={<Bell className="h-5 w-5 text-blue-400" />} title="Renewal Timeline" />
+                                                        <SectionHeader icon={<Bell className="h-5 w-5 text-blue-400" />} title="Renewal Reminder" />
                                                         <div className="pt-4 space-y-3">
                                                             <div className="flex items-center justify-between p-2 bg-white/5 rounded-xl border border-white/5">
                                                                 <div>
@@ -1143,6 +925,14 @@ export default function SystemRenewalConfigPage() {
                                                                     <Lock className="h-3 w-3" /> Auto Calculated
                                                                 </span>
                                                             </div>
+                                                            <div className="bg-white/5 p-3 rounded-xl border border-white/5 space-y-1">
+                                                                <p className="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">At this deadline:</p>
+                                                                <ul className="text-xs text-gray-300 space-y-1 list-disc pl-4">
+                                                                    <li>Final date for students to renew current bus services</li>
+                                                                    <li>Automatic reminders are sent to all unrenewed students</li>
+                                                                    <li>After 11:59 PM, the Soft Block phase begins immediately</li>
+                                                                </ul>
+                                                            </div>
                                                         </div>
                                                     </div>
                                                 </section>
@@ -1153,21 +943,13 @@ export default function SystemRenewalConfigPage() {
                                                     <div className="space-y-4 pt-4">
                                                         <div className="p-3 bg-orange-500/10 border border-orange-500/20 rounded-xl flex items-center justify-between">
                                                             <div>
-                                                                    <p className="text-sm font-bold text-orange-400">{displaySoftBlock}</p>
+                                                                <p className="text-sm font-bold text-orange-400">{displaySoftBlock}</p>
                                                                 <p className="text-xs text-orange-500/70 font-semibold">12:00 AM</p>
                                                             </div>
                                                             <span className="text-xs text-orange-400 flex items-center gap-1 font-medium bg-orange-500/10 px-2.5 py-1 rounded-full">
                                                                 <Lock className="h-3 w-3" /> Auto Calculated
                                                             </span>
                                                         </div>
-                                                        <TextField
-                                                            id="softBlockWarning"
-                                                            label="Warning Message"
-                                                            value={softBlockWarning}
-                                                            originalValue={originalSoftBlockWarning}
-                                                            onChange={(v) => setSoftBlockWarning(String(v))}
-                                                            multiline
-                                                        />
                                                         <div className="bg-white/5 p-3 rounded-xl border border-white/5 space-y-1">
                                                             <p className="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">At this point:</p>
                                                             <ul className="text-xs text-gray-300 space-y-1 list-disc pl-4">
@@ -1240,14 +1022,6 @@ export default function SystemRenewalConfigPage() {
                                                                 originalValue={originalDates.urgentWarningDays}
                                                                 onChange={(v) => setDates(prev => ({ ...prev, urgentWarningDays: Number(v) }))}
                                                             />
-                                                            <TextField
-                                                                id="hardDeleteWarning"
-                                                                label="Critical Warning"
-                                                                value={hardDeleteWarning}
-                                                                originalValue={originalHardDeleteWarning}
-                                                                onChange={(v) => setHardDeleteWarning(String(v))}
-                                                                multiline
-                                                            />
                                                         </div>
                                                         <div className="bg-white/5 p-3 rounded-xl border border-white/5">
                                                             <p className="text-xs text-gray-300">
@@ -1271,14 +1045,14 @@ export default function SystemRenewalConfigPage() {
                                                     <div className="sm:hidden absolute top-0 bottom-0 left-[29px] w-0.5 bg-white/10 -z-10" />
 
                                                     {[
-                                                        { label: 'Session Starts', date: displaySessionStart, color: 'text-indigo-400', bg: 'bg-indigo-500/20 border-indigo-500' },
+                                                        { label: 'Session Starts', date: displaySessionStart, color: 'text-blue-400', bg: 'bg-blue-500/20 border-blue-500' },
                                                         { label: 'Reminder 1', date: displayReminder1, color: 'text-blue-400', bg: 'bg-blue-500/20 border-blue-500' },
                                                         { label: 'Reminder 2', date: displayReminder2, color: 'text-blue-400', bg: 'bg-blue-500/20 border-blue-500' },
                                                         { label: 'Final Reminder', date: displayFinalReminder, color: 'text-blue-400', bg: 'bg-blue-500/20 border-blue-500' },
-                                                        { label: 'Renewal Deadline', date: displayDeadline, color: 'text-amber-400', bg: 'bg-amber-500/20 border-amber-500' },
-                                                        { label: 'Soft Block', date: displaySoftBlock, color: 'text-orange-400', bg: 'bg-orange-500/20 border-orange-500' },
-                                                        { label: 'Activation', date: displayActivation, color: 'text-purple-400', bg: 'bg-purple-500/20 border-purple-500' },
-                                                        { label: 'Hard Delete', date: '+2 Sessions', color: 'text-red-400', bg: 'bg-red-500/20 border-red-500' }
+                                                        { label: 'Renewal Deadline', date: displayDeadline, color: 'text-blue-400', bg: 'bg-blue-500/20 border-blue-500' },
+                                                        { label: 'Soft Block', date: displaySoftBlock, color: 'text-blue-400', bg: 'bg-blue-500/20 border-blue-500' },
+                                                        { label: 'Activation', date: displayActivation, color: 'text-blue-400', bg: 'bg-blue-500/20 border-blue-500' },
+                                                        { label: 'Hard Delete', date: '2 years later', color: 'text-blue-400', bg: 'bg-blue-500/20 border-blue-500' }
                                                     ].map((item, idx) => (
                                                         <div key={idx} className="flex sm:flex-col items-center gap-4 sm:gap-2 sm:text-center sm:flex-1 min-w-[100px]">
                                                             <div className={`h-8 w-8 rounded-full border-2 ${item.bg} flex items-center justify-center text-xs font-bold text-white z-10 bg-black`}>
@@ -1296,261 +1070,6 @@ export default function SystemRenewalConfigPage() {
                                         </div>
                                     );
                                 })()}
-                            </div>
-
-                            {/* ONBOARDING SECTION */}
-                            <div id="onboarding-section" className={`${activeTab === 'onboarding' ? 'block' : 'block md:hidden'} pt-10 md:pt-0`}>
-                                <div className="md:hidden flex items-center gap-2 mb-4 px-4 py-3 bg-white/5 rounded-xl border border-white/10">
-                                    <Layers className="h-4 w-4 text-indigo-400" />
-                                    <h2 className="text-sm font-bold text-white uppercase tracking-wider">Application Info</h2>
-                                </div>
-                                <div className="bg-[#0E0F12] border border-white/10 rounded-2xl p-5 md:bg-transparent md:border-none md:p-0 md:rounded-none">
-                                    <div className="space-y-6 md:space-y-10">
-
-                                        {/* Contact Info */}
-                                        <section className="space-y-4 md:space-y-6">
-                                            <SectionHeader icon={<Building className="h-5 w-5 text-indigo-400" />} title="Contact Information" />
-                                            <div className="pt-4 md:pt-0 space-y-4">
-                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                                    <TextField
-                                                        id="officeName"
-                                                        label="Office Name"
-                                                        value={contactInfo.officeName}
-                                                        originalValue={originalContactInfo.officeName}
-                                                        onChange={(v) => setContactInfo(prev => ({ ...prev, officeName: String(v) }))}
-                                                    />
-                                                    <TextField
-                                                        id="phone"
-                                                        label="Phone"
-                                                        type="tel"
-                                                        value={contactInfo.phone}
-                                                        originalValue={originalContactInfo.phone}
-                                                        onChange={(v) => setContactInfo(prev => ({ ...prev, phone: String(v) }))}
-                                                    />
-                                                    <TextField
-                                                        id="email"
-                                                        label="Email"
-                                                        type="email"
-                                                        value={contactInfo.email}
-                                                        originalValue={originalContactInfo.email}
-                                                        onChange={(v) => setContactInfo(prev => ({ ...prev, email: String(v) }))}
-                                                    />
-                                                    <TextField
-                                                        id="officeHours"
-                                                        label="Office Hours"
-                                                        value={contactInfo.officeHours}
-                                                        originalValue={originalContactInfo.officeHours}
-                                                        onChange={(v) => setContactInfo(prev => ({ ...prev, officeHours: String(v) }))}
-                                                    />
-                                                </div>
-                                                <div className="mt-4">
-                                                    <TextField
-                                                        id="address"
-                                                        label="Address"
-                                                        value={contactInfo.address}
-                                                        originalValue={originalContactInfo.address}
-                                                        onChange={(v) => setContactInfo(prev => ({ ...prev, address: String(v) }))}
-                                                        multiline
-                                                    />
-                                                </div>
-                                                <div className="mt-4">
-                                                    <TextField
-                                                        id="visitInstructions"
-                                                        label="Visit Instructions"
-                                                        value={contactInfo.visitInstructions}
-                                                        originalValue={originalContactInfo.visitInstructions}
-                                                        onChange={(v) => setContactInfo(prev => ({ ...prev, visitInstructions: String(v) }))}
-                                                        multiline
-                                                    />
-                                                </div>
-                                            </div>
-                                        </section>
-
-                                        {/* Application Steps */}
-                                        <section className="space-y-4 md:space-y-6">
-                                            <SectionHeader icon={<FileText className="h-5 w-5 text-blue-400" />} title="Application Process Steps" />
-                                            <div className="pt-4 md:pt-0 space-y-4">
-                                                {applicationSteps.map((step, index) => (
-                                                    <div key={index} className="p-4 bg-white/5 rounded-xl border border-white/5">
-                                                        <div className="flex items-center gap-3 mb-3">
-                                                            <div className="h-8 w-8 rounded-full bg-indigo-500/20 flex items-center justify-center text-indigo-400 font-bold text-sm">
-                                                                {step.num}
-                                                            </div>
-                                                            <Input
-                                                                value={step.title}
-                                                                onChange={(e) => {
-                                                                    const updated = [...applicationSteps];
-                                                                    updated[index] = { ...step, title: e.target.value };
-                                                                    setApplicationSteps(updated);
-                                                                }}
-                                                                className="bg-transparent border-white/10 text-white font-medium"
-                                                                placeholder="Step Title"
-                                                            />
-                                                        </div>
-                                                        <Textarea
-                                                            value={step.desc}
-                                                            onChange={(e) => {
-                                                                const updated = [...applicationSteps];
-                                                                updated[index] = { ...step, desc: e.target.value };
-                                                                setApplicationSteps(updated);
-                                                            }}
-                                                            className="bg-transparent border-white/10 text-gray-300 min-h-[60px] resize-none"
-                                                            placeholder="Step description..."
-                                                        />
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        </section>
-
-                                        {/* Important Notes */}
-                                        <section className="space-y-4 md:space-y-6">
-                                            <SectionHeader icon={<Info className="h-5 w-5 text-amber-400" />} title="Important Notes" />
-                                            <div className="pt-4 md:pt-0 space-y-3">
-                                                {importantNotes.map((note, index) => (
-                                                    <div key={index} className="flex gap-3 p-3 bg-white/5 rounded-xl">
-                                                        <div className="p-2 bg-amber-500/10 rounded-lg h-fit">
-                                                            <Info className="h-4 w-4 text-amber-400" />
-                                                        </div>
-                                                        <Input
-                                                            value={note.text}
-                                                            onChange={(e) => {
-                                                                const updated = [...importantNotes];
-                                                                updated[index] = { ...note, text: e.target.value };
-                                                                setImportantNotes(updated);
-                                                            }}
-                                                            className="bg-transparent border-white/10 text-gray-300 flex-1"
-                                                            placeholder="Note text..."
-                                                        />
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        </section>
-                                    </div>
-                                </div>
-                            </div>
-
-                            {/* LANDING SECTION */}
-                            <div id="landing-section" className={`${activeTab === 'landing' ? 'block' : 'block md:hidden'} pt-10 md:pt-0`}>
-                                <div className="md:hidden flex items-center gap-2 mb-4 px-4 py-3 bg-white/5 rounded-xl border border-white/10">
-                                    <Home className="h-4 w-4 text-blue-400" />
-                                    <h2 className="text-sm font-bold text-white uppercase tracking-wider">Landing Page</h2>
-                                </div>
-                                <div className="bg-[#0E0F12] border border-white/10 rounded-2xl p-5 md:bg-transparent md:border-none md:p-0 md:rounded-none">
-                                    <div className="space-y-6 md:space-y-10">
-                                        {/* Hero Section */}
-                                        <section>
-                                            <SectionHeader icon={<Home className="h-5 w-5 text-blue-400" />} title="Hero Section" />
-                                            <div className="space-y-4 pt-4 md:pt-0">
-                                                <TextField
-                                                    id="heroTitle"
-                                                    label="Hero Title"
-                                                    value={landingPage.heroTitle}
-                                                    originalValue={originalLandingPage.heroTitle}
-                                                    onChange={(v) => setLandingPage(prev => ({ ...prev, heroTitle: String(v) }))}
-                                                />
-                                                <TextField
-                                                    id="heroSubtitle"
-                                                    label="Hero Subtitle"
-                                                    value={landingPage.heroSubtitle}
-                                                    originalValue={originalLandingPage.heroSubtitle}
-                                                    onChange={(v) => setLandingPage(prev => ({ ...prev, heroSubtitle: String(v) }))}
-                                                    multiline
-                                                />
-                                            </div>
-                                        </section>
-
-                                        {/* CTA Section */}
-                                        <section>
-                                            <SectionHeader icon={<Zap className="h-5 w-5 text-amber-400" />} title="Call to Action" />
-                                            <div className="space-y-4 pt-4 md:pt-0">
-                                                <TextField
-                                                    id="ctaTitle"
-                                                    label="CTA Title"
-                                                    value={landingPage.ctaTitle}
-                                                    originalValue={originalLandingPage.ctaTitle}
-                                                    onChange={(v) => setLandingPage(prev => ({ ...prev, ctaTitle: String(v) }))}
-                                                />
-                                                <TextField
-                                                    id="ctaSubtitle"
-                                                    label="CTA Subtitle"
-                                                    value={landingPage.ctaSubtitle}
-                                                    originalValue={originalLandingPage.ctaSubtitle}
-                                                    onChange={(v) => setLandingPage(prev => ({ ...prev, ctaSubtitle: String(v) }))}
-                                                    multiline
-                                                />
-                                            </div>
-                                        </section>
-
-                                        {/* Contact Section */}
-                                        <section>
-                                            <SectionHeader icon={<Phone className="h-5 w-5 text-green-400" />} title="Contact Section" />
-                                            <div className="space-y-4 pt-4 md:pt-0">
-                                                <TextField
-                                                    id="contactTitle"
-                                                    label="Contact Title"
-                                                    value={landingPage.contactTitle}
-                                                    originalValue={originalLandingPage.contactTitle}
-                                                    onChange={(v) => setLandingPage(prev => ({ ...prev, contactTitle: String(v) }))}
-                                                />
-                                                <TextField
-                                                    id="contactSubtitle"
-                                                    label="Contact Subtitle"
-                                                    value={landingPage.contactSubtitle}
-                                                    originalValue={originalLandingPage.contactSubtitle}
-                                                    onChange={(v) => setLandingPage(prev => ({ ...prev, contactSubtitle: String(v) }))}
-                                                    multiline
-                                                />
-                                                <TextField
-                                                    id="supportText"
-                                                    label="Support Text"
-                                                    value={landingPage.supportText}
-                                                    originalValue={originalLandingPage.supportText}
-                                                    onChange={(v) => setLandingPage(prev => ({ ...prev, supportText: String(v) }))}
-                                                />
-                                            </div>
-                                        </section>
-
-                                        {/* Statistics */}
-                                        <section>
-                                            <SectionHeader icon={<Award className="h-5 w-5 text-purple-400" />} title="Platform Statistics" />
-                                            <div className="pt-4 md:pt-0">
-                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                                    {statistics.map((stat, index) => (
-                                                        <div key={index} className="p-4 bg-white/5 rounded-xl border border-white/5">
-                                                            <div className="flex gap-3">
-                                                                <div className={`p-3 rounded-xl bg-gradient-to-br ${stat.gradient} opacity-20`}>
-                                                                    <Award className="h-5 w-5 text-white" />
-                                                                </div>
-                                                                <div className="flex-1 space-y-2">
-                                                                    <Input
-                                                                        value={stat.label}
-                                                                        onChange={(e) => {
-                                                                            const updated = [...statistics];
-                                                                            updated[index] = { ...stat, label: e.target.value };
-                                                                            setStatistics(updated);
-                                                                        }}
-                                                                        className="bg-transparent border-white/10 text-gray-400 text-sm h-8"
-                                                                        placeholder="Label"
-                                                                    />
-                                                                    <Input
-                                                                        value={stat.value}
-                                                                        onChange={(e) => {
-                                                                            const updated = [...statistics];
-                                                                            updated[index] = { ...stat, value: e.target.value };
-                                                                            setStatistics(updated);
-                                                                        }}
-                                                                        className="bg-transparent border-white/10 text-white font-bold text-lg h-10"
-                                                                        placeholder="Value"
-                                                                    />
-                                                                </div>
-                                                            </div>
-                                                        </div>
-                                                    ))}
-                                                </div>
-                                            </div>
-                                        </section>
-                                    </div>
-                                </div>
                             </div>
 
                             {/* TERMS & CONDITIONS SECTION */}
@@ -1816,7 +1335,12 @@ export default function SystemRenewalConfigPage() {
 
             {/* Floating Save Bar */}
             {hasChanges && (
-                <div className="fixed bottom-0 left-0 right-0 bg-[#12131A]/95 backdrop-blur-xl border-t border-white/10 p-4 z-50">
+                <div 
+                    className="fixed bottom-0 left-0 right-0 md:left-[var(--save-bar-left)] bg-[#12131A]/95 backdrop-blur-xl border-t border-white/10 p-4 z-50 transition-all duration-300"
+                    style={{
+                        '--save-bar-left': isCollapsed ? 'var(--sidebar-width-collapsed)' : 'var(--sidebar-width-expanded)'
+                    } as React.CSSProperties}
+                >
                     <div className="max-w-5xl mx-auto flex items-center justify-between">
                         <div className="flex items-center gap-3">
                             <div className="h-2 w-2 rounded-full bg-amber-500 animate-pulse" />

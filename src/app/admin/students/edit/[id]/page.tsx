@@ -15,9 +15,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from '@/contexts/toast-context';
 import { Info, Camera, AlertTriangle } from "lucide-react";
 import { getAllRoutes, getAllBuses, Route, getStudentById, updateStudent } from '@/lib/dataService';
+import { PremiumPageLoader } from '@/components/LoadingSpinner';
 import EnhancedDatePicker from "@/components/enhanced-date-picker";
 import ProfileImageAddModal from "@/components/ProfileImageAddModal";
 import { cn } from "@/lib/utils";
+import { normalizeShift } from "@/lib/utils/shift-utils";
 
 // Define the form data type - matching ADD form exactly
 type StudentFormData = {
@@ -190,7 +192,7 @@ export default function EditStudentPage({ params }: { params: Promise<{ id: stri
           profilePhotoUrl: studentData.profilePhotoUrl || '',
           address: studentData.address || studentData.location || '',
           bloodGroup: studentData.bloodGroup || '',
-          shift: studentData.shift ? (studentData.shift.toLowerCase().includes('even') ? 'Evening' : 'Morning') : 'Morning',
+          shift: normalizeShift(studentData.shift),
           approvedBy: studentData.approvedBy || '',
           sessionDuration: studentData.sessionDuration?.toString() || '1',
           sessionStartYear: studentData.sessionStartYear || new Date().getUTCFullYear(),
@@ -473,11 +475,7 @@ export default function EditStudentPage({ params }: { params: Promise<{ id: stri
   const hasShiftConflict = selectedBus && busShift !== 'both' && busShift !== selectedShift;
 
   if (loading || loadingRoutes || loadingBuses) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-[#010717]">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
-      </div>
-    );
+    return <PremiumPageLoader message="Loading student profile..." subMessage="Preparing editing tools..." />;
   }
 
   return (

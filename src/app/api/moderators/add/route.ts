@@ -1,52 +1,50 @@
 import { NextResponse } from 'next/server';
-import fs from 'fs';
-import path from 'path';
-import { verifyApiAuth } from '@/lib/security/api-auth';
+import { withSecurity } from '@/lib/security/api-security';
+import { AddModeratorSchema, validateInput } from '@/lib/security/validation-schemas';
+import { adminDb } from '@/lib/firebase-admin';
+import { FieldValue } from 'firebase-admin/firestore';
 
-// Define types for our data
-interface Moderator {
-  id: string;
-  name: string;
-  email: string;
-  faculty: string;
-  joinDate: string;
-  [key: string]: any; // Allow additional properties
-}
+export const POST = withSecurity(
+  async (request, { auth, body, requestId }) => {
+    try {
+      if (!adminDb) {
+        return NextResponse.json({ error: 'Database not available' }, { status: 500 });
+      }
 
-// Get the data directory path
-const dataDirectory = path.join(process.cwd(), 'src', 'data');
+      const validated = body as { email: string; name: string; phone?: string; faculty?: string; employeeId?: string };
 
-// Helper function to read JSON files
-const readJsonFile = (filename: string) => {
-  const filePath = path.join(dataDirectory, filename);
-  const fileContents = fs.readFileSync(filePath, 'utf8');
-  return JSON.parse(fileContents);
-};
+      const newModerator = {
+        email: validated.email,
+        fullName: validated.name,
+        name: validated.name,
+        phone: validated.phone || '',
+        faculty: validated.faculty || '',
+        employeeId: validated.employeeId || '',
+        role: 'moderator',
+        status: 'active',
+        createdAt: new Date().toISOString(),
+        permissions: {
+          students: { canView: false, canAdd: false, canEdit: false, canDelete: false, canReassign: false },
+          drivers: { canView: false, canAdd: false, canEdit: false, canDelete: false, canReassign: false },
+          buses: { canView: false, canAdd: false, canEdit: false, canDelete: false, canReassign: false },
+          routes: { canView: false, canAdd: false, canEdit: false, canDelete: false },
+          applications: { canView: false, canApprove: false, canReject: false, canGenerateVerificationCode: false, canAppearInModeratorList: false },
+          payments: { canApproveOfflinePayment: false, canRejectOfflinePayment: false },
+        },
+        createdBy: auth.uid,
+        createdAtServer: FieldValue.serverTimestamp(),
+      };
 
-// Helper function to write JSON files
-const writeJsonFile = (filename: string, data: any) => {
-  const filePath = path.join(dataDirectory, filename);
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
-};
+      const docRef = await adminDb.collection('moderators').add(newModerator);
 
-export async function POST(request: Request) {
-  try {
-    const auth = await verifyApiAuth(request, ['admin']);
-    if (!auth.authenticated) return auth.response;
-
-    const newModeratorData = await request.json();
-    
-    const moderators: Moderator[] = readJsonFile('Moderators.json');
-    const newModerator = {
-      ...newModeratorData,
-      id: Date.now().toString()
-    };
-    moderators.push(newModerator);
-    writeJsonFile('Moderators.json', moderators);
-    
-    return NextResponse.json(newModerator, { status: 201 });
-  } catch (error) {
-    console.error('Error adding moderator:', error);
-    return NextResponse.json({ error: 'Failed to add moderator' }, { status: 500 });
+      return NextResponse.json({ id: docRef.id, ...newModerator }, { status: 201 });
+    } catch (error) {
+      console.error('Error adding moderator:', error);
+      return NextResponse.json({ error: 'Failed to add moderator' }, { status: 500 });
+    }
+  },
+  {
+    requiredRoles: ['admin'],
+    schema: AddModeratorSchema,
   }
-}
+);

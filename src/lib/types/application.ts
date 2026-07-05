@@ -135,33 +135,6 @@ export interface ApplicationFormData {
   paymentId?: string;
 }
 
-// Verification Code Metadata
-// Verification Code Metadata
-export interface VerificationCode {
-  codeId: string;
-  applicationId: string | null;
-  studentUid: string;
-  moderatorUid: string;
-  moderatorName: string; // {Name} {EMPID}
-  codeHash: string; // Never store plain code (legacy) - kept for security
-  code?: string; // Plain text code for moderator display (required by UI now)
-  codeLength: number;
-  generatedAt: string;
-  expiresAt: string;
-  used: boolean;
-  usedAt?: string;
-  attempts: number;
-  maxAttempts: number;
-
-  // Essential Display Data (Flattened)
-  studentName: string;
-  enrollmentId: string;
-  amount: number;
-  paymentMode: string;
-  paymentReference?: string;
-  shift: string;
-}
-
 // Moderator Profile
 export interface ModeratorProfile {
   moderatorUid: string;
@@ -321,23 +294,6 @@ export type ApplicationNotificationType =
   | 'Approved'
   | 'ExpiryReminder'
   | 'RemindersForPending';
-
-// Application Notification
-export interface ApplicationNotification {
-  notifId: string;
-  toUid: string;
-  toRole: 'student' | 'moderator' | 'admin';
-  type: ApplicationNotificationType;
-  title: string;
-  body: string;
-  links?: {
-    applicationId?: string;
-    profile?: string;
-    renewPage?: string;
-  };
-  read: boolean;
-  createdAt: string;
-}
 
 // API Request/Response Types
 export interface GenerateCodeRequest {

@@ -5,7 +5,7 @@ import { Loader2, ArrowLeft, Bookmark, Zap, LayoutDashboard } from 'lucide-react
 import Link from 'next/link';
 import { Button } from "@/components/ui/button";
 import { useAuth } from '@/contexts/auth-context';
-import { useSystemConfig } from '@/contexts/SystemConfigContext';
+import { APP_NAME } from '@/config/runtime';
 
 interface TermsSection {
   id: string;
@@ -21,7 +21,7 @@ interface TermsConfig {
 
 export default function PrivacyPolicyPage() {
   const { currentUser, userData, needsApplication } = useAuth();
-  const { appName } = useSystemConfig();
+  const appName = APP_NAME;
   const [config, setConfig] = useState<TermsConfig | null>(null);
   const [loading, setLoading] = useState(true);
 

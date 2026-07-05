@@ -37,7 +37,7 @@ import AlternativeBusPicker from '@/components/smart-allocation/AlternativeBusPi
 import type { AlternativeBusData } from '@/components/smart-allocation/AlternativeBusPicker';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { toast } from 'react-hot-toast';
+import { useToast } from '@/contexts/toast-context';
 import { isUpcomingApplication, getUpcomingStatus } from '@/lib/utils/application-eligibility';
 
 import { PermissionDeniedCard } from '@/components/PermissionDeniedCard';
@@ -45,6 +45,7 @@ import { PermissionDeniedCard } from '@/components/PermissionDeniedCard';
 export default function ModeratorApplicationsPage() {
   const { currentUser, userData } = useAuth();
   const router = useRouter();
+  const { showToast } = useToast();
   const { canApplicationView, canApplicationApprove, canApplicationReject, loading: permsLoading } = useModeratorPermissions();
 
   // SPARK PLAN SAFETY: Manual refresh only - no auto-polling to conserve quota
@@ -52,10 +53,33 @@ export default function ModeratorApplicationsPage() {
     pageSize: 50, orderByField: 'createdAt', orderDirection: 'desc',
     autoRefresh: false, // MANUAL REFRESH ONLY
   });
-  const { data: verificationCodes, loading: codesLoading, refresh: refreshVerificationCodes } = usePaginatedCollection('verificationCodes', {
-    pageSize: 50, orderByField: 'generatedAt', orderDirection: 'desc',
-    autoRefresh: false,
-  });
+  const [renewalRequests, setRenewalRequests] = useState<any[]>([]);
+  const [loadingRenewals, setLoadingRenewals] = useState(false);
+
+  const fetchRenewalRequests = async () => {
+    try {
+      setLoadingRenewals(true);
+      const renewalRef = collection(db, 'renewal_requests');
+      const q = query(renewalRef, where('status', '==', 'pending'));
+      const snapshot = await getDocs(q);
+
+      const requests: any[] = [];
+      snapshot.forEach((doc) => {
+        requests.push({ id: doc.id, ...doc.data() });
+      });
+      setRenewalRequests(requests);
+    } catch (error) {
+      console.error('Error fetching renewal requests:', error);
+    } finally {
+      setLoadingRenewals(false);
+    }
+  };
+
+  useEffect(() => {
+    if (currentUser) {
+      fetchRenewalRequests();
+    }
+  }, [currentUser]);
   const { data: notifications, loading: notificationsLoading, refresh: refreshNotifications } = usePaginatedCollection('notifications', {
     pageSize: 50, orderByField: 'createdAt', orderDirection: 'desc',
     autoRefresh: false,
@@ -70,7 +94,7 @@ export default function ModeratorApplicationsPage() {
   });
 
   const [error, setError] = useState("");
-  const [activeSection, setActiveSection] = useState<'applications' | 'upcoming' | 'verifications'>('applications');
+  const [activeSection, setActiveSection] = useState<'applications' | 'upcoming' | 'renewals'>('applications');
   const [currentTime, setCurrentTime] = useState(new Date());
   const [approving, setApproving] = useState<string | null>(null);
   const [rejecting, setRejecting] = useState<string | null>(null);
@@ -94,6 +118,27 @@ export default function ModeratorApplicationsPage() {
     alternatives: AlternativeBusData[];
   } | null>(null);
   const [loadingBusStudents, setLoadingBusStudents] = useState(false);
+  const [stagedBusesTrigger, setStagedBusesTrigger] = useState(0);
+
+  const stagedBuses = useMemo(() => {
+    const map = new Map<string, { busId: string; busNumber: string; routeId: string; routeName: string }>();
+    if (typeof window === 'undefined') return map;
+    for (let i = 0; i < sessionStorage.length; i++) {
+      const key = sessionStorage.key(i);
+      if (key && key.startsWith('staged_bus_')) {
+        const appId = key.replace('staged_bus_', '');
+        try {
+          const data = JSON.parse(sessionStorage.getItem(key) || '{}');
+          if (data.busId) {
+            map.set(appId, data);
+          }
+        } catch (e) {
+          console.error(e);
+        }
+      }
+    }
+    return map;
+  }, [stagedBusesTrigger, pendingApplications]);
 
   /** Fetch active students on a given bus and open the ReassignmentPanel. */
   const openReassignmentForBus = async (item: any, capacityStatus: ReturnType<typeof getCapacityStatus>) => {
@@ -103,7 +148,7 @@ export default function ModeratorApplicationsPage() {
     const appBusId = item.formData?.busId || item.formData?.routeId?.replace('route_', 'bus_') || '';
     const selectedBus = buses.find((b: any) => b.id === appBusId || b.busId === appBusId);
     if (!selectedBus) {
-      toast.error('Could not identify the overloaded bus');
+      showToast('Could not identify the overloaded bus', 'error');
       return;
     }
     setLoadingBusStudents(true);
@@ -133,8 +178,9 @@ export default function ModeratorApplicationsPage() {
 
       // Convert buses to ReassignmentPanel's BusData format
       const rpBuses: RPBusData[] = buses.map((b: any) => {
+        const matchedRoute = routes.find((r: any) => r.routeId === b.routeId || r.id === b.routeId);
         const rawStops: Array<{ id?: string; stopId?: string; name?: string; sequence?: number }> =
-          b.route?.stops || b.stops || [];
+          matchedRoute?.stops || b.route?.stops || b.stops || [];
         const stops = rawStops.map((s: any) => ({
           id: s.id || s.stopId || s.name || '',
           name: s.name || s.stopId || s.id || '',
@@ -144,13 +190,13 @@ export default function ModeratorApplicationsPage() {
           id: b.id || b.busId || '',
           busNumber: b.busNumber || b.id || '',
           routeId: b.routeId,
-          routeName: b.routeName || (b.route?.routeName) || '',
+          routeName: b.routeName || matchedRoute?.routeName || (b.route?.routeName) || '',
           currentMembers: b.currentMembers || 0,
           capacity: b.capacity || b.totalCapacity || 55,
           shift: b.shift || 'both',
           stops,
           load: b.load || { morningCount: 0, eveningCount: 0 },
-          route: b.route,
+          route: matchedRoute || b.route || null,
         };
       });
 
@@ -166,7 +212,7 @@ export default function ModeratorApplicationsPage() {
 
       setReassignmentTarget({ item, busId: appBusId, busData: currentBusRpb, busStudents });
     } catch (err: any) {
-      toast.error(err?.message || 'Failed to load bus data');
+      showToast(err?.message || 'Failed to load bus data', 'error');
     } finally {
       setLoadingBusStudents(false);
     }
@@ -242,15 +288,15 @@ export default function ModeratorApplicationsPage() {
     });
   };
 
-  // Manual refresh handler - refreshes both applications and verifications sections
+  // Manual refresh handler - refreshes applications and renewals sections
   const handleRefresh = async () => {
     setIsRefreshing(true);
     try {
       invalidateCollectionCache('applications');
-      invalidateCollectionCache('verificationCodes');
+      invalidateCollectionCache('buses');
       await Promise.all([
         refreshApplications(),
-        refreshVerificationCodes(),
+        fetchRenewalRequests(),
         refreshRoutes(),
         refreshBuses()
       ]);
@@ -274,45 +320,7 @@ export default function ModeratorApplicationsPage() {
     return () => clearInterval(timer);
   }, []);
 
-  // Smart cleanup - only when expired codes are detected in UI
-  const [lastCleanupTime, setLastCleanupTime] = useState<number>(0);
-
-  const smartCleanupExpiredCodes = async () => {
-    const now = Date.now();
-    if (now - lastCleanupTime < 120000) return;
-
-    try {
-      const token = await currentUser?.getIdToken();
-      if (!token) return;
-
-      const response = await fetch('/api/applications/cleanup-expired-codes', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        }
-      });
-
-      if (response.ok) {
-        setLastCleanupTime(now);
-      }
-    } catch (error) {
-      console.error('Error during smart cleanup:', error);
-      setLastCleanupTime(now);
-    }
-  };
-
-  useEffect(() => {
-    if (verificationCodes && verificationCodes.length > 0) {
-      const hasExpiredCodes = verificationCodes.some(code =>
-        code.moderatorUid === currentUser?.uid && new Date(code.expiresAt) <= new Date()
-      );
-
-      if (hasExpiredCodes) {
-        smartCleanupExpiredCodes();
-      }
-    }
-  }, [verificationCodes, currentUser, currentTime]);
+  // Removed verification codes cleanup effect
 
   useEffect(() => {
     if (userData && userData.role !== "moderator") {
@@ -320,26 +328,7 @@ export default function ModeratorApplicationsPage() {
     }
   }, [userData, router]);
 
-  const getTimeRemaining = (expiresAt: string) => {
-    const now = new Date().getTime();
-    const expiry = new Date(expiresAt).getTime();
-    const remaining = expiry - now;
 
-    if (remaining <= 0) return 'Expired';
-
-    const minutes = Math.floor(remaining / (1000 * 60));
-    const seconds = Math.floor((remaining % (1000 * 60)) / 1000);
-
-    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
-  };
-
-  const getActualVerificationCode = (item: any) => {
-    if (item.code) return item.code;
-    const notification = notifications.find((notif: any) =>
-      notif.links?.verificationCodeId === item.codeId && notif.toUid === currentUser?.uid
-    );
-    return notification?.verificationCode || 'HIDDEN';
-  };
 
   // Freshers/Renewals queue: submitted, current-session (non-upcoming) applications.
   // Upcoming (future-session) applications are split into their own tab so they
@@ -499,22 +488,13 @@ export default function ModeratorApplicationsPage() {
     }
   };
 
-  const verificationCodesForModerator = verificationCodes.filter((code: any) =>
-    code.moderatorUid === currentUser?.uid &&
-    !code.used &&
-    new Date(code.expiresAt) > new Date()
-  );
-
   const filteredData = useMemo(() => {
-    // Both 'applications' (Freshers) and 'upcoming' are application-card sections
-    // that share the same search/shift/processed filtering; 'verifications' uses
-    // the code-card shape.
     const isApplicationSection = activeSection === 'applications' || activeSection === 'upcoming';
     let data = activeSection === 'applications'
       ? applicationApplications
       : activeSection === 'upcoming'
         ? upcomingApplications
-        : verificationCodesForModerator;
+        : renewalRequests;
 
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase();
@@ -526,12 +506,13 @@ export default function ModeratorApplicationsPage() {
             item.formData?.phoneNumber?.includes(query)
           );
         } else {
-          // Check flattened fields first, then fallback to tempFormData
-          const name = item.studentName || item.tempFormData?.fullName || '';
-          const enrollment = item.enrollmentId || item.tempFormData?.enrollmentId || '';
+          const name = item.studentName || '';
+          const enrollment = item.enrollmentId || '';
+          const bus = item.busNumber || '';
           return (
             name.toLowerCase().includes(query) ||
-            enrollment.toLowerCase().includes(query)
+            enrollment.toLowerCase().includes(query) ||
+            bus.toLowerCase().includes(query)
           );
         }
       });
@@ -554,7 +535,7 @@ export default function ModeratorApplicationsPage() {
     }
 
     return data;
-  }, [activeSection, applicationApplications, upcomingApplications, verificationCodesForModerator, searchQuery, shiftFilter, processedIds]);
+  }, [activeSection, applicationApplications, upcomingApplications, renewalRequests, searchQuery, shiftFilter, processedIds]);
 
   const handleApprove = async (applicationId: string, overrideBusId?: string) => {
     if (!currentUser) return;
@@ -578,6 +559,29 @@ export default function ModeratorApplicationsPage() {
         return false;
       } else {
         setError("");
+        // Clear staged bus selection if any
+        sessionStorage.removeItem(`staged_bus_${applicationId}`);
+        setStagedBusesTrigger(prev => prev + 1);
+
+        // Format bus/route for toast
+        const appItem = pendingApplications.find((app: any) => app.applicationId === applicationId);
+        const activeBusId = overrideBusId || appItem?.formData?.busId || appItem?.formData?.routeId?.replace('route_', 'bus_') || '';
+        const selectedBus = buses.find((b: any) => (b.id || b.busId) === activeBusId);
+        let busLabel = '';
+        let routeLabel = '';
+        if (selectedBus) {
+          const busIdNum = activeBusId.replace(/[^0-9]/g, '');
+          busLabel = `Bus-${busIdNum || activeBusId} (${selectedBus.busNumber})`;
+          const routeIdVal = selectedBus.routeId || '';
+          const routeNum = routeIdVal.replace(/[^0-9]/g, '');
+          routeLabel = `Route-${routeNum || routeIdVal}`;
+        }
+
+        const msg = busLabel 
+          ? `Application approved successfully with ${busLabel}${routeLabel ? ` on ${routeLabel}` : ''}!` 
+          : 'Application approved successfully!';
+        showToast(msg, 'success');
+
         // Optimistically hide the card
         setProcessedIds(prev => {
           const newSet = new Set(prev);
@@ -595,15 +599,33 @@ export default function ModeratorApplicationsPage() {
     }
   };
 
-  // ── Case 2: alternative-bus selection → approve with override ───────────
+  // ── Case 2: alternative-bus selection → stage choice ───────────
   const handleAlternativeSelected = async (busId: string) => {
     if (!alternativePickerTarget) return;
     const { item } = alternativePickerTarget;
-    const ok = await handleApprove(item.applicationId, busId);
-    if (ok) {
-      toast.success(`Application approved with bus ${busId}`);
-      setAlternativePickerTarget(null);
-    }
+    
+    // Find selected bus details
+    const selectedBus = buses.find((b: any) => (b.id || b.busId) === busId);
+    const busNum = selectedBus?.busNumber || busId;
+    const routeId = selectedBus?.routeId || '';
+    const routeName = selectedBus?.routeName || '';
+
+    // Stage in sessionStorage
+    const stageData = {
+      busId,
+      busNumber: busNum,
+      routeId,
+      routeName,
+      stagedAt: Date.now()
+    };
+    sessionStorage.setItem(`staged_bus_${item.applicationId}`, JSON.stringify(stageData));
+
+    const busIdNum = busId.replace(/[^0-9]/g, '');
+    const formattedBusLabel = `Bus-${busIdNum || busId} (${busNum})`;
+
+    showToast(`${formattedBusLabel} selected and staged for approval.`, 'success');
+    setAlternativePickerTarget(null);
+    setStagedBusesTrigger(prev => prev + 1);
   };
 
   // ── Case 1: reassignment completed → approve the now-unblocked application
@@ -614,7 +636,7 @@ export default function ModeratorApplicationsPage() {
     // The bus now has a freed seat — approve normally.
     const ok = await handleApprove(item.applicationId);
     if (ok) {
-      toast.success('Capacity freed and application approved');
+      showToast('Capacity freed and application approved', 'success');
     }
   };
 
@@ -624,41 +646,98 @@ export default function ModeratorApplicationsPage() {
     setShowRejectDialog(true);
   };
 
+  const handleApproveRenewal = async (requestId: string) => {
+    if (!currentUser) return;
+    setApproving(requestId);
+    try {
+      const token = await currentUser.getIdToken();
+      const response = await fetch('/api/renewal-requests/approve-v2', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ requestId })
+      });
+
+      if (response.ok) {
+        showToast('Renewal request approved successfully', 'success');
+        setRenewalRequests(prev => prev.filter(r => r.id !== requestId));
+      } else {
+        const errorData = await response.json();
+        setError(errorData.error || 'Failed to approve renewal request');
+      }
+    } catch (error) {
+      console.error('Error approving renewal:', error);
+      setError('Failed to approve renewal request');
+    } finally {
+      setApproving(null);
+    }
+  };
+
   const confirmReject = async () => {
     if (!currentUser || !selectedApplication || !rejectionReason.trim()) return;
 
     setRejecting(selectedApplication);
     try {
       const token = await currentUser.getIdToken();
-      const response = await fetch('/api/applications/reject-unauth', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({ studentUid: selectedApplication, reason: rejectionReason })
-      });
+      if (activeSection === 'renewals') {
+        const response = await fetch('/api/renewal-requests/reject', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            requestId: selectedApplication,
+            reason: rejectionReason.trim(),
+            rejectorName: userData?.displayName || userData?.fullName || 'Moderator',
+            rejectorId: currentUser.uid
+          })
+        });
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        setError(errorData.error || "Failed to reject application");
+        if (!response.ok) {
+          const errorData = await response.json();
+          setError(errorData.error || "Failed to reject renewal request");
+        } else {
+          setError("");
+          setShowRejectDialog(false);
+          setRejectionReason("");
+          setRenewalRequests(prev => prev.filter(r => r.id !== selectedApplication));
+          setSelectedApplication(null);
+        }
       } else {
-        setError("");
-        setShowRejectDialog(false);
-        setRejectionReason("");
-        // Optimistically hide the card
-        if (selectedApplication) {
+        const response = await fetch('/api/applications/reject-unauth', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ studentUid: selectedApplication, reason: rejectionReason })
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          setError(errorData.error || "Failed to reject application");
+        } else {
+          setError("");
+          // Clear staged bus selection if any
+          sessionStorage.removeItem(`staged_bus_${selectedApplication}`);
+          setStagedBusesTrigger(prev => prev + 1);
+          
+          setShowRejectDialog(false);
+          setRejectionReason("");
           setProcessedIds(prev => {
             const newSet = new Set(prev);
             newSet.add(selectedApplication);
             return newSet;
           });
+          await handleRefresh();
+          setSelectedApplication(null);
         }
-        await handleRefresh();
-        setSelectedApplication(null);
       }
     } catch (error) {
-      setError("Failed to reject application");
+      setError("Failed to reject");
     } finally {
       setRejecting(null);
     }
@@ -693,7 +772,7 @@ export default function ModeratorApplicationsPage() {
             <h1 className="text-3xl font-bold tracking-tight text-white leading-none">Student Applications</h1>
             <div className="hidden md:block">
               <Badge className="text-[10px] font-bold px-2 py-0.5 bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 uppercase tracking-tight rounded-md">
-                {activeSection === 'applications' ? 'Applications' : activeSection === 'upcoming' ? 'Upcoming' : 'Verifications'}: {filteredData.length}
+                {activeSection === 'applications' ? 'Applications' : activeSection === 'upcoming' ? 'Upcoming' : 'Renewals'}: {filteredData.length}
               </Badge>
             </div>
           </div>
@@ -744,21 +823,26 @@ export default function ModeratorApplicationsPage() {
             )}
           </Button>
           <Button
-            variant={activeSection === 'verifications' ? 'default' : 'ghost'}
-            onClick={() => setActiveSection('verifications')}
+            variant={activeSection === 'renewals' ? 'default' : 'ghost'}
+            onClick={() => setActiveSection('renewals')}
             className={cn(
               "flex-1 gap-2 h-9",
-              activeSection === 'verifications' ? "bg-indigo-600 hover:bg-indigo-700" : "text-zinc-400"
+              activeSection === 'renewals' ? "bg-indigo-600 hover:bg-indigo-700" : "text-zinc-400"
             )}
             size="sm"
           >
-            <Shield className="h-4 w-4" />
-            Verifications
+            <ArrowRightLeft className="h-4 w-4" />
+            Renewals
+            {renewalRequests.length > 0 && (
+              <span className="ml-1 inline-flex items-center justify-center text-[10px] font-bold min-w-[18px] h-[18px] px-1 rounded-full bg-purple-500/30 text-purple-200 border border-purple-400/30">
+                {renewalRequests.length}
+              </span>
+            )}
           </Button>
         </div>
 
-        {(activeSection === 'applications' || activeSection === 'upcoming') && (
-          <div className="flex flex-col sm:flex-row gap-2 flex-1 w-full">
+        {(activeSection === 'applications' || activeSection === 'upcoming' || activeSection === 'renewals') && (
+          <div className="flex flex-col sm:flex-row gap-2 flex-1 w-full font-sans">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500" />
               <Input
@@ -808,7 +892,7 @@ export default function ModeratorApplicationsPage() {
         </div>
       )}
 
-      {loading || codesLoading || notificationsLoading || routesLoading || busesLoading ? (
+      {loading || loadingRenewals || notificationsLoading || routesLoading || busesLoading ? (
         <div className="flex-1 min-h-[calc(100dvh-120px)] flex justify-center items-center">
           <PremiumPageLoader message="Fetching data..." />
         </div>
@@ -937,6 +1021,13 @@ export default function ModeratorApplicationsPage() {
                               <span className="font-medium text-white/90">{item.formData?.busAssigned || getBusDisplayFromRoute(item.formData?.routeId)}</span>
                             </Badge>
 
+                            {stagedBuses.has(item.applicationId) && (
+                              <Badge variant="outline" className="gap-1.5 text-[10px] py-1 px-2.5 bg-purple-500/10 text-purple-400 border-purple-500/30 font-medium">
+                                <Check className="h-3 w-3 text-purple-400 shrink-0" />
+                                Staged Bus: {stagedBuses.get(item.applicationId)?.busNumber}
+                              </Badge>
+                            )}
+
                             <Badge variant="outline" className="gap-1.5 text-[10px] py-1 px-2.5 bg-zinc-800/40 border-white/5 text-zinc-300 capitalize">
                               <Clock className="h-3 -3 text-indigo-400" />
                               {item.formData?.shift || 'Morning'}
@@ -1063,14 +1154,31 @@ export default function ModeratorApplicationsPage() {
                                         Free Capacity
                                       </Button>
                                     ) : (
-                                      <Button
-                                        size="sm"
-                                        className="h-7 text-[10px] gap-1.5 bg-gradient-to-r from-indigo-600 to-blue-500 text-white hover:from-indigo-500 hover:to-blue-400 border-0 shadow-md shadow-indigo-500/20 transition-all"
-                                        onClick={() => openAlternativePicker(item)}
-                                      >
-                                        <Bus className="h-3 w-3" />
-                                        Select Alternative Bus
-                                      </Button>
+                                      <>
+                                        <Button
+                                          size="sm"
+                                          className="h-7 text-[10px] gap-1.5 bg-gradient-to-r from-indigo-600 to-blue-500 text-white hover:from-indigo-500 hover:to-blue-400 border-0 shadow-md shadow-indigo-500/20 transition-all"
+                                          onClick={() => openAlternativePicker(item)}
+                                        >
+                                          <BusIcon className="h-3 w-3" />
+                                          {stagedBuses.has(item.applicationId) ? "Change Alternative Bus" : "Select Alternative Bus"}
+                                        </Button>
+                                        {stagedBuses.has(item.applicationId) && (
+                                          <Button
+                                            size="sm"
+                                            variant="outline"
+                                            className="h-7 text-[10px] border-zinc-700 text-zinc-300 hover:bg-zinc-800"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              sessionStorage.removeItem(`staged_bus_${item.applicationId}`);
+                                              setStagedBusesTrigger(prev => prev + 1);
+                                              showToast('Staged bus selection cleared.', 'info');
+                                            }}
+                                          >
+                                            Clear Staged Bus
+                                          </Button>
+                                        )}
+                                      </>
                                     )}
                                   </div>
                                   </div>
@@ -1091,34 +1199,49 @@ export default function ModeratorApplicationsPage() {
                             View
                           </Button>
 
-                          {canApplicationApprove && (
-                            <Button
-                              className={cn(
-                                "w-full h-10 gap-2 font-medium shadow-lg shadow-emerald-900/20 hover:shadow-emerald-900/40 hover:scale-[1.02] active:scale-[0.98] transition-all",
-                                needsCapacityReview
-                                  ? "bg-emerald-600/50 text-white/50 cursor-not-allowed"
-                                  : "bg-emerald-600 hover:bg-emerald-500 text-white"
-                              )}
-                              onClick={() => handleApprove(item.applicationId)}
-                              disabled={needsCapacityReview || approving === item.applicationId}
-                            >
-                              {approving === item.applicationId ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-                              {isUpcoming ? "Verify" : "Approve"}
-                            </Button>
-                          )}
+                          <Button
+                            className={cn(
+                              "w-full h-10 gap-2 font-medium transition-all",
+                              !canApplicationApprove
+                                ? "bg-emerald-600/30 text-white/50 opacity-60 cursor-pointer border border-emerald-500/10 hover:bg-emerald-600/30"
+                                : (needsCapacityReview && !stagedBuses.has(item.applicationId))
+                                  ? "bg-emerald-600/50 text-white/50 cursor-not-allowed shadow-lg shadow-emerald-900/20"
+                                  : "bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-900/20 hover:shadow-emerald-900/40 hover:scale-[1.02] active:scale-[0.98]"
+                            )}
+                            onClick={() => {
+                              if (!canApplicationApprove) {
+                                showToast("You are not authorized to approve students.", "error");
+                                return;
+                              }
+                              const staged = stagedBuses.get(item.applicationId);
+                              handleApprove(item.applicationId, staged?.busId);
+                            }}
+                            disabled={canApplicationApprove && ((needsCapacityReview && !stagedBuses.has(item.applicationId)) || approving === item.applicationId)}
+                          >
+                            {approving === item.applicationId ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                            {isUpcoming ? "Verify" : "Approve"}
+                          </Button>
 
-                          {canApplicationReject && (
-                            <Button
-                              variant="outline"
-                              className="w-full h-10 gap-2 border-red-500/20 text-red-400 bg-red-500/5 hover:bg-red-500/10 hover:text-red-300 hover:border-red-500/30 transition-all hover:scale-[1.02] active:scale-[0.98]"
-                              onClick={() => handleRejectClick(item.applicationId)}
-                              disabled={rejecting === item.applicationId}
-                            >
-                              {rejecting === item.applicationId ? <Loader2 className="h-4 w-4 animate-spin" /> : <X className="h-4 w-4" />}
-
-                              Reject
-                            </Button>
-                          )}
+                          <Button
+                            variant="outline"
+                            className={cn(
+                              "w-full h-10 gap-2 transition-all",
+                              !canApplicationReject
+                                ? "border-red-500/10 text-red-500/50 bg-red-500/5 opacity-60 cursor-pointer hover:bg-red-500/5 hover:text-red-500/50"
+                                : "border-red-500/20 text-red-400 bg-red-500/5 hover:bg-red-500/10 hover:text-red-300 hover:border-red-500/30 hover:scale-[1.02] active:scale-[0.98]"
+                            )}
+                            onClick={() => {
+                              if (!canApplicationReject) {
+                                showToast("You are not authorized to reject students.", "error");
+                                return;
+                              }
+                              handleRejectClick(item.applicationId);
+                            }}
+                            disabled={canApplicationReject && (rejecting === item.applicationId)}
+                          >
+                            {rejecting === item.applicationId ? <Loader2 className="h-4 w-4 animate-spin" /> : <X className="h-4 w-4" />}
+                            Reject
+                          </Button>
                         </div>
 
                       </div>
@@ -1126,40 +1249,85 @@ export default function ModeratorApplicationsPage() {
                   );
                 })() : (
                   <CardContent className="p-5">
-                    <div className="flex flex-col gap-6">
-                      <div className="flex justify-between items-center">
-                        <div className="flex items-center gap-3">
-                          <div className="p-2.5 bg-indigo-500/10 rounded-lg text-indigo-400">
-                            <Shield className="h-5 w-5" />
-                          </div>
-                          <div>
-                            <h3 className="font-bold text-white">{item.studentName || item.tempFormData?.fullName}</h3>
-                            <p className="text-xs text-zinc-500">{item.enrollmentId || item.tempFormData?.enrollmentId}</p>
+                    <div className="flex flex-col gap-2">
+                      {/* Profile & Status */}
+                      <div className="flex justify-between items-start">
+                        <div className="flex items-start gap-4">
+                          <Avatar className="h-12 w-12 ring-2 ring-white/5 bg-zinc-900 shadow-xl">
+                            <AvatarFallback className="bg-indigo-500/10 text-indigo-400 font-bold">
+                              {item.studentName?.substring(0, 2).toUpperCase() || 'RN'}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2 mb-2">
+                              <h3 className="font-bold text-base text-white leading-none">{item.studentName || 'Renewal Student'}</h3>
+                              <Badge className="text-[10px] bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 font-semibold rounded uppercase px-2 py-0.5">
+                                Renewal
+                              </Badge>
+                            </div>
+                            <div className="flex flex-col md:flex-row md:items-center gap-2 md:gap-3 mt-1">
+                              <span className="flex items-center gap-1.5 bg-zinc-900/50 px-2.5 py-0.5 rounded border border-white/5 font-mono text-[11px] md:text-xs text-zinc-300 w-fit">
+                                <User className="h-3 w-3 text-zinc-500 shrink-0" />
+                                {item.enrollmentId}
+                              </span>
+                            </div>
                           </div>
                         </div>
-                        <Badge variant="outline" className="bg-amber-500/10 text-amber-500 border-amber-500/20">
-                          Pending
+                        <div className="flex flex-col items-end gap-2">
+                          <Badge variant="outline" className={cn(
+                            "gap-1.5 text-[10px] px-2.5 py-1 h-fit font-medium tracking-wide shadow-sm",
+                            item.paymentMode === 'online' ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" : "bg-amber-500/10 text-amber-400 border-amber-500/20"
+                          )}>
+                            <div className={cn("w-1.5 h-1.5 rounded-full", item.paymentMode === 'online' ? "bg-emerald-400" : "bg-amber-400")} />
+                            {item.paymentMode === 'online' ? 'ONLINE' : 'MANUAL'}
+                          </Badge>
+                          {item.amountPaid && (
+                            <span className="text-xs font-mono font-bold text-zinc-500 bg-zinc-900/80 px-2 py-1 rounded border border-white/5">
+                              ₹{Number(item.amountPaid).toLocaleString('en-IN')}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Bus & Route info */}
+                      <div className="flex flex-wrap items-center gap-2 mt-3 mb-4">
+                        <Badge variant="outline" className="gap-1.5 text-[10px] py-1 px-2.5 bg-zinc-800/40 border-white/5 text-zinc-300">
+                          <BusIcon className="h-3 w-3 text-indigo-400" />
+                          <span className="font-medium text-white/90">{item.busNumber || item.busId || 'Bus'}</span>
                         </Badge>
+                        <Badge variant="outline" className="gap-1.5 text-[10px] py-1 px-2.5 bg-zinc-800/40 border-white/5 text-zinc-300 capitalize">
+                          <Clock className="h-3 w-3 text-indigo-400" />
+                          {item.shift || 'Flexible'}
+                        </Badge>
+                        {item.durationYears && (
+                          <Badge variant="outline" className="gap-1.5 text-[10px] py-1 px-2.5 bg-zinc-800/40 border-white/5 text-zinc-300">
+                            <Calendar className="h-3 w-3 text-indigo-400" />
+                            {item.durationYears} Year Plan
+                          </Badge>
+                        )}
                       </div>
 
-                      <div className="text-center py-6 bg-indigo-500/5 rounded-xl border border-indigo-500/10">
-                        <div className="text-4xl font-mono font-bold text-indigo-400 tracking-widest mb-2">
-                          {getActualVerificationCode(item)}
-                        </div>
-                        <p className="text-xs text-zinc-500 uppercase tracking-wider font-semibold">Verification Code</p>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-4 text-sm">
-                        <div className="p-3 rounded-lg bg-white/5 border border-white/[0.05]">
-                          <p className="text-zinc-500 text-xs mb-1">Time Left</p>
-                          <p className="font-mono font-bold text-white">{getTimeRemaining(item.expiresAt)}</p>
-                        </div>
-                        <div className="p-3 rounded-lg bg-white/5 border border-white/[0.05]">
-                          <p className="text-zinc-500 text-xs mb-1">Amount</p>
-                          <p className="font-bold text-white">
-                            ₹{(item.amount || 0).toLocaleString('en-IN')}
-                          </p>
-                        </div>
+                      {/* Actions */}
+                      <div className="flex justify-end gap-3 pt-3 border-t border-white/[0.05]">
+                        <Button
+                          variant="outline"
+                          onClick={() => {
+                            setSelectedApplication(item.id);
+                            setRejectionReason("");
+                            setShowRejectDialog(true);
+                          }}
+                          disabled={rejecting === item.id || approving === item.id}
+                          className="border-red-500/20 text-red-400 bg-red-500/5 hover:bg-red-500/10 hover:text-red-300 hover:border-red-500/30 text-[11px] font-bold uppercase tracking-wider h-9 px-4 transition-all"
+                        >
+                          Reject
+                        </Button>
+                        <Button
+                          onClick={() => handleApproveRenewal(item.id)}
+                          disabled={rejecting === item.id || approving === item.id}
+                          className="bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold uppercase tracking-wider h-9 px-4 transition-all shadow-md shadow-emerald-950/20"
+                        >
+                          {approving === item.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Approve'}
+                        </Button>
                       </div>
                     </div>
                   </CardContent>
@@ -1200,7 +1368,7 @@ export default function ModeratorApplicationsPage() {
               variant="destructive"
               onClick={confirmReject}
               disabled={!rejectionReason.trim() || rejecting !== null}
-              className="bg-red-600 hover:bg-red-700"
+              className="bg-red-650 hover:bg-red-600"
             >
               {rejecting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
               Confirm Rejection
@@ -1215,12 +1383,13 @@ export default function ModeratorApplicationsPage() {
         <ReassignmentPanel
           selectedStudents={reassignmentTarget.busStudents}
           allBuses={(buses as any[]).map((b: any) => {
-            const rawStops: any[] = b.route?.stops || b.stops || [];
+            const matchedRoute = routes.find((r: any) => r.routeId === b.routeId || r.id === b.routeId);
+            const rawStops: any[] = matchedRoute?.stops || b.route?.stops || b.stops || [];
             return {
               id: b.id || b.busId || '',
               busNumber: b.busNumber || b.id || '',
               routeId: b.routeId,
-              routeName: b.routeName || b.route?.routeName || '',
+              routeName: b.routeName || matchedRoute?.routeName || b.route?.routeName || '',
               currentMembers: b.currentMembers || 0,
               capacity: b.capacity || b.totalCapacity || 55,
               shift: b.shift || 'both',
@@ -1230,7 +1399,7 @@ export default function ModeratorApplicationsPage() {
                 sequence: s.sequence ?? 0,
               })),
               load: b.load || { morningCount: 0, eveningCount: 0 },
-              route: b.route,
+              route: matchedRoute || b.route || null,
             };
           })}
           currentBus={reassignmentTarget.busData}

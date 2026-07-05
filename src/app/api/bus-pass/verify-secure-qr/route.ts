@@ -176,7 +176,6 @@ export async function POST(request: NextRequest) {
                 version: qrPayload.version,
             },
             verifiedAt: new Date().toISOString(),
-            verifiedBy: auth.uid,
             secureVerification: true,
             isTripStale
         });

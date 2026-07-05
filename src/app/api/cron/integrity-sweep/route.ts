@@ -22,7 +22,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { adminReconcileBusLoads } from '@/lib/services/admin-reconcile-bus-loads';
 import { runIntegrityScan } from '@/lib/services/integrity-detector';
 import { isSeatReleaseAtSoftBlockEnabled } from '@/lib/config/capacity-flags';
-import { recordOperationalEvent, replayAuditFailures, SYSTEM_ACTOR } from '@/lib/audit/audit-service';
+import { createAuditLog, SYSTEM_ACTOR } from '@/lib/services/audit.service';
+import { replayAuditFailures } from '@/lib/audit/audit-service';
 import crypto from 'crypto';
 
 export const dynamic = 'force-dynamic';
@@ -89,13 +90,17 @@ export async function GET(request: NextRequest) {
     };
 
     // Durable, admin-visible summary of the whole sweep.
-    await recordOperationalEvent({
+    await createAuditLog({
+      category: 'system',
       action: 'integrity_sweep_completed',
-      actor: SYSTEM_ACTOR,
-      targetId: 'cron:integrity-sweep',
+      summary: 'Integrity sweep completed',
+      severity: 'medium',
+      performedBy: SYSTEM_ACTOR.id,
+      performedByName: SYSTEM_ACTOR.name,
+      performedByRole: SYSTEM_ACTOR.role,
       targetType: 'cron',
-      reason: 'scheduled_run',
-      details: report,
+      targetId: 'cron:integrity-sweep',
+      metadata: report,
     });
 
     return NextResponse.json({ success: true, ...report });

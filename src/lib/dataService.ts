@@ -14,6 +14,7 @@ import {
   orderBy
 } from 'firebase/firestore';
 import { getAuth } from 'firebase/auth';
+
 import type {
   User,
   Student,
@@ -21,7 +22,6 @@ import type {
   Moderator,
   Bus,
   Route,
-  Notification,
   Application,
   Invitation
 } from '@/lib/types';
@@ -446,11 +446,10 @@ export const getDriverById = async (id: string): Promise<any | null> => {
         busId: data.busId || data.assignedBusId || '',
         assignedBusId: data.assignedBusId || data.busId || '',
         shift: (() => {
-          const s = (data.shift || data.assignedShift || '').toLowerCase();
-          if (s.includes('morn')) return 'Morning';
-          if (s.includes('even')) return 'Evening';
-          if (s.includes('both')) return 'Both';
-          return '';
+          const { normalizeShift } = require('@/lib/utils/shift-utils');
+          const raw = data.shift || data.assignedShift || '';
+          if (!raw) return '';
+          return normalizeShift(raw);
         })(),
         employeeId: data.employeeId || data.driverId || ''
       };
@@ -814,73 +813,6 @@ export const updateRoute = async (id: string, data: Partial<Route>): Promise<boo
   }
 };
 
-// Notifications collection functions
-export const getAllNotifications = async (): Promise<Notification[]> => {
-  try {
-    const db = await getDatabase();
-    const notificationsCol = collection(db as Firestore, 'notifications');
-    const notificationSnapshot = await getDocs(notificationsCol);
-    return notificationSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Notification));
-  } catch (error) {
-    console.error('Error fetching notifications:', error);
-    return [];
-  }
-};
-
-export const getNotificationById = async (id: string): Promise<Notification | null> => {
-  try {
-    const db = await getDatabase();
-    const notificationDoc = await getDoc(doc(db as Firestore, 'notifications', id));
-    return notificationDoc.exists() ? { id: notificationDoc.id, ...notificationDoc.data() } as Notification : null;
-  } catch (error) {
-    console.error('Error fetching notification:', error);
-    return null;
-  }
-};
-
-export const deleteNotification = async (id: string): Promise<boolean> => {
-  try {
-    const db = await getDatabase();
-    const notificationRef = doc(db as Firestore, 'notifications', id);
-
-    // First, get the notification to check if user can delete it
-    const notificationDoc = await getDoc(notificationRef);
-    if (!notificationDoc.exists()) {
-      console.error('Notification not found');
-      return false;
-    }
-
-    const notificationData = notificationDoc.data();
-
-    // Check if current user is authenticated
-    const auth = getAuth();
-    const currentUser = auth.currentUser;
-    if (!currentUser) {
-      console.error('User not authenticated');
-      return false;
-    }
-
-    // Check if user is the author or admin (this will be enforced by Firestore rules)
-    // The Firestore rules will handle the actual permission check
-    await deleteDoc(notificationRef);
-    return true;
-  } catch (error) {
-    console.error('Error deleting notification:', error);
-    return false;
-  }
-};
-
-export const updateNotification = async (id: string, data: Partial<Notification>): Promise<boolean> => {
-  try {
-    const db = await getDatabase();
-    await updateDoc(doc(db as Firestore, 'notifications', id), data as any);
-    return true;
-  } catch (error) {
-    console.error('Error updating notification:', error);
-    return false;
-  }
-};
-
 // Applications collection functions  
 export const getAllApplications = async (): Promise<Application[]> => {
   try {
@@ -1052,20 +984,7 @@ export const addRoute = async (routeData: Omit<Route, 'id'>): Promise<string | n
   }
 };
 
-export const createNotification = async (notificationData: Omit<Notification, 'id'>): Promise<string | null> => {
-  try {
-    const db = await getDatabase();
-    const notificationId = createRandomId();
-    await setDoc(doc(db as Firestore, 'notifications', notificationId), {
-      ...notificationData,
-      createdAt: getCurrentTimestamp()
-    });
-    return notificationId;
-  } catch (error) {
-    console.error('Error creating notification:', error);
-    return null;
-  }
-};
+
 
 export const getStudentsByBusId = async (busId: string): Promise<Student[]> => {
   const cacheKey = `students_bus_${busId}`;
@@ -1126,22 +1045,7 @@ export const getStudentsByBusId = async (busId: string): Promise<Student[]> => {
   }
 };
 
-export const markNotificationAsRead = async (notificationId: string, userId: string): Promise<boolean> => {
-  try {
-    const db = await getDatabase();
-    // Use the notification_read_receipts collection instead of updating the notification directly
-    const readReceiptRef = doc(db as Firestore, 'notification_read_receipts', `${notificationId}_${userId}`);
-    await setDoc(readReceiptRef, {
-      notificationId,
-      userId,
-      readAt: new Date(),
-    });
-    return true;
-  } catch (error) {
-    console.error('Error marking notification as read:', error);
-    return false;
-  }
-};
+
 
 /**
  * Fetches all payments associated with a specific student UID from Supabase

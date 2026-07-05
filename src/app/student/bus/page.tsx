@@ -28,6 +28,7 @@ import WaitingFlagModal from "@/components/WaitingFlagModal";
 import { useToast } from "@/contexts/toast-context";
 import { useFCMToken } from "@/hooks/useFCMToken";
 import TransportEntitlementGuard from "@/components/transport/TransportEntitlementGuard";
+import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import ErrorBoundary from "@/components/ErrorBoundary";
 
 function StudentBusLive() {
@@ -281,11 +282,7 @@ function StudentBusLive() {
   }, [waitingFlagId, currentUser, addToast]);
 
   if (loading) {
-    return (
-      <div className="flex-1 min-h-[calc(100dvh-120px)] flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
-      </div>
-    );
+    return <PremiumPageLoader message="Loading Bus Details..." subMessage="Fetching bus status and schedule..." />;
   }
 
   if (!studentData) {

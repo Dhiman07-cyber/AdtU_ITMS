@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Loader2, Save, IndianRupee } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import { PremiumPageLoader } from "@/components/LoadingSpinner";
 
 export default function AdminSettingsPage() {
   const { currentUser, userData, loading } = useAuth();
@@ -84,11 +85,7 @@ export default function AdminSettingsPage() {
   };
 
   if (loading || loadingFees) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <Loader2 className="h-12 w-12 animate-spin text-blue-600" />
-      </div>
-    );
+    return <PremiumPageLoader message="Loading System Settings..." subMessage="Fetching configs..." />;
   }
 
   return (

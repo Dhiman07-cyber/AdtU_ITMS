@@ -21,11 +21,13 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { verifyApiAuth } from '@/lib/security/api-auth';
+import { withSecurity } from '@/lib/security/api-security';
 import { adminDb, adminMessaging } from '@/lib/firebase-admin';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { UserRole, TargetType, NotificationType } from '@/lib/notifications/types';
 import { safeErrorMessage } from '@/lib/security/safe-error';
+import { NotificationCreateSchema } from '@/lib/security/validation-schemas';
+import { z } from 'zod';
 
 // ─── Recipient Resolution ────────────────────────────────────────────────────
 
@@ -100,7 +102,7 @@ async function resolveRecipientIds(
           driverSnap.docs.forEach(d => {
             const data = d.data();
             const driverShift = (data.shift || data.assignedShift || '').toLowerCase();
-            if (driverShift === targetShift || driverShift === 'both' || driverShift === 'morning & evening') {
+            if (driverShift === targetShift || driverShift === 'both') {
               recipientIds.push(d.id);
             }
           });
@@ -244,35 +246,24 @@ async function sendFCMNotifications(
   }
 
   try {
-    // Collect FCM tokens for all recipients
+    // Collect FCM tokens for all recipients from canonical subcollection
     const fcmTokens: string[] = [];
 
-    // Check fcm_tokens collection
-    for (let i = 0; i < recipientIds.length; i += 30) {
-      const chunk = recipientIds.slice(i, i + 30);
-      const snapshot = await adminDb.collection('fcm_tokens')
-        .where('userUid', 'in', chunk).get();
-      snapshot.docs.forEach(doc => {
-        const token = doc.data().deviceToken;
-        if (token && typeof token === 'string' && token.length > 10) {
-          fcmTokens.push(token);
-        }
-      });
-    }
-
-    // Also check legacy fcmToken field in students collection
-    for (let i = 0; i < recipientIds.length; i += 30) {
-      const chunk = recipientIds.slice(i, i + 30);
+    // Read from students/{id}/tokens subcollection (canonical)
+    for (const uid of recipientIds) {
       try {
-        const studentDocs = await Promise.all(
-          chunk.map(uid => adminDb!.collection('students').doc(uid).get())
-        );
-        studentDocs.forEach(doc => {
-          if (doc.exists) {
-            const token = doc.data()?.fcmToken;
-            if (token && typeof token === 'string' && token.length > 10 && !fcmTokens.includes(token)) {
-              fcmTokens.push(token);
-            }
+        const studentDoc = await adminDb.collection('students').doc(uid).get();
+        if (!studentDoc.exists) continue;
+        
+        const tokensSnapshot = await studentDoc.ref.collection('tokens')
+          .where('valid', '==', true)
+          .limit(3)
+          .get();
+        
+        tokensSnapshot.docs.forEach(doc => {
+          const token = doc.data().token;
+          if (token && typeof token === 'string' && token.length > 10 && !fcmTokens.includes(token)) {
+            fcmTokens.push(token);
           }
         });
       } catch {
@@ -327,156 +318,134 @@ async function sendFCMNotifications(
 
 // ─── POST Handler ────────────────────────────────────────────────────────────
 
-export async function POST(request: NextRequest) {
-  try {
-    // 1. Authenticate
-    const auth = await verifyApiAuth(request, ['admin', 'moderator', 'driver']);
-    if (!auth.authenticated) return auth.response;
+export const POST = withSecurity(
+  async (request, { auth, body, requestId }) => {
+    try {
+      if (!adminDb) {
+        return NextResponse.json(
+          { success: false, error: 'Server configuration error' },
+          { status: 500 }
+        );
+      }
 
-    if (!adminDb) {
+      const {
+        type = 'notice',
+        title,
+        content,
+        targetType = 'all_users',
+        targetRole,
+        targetShift,
+        targetBusIds,
+        targetRouteIds,
+        targetUserIds,
+        expiryAt,
+        sendToAllRoles,
+      } = body as z.infer<typeof NotificationCreateSchema>;
+
+      // 4. Permission check
+      const senderRole = auth.role as UserRole;
+      if (senderRole === 'driver') {
+        if (targetType === 'all_users') {
+          return NextResponse.json(
+            { success: false, error: 'Drivers can only send to students' },
+            { status: 403 }
+          );
+        }
+        if (targetType === 'all_role' && targetRole && targetRole !== 'student') {
+          return NextResponse.json(
+            { success: false, error: 'Drivers can only send to students' },
+            { status: 403 }
+          );
+        }
+      }
+
+      // 5. Resolve recipients
+      const directRecipientIds = await resolveRecipientIds(
+        targetType as TargetType,
+        targetRole as UserRole | undefined,
+        targetShift,
+        targetBusIds,
+        targetRouteIds,
+        targetUserIds,
+        sendToAllRoles,
+        senderRole
+      );
+
+      // 6. Auto-inject higher-ups
+      const autoInjectedIds = await getAutoInjectedRecipients(senderRole, directRecipientIds);
+
+      const filteredDirectRecipientIds = directRecipientIds.filter(id => id !== auth.uid);
+      const filteredAutoInjectedIds = autoInjectedIds.filter(id => id !== auth.uid);
+      const allRecipientIds = [...new Set([...filteredDirectRecipientIds, ...filteredAutoInjectedIds])];
+
+      if (allRecipientIds.length === 0) {
+        return NextResponse.json(
+          { success: false, error: 'No recipients found for this target' },
+          { status: 400 }
+        );
+      }
+
+      // 7. Build notification target object
+      const target: Record<string, any> = { type: targetType };
+      if (targetRole) target.roleFilter = targetRole;
+      if (targetShift) target.shift = targetShift;
+      if (targetBusIds && targetBusIds.length > 0) target.busIds = targetBusIds;
+      if (targetRouteIds && targetRouteIds.length > 0) target.routeIds = targetRouteIds;
+      if (targetUserIds && targetUserIds.length > 0) target.specificUserIds = targetUserIds;
+
+      const sender: Record<string, any> = {
+        userId: auth.uid,
+        userName: auth.name || 'Staff',
+        userRole: senderRole,
+      };
+
+      const notificationData: Record<string, any> = {
+        title: title.trim(),
+        content: content.trim(),
+        type: type as NotificationType,
+        sender,
+        target,
+        recipientIds: allRecipientIds,
+        readByUserIds: [auth.uid],
+        hiddenForUserIds: [],
+        isEdited: false,
+        isDeletedGlobally: false,
+        createdAt: FieldValue.serverTimestamp(),
+      };
+
+      if (expiryAt && typeof expiryAt === 'number') {
+        notificationData.expiryAt = Timestamp.fromMillis(expiryAt);
+      }
+
+      const docRef = await adminDb.collection('notifications').add(notificationData);
+
+      // 11. Send FCM push notifications (non-blocking)
+      const fcmResult = await sendFCMNotifications(
+        allRecipientIds,
+        title.trim(),
+        content.trim(),
+        docRef.id
+      );
+
+      return NextResponse.json({
+        success: true,
+        notificationId: docRef.id,
+        recipientCount: filteredDirectRecipientIds.length,
+        autoInjectedCount: filteredAutoInjectedIds.length,
+        fcm: fcmResult,
+      }, { status: 200 });
+
+    } catch (error: any) {
+      console.error('Error creating notification:', error);
       return NextResponse.json(
-        { success: false, error: 'Server configuration error' },
+        { success: false, error: safeErrorMessage(error, 'Failed to create notification') },
         { status: 500 }
       );
     }
-
-    // 2. Parse body
-    const body = await request.json();
-    const {
-      type = 'notice',
-      title,
-      content,
-      targetType = 'all_users',
-      targetRole,
-      targetShift,
-      targetBusIds,
-      targetRouteIds,
-      targetUserIds,
-      expiryAt,
-      sendToAllRoles,
-    } = body;
-
-    // 3. Validate
-    if (!title || !title.trim()) {
-      return NextResponse.json(
-        { success: false, error: 'Title is required' },
-        { status: 400 }
-      );
-    }
-    if (!content || !content.trim()) {
-      return NextResponse.json(
-        { success: false, error: 'Content is required' },
-        { status: 400 }
-      );
-    }
-
-    // 4. Permission check
-    const senderRole = auth.role as UserRole;
-    if (senderRole === 'driver') {
-      // Drivers can only send to students
-      if (targetType === 'all_users') {
-        return NextResponse.json(
-          { success: false, error: 'Drivers can only send to students' },
-          { status: 403 }
-        );
-      }
-      if (targetType === 'all_role' && targetRole && targetRole !== 'student') {
-        return NextResponse.json(
-          { success: false, error: 'Drivers can only send to students' },
-          { status: 403 }
-        );
-      }
-    }
-
-    // 5. Resolve recipients
-    const directRecipientIds = await resolveRecipientIds(
-      targetType as TargetType,
-      targetRole as UserRole | undefined,
-      targetShift,
-      targetBusIds,
-      targetRouteIds,
-      targetUserIds,
-      sendToAllRoles,
-      senderRole
-    );
-
-    // 6. Auto-inject higher-ups
-    const autoInjectedIds = await getAutoInjectedRecipients(senderRole, directRecipientIds);
-
-    // Remove sender from recipients (don't notify yourself)
-    const filteredDirectRecipientIds = directRecipientIds.filter(id => id !== auth.uid);
-    const filteredAutoInjectedIds = autoInjectedIds.filter(id => id !== auth.uid);
-    const allRecipientIds = [...new Set([...filteredDirectRecipientIds, ...filteredAutoInjectedIds])];
-
-    if (allRecipientIds.length === 0) {
-      return NextResponse.json(
-        { success: false, error: 'No recipients found for this target' },
-        { status: 400 }
-      );
-    }
-
-    // 7. Build notification target object (for visibility checks later)
-    const target: Record<string, any> = { type: targetType };
-    if (targetRole) target.roleFilter = targetRole;
-    if (targetShift) target.shift = targetShift;
-    if (targetBusIds && targetBusIds.length > 0) target.busIds = targetBusIds;
-    if (targetRouteIds && targetRouteIds.length > 0) target.routeIds = targetRouteIds;
-    if (targetUserIds && targetUserIds.length > 0) target.specificUserIds = targetUserIds;
-
-    // 8. Build sender object
-    const sender: Record<string, any> = {
-      userId: auth.uid,
-      userName: auth.name || 'Staff',
-      userRole: senderRole,
-    };
-    if (auth.employeeId) sender.employeeId = auth.employeeId;
-
-    // 10. Create notification document in `notifications` collection
-    const notificationData: Record<string, any> = {
-      title: title.trim(),
-      content: content.trim(),
-      type: type as NotificationType,
-      sender,
-      target,
-      recipientIds: allRecipientIds,
-      readByUserIds: [auth.uid], // Sender has already "read" it
-      hiddenForUserIds: [],
-      isEdited: false,
-      isDeletedGlobally: false,
-      createdAt: FieldValue.serverTimestamp(),
-    };
-
-    // Add expiry if provided
-    if (expiryAt && typeof expiryAt === 'number') {
-      notificationData.expiryAt = Timestamp.fromMillis(expiryAt);
-    }
-
-    // Save to Firestore
-    const docRef = await adminDb.collection('notifications').add(notificationData);
-
-    console.log(`✅ Notification created: ${docRef.id} | type=${type} | directRecipients=${filteredDirectRecipientIds.length}`);
-
-    // 11. Send FCM push notifications (non-blocking)
-    const fcmResult = await sendFCMNotifications(
-      allRecipientIds,
-      title.trim(),
-      content.trim(),
-      docRef.id
-    );
-
-    return NextResponse.json({
-      success: true,
-      notificationId: docRef.id,
-      recipientCount: filteredDirectRecipientIds.length,
-      autoInjectedCount: filteredAutoInjectedIds.length,
-      fcm: fcmResult,
-    }, { status: 200 });
-
-  } catch (error: any) {
-    console.error('❌ Error creating notification:', error);
-    return NextResponse.json(
-      { success: false, error: safeErrorMessage(error, 'Failed to create notification') },
-      { status: 500 }
-    );
+  },
+  {
+    requiredRoles: ['admin', 'moderator', 'driver'],
+    schema: NotificationCreateSchema,
+    rateLimit: { maxRequests: 10, windowMs: 60_000 },
   }
-}
+);

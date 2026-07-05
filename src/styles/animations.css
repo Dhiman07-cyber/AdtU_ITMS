@@ -1128,35 +1128,16 @@
     padding-bottom: 3rem !important;
   }
 
-  /* Section 2 (Why Choose Us) specific spacing */
-  .apply-landing-container .apply-snap-section:nth-of-type(2) {
-    padding-top: 4.5rem !important;
-    padding-bottom: 3.5rem !important;
-  }
-  .apply-landing-container .apply-snap-section:nth-of-type(2) .max-w-7xl {
-    margin-top: 0 !important;
-  }
-  .apply-landing-container .apply-snap-section:nth-of-type(2) .max-w-7xl > div:first-of-type {
-    margin-bottom: 1.5rem !important;
-  }
-  .apply-landing-container .apply-snap-section:nth-of-type(2) .grid {
-    grid-template-columns: 1fr !important;
-    gap: 0.75rem !important;
-  }
-  .apply-landing-container .apply-snap-section:nth-of-type(2) .grid > div {
-    padding: 1rem 1.25rem !important;
-  }
-
   /* Section 3 (Journey) sticky container and height overrides */
-  .apply-landing-container section:nth-of-type(3) {
+  .apply-landing-container .apply-journey-section {
     height: 100dvh !important;
   }
   .apply-landing-container section div.sticky,
-  .apply-landing-container section:nth-of-type(3) > div:first-of-type {
+  .apply-landing-container .apply-journey-section > div:first-of-type {
     height: 100dvh !important;
   }
   .apply-landing-container section div.sticky > .max-w-7xl,
-  .apply-landing-container section:nth-of-type(3) > div:first-of-type > .max-w-7xl {
+  .apply-landing-container .apply-journey-section > div:first-of-type > .max-w-7xl {
     transform: none !important;
     padding-top: 4.5rem !important;
   }
@@ -1165,28 +1146,17 @@
     height: 100dvh !important;
   }
 
-  /* Section 4 (Things You Should Know) specific spacing */
-  .apply-landing-container .apply-snap-section:nth-of-type(4) {
+  /* Things You Should Know Section Spacing */
+  .apply-landing-container .apply-things-section {
     padding-top: 4.5rem !important;
     padding-bottom: 3.5rem !important;
   }
-  .apply-landing-container .apply-snap-section:nth-of-type(4) .grid {
+  .apply-landing-container .apply-things-section .grid {
     grid-template-columns: 1fr !important;
     gap: 0.75rem !important;
   }
-  .apply-landing-container .apply-snap-section:nth-of-type(4) .grid > div {
+  .apply-landing-container .apply-things-section .grid > div {
     padding: 1rem 1.25rem !important;
-  }
-
-  /* Section 5 (Final CTA) spacing */
-  .apply-landing-container .apply-snap-section:last-of-type {
-    padding-top: 4.5rem !important;
-    padding-bottom: 4.5rem !important;
-    justify-content: center !important;
-  }
-  .apply-landing-container .apply-snap-section:last-of-type > div {
-    padding-top: 2rem !important;
-    padding-bottom: 2rem !important;
   }
 }
 

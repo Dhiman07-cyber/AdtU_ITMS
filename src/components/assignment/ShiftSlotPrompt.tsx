@@ -25,6 +25,7 @@ import {
     Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { normalizeShift } from "@/lib/utils/shift-utils";
 
 // ============================================
 // DESIGN TOKENS
@@ -150,8 +151,8 @@ export function ShiftSlotPrompt({
                 // 'Both' - default to the first existing driver's shift if available
                 const firstExisting = existingDrivers[0];
                 if (firstExisting) {
-                    const s = firstExisting.shift?.toLowerCase();
-                    setNewDriverShift(s?.includes("evening") ? "Evening" : "Morning");
+                    const normalizedShift = normalizeShift(firstExisting.shift);
+                    setNewDriverShift(normalizedShift === "Evening" ? "Evening" : "Morning");
                 } else {
                     setNewDriverShift("Morning");
                 }
@@ -176,13 +177,13 @@ export function ShiftSlotPrompt({
 
         // Set default shift based on first existing driver
         if (existingDrivers.length > 0) {
-            const firstShift = existingDrivers[0].shift?.toLowerCase();
+            const normalizedFirstShift = normalizeShift(existingDrivers[0].shift);
             if (action === "split") {
-                if (firstShift === "morning") setNewDriverShift("Evening");
-                else if (firstShift === "evening") setNewDriverShift("Morning");
+                if (normalizedFirstShift === "Morning") setNewDriverShift("Evening");
+                else if (normalizedFirstShift === "Evening") setNewDriverShift("Morning");
                 else setNewDriverShift("Evening");
             } else {
-                if (firstShift?.includes("evening")) {
+                if (normalizedFirstShift === "Evening") {
                     setNewDriverShift("Evening");
                 } else {
                     setNewDriverShift("Morning");

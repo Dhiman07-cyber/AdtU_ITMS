@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const mapProviderSchema = z.enum(["gmap", "guwahati"]);
+export const mapProviderSchema = z.enum(["guwahati"]);
 export const mapThemeSchema = z.enum(["light", "dark"]);
 
 export const mapConfigSchema = z.object({

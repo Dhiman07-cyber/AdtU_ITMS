@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { auth } from "@/lib/firebase";
+import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import { useAuth } from "@/contexts/auth-context";
 import { useToast } from "@/contexts/toast-context";
 import {
@@ -301,17 +302,7 @@ export default function ModConfigPage() {
     // LOADING STATE
     // ═══════════════════════════════════════════════
     if (loading) {
-        return (
-            <div className="min-h-screen bg-transparent flex items-center justify-center">
-                <div className="flex flex-col items-center gap-4 animate-in fade-in zoom-in-95 duration-200">
-                    <div className="relative">
-                        <Loader2 className="w-10 h-10 text-blue-400 animate-spin" />
-                        <Shield className="w-5 h-5 text-blue-400/50 absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" />
-                    </div>
-                    <p className="text-slate-400 text-sm">Loading Permissions...</p>
-                </div>
-            </div>
-        );
+        return <PremiumPageLoader message="Loading permissions..." subMessage="Configuring Moderator access..." />;
     }
 
     // ═══════════════════════════════════════════════

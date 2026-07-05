@@ -116,18 +116,27 @@ export async function POST(request: NextRequest) {
     //  - overwrite: false       → Cannot replace an existing asset
     //  - strip_profile flag     → Removes EXIF / GPS metadata
     const arrayBuffer = await file.arrayBuffer();
-    const base64 = Buffer.from(arrayBuffer).toString('base64');
-    const dataURI = `data:${file.type};base64,${base64}`;
+    const buffer = Buffer.from(arrayBuffer);
 
-    const result = await cloudinary.uploader.upload(dataURI, {
-      folder,
-      use_filename: false,
-      unique_filename: true,
-      overwrite: false,
-      // SECURITY: Strip all metadata (EXIF, GPS) from uploaded images
-      transformation: [{ flags: 'strip_profile' }],
-      // Restrict to image resource type only
-      resource_type: 'image',
+    const result = await new Promise<any>((resolve, reject) => {
+      const uploadStream = cloudinary.uploader.upload_stream(
+        {
+          folder,
+          use_filename: false,
+          unique_filename: true,
+          overwrite: false,
+          transformation: [{ flags: 'strip_profile' }],
+          resource_type: 'image',
+        },
+        (error, uploadResult) => {
+          if (error) {
+            reject(error);
+          } else {
+            resolve(uploadResult);
+          }
+        }
+      );
+      uploadStream.end(buffer);
     });
 
     // Validate we got a URL back

@@ -75,6 +75,37 @@ export default function StudentDashboard() {
     fetchDashboardData();
   }, [currentUser]);
 
+  // Automatic Payment Recovery Trigger (Phase 4)
+  useEffect(() => {
+    if (!currentUser || !studentData) return;
+
+    const isOnlinePayment = studentData?.paymentInfo?.paymentMode?.toLowerCase() === 'online' ||
+                            studentData?.paymentMode?.toLowerCase() === 'online';
+    const isPending = studentData?.status === 'pending' || studentData?.status === 'submitted' || !studentData?.status;
+
+    if (isOnlinePayment && isPending) {
+      console.log('🔄 Triggering automatic online payment recovery from dashboard...');
+      authApiFetch(currentUser, '/api/payment/recover')
+      .then(res => res.json())
+      .then(data => {
+        const { status } = data;
+        if (status === 'success' || status === 'already_processed') {
+          console.log('✅ Payment recovered successfully! Refreshing dashboard...');
+          window.location.reload();
+        } else if (status === 'processing' || status === 'verification_pending') {
+          // Silent — student can go to renew page for details
+          console.log(`[Dashboard Recovery] status=${status} — silent, recovery ongoing`);
+        } else {
+          // failed / not_found — do nothing, don't alarm the student
+          console.log(`[Dashboard Recovery] status=${status} — no action needed`);
+        }
+      })
+      .catch(err => {
+        console.error('❌ Payment recovery check failed:', err);
+      });
+    }
+  }, [currentUser, studentData]);
+
   // REALTIME SUBSCRIPTIONS
   useEffect(() => {
     const busId = studentData?.busId || studentData?.assignedBusId;
@@ -114,47 +145,7 @@ export default function StudentDashboard() {
   // No need for additional blocking logic here as it's already handled in StudentAuthWrapper
 
   if (loading) {
-    return (
-      <div className="flex-1 min-h-[calc(100dvh-120px)] flex items-center justify-center bg-gray-900 dark:bg-gray-950 relative overflow-hidden mt-15">
-        {/* Animated background gradient orbs */}
-        <div className="absolute inset-0 overflow-hidden">
-          <div className="absolute -top-40 -right-40 w-80 h-80 bg-purple-400 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-blob"></div>
-          <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-blue-400 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-blob animation-delay-2000"></div>
-          <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-80 h-80 bg-cyan-400 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-blob animation-delay-4000"></div>
-        </div>
-
-        <div className="text-center space-y-12 relative z-10">
-          {/* Premium spinner with gradient ring */}
-          <div className="relative flex items-center justify-center">
-            {/* Gradient ring structure */}
-            <div className="absolute w-22 h-22 rounded-full bg-gradient-to-r from-purple-500 via-blue-500 to-purple-500 animate-spin"></div>
-            <div className="absolute w-20 h-20 rounded-full bg-gray-900 dark:bg-gray-950"></div>
-
-            {/* Center icon with pulse effect */}
-            <div className="relative animate-pulse">
-              <GraduationCap className="h-8 w-8 text-purple-500 dark:text-purple-400" />
-            </div>
-          </div>
-
-          {/* Loading text with gradient */}
-          <div className="space-y-3">
-            <h3 className="text-2xl font-bold bg-gradient-to-r from-purple-600 via-blue-600 to-cyan-600 bg-clip-text text-transparent animate-pulse">
-              Loading Dashboard
-            </h3>
-            <p className="text-sm font-medium text-gray-600 dark:text-gray-400">
-              Preparing your student portal...
-            </p>
-
-            {/* Loading dots animation */}
-            <div className="flex items-center justify-center gap-2">
-              <div className="w-2 h-2 bg-purple-500 rounded-full animate-bounce"></div>
-              <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
-              <div className="w-2 h-2 bg-cyan-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
+    return <PremiumPageLoader message="Loading Dashboard" subMessage="Preparing your student portal..." />;
   }
 
   // Extract key information with better fallbacks

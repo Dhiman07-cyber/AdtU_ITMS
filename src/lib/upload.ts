@@ -55,14 +55,14 @@ export const uploadImage = async (
       );
     }
 
-    if (file.size > MAX_FILE_SIZE) {
-      throw new Error('File size too large. Maximum file size is 5 MB.');
+    // ── Image compression (compress if size is > 1MB on mobile/desktop to save bandwidth and prevent connection resets) ──
+    let processedFile = file;
+    if (file.size > 1 * 1024 * 1024) {
+      processedFile = await compressImageForMobile(file, 2);
     }
 
-    // ── Mobile compression ────────────────────────────────────────────────
-    let processedFile = file;
-    if (isMobileDevice() && file.size > 1 * 1024 * 1024) {
-      processedFile = await compressImageForMobile(file, 2);
+    if (processedFile.size > MAX_FILE_SIZE) {
+      throw new Error('File size too large. Maximum file size is 5 MB.');
     }
 
     // ── Get auth token ────────────────────────────────────────────────────
@@ -154,7 +154,7 @@ export const uploadImage = async (
     return null;
   } catch (error: any) {
     console.error('❌ [uploadImage] Error:', error);
-    return null;
+    throw error;
   }
 };
 

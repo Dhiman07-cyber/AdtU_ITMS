@@ -16,6 +16,7 @@ import {
 } from "firebase/firestore";
 import { generatePrefixedId } from '@/lib/security/random-id';
 
+
 // ============================================
 // TYPES
 // ============================================
@@ -161,16 +162,13 @@ export async function validateDriverAssignment(
             warnings.push(`Bus ${bus.busNumber} is currently assigned to another driver. They will be unassigned.`);
         }
 
-        // Shift compatibility check
-        const driverShift = (driver.shift || "").toLowerCase();
-        const busShift = (bus.shift || "both").toLowerCase();
+        // Shift compatibility check using canonical shift-utils
+        const { normalizeShift, areShiftsCompatible } = await import('@/lib/utils/shift-utils');
+        const driverShift = normalizeShift(driver.shift || '');
+        const busShift = normalizeShift(bus.shift || 'Both');
 
-        if (driverShift && busShift !== "both") {
-            if (driverShift === "morning" && busShift === "evening") {
-                warnings.push(`Driver prefers Morning shift but bus operates Evening only.`);
-            } else if (driverShift === "evening" && busShift === "morning") {
-                warnings.push(`Driver prefers Evening shift but bus operates Morning only.`);
-            }
+        if (!areShiftsCompatible(driverShift, busShift)) {
+            warnings.push(`Driver prefers ${driverShift} shift but bus operates ${busShift} only.`);
         }
 
         return { isValid: errors.length === 0, warnings, errors };
@@ -591,14 +589,32 @@ async function writeAuditLog(
     const ttlDate = new Date();
     ttlDate.setDate(ttlDate.getDate() + 30); // 30-day TTL
 
-    await addDoc(collection(db, "adminActions"), {
-        actionType: "assignment_commit",
-        actorUid: adminUid,
-        summary: `Committed ${successCount}/${totalOps} assignments`,
-        rowsAffected: successCount,
-        timestamp: serverTimestamp(),
-        expiresAt: Timestamp.fromDate(ttlDate), // TTL field for Firestore TTL policy
-    });
+    try {
+        const auditLogsRef = collection(db, 'audit_logs');
+        const docId = generatePrefixedId('aud_');
+        await addDoc(auditLogsRef, {
+            auditId: docId,
+            createdAt: serverTimestamp(),
+            expiresAt: Timestamp.fromDate(ttlDate),
+            category: 'reassignments',
+            action: 'assignment_commit',
+            summary: `Committed ${successCount}/${totalOps} assignments`,
+            description: '',
+            severity: 'low',
+            performedBy: adminUid,
+            performedByName: 'Admin',
+            performedByRole: 'admin',
+            performedAt: serverTimestamp(),
+            targetType: 'bus',
+            targetId: adminUid,
+            targetName: '',
+            metadata: { rowsAffected: successCount, totalOps },
+            ipAddress: '',
+            userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : ''
+        });
+    } catch (err) {
+        console.error('Failed to write client-side audit log:', err);
+    }
 }
 
 // ============================================

@@ -34,9 +34,6 @@ export default function ApplyLandingPage() {
   const [journeyProgress, setJourneyProgress] = useState(0);
 
   // Scroll visibility states
-  const [whyVisible, setWhyVisible] = useState(false);
-  const whyRef = useRef<HTMLDivElement>(null);
-
   const [thingsVisible, setThingsVisible] = useState(false);
   const thingsRef = useRef<HTMLDivElement>(null);
 
@@ -65,6 +62,14 @@ export default function ApplyLandingPage() {
     }
   }, [loading, currentUser, userData, router]);
 
+  // Toggle .no-global-scrollbar class on HTML element for Apply Landing page to prevent scrollbar track/gutter space
+  useEffect(() => {
+    document.documentElement.classList.add('no-global-scrollbar');
+    return () => {
+      document.documentElement.classList.remove('no-global-scrollbar');
+    };
+  }, []);
+
   // Combined scroll handler for the custom scrollable container
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const target = e.currentTarget;
@@ -91,13 +96,7 @@ export default function ApplyLandingPage() {
       }
     }
 
-    // Trigger reveal for Why Choose Us
-    if (whyRef.current) {
-      const rect = whyRef.current.getBoundingClientRect();
-      if (rect.top < clientHeight * 0.9) {
-        setWhyVisible(true);
-      }
-    }
+
 
     // Trigger reveal for Things You Should Know
     if (thingsRef.current) {
@@ -287,16 +286,21 @@ export default function ApplyLandingPage() {
       <ApplyFormNavbar />
 
       {/* 1. HERO SECTION */}
-      <section
-        className="apply-snap-section relative h-screen snap-start snap-always flex items-center justify-center px-6 lg:px-8"
-        style={{
-          backgroundImage: 'linear-gradient(to bottom, #0F1117 0%, rgba(15, 17, 23, 0.3) 15%, rgba(15, 17, 23, 0.3) 85%, #0F1117 100%), url(/apply/hero1.webp)',
-          backgroundSize: 'cover',
-          backgroundPosition: 'center',
-          backgroundRepeat: 'no-repeat'
-        }}
-      >
-        <div className="max-w-7xl mx-auto flex flex-col items-center justify-center text-center">
+      <section className="apply-snap-section relative h-screen snap-start snap-always flex items-center justify-center px-6 lg:px-8">
+        {/* Background Image Container */}
+        <div className="absolute inset-0 min-h-dvh md:min-h-0 z-0">
+          {/* Main Hero Image */}
+          <div
+            className="absolute inset-0 w-full h-full min-h-dvh md:min-h-0 bg-cover bg-left md:bg-center bg-no-repeat"
+            style={{
+              backgroundImage: 'url(/apply/hero_new.webp)'
+            }}
+          />
+          {/* Gradient Overlay */}
+          <div className="absolute inset-0 w-full h-full min-h-dvh md:min-h-0 bg-gradient-to-b from-[#0F1117] via-[#0F1117]/30 to-[#0F1117]" />
+        </div>
+
+        <div className="max-w-7xl mx-auto flex flex-col items-center justify-center text-center relative z-10">
           <div className="max-w-3xl space-y-8 flex flex-col items-center">
             <div className="inline-flex items-center space-x-2 px-3 py-1.5 rounded-full bg-[#3B82F6]/10 border border-[#3B82F6]/20 text-[#3B82F6] text-xs font-semibold shadow-sm w-fit transition-all duration-300 hover:border-[#3B82F6]/40">
               <span className="w-1.5 h-1.5 rounded-full bg-[#3B82F6] animate-pulse"></span>
@@ -330,76 +334,10 @@ export default function ApplyLandingPage() {
         </div>
       </section>
 
-      {/* 2. WHY CHOOSE US SECTION */}
-      <section
-        className="apply-snap-section relative h-screen snap-start snap-always flex items-center justify-center px-6 lg:px-8"
-        style={{
-          backgroundImage: 'linear-gradient(to bottom, #0F1117 0%, rgba(15, 17, 23, 0.3) 15%, rgba(15, 17, 23, 0.3) 85%, #0F1117 100%), url(/apply/image3.webp)',
-          backgroundSize: 'cover',
-          backgroundPosition: 'center',
-          backgroundRepeat: 'no-repeat'
-        }}
-      >
-        <div className="max-w-7xl mx-auto w-full space-y-16">
-          <div className="max-w-xl space-y-4">
-            <span className="text-[10px] font-bold text-[#3B82F6] uppercase tracking-widest block font-mono">Perks & Assurance</span>
-            <h2 className="text-3xl md:text-4xl font-extrabold text-white tracking-tight">Why Students Choose AdtU Bus Services</h2>
-            <p className="text-slate-300 text-sm md:text-base leading-relaxed font-medium">
-              Our Integrated Transit Management System is designed to make your daily university commute stress-free, modern, and reliable.
-            </p>
-          </div>
-
-          <div
-            ref={whyRef}
-            className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-6"
-          >
-            {[
-              {
-                num: "01",
-                title: "Live GPS Tracking",
-                desc: "Track your exact bus location in real-time from the comfort of your home. No more rushing, and never miss your bus again."
-              },
-              {
-                num: "02",
-                title: "Digital QR Pass",
-                desc: "No need to carry physical cards all day. Your phone acts as a digital bus pass — just show your screen while boarding."
-              },
-              {
-                num: "03",
-                title: "Easy Payments",
-                desc: "Pay your bus fee seamlessly online or offline. Skip the long lines and avoid waiting in queue counters."
-              },
-              {
-                num: "04",
-                title: "Instant Alerts",
-                desc: "Get real-time push notifications the moment your bus starts its route and right when it is about to arrive at your stop."
-              }
-            ].map((feat, idx) => (
-              <div
-                key={idx}
-                className={`p-8 rounded-2xl bg-[#141824] border border-white/[0.08] shadow-[inset_0_2px_4px_rgba(255,255,255,0.06),_inset_0_-2px_4px_rgba(0,0,0,0.4),_0_8px_30px_rgba(0,0,0,0.3)] space-y-4 transition-all duration-300 hover:border-[#3B82F6]/40 hover:-translate-y-1 hover:shadow-[inset_0_2px_4px_rgba(255,255,255,0.06),_inset_0_-2px_4px_rgba(0,0,0,0.4),_0_12px_30px_rgba(59,130,246,0.12)] group cursor-default ${whyVisible
-                  ? 'opacity-100 translate-y-0'
-                  : 'opacity-0 translate-y-4'
-                  }`}
-                style={{ transitionDelay: `${idx * 150}ms` }}
-              >
-                <div className="flex justify-between items-center">
-                  <span className="text-xs font-black text-[#3B82F6] font-mono tracking-wider">{feat.num}</span>
-                </div>
-                <div className="space-y-2">
-                  <h4 className="text-base font-bold text-white transition-colors duration-300 group-hover:text-[#3B82F6]">{feat.title}</h4>
-                  <p className="text-xs text-slate-400 leading-relaxed">{feat.desc}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
       {/* 3. SIGNATURE PROCESS JOURNEY SECTION */}
       <section
         ref={journeySectionRef}
-        className="relative h-screen md:h-[500vh] bg-[#0F1117] snap-start snap-always"
+        className="apply-journey-section relative h-screen md:h-[500vh] bg-[#0F1117] snap-start snap-always"
       >
         <div className="relative md:sticky md:top-0 h-full md:h-screen w-full flex items-center overflow-visible md:overflow-hidden z-10">
           {/* Background image that stays intact and moves slightly on scroll */}
@@ -637,7 +575,7 @@ export default function ApplyLandingPage() {
 
       {/* 4. THINGS YOU SHOULD KNOW */}
       <section
-        className="apply-snap-section relative h-screen snap-start snap-always flex items-center justify-center px-6 lg:px-8"
+        className="apply-snap-section apply-things-section relative min-h-screen md:h-screen snap-start snap-always flex items-center justify-center px-6 lg:px-8 py-20 md:py-0"
         style={{
           backgroundImage: 'linear-gradient(to bottom, #0F1117 0%, rgba(15, 17, 23, 0.3) 15%, rgba(15, 17, 23, 0.3) 85%, #0F1117 100%), url(/apply/image3.webp)',
           backgroundSize: 'cover',
@@ -680,40 +618,6 @@ export default function ApplyLandingPage() {
         </div>
       </section>
 
-      {/* 5. FINAL CTA */}
-      <section
-        className="apply-snap-section relative h-screen snap-start snap-always flex items-center justify-center px-6 lg:px-8 bg-[#0F1117]"
-        style={{
-          backgroundImage: 'linear-gradient(to bottom, #0F1117 0%, rgba(15, 17, 23, 0.45) 15%, rgba(15, 17, 23, 0.45) 85%, #0F1117 100%), url(/apply/image2.webp)',
-          backgroundSize: 'cover',
-          backgroundPosition: 'center',
-          backgroundRepeat: 'no-repeat'
-        }}
-      >
-        <div
-          className="max-w-5xl mx-auto w-full py-20 px-8 text-center rounded-3xl border border-white/[0.08] shadow-[inset_0_2px_4px_rgba(255,255,255,0.06),_inset_0_-2px_4px_rgba(0,0,0,0.4),_0_15px_35px_rgba(0,0,0,0.3)] relative overflow-hidden"
-          style={{
-            backgroundImage: 'linear-gradient(rgba(20, 24, 36, 0.9), rgba(20, 24, 36, 0.95)), url(/landing/hero.jpg)',
-            backgroundSize: 'cover',
-            backgroundPosition: 'center',
-            backgroundRepeat: 'no-repeat'
-          }}
-        >
-          <div className="relative z-10 space-y-8 max-w-xl mx-auto">
-            <h2 className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight">Ready to Simplify Your Commute?</h2>
-            <p className="text-slate-350 text-sm leading-relaxed max-w-md mx-auto">
-              Applications take less than 10 minutes to complete. Submit your details online and claim your smart boarding pass today.
-            </p>
-            <div className="pt-4 flex justify-center">
-              <Link href="/apply/form">
-                <Button size="lg" className="bg-gradient-to-r from-[#3B82F6] to-[#4F46E5] hover:from-[#2563EB] hover:to-[#4338CA] text-white font-bold px-10 py-5 h-auto text-sm rounded-xl shadow-lg transition-all duration-300 ease-out hover:scale-[1.03] hover:-translate-y-0.5 active:scale-[0.98] active:translate-y-0 hover:shadow-[0_4px_30px_rgba(59,130,246,0.3)] whitespace-nowrap">
-                  Start Application
-                </Button>
-              </Link>
-            </div>
-          </div>
-        </div>
-      </section>
 
       {/* 6. FOOTER */}
       <Footer className="relative z-10 snap-start snap-always !border-white/5 !bg-[#0F1117]" />

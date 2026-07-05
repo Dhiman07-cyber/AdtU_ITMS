@@ -13,6 +13,7 @@ import { Info } from "lucide-react";
 import { getAllRoutes } from "@/lib/dataService";
 import { Route } from "@/lib/types";
 import { useToast } from "@/contexts/toast-context";
+import { PremiumPageLoader } from "@/components/LoadingSpinner";
 
 export default function EditNotificationPage({ params }: { params: Promise<{ id: string }> }) {
   const router = useRouter();
@@ -188,11 +189,7 @@ export default function EditNotificationPage({ params }: { params: Promise<{ id:
   };
 
   if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
-      </div>
-    );
+    return <PremiumPageLoader message="Loading notification details..." subMessage="Preparing editing tools..." />;
   }
 
   if (!notification) {

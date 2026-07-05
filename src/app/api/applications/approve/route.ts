@@ -9,9 +9,10 @@ import { deleteAsset, extractPublicId } from '@/lib/cloudinary-server';
 import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
 import { createOfflinePaymentAtApproval } from '@/lib/payment/payment.service';
 import { isUpcomingApplication } from '@/lib/utils/application-eligibility';
-import { writeAuditInTransaction, type AuditActorRole } from '@/lib/audit/audit-service';
+import { createAuditLogInTransaction, type AuditActorRole } from '@/lib/services/audit.service';
 import { CapacityFullError, ApprovalConflictError } from '@/lib/errors/sentinel-errors';
 import { safeErrorMessage } from '@/lib/security/safe-error';
+import { normalizeShift, areShiftsCompatible, getShiftLoad } from '@/lib/utils/shift-utils';
 
 /**
  * Optimized Application Approval API
@@ -22,15 +23,6 @@ import { safeErrorMessage } from '@/lib/security/safe-error';
  * - Backgrounded heavy Cloudinary and Supabase tasks
  * - Integrated hardened Cloudinary server helper
  */
-
-function normalizeShift(shift: string | undefined): string {
-  if (!shift) return 'Morning';
-  const n = shift.toLowerCase().trim();
-  if (n.includes('even')) return 'Evening';
-  if (n.includes('morn')) return 'Morning';
-  if (n === 'both') return 'Both';
-  return 'Morning';
-}
 
 export async function POST(request: NextRequest) {
   try {
@@ -103,17 +95,25 @@ export async function POST(request: NextRequest) {
             updatedAt: nowIsoVU,
             stateHistory: [...(freshData.stateHistory || []), { state: 'verified_upcoming', timestamp: nowIsoVU, actor: uid }],
           });
-          writeAuditInTransaction(transaction, {
+          createAuditLogInTransaction(transaction, {
+            category: 'applications',
             action: 'application_verified_upcoming',
-            actor: { id: uid, role: approverRole as AuditActorRole, name: approverNameVU },
-            targetId: appData.applicantUid,
+            summary: `Application verified for upcoming session: ${appData.formData?.fullName || ''}`,
+            severity: 'medium',
+            performedBy: uid,
+            performedByName: approverNameVU,
+            performedByRole: approverRole as AuditActorRole,
             targetType: 'application',
+            targetId: appData.applicantUid,
             targetName: appData.formData?.fullName || '',
-            reason: 'future_session_verified_pre_activation',
-            before: { applicationId, state: 'submitted' },
-            after: { applicationId, state: 'verified_upcoming', eligibleApproval: appData.eligibleApproval, targetSession: appData.targetSession },
-            details: { applicationId, notes: notes || null },
-            correlationId: applicationId,
+            metadata: {
+              applicationId,
+              notes: notes || null,
+              eligibleApproval: appData.eligibleApproval,
+              targetSession: appData.targetSession,
+              beforeState: 'submitted',
+              afterState: 'verified_upcoming',
+            },
           });
         });
       } catch (vuErr: any) {
@@ -126,15 +126,29 @@ export async function POST(request: NextRequest) {
       try {
         const notifRef = adminDb.collection('notifications').doc();
         await notifRef.set({
-          notifId: notifRef.id,
-          toUid: appData.applicantUid,
-          toRole: 'student',
-          type: 'VerifiedUpcoming',
           title: 'Application verified — awaiting new session',
-          body: 'Your application has been verified and will become active when the new academic session begins.',
-          links: { applicationId, statusPage: `/apply/status/${applicationId}` },
-          read: false,
+          content: 'Your application has been verified and will become active when the new academic session begins.',
+          type: 'info',
+          sender: {
+            userId: 'system',
+            userName: 'System',
+            userRole: 'admin'
+          },
+          target: {
+            type: 'specific_users',
+            specificUserIds: [appData.applicantUid]
+          },
+          recipientIds: [appData.applicantUid],
+          autoInjectedRecipientIds: [],
+          readByUserIds: [],
+          isEdited: false,
+          isDeletedGlobally: false,
+          hiddenForUserIds: [],
           createdAt: nowIsoVU,
+          metadata: {
+            applicationId,
+            statusPage: `/apply/status/${applicationId}`
+          }
         });
       } catch (notifErr) {
         console.warn('verified_upcoming notify failed:', notifErr);
@@ -158,16 +172,14 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Selected alternative bus not found' }, { status: 404 });
       }
       const overrideData = overrideDoc.data() || {};
-      const overrideShift = (overrideData.shift || '').toLowerCase();
-      const appShift = normalizeShift(formData.shift).toLowerCase();
-      const shiftCompatible =
-        overrideShift === 'both' ||
-        overrideShift.includes(appShift) ||
-        appShift.includes(overrideShift);
+      const overrideShift = overrideData.shift || '';
+      const appShift = formData.shift || '';
+      const shiftCompatible = areShiftsCompatible(appShift, overrideShift);
       if (!shiftCompatible) {
         return NextResponse.json({ error: 'Selected bus is not compatible with the required shift' }, { status: 400 });
       }
-      if ((overrideData.currentMembers || 0) >= (overrideData.capacity || 55)) {
+      // Per-shift pre-check: gate on the applicant's own trip counter (non-authoritative).
+      if (getShiftLoad(overrideData, appShift) >= (overrideData.capacity || 55)) {
         return NextResponse.json({ error: 'Selected alternative bus is also full' }, { status: 400 });
       }
       // Mutate formData so the downstream studentDoc and transaction see the override.
@@ -248,6 +260,7 @@ export async function POST(request: NextRequest) {
     const busRef = adminDb.collection('buses').doc(busId);
 
     let capacityNewMembers = 0;
+    let capacityNewShiftLoad = 0;
     let capacityLimit = 0;
     let busNumberForAlert = '';
     let routeIdForAlert = '';
@@ -269,11 +282,13 @@ export async function POST(request: NextRequest) {
         // for the last seat. Uses the shared single-source capacity math.
         const busData = busSnap.data();
         const delta = buildCapacityDelta(busData, studentDoc.shift, 1);
-        if (delta.oldMembers >= delta.capacity) {
+        // Per-shift gate: only the student's own trip counter is constrained.
+        if (delta.oldShiftLoad >= delta.capacity) {
           throw new CapacityFullError();
         }
 
         capacityNewMembers = delta.newMembers;
+        capacityNewShiftLoad = delta.newShiftLoad;
         capacityLimit = delta.capacity;
         busNumberForAlert = busData?.busNumber || '';
         routeIdForAlert = busData?.routeId || '';
@@ -293,34 +308,32 @@ export async function POST(request: NextRequest) {
           (Number(formData.sessionInfo?.sessionStartYear || 0) !== finalStartYear ||
             Number(formData.sessionInfo?.sessionEndYear || 0) !== finalEndYear);
         const usedAlternativeBus = !!overrideBusId && overrideBusId !== requestedBusId;
-        writeAuditInTransaction(transaction, {
+        createAuditLogInTransaction(transaction, {
+          category: 'applications',
           action: 'application_approved',
-          actor: { id: uid, role: approverRole as AuditActorRole, name: approverName },
-          targetId: appData.applicantUid,
+          summary: `Application approved: ${formData.fullName || ''}`,
+          severity: 'high',
+          performedBy: uid,
+          performedByName: approverName,
+          performedByRole: approverRole as AuditActorRole,
           targetType: 'student',
+          targetId: appData.applicantUid,
           targetName: formData.fullName || '',
-          reason: usedAlternativeBus ? 'capacity_reallocation' : 'application_approval',
-          before: { applicationId, applicationState: 'submitted', requestedBusId: requestedBusId || null },
-          after: {
-            studentUid: appData.applicantUid,
-            busId,
-            shift: studentDoc.shift,
-            sessionStartYear: finalStartYear,
-            sessionEndYear: finalEndYear,
-            validUntil,
-            status: 'active',
-          },
-          details: {
+          metadata: {
             applicationId,
             notes: notes || null,
             sessionModified,
             previousStartYear: Number(formData.sessionInfo?.sessionStartYear || 0),
             previousEndYear: Number(formData.sessionInfo?.sessionEndYear || 0),
+            busId,
+            shift: studentDoc.shift,
+            sessionStartYear: finalStartYear,
+            sessionEndYear: finalEndYear,
+            validUntil,
             alternativeBus: usedAlternativeBus
               ? { requestedBusId: requestedBusId || null, approvedBusId: overrideBusId }
               : null,
           },
-          correlationId: applicationId,
         });
       });
     } catch (txErr: any) {
@@ -426,8 +439,8 @@ export async function POST(request: NextRequest) {
       })(),
     ];
 
-    // Bus full alert if this approval consumed the last seat
-    if (capacityLimit > 0 && capacityNewMembers >= capacityLimit) {
+    // Bus full alert if this approval consumed the last seat on the affected shift
+    if (capacityLimit > 0 && capacityNewShiftLoad >= capacityLimit) {
       postTasks.push(sendBusFullAlert(busId, busNumberForAlert, routeIdForAlert));
     }
 

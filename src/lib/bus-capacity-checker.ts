@@ -1,4 +1,5 @@
 import { collection, getDocs, query, where, doc, getDoc } from 'firebase/firestore';
+import { normalizeShift, isStudentBusShiftCompatible } from '@/lib/utils/shift-utils';
 
 async function getDb() {
   const { db } = await import('@/lib/firebase');
@@ -62,14 +63,15 @@ export async function checkBusCapacity(busId: string, shift?: string): Promise<B
     // Get totalCapacity - this is the capacity per shift
     const totalCapacity = busData.totalCapacity || busData.capacity || 0;
 
-    // Get shift-specific load
+    // Get shift-specific load using canonical shift-utils
     let shiftLoad = 0;
     let shiftName = shift || 'unspecified';
+    const normalizedShift = normalizeShift(shift);
 
-    if (shift === 'Morning' || shift?.toLowerCase() === 'morning') {
+    if (normalizedShift === 'Morning') {
       shiftLoad = typeof busData.load?.morningCount === 'number' ? busData.load.morningCount : (typeof busData.morningLoad === 'number' ? busData.morningLoad : 0);
       shiftName = 'Morning';
-    } else if (shift === 'Evening' || shift?.toLowerCase() === 'evening') {
+    } else if (normalizedShift === 'Evening') {
       shiftLoad = typeof busData.load?.eveningCount === 'number' ? busData.load.eveningCount : (typeof busData.eveningLoad === 'number' ? busData.eveningLoad : 0);
       shiftName = 'Evening';
     } else if (typeof busData.currentMembers === 'number') {
@@ -82,10 +84,10 @@ export async function checkBusCapacity(busId: string, shift?: string): Promise<B
         const q = query(studentsRef, where('busId', '==', busId));
         const countSnapshot = await getDocs(q);
 
-        if (shift) {
-          const normalizedShift = shift.charAt(0).toUpperCase() + shift.slice(1).toLowerCase();
-          const shiftStudents = countSnapshot.docs.filter(doc => doc.data().shift === normalizedShift);
-          shiftLoad = shiftStudents.length;
+          if (shift) {
+            const normalizedShiftForQuery = normalizeShift(shift);
+            const shiftStudents = countSnapshot.docs.filter(doc => normalizeShift(doc.data().shift) === normalizedShiftForQuery);
+            shiftLoad = shiftStudents.length;
         } else {
           shiftLoad = countSnapshot.size;
         }
@@ -96,9 +98,9 @@ export async function checkBusCapacity(busId: string, shift?: string): Promise<B
     }
 
     // Check compatibility for Evening shift
-    if (shift === 'Evening' || shift?.toLowerCase() === 'evening') {
+    if (normalizeShift(shift) === 'Evening') {
       const busShift = busData.shift || 'Both';
-      if (busShift === 'Morning') {
+      if (normalizeShift(busShift) === 'Morning') {
         // Bus doesn't run in evening
         return {
           busId,
@@ -249,12 +251,7 @@ export async function findBusesByStop(stopId: string, stopName: string, shift?: 
     if (shift) {
       filteredCandidates = candidateBuses.filter(busData => {
         const busShift = busData.shift || 'Both';
-        if (shift === 'Morning') {
-          return busShift === 'Morning' || busShift === 'Both';
-        } else if (shift === 'Evening') {
-          return busShift === 'Both'; // Only buses that run both shifts can serve evening
-        }
-        return true;
+        return isStudentBusShiftCompatible(shift, busShift);
       });
       console.log(`🚌 Buses after shift filter (${shift}):`, filteredCandidates.length);
     }
@@ -265,14 +262,15 @@ export async function findBusesByStop(stopId: string, stopName: string, shift?: 
       // Get totalCapacity - this is the capacity per shift
       const totalCapacity = busData.totalCapacity || busData.capacity || 0;
 
-      // Get shift-specific load
+      // Get shift-specific load using canonical shift-utils
       let shiftLoad = 0;
       let shiftName = shift || 'unspecified';
+      const normalizedShift2 = normalizeShift(shift);
 
-      if (shift === 'Morning' || shift?.toLowerCase() === 'morning') {
+      if (normalizedShift2 === 'Morning') {
         shiftLoad = typeof busData.load?.morningCount === 'number' ? busData.load.morningCount : (typeof busData.morningLoad === 'number' ? busData.morningLoad : 0);
         shiftName = 'Morning';
-      } else if (shift === 'Evening' || shift?.toLowerCase() === 'evening') {
+      } else if (normalizedShift2 === 'Evening') {
         shiftLoad = typeof busData.load?.eveningCount === 'number' ? busData.load.eveningCount : (typeof busData.eveningLoad === 'number' ? busData.eveningLoad : 0);
         shiftName = 'Evening';
       } else if (typeof busData.currentMembers === 'number') {
@@ -285,8 +283,8 @@ export async function findBusesByStop(stopId: string, stopName: string, shift?: 
           const countSnapshot = await getDocs(q);
 
           if (shift) {
-            const normalizedShift = shift.charAt(0).toUpperCase() + shift.slice(1).toLowerCase();
-            const shiftStudents = countSnapshot.docs.filter(doc => doc.data().shift === normalizedShift);
+            const normalizedShiftForQuery = normalizeShift(shift);
+            const shiftStudents = countSnapshot.docs.filter(doc => normalizeShift(doc.data().shift) === normalizedShiftForQuery);
             shiftLoad = shiftStudents.length;
           } else {
             shiftLoad = countSnapshot.size;

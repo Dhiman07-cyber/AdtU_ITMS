@@ -2,8 +2,7 @@
 
 import { useEffect } from "react";
 import { usePathname } from "next/navigation";
-import { useSystemConfig } from "@/contexts/SystemConfigContext";
-import { readMapPreferences, resolveThemePreference, systemConfigProviderToUserProvider } from "@/lib/maps/map-preferences";
+import { readMapPreferences, resolveThemePreference } from "@/lib/maps/map-preferences";
 import { ensurePmtilesProtocolRegistered } from "@/lib/maps/pmtiles-protocol";
 
 const TRACKING_ROUTES = ["/student/track-bus", "/driver/live-tracking"];
@@ -22,22 +21,17 @@ function isTrackingRoute(pathname: string | null): boolean {
  */
 export default function MapRuntimeBootstrap() {
   const pathname = usePathname();
-  const { config } = useSystemConfig();
 
   useEffect(() => {
     if (!isTrackingRoute(pathname)) return;
 
-    // Determine preferred provider (user preference overrides system config).
+    // Determine preferred theme preference
     const prefs = readMapPreferences();
-    const provider = prefs?.provider ?? systemConfigProviderToUserProvider(config?.mapProvider);
-
-    // Ensure theme is computed once to avoid re-register loops on theme toggles.
     void resolveThemePreference(prefs?.theme);
 
-    if (provider === "guwahati") {
-      void ensurePmtilesProtocolRegistered();
-    }
-  }, [pathname, config?.mapProvider]);
+    // Register vector map protocol
+    void ensurePmtilesProtocolRegistered();
+  }, [pathname]);
 
   return null;
 }

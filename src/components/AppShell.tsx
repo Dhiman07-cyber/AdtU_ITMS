@@ -12,7 +12,7 @@ import { useEffect, useState, createContext, useContext, useCallback } from 'rea
 import { useTheme } from '@/components/theme-provider';
 import { cn } from '@/lib/utils';
 
-import { SystemConfigProvider } from '@/contexts/SystemConfigContext';
+
 import { FCMTokenManager } from '@/components/FCMTokenManager';
 import MapRuntimeBootstrap from '@/components/maps/MapRuntimeBootstrap';
 
@@ -106,7 +106,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   }, [mobileOpen]);
 
   return (
-    <SystemConfigProvider>
+    <>
       <MapRuntimeBootstrap />
       <TooltipProvider delayDuration={0}>
         <SidebarContext.Provider value={{
@@ -247,7 +247,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </SidebarContext.Provider>
       </TooltipProvider>
-    </SystemConfigProvider>
+    </>
   );
 }
 

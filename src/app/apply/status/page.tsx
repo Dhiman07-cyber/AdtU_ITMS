@@ -38,6 +38,23 @@ export default function ApplicationStatusPage() {
   const loadApplication = async () => {
     try {
       const token = await currentUser?.getIdToken();
+      if (!token) return;
+
+      // Automatically trigger payment recovery on status load (Phase 4)
+      try {
+        const recRes = await fetch('/api/payment/recover', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (recRes.ok) {
+          const recData = await recRes.json();
+          const { status } = recData;
+          console.log(`[Status Page Recovery] status=${status}`);
+          // Only log — UI state is managed by PaymentModeSelector
+        }
+      } catch (recErr) {
+        console.error('Failed to run payment recovery on status load:', recErr);
+      }
+
       const response = await fetch('/api/applications/my-status', {
         headers: { 'Authorization': `Bearer ${token}` }
       });

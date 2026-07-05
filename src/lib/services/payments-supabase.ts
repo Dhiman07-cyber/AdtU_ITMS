@@ -257,6 +257,30 @@ class PaymentsSupabaseService {
         }
 
         try {
+            // 1. Pre-insert check: Query existing completed payment for the student and session
+            if (input.studentUid && input.sessionStartYear && input.sessionEndYear) {
+                const { data: existingRecords, error: queryErr } = await this.supabase
+                    .from('payments')
+                    .select('payment_id, razorpay_payment_id, status')
+                    .eq('student_uid', input.studentUid)
+                    .eq('session_start_year', input.sessionStartYear)
+                    .eq('session_end_year', input.sessionEndYear)
+                    .eq('status', 'Completed');
+
+                if (!queryErr && existingRecords && existingRecords.length > 0) {
+                    const existing = existingRecords[0];
+                    const isSamePayment = existing.payment_id === input.paymentId || 
+                                          (existing.razorpay_payment_id && existing.razorpay_payment_id === input.razorpayPaymentId) ||
+                                          (input.razorpayPaymentId && existing.payment_id === input.razorpayPaymentId);
+                    
+                    if (isSamePayment) {
+                        throw new Error('ALREADY_PROCESSED');
+                    } else {
+                        throw new Error('DUPLICATE_SESSION_PAYMENT');
+                    }
+                }
+            }
+
             const validUntilIso = input.validUntil?.toISOString();
             const transactionDateIso = input.transactionDate?.toISOString() || new Date().toISOString();
             const documentSignature = this.buildCompletedPaymentSignature(input, {
@@ -299,14 +323,51 @@ class PaymentsSupabaseService {
 
             if (error) {
                 if (error.code === '23505') {
-                    return input.paymentId;
+                    // Post-insert fallback / race-condition check
+                    const query = this.supabase
+                        .from('payments')
+                        .select('payment_id, razorpay_payment_id, status')
+                        .eq('status', 'Completed');
+                    
+                    if (input.studentUid) query.eq('student_uid', input.studentUid);
+                    if (input.sessionStartYear) query.eq('session_start_year', input.sessionStartYear);
+                    if (input.sessionEndYear) query.eq('session_end_year', input.sessionEndYear);
+
+                    const { data: existingRecords, error: queryErr } = await query;
+
+                    if (!queryErr && existingRecords && existingRecords.length > 0) {
+                        const existing = existingRecords[0];
+                        const isSamePayment = existing.payment_id === input.paymentId || 
+                                              (existing.razorpay_payment_id && existing.razorpay_payment_id === input.razorpayPaymentId) ||
+                                              (input.razorpayPaymentId && existing.payment_id === input.razorpayPaymentId);
+                        
+                        if (isSamePayment) {
+                            throw new Error('ALREADY_PROCESSED');
+                        } else {
+                            throw new Error('DUPLICATE_SESSION_PAYMENT');
+                        }
+                    }
+                    
+                    // Fallback to check if the payment_id itself is a duplicate
+                    const { data: idRecords } = await this.supabase
+                        .from('payments')
+                        .select('payment_id')
+                        .eq('payment_id', input.paymentId);
+                    if (idRecords && idRecords.length > 0) {
+                        throw new Error('ALREADY_PROCESSED');
+                    }
+                    
+                    throw new Error('DUPLICATE_SESSION_PAYMENT');
                 }
                 console.error('[PaymentsSupabaseService] Insert error:', error);
                 return null;
             }
 
             return data?.payment_id || input.paymentId;
-        } catch (err) {
+        } catch (err: any) {
+            if (err.message === 'ALREADY_PROCESSED' || err.message === 'DUPLICATE_SESSION_PAYMENT') {
+                throw err;
+            }
             console.error('[PaymentsSupabaseService] Insert exception:', err);
             return null;
         }

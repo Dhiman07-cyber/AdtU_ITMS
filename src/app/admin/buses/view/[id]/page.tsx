@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useToast } from '@/contexts/toast-context';
+import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import RouteJourney from "@/components/RouteJourney";
 import {
   Dialog,
@@ -186,11 +187,7 @@ export default function ViewBusPage({ params }: { params: Promise<{ id: string }
   };
 
   if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-[#010717]">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-500"></div>
-      </div>
-    );
+    return <PremiumPageLoader message="Loading bus details..." subMessage="Fetching diagnostics..." />;
   }
 
   // Helper to format ID (bus_1 -> Bus-1)

@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useToast } from '@/contexts/toast-context';
+import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import RouteJourney from "@/components/RouteJourney";
 import { formatDateFlexible } from '@/lib/utils/date-utils';
 import {
@@ -175,11 +176,7 @@ export default function ViewRoutePage({ params }: { params: Promise<{ id: string
   };
 
   if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-[#010717]">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-500"></div>
-      </div>
-    );
+    return <PremiumPageLoader message="Loading route details..." subMessage="Fetching checkpoints and stops..." />;
   }
 
   // Helper function to format Firestore timestamp

@@ -150,38 +150,5 @@ export async function getBusesForDriver(driverId: string): Promise<string[]> {
     return Array.from(busIds);
 }
 
-/**
- * Normalize shift string to canonical format.
- * Canonical: 'Morning', 'Evening', 'Morning & Evening' for users; 'Morning', 'Evening', 'Both' for buses.
- * 
- * @param shift - Raw shift string
- * @param isBus - Whether the shift is for a bus (uses 'Both' instead of 'Morning & Evening')
- * @returns Normalized shift string
- */
-export function normalizeShift(shift: string | undefined, isBus: boolean = false): string {
-    if (!shift) return isBus ? 'Both' : 'Morning';
-    const n = shift.toLowerCase().trim();
-    if (n.includes('even')) return 'Evening';
-    if (n.includes('morn')) return 'Morning';
-    if (n === 'both') return isBus ? 'Both' : 'Morning & Evening';
-    return isBus ? 'Both' : 'Morning';
-}
-
-/**
- * Check if two shifts are compatible.
- * 
- * @param shift1 - First shift (canonical format)
- * @param shift2 - Second shift (canonical format)
- * @returns True if shifts are compatible
- */
-export function areShiftsCompatible(shift1: string, shift2: string): boolean {
-    const s1 = shift1.toLowerCase();
-    const s2 = shift2.toLowerCase();
-    
-    // 'both' / 'morning & evening' is compatible with everything
-    if (s1.includes('both') || s1.includes('morning & evening')) return true;
-    if (s2.includes('both') || s2.includes('morning & evening')) return true;
-    
-    // Exact match
-    return s1 === s2;
-}
+// Re-export canonical shift utilities from shift-utils.ts
+export { normalizeShift, areShiftsCompatible } from '@/lib/utils/shift-utils';

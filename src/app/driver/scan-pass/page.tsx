@@ -30,7 +30,7 @@ import {
 import jsQR from 'jsqr';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
-import { useSystemConfig } from '@/contexts/SystemConfigContext';
+import { APP_NAME } from '@/config/runtime';
 import { auth, db } from '@/lib/firebase';
 import { doc, getDoc } from 'firebase/firestore';
 import { safeImageSrc } from '@/lib/security/url-sanitizer';
@@ -70,7 +70,7 @@ interface ScanResult {
 
 export default function DriverScanPassPage() {
   const { userData, currentUser } = useAuth();
-  const { appName } = useSystemConfig();
+  const appName = APP_NAME;
   const router = useRouter();
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);

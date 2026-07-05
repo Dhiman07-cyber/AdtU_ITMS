@@ -22,12 +22,13 @@ import {
   UserPlus,
   RotateCcw,
   ArrowRightLeft,
-  Users
+  Users,
+  ScrollText
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useSidebar } from './AppShell';
-import { useSystemConfig } from '@/contexts/SystemConfigContext';
+
 import { useTheme } from '@/components/theme-provider';
 
 interface SidebarItem {
@@ -86,6 +87,7 @@ const adminNavGroups: NavGroup[] = [
     items: [
       { href: '/admin/notifications', label: 'Notifications', icon: Bell, color: 'text-red-400' },
       { href: '/admin/feedback', label: 'Feedbacks', icon: MessageCircle, color: 'text-cyan-400' },
+      { href: '/admin/audit-logs', label: 'Audit Logs', icon: ScrollText, color: 'text-violet-400' },
     ]
   }
 ];
@@ -97,7 +99,7 @@ const adminAllHrefs = adminNavGroups.flatMap(group => group.items.map(i => i.hre
 export default function AdminSidebar() {
   const pathname = usePathname();
   const { collapsed, setCollapsed, mobileOpen } = useSidebar();
-  const { config } = useSystemConfig();
+
   const { theme } = useTheme();
 
   // Auto-collapse on mobile (to keep desktop view compact if resized)
@@ -309,12 +311,12 @@ export default function AdminSidebar() {
               <div className="h-1.5 w-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)] animate-pulse" />
               <span className={cn("text-[9px] uppercase tracking-wider font-semibold", theme === 'dark' ? "text-zinc-400" : "text-admin-text-secondary")}>Active</span>
             </div>
-            <span className={cn("text-[9px] font-mono", theme === 'dark' ? "text-zinc-400" : "text-admin-text-secondary")}>{config?.version || 'v2.4.0'}</span>
+            <span className={cn("text-[9px] font-mono", theme === 'dark' ? "text-zinc-400" : "text-admin-text-secondary")}>v2.4.0</span>
           </div>
         ) : (
           <div className="flex justify-center mt-1 opacity-60">
             <span className={cn("text-[8px] font-mono tracking-tighter", theme === 'dark' ? "text-zinc-400" : "text-admin-text-secondary")}>
-              {config?.version || 'v2.4.0'}
+              v2.4.0
             </span>
           </div>
         )}

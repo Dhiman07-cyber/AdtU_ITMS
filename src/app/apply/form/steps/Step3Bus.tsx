@@ -48,6 +48,7 @@ export default function Step3Bus({
           onReferenceChange={handleRefChange}
           onCapacityCheckResult={setCapacityCheckResult}
           isReadOnly={applicationState === 'submitted'}
+          hideCapacityAlerts={true}
           shiftContent={
             <div className="space-y-1">
               <Label htmlFor="shift" className="block text-[11px] font-bold tracking-wider text-slate-500 uppercase mb-2">

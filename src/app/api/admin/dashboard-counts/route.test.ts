@@ -17,7 +17,86 @@ vi.mock('@/lib/security/api-security', () => ({
   },
 }));
 
-// Now import GET after the mock is registered
+// Mock Firebase Admin
+const mockCountGet = vi.fn().mockResolvedValue({
+  data: () => ({ count: 10 })
+});
+
+const mockDocGet = vi.fn().mockResolvedValue({
+  exists: true,
+  data: () => ({ busFee: { amount: 120 } })
+});
+
+const mockCollectionGet = vi.fn().mockResolvedValue({
+  size: 5,
+  forEach: (cb: any) => {
+    cb({
+      id: 'bus-1',
+      data: () => ({ busNumber: 'B1', currentMembers: 20, totalCapacity: 50, status: 'Active' })
+    });
+  },
+  docs: [
+    {
+      id: 'route-1',
+      data: () => ({ routeName: 'Route 1' })
+    }
+  ]
+});
+
+const mockCollection = vi.fn().mockReturnValue({
+  count: vi.fn().mockReturnValue({ get: mockCountGet }),
+  where: vi.fn().mockReturnValue({
+    count: vi.fn().mockReturnValue({ get: mockCountGet }),
+    where: vi.fn().mockReturnValue({
+      count: vi.fn().mockReturnValue({ get: mockCountGet })
+    })
+  }),
+  get: mockCollectionGet,
+  doc: vi.fn().mockReturnValue({ get: mockDocGet })
+});
+
+vi.mock('@/lib/firebase-admin', () => ({
+  adminDb: {
+    collection: (...args: any[]) => mockCollection(...args),
+  },
+  FieldValue: {
+    serverTimestamp: () => 'timestamp',
+  },
+}));
+
+// Mock Supabase Server
+const mockSupabaseSelect = vi.fn().mockReturnValue({
+  in: vi.fn().mockResolvedValue({
+    data: [
+      { id: 'trip-1', bus_id: 'bus-1', route_id: 'route-1', status: 'enroute', started_at: '2026-07-01T12:00:00Z' }
+    ]
+  }),
+  or: vi.fn().mockResolvedValue({
+    data: [
+      { amount: 1500, method: 'online' },
+      { amount: 500, method: 'offline' }
+    ]
+  })
+});
+
+vi.mock('@/lib/supabase-server', () => ({
+  getSupabaseServer: () => ({
+    from: () => ({
+      select: mockSupabaseSelect
+    })
+  })
+}));
+
+// Mock Deadline Config
+vi.mock('@/lib/deadline-config-service', () => ({
+  getDeadlineConfig: vi.fn().mockResolvedValue({
+    academicYear: { anchorMonth: 5, anchorDay: 30 },
+    softBlock: { month: 4, day: 15 },
+    hardDelete: { month: 5, day: 15 }
+  })
+}));
+
+// Now import GET after the mocks are registered
 import { GET } from './route';
 
 describe('GET /api/admin/dashboard-counts', () => {
@@ -33,3 +112,4 @@ describe('GET /api/admin/dashboard-counts', () => {
     expect(body.success).toBe(true);
   });
 });
+

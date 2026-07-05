@@ -288,13 +288,12 @@ function NotificationCardV2({
   return (
     <>
       <Card
-        className={`group relative flex flex-col overflow-hidden transition-all duration-500 border-l-[6px] cursor-pointer ${!isEffectiveRead
-          ? `bg-gradient-to-br from-white to-${roleTheme.color}-50/40 dark:from-slate-800/60 dark:to-${roleTheme.color}-900/20 ${roleTheme.glow} scale-[1.01] z-10 border-r border-t border-b border-${roleTheme.color}-200/50 dark:border-${roleTheme.color}-800/30`
-          : `bg-white dark:bg-[#0a0b14] shadow-sm hover:shadow-xl hover:dark:bg-slate-900 transition-all shadow-black/5`} rounded-[24px] border ${roleTheme.border} dark:border-slate-800 hover:shadow-2xl hover:shadow-${roleTheme.color}-500/10 transition-all duration-300`}
+        className={`group relative flex flex-col overflow-hidden transition-colors duration-200 border-l-[6px] cursor-pointer ${!isEffectiveRead
+          ? `bg-gradient-to-br from-white to-${roleTheme.color}-50/40 dark:from-slate-800/60 dark:to-${roleTheme.color}-900/20 border-r border-t border-b border-${roleTheme.color}-200/50 dark:border-${roleTheme.color}-800/30`
+          : `bg-white dark:bg-[#0a0b14] shadow-sm hover:shadow-xl hover:dark:bg-slate-900 transition-colors shadow-black/5`} rounded-[24px] border ${roleTheme.border} dark:border-slate-800 hover:shadow-lg hover:shadow-${roleTheme.color}-500/10 transition-colors duration-200`}
         style={{ borderLeftColor: `var(--role-${targetRole})` }}
         onClick={() => {
           setIsViewDialogOpen(true);
-          // Pass true to skip refresh, preventing component unmount during open
           if (!isEffectiveRead) handleMarkAsRead(true);
         }}
       >
@@ -303,9 +302,8 @@ function NotificationCardV2({
             {/* Header: Type & Metadata */}
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <div className={`p-2.5 rounded-xl bg-gradient-to-br ${roleTheme.accent} text-white shadow-lg overflow-hidden relative group-hover:scale-110 transition-transform duration-500`}>
+                <div className={`p-2.5 rounded-xl bg-gradient-to-br ${roleTheme.accent} text-white shadow-lg overflow-hidden relative`}>
                   <ThemeIcon className="h-4 w-4 relative z-10" />
-                  <div className="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-500" />
                 </div>
                 <div className="space-y-0.5">
                   <div className="flex items-center gap-2">
@@ -325,34 +323,32 @@ function NotificationCardV2({
 
               <div className="flex items-center gap-2">
                 {!isEffectiveRead && (
-                  <span className={`flex h-2 w-2 rounded-full bg-${roleTheme.color}-500 animate-bounce`} />
+                  <span className={`flex h-2 w-2 rounded-full bg-${roleTheme.color}-500`} />
                 )}
                 {(notification.canEdit || notification.canDeleteGlobally) && (
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
-                      <Button variant="ghost" size="icon" className="h-9 w-9 rounded-2xl text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all hover:scale-110 hover:rotate-90">
+                      <Button variant="ghost" size="icon" className="h-9 w-9 rounded-2xl text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
                         <MoreVertical className="h-4 w-4" />
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="w-56 rounded-[20px] border-slate-200/50 dark:border-slate-800/50 shadow-2xl bg-white dark:bg-slate-950 p-1.5">
-                      <DropdownMenuItem className="py-2.5 rounded-xl font-bold text-xs cursor-pointer focus:bg-slate-100 dark:focus:bg-slate-900 transition-all" onClick={() => {
+                      <DropdownMenuItem className="py-2.5 rounded-xl font-bold text-xs cursor-pointer focus:bg-slate-100 dark:focus:bg-slate-900 transition-colors" onClick={() => {
                         setIsViewDialogOpen(true);
-                        // Skip refresh here too to prevent closing
                         if (!isEffectiveRead) handleMarkAsRead(true);
                       }}>
                         <Eye className="h-4 w-4 mr-3 text-slate-500" /> View Detailed Broadcast
                       </DropdownMenuItem>
                       {!isEffectiveRead && (
-                        <DropdownMenuItem className="py-2.5 rounded-xl font-bold text-xs cursor-pointer focus:bg-blue-50 dark:focus:bg-blue-900/40 text-blue-600 transition-all" onClick={(e) => {
+                        <DropdownMenuItem className="py-2.5 rounded-xl font-bold text-xs cursor-pointer focus:bg-blue-50 dark:focus:bg-blue-900/40 text-blue-600 transition-colors" onClick={(e) => {
                           e.stopPropagation();
-                          // Standard refresh is fine here as we aren't opening a modal
                           handleMarkAsRead();
                         }}>
                           <CheckCheck className="h-4 w-4 mr-3" /> Acknowledge Message
                         </DropdownMenuItem>
                       )}
                       {notification.canEdit && (
-                        <DropdownMenuItem className="py-2.5 rounded-xl font-bold text-xs cursor-pointer focus:bg-amber-50 dark:focus:bg-amber-900/40 text-amber-600 transition-all" onClick={(e) => {
+                        <DropdownMenuItem className="py-2.5 rounded-xl font-bold text-xs cursor-pointer focus:bg-amber-50 dark:focus:bg-amber-900/40 text-amber-600 transition-colors" onClick={(e) => {
                           e.stopPropagation();
                           setIsEditDialogOpen(true);
                         }}>
@@ -362,7 +358,7 @@ function NotificationCardV2({
                       <DropdownMenuSeparator className="my-1.5" />
                       {notification.canDeleteGlobally && (
                         <DropdownMenuItem
-                          className="py-2.5 rounded-xl font-bold text-xs cursor-pointer text-red-600 focus:bg-red-600 focus:text-white transition-all transform active:scale-95"
+                          className="py-2.5 rounded-xl font-bold text-xs cursor-pointer text-red-600 focus:bg-red-600 focus:text-white transition-colors"
                           onClick={(e) => {
                             e.stopPropagation();
                             setIsDeleteDialogOpen(true);
@@ -390,9 +386,9 @@ function NotificationCardV2({
             {/* Footer Information */}
             <div className="pt-4 flex items-center justify-between border-t border-slate-100/60 dark:border-slate-800/40">
               <div className="flex items-center gap-2.5 group/sender">
-                <div className={`h-8 w-8 rounded-full bg-gradient-to-br ${roleTheme.accent} p-[1.5px] transition-transform group-hover/sender:scale-110`}>
+                <div className={`h-8 w-8 rounded-full bg-gradient-to-br ${roleTheme.accent} p-[1.5px]`}>
                   <div className="h-full w-full rounded-full bg-white dark:bg-slate-900 flex items-center justify-center">
-                    <User className={`h-3.5 w-3.5 text-${roleTheme.color}-500 animate-pulse`} />
+                    <User className={`h-3.5 w-3.5 text-${roleTheme.color}-500`} />
                   </div>
                 </div>
                 <div className="flex flex-col">
@@ -527,7 +523,7 @@ function NotificationCardV2({
 
             {/* Scrollable Content Area - Compact on mobile */}
             <div
-              className="px-5 sm:px-8 py-5 sm:py-6 overflow-y-auto custom-scrollbar overscroll-contain touch-pan-y flex-1 relative max-h-[420px] sm:max-h-[450px]"
+              className="px-5 sm:px-8 py-5 sm:py-6 overflow-y-auto custom-scrollbar overscroll-none touch-pan-y flex-1 relative max-h-[420px] sm:max-h-[450px]"
               onWheel={(e) => e.stopPropagation()}
             >
               <div className="max-w-none relative z-10">

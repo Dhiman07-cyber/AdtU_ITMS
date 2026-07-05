@@ -9,17 +9,12 @@ import {
   doc,
   addDoc,
   updateDoc,
-  deleteDoc,
   getDoc,
   getDocs,
   query,
   where,
-  orderBy,
   serverTimestamp,
-  Timestamp,
-  writeBatch,
-  arrayUnion,
-  arrayRemove
+  arrayUnion
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import {
@@ -27,10 +22,10 @@ import {
   TargetType,
   NotificationTarget,
   NotificationSender,
-  NotificationDocument,
   PermissionCheckResult,
   VisibilityCheckResult
 } from './types';
+import { normalizeShift } from '@/lib/utils/shift-utils';
 
 export class NotificationService {
   private db: Firestore;
@@ -208,12 +203,12 @@ export class NotificationService {
           break;
 
         case 'shift_based':
-          // Get students in specific shift
+          // Get students in specific shift using canonical shift-utils
           if (target.shift) {
-            const shiftValue = target.shift === 'both' ? null : (target.shift.charAt(0).toUpperCase() + target.shift.slice(1));
-            const shiftQuery = shiftValue
-              ? query(collection(this.db, 'students'), where('shift', '==', shiftValue))
-              : query(collection(this.db, 'students'));
+            const normalizedShift = normalizeShift(target.shift);
+            const shiftQuery = normalizedShift === 'Both'
+              ? query(collection(this.db, 'students'))
+              : query(collection(this.db, 'students'), where('shift', '==', normalizedShift));
             const shiftDocs = await getDocs(shiftQuery);
             shiftDocs.forEach(doc => recipientIds.push(doc.id));
           }
@@ -437,6 +432,22 @@ export class NotificationService {
       return { visible: false, reason: 'Notification was deleted' };
     }
 
+    // Check if notification has expired
+    if (notification.expiryAt) {
+      let expiryMillis = 0;
+      if (typeof notification.expiryAt.toMillis === 'function') {
+        expiryMillis = notification.expiryAt.toMillis();
+      } else if (typeof notification.expiryAt === 'number') {
+        expiryMillis = notification.expiryAt;
+      } else if (typeof notification.expiryAt === 'string') {
+        expiryMillis = new Date(notification.expiryAt).getTime();
+      } else if (notification.expiryAt instanceof Date) {
+        expiryMillis = notification.expiryAt.getTime();
+      }
+      if (expiryMillis > 0 && expiryMillis <= Date.now()) {
+        return { visible: false, reason: 'Notification has expired' };
+      }
+    }
 
     // ADMIN/MODERATOR VISIBILITY (Global Access)
     // Admins and Moderators can see ALL notifications for auditing purposes
@@ -507,64 +518,6 @@ export class NotificationService {
     }
 
     return { visible: false, reason: 'User is not a recipient of this notification' };
-  }
-
-  /**
-   * Get all visible notifications for a user
-   */
-  async getUserNotifications(
-    userId: string,
-    userRole: UserRole,
-    userRouteId: string | null = null
-  ): Promise<any[]> {
-    try {
-      // Query all notifications
-      const notificationsQuery = query(
-        collection(this.db, 'notifications'),
-        orderBy('createdAt', 'desc')
-      );
-
-      const snapshot = await getDocs(notificationsQuery);
-      const visibleNotifications: any[] = [];
-
-      // Filter based on visibility
-      for (const doc of snapshot.docs) {
-        const notificationData = { id: doc.id, ...doc.data() } as any;
-        const visibility = this.isNotificationVisibleToUser(
-          notificationData,
-          userId,
-          userRole,
-          userRouteId
-        );
-
-        if (visibility.visible) {
-          // Check if read
-          const isRead = notificationData.readByUserIds?.includes(userId) || false;
-          visibleNotifications.push({
-            ...notificationData,
-            isRead,
-            isHiddenByUser: false
-          });
-        }
-      }
-
-      return visibleNotifications;
-    } catch (error) {
-      console.error('Error getting user notifications:', error);
-      return [];
-    }
-  }
-
-  /**
-   * Get unread notification count for a user
-   */
-  async getUnreadCount(
-    userId: string,
-    userRole: UserRole,
-    userRouteId: string | null = null
-  ): Promise<number> {
-    const notifications = await this.getUserNotifications(userId, userRole, userRouteId);
-    return notifications.filter(n => !n.isRead && !n.isDeletedGlobally).length;
   }
 }
 

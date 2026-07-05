@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 
 export default function MobileInitialSplash() {
   const [visible, setVisible] = useState(true);
-  const [displayText, setDisplayText] = useState('Salvaging Details...');
+  const [displayText, setDisplayText] = useState('');
   const [phraseIndex, setPhraseIndex] = useState(0);
   const [isDeleting, setIsDeleting] = useState(false);
 
@@ -27,17 +27,17 @@ export default function MobileInitialSplash() {
       if (displayText.length < currentPhrase.length) {
         timer = setTimeout(() => {
           setDisplayText(currentPhrase.slice(0, displayText.length + 1));
-        }, 70);
+        }, 90);
       } else {
         timer = setTimeout(() => {
           setIsDeleting(true);
-        }, 1600);
+        }, 1800);
       }
     } else {
       if (displayText.length > 0) {
         timer = setTimeout(() => {
           setDisplayText(currentPhrase.slice(0, displayText.length - 1));
-        }, 35);
+        }, 60);
       } else {
         setIsDeleting(false);
         setPhraseIndex((prev) => (prev + 1) % phrases.length);
@@ -55,24 +55,28 @@ export default function MobileInitialSplash() {
       className="md:hidden fixed inset-0 z-[999999] bg-[#05060e] flex flex-col items-center justify-center p-6 text-white overflow-hidden transition-opacity duration-300 pointer-events-none"
       suppressHydrationWarning
     >
-      <div className="mb-8 relative z-10 flex items-center justify-center">
-        <img
-          src="/adtu-new-logo.svg"
-          alt="AdtU Logo"
-          className="w-44 h-auto max-w-[75vw] object-contain drop-shadow-[0_0_25px_rgba(99,102,241,0.25)]"
-        />
-      </div>
-      <div className="mb-6 relative z-10">
-        <div className="w-8 h-8 border-3 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin shadow-lg shadow-indigo-500/10" />
-      </div>
-      <div className="h-6 flex items-center justify-center relative z-10 px-4">
-        <span
-          id="mobile-splash-typewriter"
-          className="text-sm font-semibold text-slate-300 tracking-wide font-mono"
-          suppressHydrationWarning
-        >
-          {displayText}
-        </span>
+      <div className="flex flex-col items-center gap-6 max-w-[280px] w-full text-center">
+        <div>
+          <img
+            src="/adtu-new-logo.svg"
+            alt="AdtU Logo"
+            className="w-36 h-auto object-contain"
+          />
+        </div>
+
+        {/* Normal Spinner with Lightweight Animation */}
+        <div className="w-8 h-8 rounded-full border-3 border-slate-800 border-t-indigo-500 animate-spin" />
+
+        <div className="h-5 flex items-center justify-center">
+          <span
+            id="mobile-splash-typewriter"
+            className="text-xs font-semibold text-slate-400 tracking-wider font-mono flex items-center uppercase"
+            suppressHydrationWarning
+          >
+            {displayText}
+            <span className="inline-block w-[1.5px] h-3 ml-1 bg-slate-400 animate-pulse" />
+          </span>
+        </div>
       </div>
     </div>
   );

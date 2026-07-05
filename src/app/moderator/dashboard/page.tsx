@@ -15,6 +15,7 @@ import {
   AlertCircle
 } from "lucide-react";
 import { supabase } from '@/lib/supabase-client';
+import { PremiumPageLoader } from "@/components/LoadingSpinner";
 
 interface DriverStatus {
   driver_uid: string;
@@ -82,11 +83,7 @@ export default function ModeratorDashboard() {
   }, []);
 
   if (loading) {
-    return (
-      <div className="flex-1 min-h-[calc(100dvh-120px)] flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
-      </div>
-    );
+    return <PremiumPageLoader message="Loading Moderator Dashboard..." subMessage="Preparing system controls..." />;
   }
 
   return (

@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { toast } from "react-hot-toast";
+import { normalizeShift, type CanonicalShift } from "@/lib/utils/shift-utils";
 
 // ── Types (compatible with ReassignmentPanel) ─────────────────────────────────
 
@@ -46,19 +47,18 @@ export interface AlternativeBusPickerProps {
   onClose: () => void;
 }
 
-// ── Helpers (same normalisation as ReassignmentPanel) ─────────────────────────
-
-function normalizeShift(shift: string | undefined): "Morning" | "Evening" {
-  const s = (shift || "morning").toLowerCase().trim();
-  return s === "evening" ? "Evening" : "Morning";
-}
+// ── Helpers ───────────────────────────────────────────────────────────────
 
 function getShiftLoad(
   bus: AlternativeBusData,
-  shift: "Morning" | "Evening"
+  shift: CanonicalShift
 ): number {
   const load = bus.load || { morningCount: 0, eveningCount: 0 };
-  return shift === "Morning" ? load.morningCount || 0 : load.eveningCount || 0;
+  const morning = load.morningCount || 0;
+  const evening = load.eveningCount || 0;
+  if (shift === "Both") return Math.max(morning, evening);
+  if (shift === "Evening") return evening;
+  return morning;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -216,7 +216,7 @@ export default function AlternativeBusPicker({
                           : "border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-300 hover:border-purple-400 hover:text-purple-600 dark:hover:text-purple-400"
                       )}
                     >
-                      {selectedBusId === bus.id ? "Approving…" : "Select"}
+                      {selectedBusId === bus.id ? "Staging…" : "Select"}
                       {selectedBusId !== bus.id && <ArrowRight className="w-3 h-3 ml-1" />}
                     </Button>
                   </div>

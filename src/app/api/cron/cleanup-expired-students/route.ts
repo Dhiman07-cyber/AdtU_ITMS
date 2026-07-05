@@ -9,7 +9,7 @@ import { buildCapacityDelta } from '@/lib/busCapacityService';
 import { getDeadlineConfig } from '@/lib/deadline-config-service';
 import { isSeatReleaseAtSoftBlockEnabled, wasSeatReleased } from '@/lib/config/capacity-flags';
 import { adminReconcileBusLoads } from '@/lib/services/admin-reconcile-bus-loads';
-import { writeAuditInTransaction, recordOperationalEvent, SYSTEM_ACTOR } from '@/lib/audit/audit-service';
+import { createAuditLogInTransaction, createAuditLog, SYSTEM_ACTOR } from '@/lib/services/audit.service';
 import { getCurrentSessionStartYear } from '@/lib/services/session-activation.service';
 
 // Configure Cloudinary
@@ -278,26 +278,34 @@ export async function GET(request: NextRequest) {
                             transaction.update(busRef, delta.updates);
                             seatDecremented = true;
                         }
-                        writeAuditInTransaction(transaction, {
+                        createAuditLogInTransaction(transaction, {
                             action: 'student_hard_deleted',
-                            actor: SYSTEM_ACTOR,
+                            performedBy: SYSTEM_ACTOR.id,
+                            performedByName: SYSTEM_ACTOR.name,
+                            performedByRole: SYSTEM_ACTOR.role,
                             targetId: uid,
                             targetType: 'student',
                             targetName: freshData.fullName || '',
-                            reason: 'lifecycle_hard_delete_expired',
-                            before: {
-                                enrollmentId: freshData.enrollmentId || null,
+                            category: 'system',
+                            summary: 'Student hard-deleted: ' + (freshData.fullName || ''),
+                            severity: 'high',
+                            metadata: {
+                                before: {
+                                    enrollmentId: freshData.enrollmentId || null,
+                                    busId: freshBusId || null,
+                                    shift: freshShift || null,
+                                    status: freshData.status || null,
+                                    validUntil: validUntilStr,
+                                    sessionEndYear: freshData.sessionEndYear || null,
+                                    hardBlock: hardBlockStr || null,
+                                    seatReleasedAt: freshData.seatReleasedAt || null,
+                                },
+                                after: { deleted: true },
+                                seatDecremented: freshShouldDecrement,
                                 busId: freshBusId || null,
-                                shift: freshShift || null,
-                                status: freshData.status || null,
-                                validUntil: validUntilStr,
-                                sessionEndYear: freshData.sessionEndYear || null,
-                                hardBlock: hardBlockStr || null,
-                                seatReleasedAt: freshData.seatReleasedAt || null,
+                                reason: 'lifecycle_hard_delete_expired',
+                                correlationId: uid,
                             },
-                            after: { deleted: true },
-                            details: { seatDecremented: freshShouldDecrement, busId: freshBusId || null },
-                            correlationId: uid,
                         });
                     });
                     console.log(`   ✅ Hard-deleted student ${uid} (seatDecremented=${seatDecremented})`);
@@ -352,17 +360,25 @@ export async function GET(request: NextRequest) {
                                 decremented = true;
                             }
 
-                            writeAuditInTransaction(transaction, {
+                            createAuditLogInTransaction(transaction, {
                                 action: releaseSeat ? 'student_soft_blocked_seat_released' : 'student_soft_blocked',
-                                actor: SYSTEM_ACTOR,
+                                performedBy: SYSTEM_ACTOR.id,
+                                performedByName: SYSTEM_ACTOR.name,
+                                performedByRole: SYSTEM_ACTOR.role,
                                 targetId: uid,
                                 targetType: 'student',
                                 targetName: freshData.fullName || '',
-                                reason: 'soft_block',
-                                before: { status: 'active', busId: sbBusId, shift: sbShift || null },
-                                after: { status: 'soft_blocked', seatReleased: releaseSeat, seatDecremented: decremented },
-                                details: { busId: sbBusId, at: nowIso },
-                                correlationId: uid,
+                                category: 'system',
+                                summary: (releaseSeat ? 'Student soft-blocked (seat released): ' : 'Student soft-blocked: ') + (freshData.fullName || ''),
+                                severity: 'high',
+                                metadata: {
+                                    before: { status: 'active', busId: sbBusId, shift: sbShift || null },
+                                    after: { status: 'soft_blocked', seatReleased: releaseSeat, seatDecremented: decremented },
+                                    busId: sbBusId,
+                                    at: nowIso,
+                                    reason: 'soft_block',
+                                    correlationId: uid,
+                                },
                             });
                             didBlock = true;
                         });
@@ -442,15 +458,29 @@ export async function GET(request: NextRequest) {
                         // (1) Eligible now, within grace, not yet reminded → notify once.
                         const notifRef = adminDb.collection('notifications').doc();
                         await notifRef.set({
-                            notifId: notifRef.id,
-                            toUid: appData.applicantUid || appId,
-                            toRole: 'student',
-                            type: 'UpcomingEligible',
                             title: 'Your application is now eligible',
-                            body: `Seats for your upcoming session (${appData.targetSession?.startYear || ''}-${appData.targetSession?.endYear || ''}) are now available. Visit the Bus Office to complete your approval.`,
-                            links: { applicationId: appId, statusPage: `/apply/status/${appId}` },
-                            read: false,
+                            content: `Seats for your upcoming session (${appData.targetSession?.startYear || ''}-${appData.targetSession?.endYear || ''}) are now available. Visit the Bus Office to complete your approval.`,
+                            type: 'info',
+                            sender: {
+                                userId: 'system',
+                                userName: 'System',
+                                userRole: 'admin'
+                            },
+                            target: {
+                                type: 'specific_users',
+                                specificUserIds: [appData.applicantUid || appId]
+                            },
+                            recipientIds: [appData.applicantUid || appId],
+                            autoInjectedRecipientIds: [],
+                            readByUserIds: [],
+                            isEdited: false,
+                            isDeletedGlobally: false,
+                            hiddenForUserIds: [],
                             createdAt: new Date().toISOString(),
+                            metadata: {
+                                applicationId: appId,
+                                statusPage: `/apply/status/${appId}`
+                            }
                         });
                         await appDoc.ref.update({ eligibleReminderSentAt: new Date().toISOString() });
                         upcomingResults.reminded++;
@@ -494,13 +524,17 @@ export async function GET(request: NextRequest) {
         // Tier B — operational visibility. Surface the run summary (and any healed
         //   drift) into the audit stream so admins can SEE what the cron did without
         //   reading server logs. Best-effort with audit_failure capture on write loss.
-        await recordOperationalEvent({
+        await createAuditLog({
             action: 'cron_cleanup_expired_students_completed',
-            actor: SYSTEM_ACTOR,
+            performedBy: SYSTEM_ACTOR.id,
+            performedByName: SYSTEM_ACTOR.name,
+            performedByRole: SYSTEM_ACTOR.role,
             targetId: 'cron:cleanup-expired-students',
             targetType: 'cron',
-            reason: 'scheduled_run',
-            details: { results, upcomingApplications: upcomingResults, reconciliation },
+            category: 'system',
+            summary: 'Cron cleanup completed',
+            severity: 'medium',
+            metadata: { results, upcomingApplications: upcomingResults, reconciliation, reason: 'scheduled_run' },
         });
 
         // Write the Soft Block Completion Marker to allow session activation to proceed

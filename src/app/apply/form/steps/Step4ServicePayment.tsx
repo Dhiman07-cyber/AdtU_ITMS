@@ -32,22 +32,25 @@ export default function Step4ServicePayment({
 }: PaymentStepProps) {
   const [showCaution, setShowCaution] = React.useState(false);
 
+  const startMonthIndex = deadlineConfig?.academicSessionStart?.month ?? 6; // default to 6 (July)
+  const monthNames = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'
+  ];
+  const startMonthName = monthNames[startMonthIndex] || 'July';
+
   const triggerCaution = React.useCallback(() => {
-    const isDismissed = sessionStorage.getItem('academicCautionDismissed');
-    if (!isDismissed) {
-      setShowCaution(true);
-    }
+    setShowCaution(true);
   }, []);
 
   const dismissCaution = () => {
-    sessionStorage.setItem('academicCautionDismissed', 'true');
     setShowCaution(false);
   };
 
   return (
     <div className="space-y-6 flex-1 flex flex-col">
       <Dialog open={showCaution} onOpenChange={setShowCaution}>
-        <DialogContent className="max-w-md bg-[#12131A] text-white border-white/10 shadow-2xl sm:rounded-2xl">
+        <DialogContent className="max-w-[calc(100%-2rem)] sm:max-w-md bg-[#12131A] text-white border-white/10 shadow-2xl sm:rounded-2xl">
           <DialogHeader className="flex flex-col items-center text-center">
             <div className="h-12 w-12 rounded-full bg-amber-500/10 flex items-center justify-center border border-amber-500/20 mb-3">
               <AlertTriangle className="h-6 w-6 text-amber-500" />
@@ -56,7 +59,7 @@ export default function Step4ServicePayment({
               Caution
             </DialogTitle>
             <DialogDescription className="text-zinc-400 text-sm mt-3 text-justify leading-relaxed">
-              The university follows a July-to-July academic session cycle. Please carefully select the academic session for which you want transportation services. The selected academic session determines the validity period of your transportation access. Ensure that the selected session matches the academic year in which you intend to use the service before continuing.
+              The university follows a {startMonthName}-to-{startMonthName} academic session cycle. Please carefully select the academic session for which you want transportation services. The selected academic session determines the validity period of your transportation access. Ensure that the selected session matches the academic year in which you intend to use the service before continuing.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="mt-6">
@@ -171,6 +174,7 @@ export default function Step4ServicePayment({
           purpose="new_registration"
           initialPaymentId={formData.paymentInfo.paymentReference}
           initialReceiptPreview={receiptPreview || formData.paymentInfo.paymentEvidenceUrl}
+          initialPaidAt={formData.paymentInfo.paidAt}
           isReadOnly={applicationState === 'submitted'}
           isVerified={applicationState === 'verified'}
           onPaymentComplete={(details) => {
@@ -197,6 +201,9 @@ export default function Step4ServicePayment({
             handleInputChange('paymentInfo.amountPaid', calculateTotalFee(formData.sessionInfo.durationYears, formData.shift || 'morning'));
             if (data.paymentId) {
               handleInputChange('paymentInfo.paymentReference', data.paymentId);
+            }
+            if (data.paidAt) {
+              handleInputChange('paymentInfo.paidAt', data.paidAt);
             }
           }}
           onReceiptFileSelect={(file) => {

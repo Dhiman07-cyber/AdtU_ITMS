@@ -16,8 +16,9 @@ import {
 import { getStudentByUid, getBusById, getRouteById, getBusesByRouteId } from "@/lib/dataService";
 import dynamic from "next/dynamic";
 
-// Dynamic import for Uber-like live-location map (student)
-const BusMap = dynamic(() => import("@/components/UberLikeBusMap"), { ssr: false });
+// Dynamic import for live-location map (student)
+const BusMap = dynamic(() => import("@/components/maps/LiveTrackingBusMap"), { ssr: false });
+import { PremiumPageLoader } from "@/components/LoadingSpinner";
 
 export default function StudentWaitingPage() {
   const { currentUser, userData } = useAuth();
@@ -173,11 +174,7 @@ export default function StudentWaitingPage() {
   };
 
   if (loading) {
-    return (
-      <div className="flex-1 min-h-[calc(100dvh-120px)] flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
-      </div>
-    );
+    return <PremiumPageLoader message="Loading Waiting Status..." subMessage="Fetching flag information..." />;
   }
 
   if (error) {

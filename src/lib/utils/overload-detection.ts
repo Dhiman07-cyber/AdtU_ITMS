@@ -6,7 +6,9 @@
  * Helper functions to detect which shift is overloaded and filter data accordingly
  */
 
-export type ShiftType = 'Morning' | 'Evening' | 'Both';
+import type { CanonicalShift } from '@/lib/utils/shift-utils';
+
+export type ShiftType = CanonicalShift;
 export type OverloadedShift = 'morning' | 'evening' | 'both' | null;
 
 export interface BusWithLoad {

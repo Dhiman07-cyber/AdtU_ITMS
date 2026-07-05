@@ -215,7 +215,7 @@ export function withSecurity<T = any>(
 
             // ── 1. Parse body ──
             let rawBody: any = {};
-            if (['POST', 'PUT', 'PATCH'].includes(method)) {
+            if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
                 rawBody = await safeParseBody(request);
                 if (rawBody === '__PAYLOAD_TOO_LARGE__') {
                     return NextResponse.json(
@@ -229,6 +229,18 @@ export function withSecurity<T = any>(
                         { status: 400 }
                     );
                 }
+            }
+
+            // Parse and merge query parameters for all requests
+            try {
+                const url = new URL(request.url);
+                const queryParams: Record<string, string> = {};
+                url.searchParams.forEach((value, key) => {
+                    queryParams[key] = value;
+                });
+                rawBody = { ...queryParams, ...rawBody };
+            } catch (e) {
+                console.error(`[${requestId}] Failed to parse query params:`, e);
             }
 
             // ── 2. Authentication ──
@@ -311,7 +323,7 @@ export function withSecurity<T = any>(
 
             // ── 6. Input validation ──
             let validatedBody: T = rawBody as T;
-            if (schema && ['POST', 'PUT', 'PATCH'].includes(method)) {
+            if (schema) {
                 // Strip idToken from body before validation (it's a transport field, not data)
                 const { idToken, ...dataFields } = rawBody;
                 const validation = validateInput(schema, dataFields);

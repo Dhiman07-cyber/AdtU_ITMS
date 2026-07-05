@@ -304,6 +304,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       } else {
         // No user logged in
+        if (currentUser) {
+          setSigningOut(true);
+          if (signOutTimerRef.current) clearTimeout(signOutTimerRef.current);
+          signOutTimerRef.current = setTimeout(() => {
+            setSigningOut(false);
+            signOutTimerRef.current = null;
+          }, 3000);
+        }
         if (listenerUnsubscribe.current) {
           listenerUnsubscribe.current();
           listenerUnsubscribe.current = null;

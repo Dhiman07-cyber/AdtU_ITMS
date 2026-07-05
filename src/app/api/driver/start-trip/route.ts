@@ -42,9 +42,10 @@ export const POST = withSecurity<StartTripBody>(
         const { busId, routeId, shift } = body;
         const driverId = auth.uid;
 
-        // Validate shift
-        const validShifts = ['morning', 'evening', 'both'];
-        const tripShift = shift && validShifts.includes(shift) ? shift : 'both';
+        // Validate shift using canonical shift-utils
+        const { normalizeShift } = await import('@/lib/utils/shift-utils');
+        const normalizedShift = normalizeShift(shift);
+        const tripShift = normalizedShift.toLowerCase() as 'morning' | 'evening' | 'both';
 
         // Verify driver→bus→route binding (prevent spoofing)
         const authCheck = await verifyDriverRouteBinding(driverId, routeId, busId);

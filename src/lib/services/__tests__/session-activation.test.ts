@@ -233,6 +233,7 @@ describe('Session Activation Service', () => {
           shift: 'Morning',
           currentMembers: 50,
           capacity: 55,
+          load: { morningCount: 50, eveningCount: 0 },
           route: {
             stops: [{ stopId: 'stop_A', name: 'Stop A' }],
           },
@@ -244,6 +245,7 @@ describe('Session Activation Service', () => {
           shift: 'Morning',
           currentMembers: 40,
           capacity: 55,
+          load: { morningCount: 40, eveningCount: 0 },
           route: {
             stops: [{ stopId: 'stop_A', name: 'Stop A' }],
           },
@@ -255,6 +257,7 @@ describe('Session Activation Service', () => {
           shift: 'Morning',
           currentMembers: 30,
           capacity: 55,
+          load: { morningCount: 30, eveningCount: 0 },
           route: {
             stops: [{ stopId: 'stop_A', name: 'Stop A' }],
           },
@@ -266,6 +269,7 @@ describe('Session Activation Service', () => {
           shift: 'Morning',
           currentMembers: 55,
           capacity: 55,
+          load: { morningCount: 55, eveningCount: 0 },
           route: {
             stops: [{ stopId: 'stop_A', name: 'Stop A' }],
           },
@@ -344,13 +348,16 @@ describe('Session Activation Service', () => {
       // Mock capacity delta updates
       mockBuildCapacityDelta.mockImplementation((busData, shift, change) => {
         if (busData.id === 'bus_requested' || busData.routeId === 'route_requested') {
-          return { oldMembers: 55, capacity: 55, updates: {} }; // full
+          return { oldMembers: 55, oldShiftLoad: 55, newShiftLoad: 56, capacity: 55, updates: {} }; // full
         }
+        const shiftLoad = busData.load?.morningCount || 0;
         return {
           oldMembers: busData.currentMembers,
+          oldShiftLoad: shiftLoad,
+          newShiftLoad: shiftLoad + 1,
+          newMembers: busData.currentMembers + 1,
           capacity: busData.capacity,
           updates: { currentMembers: busData.currentMembers + 1 },
-          newMembers: busData.currentMembers + 1
         };
       });
 

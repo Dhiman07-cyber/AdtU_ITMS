@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { activateUpcomingSessionApplications } from '@/lib/services/session-activation.service';
-import { recordOperationalEvent, SYSTEM_ACTOR } from '@/lib/audit/audit-service';
+import { createAuditLog, SYSTEM_ACTOR } from '@/lib/services/audit.service';
 
 /**
  * Daily session-activation cron.
@@ -33,13 +33,17 @@ export async function GET(request: NextRequest) {
 
     const summary = await activateUpcomingSessionApplications({ trigger: 'cron' });
 
-    await recordOperationalEvent({
+    await createAuditLog({
+      category: 'system',
       action: 'cron_session_activation_completed',
-      actor: SYSTEM_ACTOR,
-      targetId: 'cron:session-activation',
+      summary: 'Session activation cron completed',
+      severity: 'medium',
+      performedBy: SYSTEM_ACTOR.id,
+      performedByName: SYSTEM_ACTOR.name,
+      performedByRole: SYSTEM_ACTOR.role,
       targetType: 'cron',
-      reason: 'scheduled_run',
-      details: summary as unknown as Record<string, unknown>,
+      targetId: 'cron:session-activation',
+      metadata: summary as unknown as Record<string, unknown>,
     }).catch(() => {});
 
     return NextResponse.json({ success: true, summary });

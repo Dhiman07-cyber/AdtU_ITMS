@@ -42,6 +42,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/auth-context";
 import { toast } from "react-hot-toast";
+import { normalizeShift, isStudentBusShiftCompatible, type CanonicalShift } from "@/lib/utils/shift-utils";
 
 // =============================================================================
 // TYPES
@@ -103,7 +104,7 @@ export interface ReassignmentAssignment {
   targetBusId: string;
   targetBusNumber: string;
   stopName: string;
-  shift: "Morning" | "Evening";
+  shift: CanonicalShift;
 }
 
 export interface ReassignmentResult {
@@ -119,12 +120,12 @@ interface AssignmentDetails {
   busId: string;
   stopId: string;
   stopName: string;
-  shift?: "Morning" | "Evening";
+  shift?: CanonicalShift;
 }
 
 interface ProcessedStudent {
   student: StudentData;
-  normalizedShift: "Morning" | "Evening";
+  normalizedShift: CanonicalShift;
   eligibleBuses: BusData[];
   assignment?: AssignmentDetails;
 }
@@ -133,24 +134,11 @@ interface ProcessedStudent {
 // HELPER FUNCTIONS
 // =============================================================================
 
-function normalizeShift(shift: string | undefined): "Morning" | "Evening" {
-  const s = (shift || "morning").toLowerCase().trim();
-  return s === "evening" ? "Evening" : "Morning";
-}
-
 function isShiftCompatible(
-  studentShift: "Morning" | "Evening",
+  studentShift: CanonicalShift,
   busShift: string | undefined,
 ): boolean {
-  const normalizedBusShift = (busShift || "morning").toLowerCase().trim();
-
-  if (studentShift === "Morning") {
-    return normalizedBusShift === "morning" || normalizedBusShift === "both";
-  }
-  if (studentShift === "Evening") {
-    return normalizedBusShift === "evening" || normalizedBusShift === "both";
-  }
-  return false;
+  return isStudentBusShiftCompatible(studentShift, busShift);
 }
 
 /**
@@ -343,7 +331,7 @@ export default function ReassignmentPanel({
 
   // 4. Derived State: Live Plan & Loads
   const { plan, busLoadImpacts, liveBusLoads } = useMemo(() => {
-    const planMap = new Map<string, { bus: BusData; students: (StudentData & { overrideStopId?: string; overrideStopName?: string; overrideShift?: "Morning" | "Evening" })[] }>();
+    const planMap = new Map<string, { bus: BusData; students: (StudentData & { overrideStopId?: string; overrideStopName?: string; overrideShift?: CanonicalShift })[] }>();
 
     // Helper to get base loads
     const currentLoads = new Map<string, { morning: number; evening: number; capacity: number }>();
@@ -426,7 +414,7 @@ export default function ReassignmentPanel({
         fromBusId: string;
         toBusId: string;
         toBusNumber: string;
-        shift: "Morning" | "Evening";
+        shift: CanonicalShift;
         stopId: string;
         stopName?: string;
         studentShift?: string; // Add this

@@ -36,13 +36,10 @@ export function resolveThemePreference(explicit: MapTheme | undefined): MapTheme
 }
 
 export function systemConfigProviderToUserProvider(p: MapProviderId | undefined | null): MapProvider {
-  if (p === "google") return "gmap";
-  if (p === "guwahati") return "guwahati";
-  // legacy: treat as guwahati in new UI
   return "guwahati";
 }
 
 export function userProviderToSystemConfigProvider(p: MapProvider): MapProviderId {
-  return p === "gmap" ? "google" : "guwahati";
+  return "guwahati";
 }
 

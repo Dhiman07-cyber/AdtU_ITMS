@@ -31,8 +31,9 @@ import {
   Filter,
   X
 } from "lucide-react";
-import { getDriverById as getDriverByUid, getStudentsByBusId } from "@/lib/dataService";
+import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import { useWaitingFlags } from "@/hooks/useWaitingFlags";
+import { getDriverById as getDriverByUid, getStudentsByBusId } from "@/lib/dataService";
 import { safeImageSrc } from "@/lib/security/url-sanitizer";
 
 // Custom Image component with fallback
@@ -229,27 +230,7 @@ export default function DriverStudentsPage() {
   };
 
   if (loading) {
-    return (
-      <div className="flex-1 min-h-[calc(100dvh-120px)] flex items-center justify-center bg-gray-50 dark:bg-gray-950">
-        <div className="text-center space-y-8 relative z-10">
-          <div className="relative flex items-center justify-center">
-            <div className="absolute w-20 h-20 rounded-full bg-gradient-to-r from-blue-500 via-purple-500 to-blue-500 animate-spin"></div>
-            <div className="absolute w-18 h-18 rounded-full bg-gray-50 dark:bg-gray-950"></div>
-            <div className="relative animate-pulse">
-              <Users className="h-8 w-8 text-blue-500" />
-            </div>
-          </div>
-          <div className="space-y-2">
-            <h3 className="text-xl font-bold bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 bg-clip-text text-transparent animate-pulse">
-              Loading Students
-            </h3>
-            <p className="text-sm font-medium text-gray-500 dark:text-gray-400">
-              Fetching directory...
-            </p>
-          </div>
-        </div>
-      </div>
-    );
+    return <PremiumPageLoader message="Loading Students" subMessage="Fetching directory..." />;
   }
 
   if (error) {

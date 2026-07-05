@@ -4,7 +4,7 @@ import { Application, AuditLogEntry } from '@/lib/types/application';
 import { deleteAsset, extractPublicId } from '@/lib/cloudinary-server';
 import { sendApplicationRejectedNotification } from '@/lib/services/admin-email.service';
 import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
-import { writeAuditInTransaction } from '@/lib/audit/audit-service';
+import { createAuditLogInTransaction } from '@/lib/services/audit.service';
 import { ApplicationGoneError } from '@/lib/errors/sentinel-errors';
 
 export async function POST(request: NextRequest) {
@@ -100,17 +100,23 @@ export async function POST(request: NextRequest) {
           throw new ApplicationGoneError();
         }
         transaction.delete(appRef);
-        writeAuditInTransaction(transaction, {
+        createAuditLogInTransaction(transaction, {
+          category: 'applications',
           action: 'application_rejected',
-          actor: { id: uid, role: adminDoc.exists ? 'admin' : 'moderator', name: actorData?.fullName || actorData?.name || rejectorName },
-          targetId: appData.applicantUid,
+          summary: `Application rejected: ${formData.fullName || ''}`,
+          severity: 'medium',
+          performedBy: uid,
+          performedByName: actorData?.fullName || actorData?.name || rejectorName,
+          performedByRole: (adminDoc.exists ? 'admin' : 'moderator') as any,
           targetType: 'application',
+          targetId: appData.applicantUid,
           targetName: formData.fullName || '',
-          reason,
-          before: { applicationId, applicationState: 'submitted', ...destroyedSnapshot },
-          after: { applicationState: 'deleted' },
-          details: { applicationId, rejectorName, rejectorId },
-          correlationId: applicationId,
+          metadata: {
+            reason,
+            before: { applicationId, applicationState: 'submitted', ...destroyedSnapshot },
+            after: { applicationState: 'deleted' },
+            details: { applicationId, rejectorName, rejectorId },
+          },
         });
       });
       applicationDeleted = true;

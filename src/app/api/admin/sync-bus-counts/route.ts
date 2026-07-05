@@ -4,6 +4,7 @@ import { withSecurity } from '@/lib/security/api-security';
 import { EmptySchema } from '@/lib/security/validation-schemas';
 import { RateLimits } from '@/lib/security/rate-limiter';
 import { wasSeatReleased } from '@/lib/config/capacity-flags';
+import { getShiftDeltas } from '@/lib/utils/shift-utils';
 
 export const POST = withSecurity(
     async () => {
@@ -62,13 +63,12 @@ export const POST = withSecurity(
             }
 
             const counts = busCounts.get(matchedBusId)!;
-            // Normalize shift IDENTICALLY to the writer (buildCapacityDelta): use
-            // includes() so non-canonical casings ("Morning shift") still bucket.
-            const shift = (student.shift || 'morning').toLowerCase();
+            // Use canonical shift-utils for normalization
+            const deltas = getShiftDeltas(student.shift || 'morning');
 
             counts.total++;
-            if (shift.includes('morning') || shift === 'both') counts.morningCount++;
-            if (shift.includes('evening') || shift === 'both') counts.eveningCount++;
+            if (deltas.affectsMorning) counts.morningCount++;
+            if (deltas.affectsEvening) counts.eveningCount++;
 
             // Count per stop
             const stopId = student.stopId || '';

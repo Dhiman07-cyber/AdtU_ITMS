@@ -28,6 +28,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
     Select,
@@ -816,22 +817,7 @@ export default function SmartDriverAssignmentPage() {
     // ============================================
 
     if (loading || authLoading) {
-        return (
-            <div className="flex items-center justify-center min-h-screen" style={{ backgroundColor: tokens.darkBg }}>
-                <div className="flex flex-col items-center gap-4">
-                    <div
-                        className="w-16 h-16 border-4 border-t-transparent rounded-full animate-spin"
-                        style={{ borderColor: `${tokens.primaryOrange}40`, borderTopColor: tokens.primaryOrange }}
-                    />
-                    <p
-                        className="text-lg font-semibold animate-pulse"
-                        style={{ color: tokens.primaryOrange }}
-                    >
-                        Loading driver assignment system...
-                    </p>
-                </div>
-            </div>
-        );
+        return <PremiumPageLoader message="Loading driver assignment system..." subMessage="Configuring shift slots..." />;
     }
 
     if (!permsLoading && !canDriverReassign) {

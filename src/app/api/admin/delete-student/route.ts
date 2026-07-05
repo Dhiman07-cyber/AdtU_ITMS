@@ -6,7 +6,7 @@ import { wasSeatReleased } from '@/lib/config/capacity-flags';
 import { withSecurity } from '@/lib/security/api-security';
 import { DeleteStudentSchema } from '@/lib/security/validation-schemas';
 import { RateLimits } from '@/lib/security/rate-limiter';
-import { writeAuditInTransaction, resolveActor } from '@/lib/audit/audit-service';
+import { createAuditLogInTransaction, resolveAuditActor } from '@/lib/services/audit.service';
 
 export const POST = withSecurity(
     async (request, { auth, body }) => {
@@ -26,7 +26,7 @@ export const POST = withSecurity(
         const shouldDecrement = !!busId && !wasSeatReleased(studentData);
 
         // Resolve the acting admin BEFORE opening the transaction (it performs reads).
-        const actor = await resolveActor(auth.uid);
+        const actor = await resolveAuditActor(auth.uid);
 
         // ── Tier A: the IRREVERSIBLE ownership/capacity mutation — student doc delete,
         //    user doc delete, and bus seat decrement — commits atomically WITH a
@@ -45,25 +45,31 @@ export const POST = withSecurity(
                 transaction.update(busRef, delta.updates);
             }
 
-            writeAuditInTransaction(transaction, {
+            createAuditLogInTransaction(transaction, {
+                category: 'system',
                 action: 'student_deleted',
-                actor,
-                targetId: uid,
+                summary: `Student deleted: ${studentData?.fullName || studentData?.name || ''}`,
+                severity: 'high',
+                performedBy: auth.uid,
+                performedByName: actor.name,
+                performedByRole: actor.role as any,
                 targetType: 'student',
+                targetId: uid,
                 targetName: studentData?.fullName || studentData?.name || '',
-                reason: 'admin_manual_delete',
-                before: {
-                    enrollmentId: studentData?.enrollmentId || null,
-                    busId: busId || null,
-                    shift: studentData?.shift || null,
-                    status: studentData?.status || null,
-                    validUntil: studentData?.validUntil || null,
-                    sessionEndYear: studentData?.sessionEndYear || null,
-                    seatReleasedAt: studentData?.seatReleasedAt || null,
+                metadata: {
+                    reason: 'admin_manual_delete',
+                    before: {
+                        enrollmentId: studentData?.enrollmentId || null,
+                        busId: busId || null,
+                        shift: studentData?.shift || null,
+                        status: studentData?.status || null,
+                        validUntil: studentData?.validUntil || null,
+                        sessionEndYear: studentData?.sessionEndYear || null,
+                        seatReleasedAt: studentData?.seatReleasedAt || null,
+                    },
+                    after: { deleted: true },
+                    details: { seatDecremented: shouldDecrement, busId: busId || null },
                 },
-                after: { deleted: true },
-                details: { seatDecremented: shouldDecrement, busId: busId || null },
-                correlationId: uid,
             });
         });
 

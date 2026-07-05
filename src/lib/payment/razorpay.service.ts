@@ -90,6 +90,7 @@ export async function createRazorpayOrder(
     
     return order;
   } catch (error: any) {
+    console.error('❌ Razorpay order creation error details:', error);
     throw new Error(error.message || 'Failed to create payment order');
   }
 }

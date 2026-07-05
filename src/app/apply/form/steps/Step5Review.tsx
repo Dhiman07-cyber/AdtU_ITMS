@@ -2,7 +2,7 @@ import React, { useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { ReviewStepProps } from './types';
-import { CheckCircle, Shield, Loader2, Send, Download, User, BookOpen, Truck, MapPin, Calendar, Phone, Mail, Award, Clock, ArrowLeft } from 'lucide-react';
+import { CheckCircle, Shield, Loader2, Send, Download, User, BookOpen, Truck, MapPin, Calendar, Phone, Mail, Award, Clock, ArrowLeft, CreditCard } from 'lucide-react';
 import Image from 'next/image';
 import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
@@ -233,7 +233,9 @@ export default function Step5Review({
         { label: 'Total Duration', value: `${formData.sessionInfo.durationYears} Year(s)`, x: col2, width: 60 }
       ]);
 
-      const expiry = formData.sessionInfo.validUntil ? new Date(formData.sessionInfo.validUntil).toLocaleDateString() : 'PENDING APPROVAL';
+      const expiry = formData.sessionInfo.validUntil 
+        ? new Date(formData.sessionInfo.validUntil).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) 
+        : 'PENDING APPROVAL';
       drawRow([
         { label: 'Payment Mode', value: formData.paymentInfo.paymentMode?.toUpperCase(), x: col1, width: 60 },
         { label: 'Valid Until', value: expiry, x: col2, width: 60 }
@@ -255,11 +257,15 @@ export default function Step5Review({
       // Verifiable Footer
       pdf.setTextColor(148, 163, 184);
       pdf.setFontSize(7);
-      const cryptoObj = typeof window !== 'undefined' ? (window.crypto || (window as any).msCrypto) : null;
-      const appToken = cryptoObj && cryptoObj.randomUUID
-        ? cryptoObj.randomUUID().substring(24).toUpperCase()
-        : Math.random().toString(36).substring(7).toUpperCase();
-      pdf.text(`GEN_TS: ${new Date().toISOString()} | APP_TOKEN: ${appToken}`, 105, 285, { align: 'center' });
+      const formattedDate = new Date().toLocaleDateString('en-IN', {
+        day: '2-digit',
+        month: 'long',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true
+      });
+      pdf.text(`GENERATED ON: ${formattedDate} | STATUS: RECORD COPY`, 105, 285, { align: 'center' });
       pdf.text('© ASSAM DOWN TOWN UNIVERSITY - ITMS RECORD', 105, 290, { align: 'center' });
 
       pdf.save(`AdtU_Application_${formData.fullName.replace(/\s+/g, '_')}.pdf`);
@@ -392,8 +398,29 @@ export default function Step5Review({
             <DetailItem label="Academic Session" value={`${formData.sessionInfo.sessionStartYear} - ${formData.sessionInfo.sessionEndYear}`} />
             <DetailItem label="Duration" value={`${formData.sessionInfo.durationYears} Year(s)`} />
             <DetailItem label="Payment Mode" value={formData.paymentInfo.paymentMode ? formData.paymentInfo.paymentMode.charAt(0).toUpperCase() + formData.paymentInfo.paymentMode.slice(1) : 'Not Selected'} />
-            <DetailItem label="Expiry Date" value={formData.sessionInfo.validUntil ? new Date(formData.sessionInfo.validUntil).toLocaleDateString() : 'Set after approval'} />
+            <DetailItem 
+              label="Expiry Date" 
+              value={formData.sessionInfo.validUntil 
+                ? new Date(formData.sessionInfo.validUntil).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) 
+                : 'Set after approval'} 
+            />
           </ReviewSection>
+
+          {formData.paymentInfo.paymentMode === 'offline' && (
+            <ReviewSection title="Offline Payment Details" icon={CreditCard}>
+              <DetailItem label="Transaction ID" value={formData.paymentInfo.paymentReference || 'N/A'} />
+              <DetailItem 
+                label="Payment Date & Time" 
+                value={formData.paymentInfo.paidAt 
+                  ? new Date(formData.paymentInfo.paidAt).toLocaleString('en-IN', {
+                      dateStyle: 'medium',
+                      timeStyle: 'short'
+                    })
+                  : 'N/A'
+                } 
+              />
+            </ReviewSection>
+          )}
         </div>
 
         {/* Watermark/Footer for PDF */}

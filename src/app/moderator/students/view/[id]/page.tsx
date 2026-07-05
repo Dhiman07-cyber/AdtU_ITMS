@@ -43,7 +43,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { getStudentById, deleteStudent, getPaymentsByStudentUid } from '@/lib/dataService';
+import { getStudentById, getBusById, getRouteById, deleteStudent, getPaymentsByStudentUid } from "@/lib/dataService";
+import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import { isDateExpired, formatDateFlexible } from '@/lib/utils/date-utils';
 import { safeImageSrc } from "@/lib/security/url-sanitizer";
 import {
@@ -388,14 +389,7 @@ export default function ViewStudentPage({ params }: { params: Promise<{ id: stri
   }, [student]);
 
   if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-transparent">
-        <div className="text-center">
-          <Loader2 className="w-16 h-16 animate-spin text-purple-600 dark:text-purple-400 mx-auto mb-4" />
-          <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Loading student profile...</p>
-        </div>
-      </div>
-    );
+    return <PremiumPageLoader message="Loading student profile..." subMessage="Fetching details..." />;
   }
 
   if (!student) {

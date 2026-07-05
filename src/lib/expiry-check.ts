@@ -92,22 +92,31 @@ export async function checkAndNotifyExpiringStudents(force: boolean = false): Pr
           const freshCount = freshData?.expiryReminderCount || 0;
 
           transaction.set(notifRef, {
-            notifId: notifRef.id,
-            toUid: studentUid,
-            toRole: 'student',
-            type: 'ExpiryReminder',
             title,
-            body,
-            links: {
-              profile: '/student/profile',
-              renewPage: '/apply'
+            content: body,
+            type: 'info',
+            sender: {
+              userId: 'system',
+              userName: 'System',
+              userRole: 'admin'
             },
-            read: false,
+            target: {
+              type: 'specific_users',
+              specificUserIds: [studentUid]
+            },
+            recipientIds: [studentUid],
+            autoInjectedRecipientIds: [],
+            readByUserIds: [],
+            isEdited: false,
+            isDeletedGlobally: false,
+            hiddenForUserIds: [],
             createdAt: nowIso,
-            expiryDetails: {
+            metadata: {
               sessionStartYear: studentData.sessionStartYear,
               sessionEndYear: studentData.sessionEndYear,
-              validUntil: studentData.validUntil
+              validUntil: studentData.validUntil,
+              profile: '/student/profile',
+              renewPage: '/apply'
             }
           });
 
@@ -153,15 +162,26 @@ async function sendAdminSummary(result: ExpiryCheckResult, title: string, expiry
   for (const adminDoc of adminsQuery.docs) {
     const notifRef = adminDb.collection('notifications').doc();
     batch.set(notifRef, {
-      notifId: notifRef.id,
-      toUid: adminDoc.id,
-      toRole: 'admin',
-      type: 'ExpiryReminderSummary',
-      title: title,
-      body: `${result.remindersSent} students were notified about their expiring bus service (${expiryDate.toLocaleDateString()}). Please ensure the Bus Office is prepared for renewals.`,
-      read: false,
+      title,
+      content: `${result.remindersSent} students were notified about their expiring bus service (${expiryDate.toLocaleDateString()}). Please ensure the Bus Office is prepared for renewals.`,
+      type: 'info',
+      sender: {
+        userId: 'system',
+        userName: 'System',
+        userRole: 'admin'
+      },
+      target: {
+        type: 'specific_users',
+        specificUserIds: [adminDoc.id]
+      },
+      recipientIds: [adminDoc.id],
+      autoInjectedRecipientIds: [],
+      readByUserIds: [],
+      isEdited: false,
+      isDeletedGlobally: false,
+      hiddenForUserIds: [],
       createdAt: new Date().toISOString(),
-      summary: {
+      metadata: {
         totalChecked: result.totalChecked,
         remindersSent: result.remindersSent,
         errors: result.errors.length

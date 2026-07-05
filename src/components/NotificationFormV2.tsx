@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import dynamic from 'next/dynamic';
 import { useAuth } from '@/contexts/auth-context';
 import { useToast } from '@/contexts/toast-context';
@@ -10,7 +10,6 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
@@ -196,15 +195,14 @@ export default function NotificationFormV2({ open, onClose, onSuccess, mode = 'c
     }
   }, [open, targetType, specificUserRoleFilter, currentUser, userRole, userData]);
 
-  const loadFullBuses = async () => {
+  const loadFullBuses = useCallback(async () => {
     try {
       const snapshot = await getDocs(collection(db, 'buses'));
       const busData = snapshot.docs.map(doc => ({
         id: doc.id,
-        busId: doc.id,  // Ensure busId is available
+        busId: doc.id,
         ...doc.data()
       }));
-      // Sort by bus ID number (e.g., bus_1, bus_2, bus_10)
       setFullBuses(busData.sort((a: any, b: any) => {
         const numA = parseInt((a.busId || a.id || '').replace(/\D/g, '') || '0');
         const numB = parseInt((b.busId || b.id || '').replace(/\D/g, '') || '0');
@@ -213,18 +211,18 @@ export default function NotificationFormV2({ open, onClose, onSuccess, mode = 'c
     } catch (error) {
       console.error('Error loading full buses:', error);
     }
-  };
+  }, []);
 
-  const loadFullRoutes = async () => {
+  const loadFullRoutes = useCallback(async () => {
     try {
       const data = await getAllRoutes();
       setFullRoutes(data);
     } catch (error) {
       console.error('Error loading full routes:', error);
     }
-  };
+  }, []);
 
-  const loadOptions = async () => {
+  const loadOptions = useCallback(async () => {
     setLoadingOptions(true);
     try {
       if (targetType === 'bus_based') {
@@ -283,7 +281,7 @@ export default function NotificationFormV2({ open, onClose, onSuccess, mode = 'c
     } finally {
       setLoadingOptions(false);
     }
-  };
+  }, [targetType, specificUserRoleFilter, userRole, addToast]);
 
   // Update message when dropoff assignments change
   useEffect(() => {
@@ -298,7 +296,7 @@ export default function NotificationFormV2({ open, onClose, onSuccess, mode = 'c
     }
   }, [dropoffAssignments, notificationType, selectedTemplate, mode]);
 
-  const resetForm = () => {
+  const resetForm = useCallback(() => {
     setTargetType('all_users');
     setTargetRole(undefined);
     setSelectedBuses([]);
@@ -327,15 +325,15 @@ export default function NotificationFormV2({ open, onClose, onSuccess, mode = 'c
         setSelectedBuses([driverBus]);
       }
     }
-  };
+  }, [userRole, userData]);
 
-  const handleDiscard = () => {
+  const handleDiscard = useCallback(() => {
     resetForm();
     onClose();
     addToast('Draft discarded and form reset', 'success');
-  };
+  }, [resetForm, onClose, addToast]);
 
-  const applyTemplate = (key: string) => {
+  const applyTemplate = useCallback((key: string) => {
     if (key === 'custom') {
       setSelectedTemplate('custom');
       setNotificationType('notice');
@@ -359,9 +357,9 @@ export default function NotificationFormV2({ open, onClose, onSuccess, mode = 'c
         setDropoffAssignments([]);
       }
     }
-  };
+  }, [userData]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = useCallback(async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title || !message) {
       addToast('Please fill title and message', 'error');
@@ -387,7 +385,6 @@ export default function NotificationFormV2({ open, onClose, onSuccess, mode = 'c
           body: JSON.stringify({
             type: notificationType,
             title, content: message,
-            // For dropoff type, use dedicated targeting
             targetType: notificationType === 'dropoff' ? 'all_role' : targetType,
             targetRole: notificationType === 'dropoff' ? (userRole === 'driver' ? 'student' : (dropoffTargetRole === 'all' ? undefined : dropoffTargetRole)) : targetRole,
             targetShift: notificationType === 'dropoff' ? (userRole === 'driver' ? targetShift : dropoffShift) : targetShift,
@@ -408,12 +405,13 @@ export default function NotificationFormV2({ open, onClose, onSuccess, mode = 'c
       }
     } catch (error) { addToast('Operation failed', 'error'); }
     finally { setSending(false); }
-  };
+  }, [title, message, mode, initialData, onEdit, notificationType, targetType, targetRole, selectedBuses, selectedRoutes, selectedUsers, expiryDate, expiryTime, expiryDays, dropoffTargetRole, dropoffShift, currentUser, userRole, userData, addToast, onSuccess, onClose, resetForm]);
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
       <DialogContent
         onWheel={(e) => e.stopPropagation()}
+        onPointerDownOutside={(e) => e.preventDefault()}
         className="max-w-[95vw] sm:max-w-[550px] lg:max-w-[800px] p-0 mt-5 overflow-hidden rounded-[20px] border border-slate-200/50 dark:border-slate-800/50 shadow-2xl bg-white dark:bg-slate-950 top-[50%] translate-y-[-50%] [&>button[data-slot=dialog-close]]:right-4 [&>button[data-slot=dialog-close]]:top-4 [&>button[data-slot=dialog-close]]:bg-slate-100 dark:[&>button[data-slot=dialog-close]]:bg-slate-800 [&>button[data-slot=dialog-close]]:rounded-full [&>button[data-slot=dialog-close]]:p-1.5 [&>button[data-slot=dialog-close]]:hover:bg-red-500 [&>button[data-slot=dialog-close]]:hover:text-white"
       >
         <DialogHeader className="p-0">
@@ -438,7 +436,7 @@ export default function NotificationFormV2({ open, onClose, onSuccess, mode = 'c
 
         <form
           onSubmit={handleSubmit}
-          className="px-5 pb-5 space-y-4 max-h-[70vh] overflow-y-auto custom-scrollbar overscroll-contain touch-pan-y pt-4"
+          className="px-5 pb-5 space-y-4 max-h-[70vh] overflow-y-auto custom-scrollbar overscroll-none touch-pan-y pt-4"
           onWheel={(e) => e.stopPropagation()}
         >
           {/* Section 1: Template & Target */}

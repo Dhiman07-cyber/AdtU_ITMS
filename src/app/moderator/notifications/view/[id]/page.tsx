@@ -5,7 +5,9 @@ import { useParams, useRouter } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Loader2, ArrowLeft } from "lucide-react";
-import { getNotificationById } from '@/lib/dataService';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
+import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import Link from 'next/link';
 
 export default function ModeratorViewNotification() {
@@ -18,8 +20,11 @@ export default function ModeratorViewNotification() {
   useEffect(() => {
     const fetchNotification = async () => {
       try {
-        const data = await getNotificationById(id);
-        setNotification(data);
+        const docRef = doc(db, 'notifications', id);
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) {
+          setNotification({ id: docSnap.id, ...docSnap.data() });
+        }
       } catch (error) {
         console.error("Error fetching notification:", error);
       } finally {
@@ -33,11 +38,7 @@ export default function ModeratorViewNotification() {
   }, [id]);
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-[70vh]">
-        <Loader2 className="h-12 w-12 animate-spin text-blue-600" />
-      </div>
-    );
+    return <PremiumPageLoader message="Loading notification..." subMessage="Fetching content..." />;
   }
 
   if (!notification) {
@@ -72,17 +73,17 @@ export default function ModeratorViewNotification() {
 
           <div>
             <p className="text-sm text-gray-500 mb-2">Message</p>
-            <p className="whitespace-pre-wrap">{notification.message}</p>
+            <p className="whitespace-pre-wrap">{notification.content || notification.message}</p>
           </div>
 
           <div className="grid grid-cols-2 gap-4">
             <div>
               <p className="text-sm text-gray-500">Created By</p>
-              <p className="font-medium">{notification.createdBy || 'N/A'}</p>
+              <p className="font-medium">{notification.sender?.userName || notification.createdBy || 'N/A'}</p>
             </div>
             <div>
               <p className="text-sm text-gray-500">Status</p>
-              <p className="font-medium">{notification.status || 'Sent'}</p>
+              <p className="font-medium">{notification.isDeletedGlobally ? 'Deleted' : 'Sent'}</p>
             </div>
           </div>
 

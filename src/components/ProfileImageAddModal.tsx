@@ -28,7 +28,7 @@ export default function ProfileImageAddModal({
     maxSizeMB = 5,
     immediateUpload = true,
 }: ProfileImageAddModalProps) {
-    const [step, setStep] = useState<'select' | 'crop' | 'confirm' | 'uploading' | 'success' | 'error'>('select');
+    const [step, setStep] = useState<'select' | 'crop' | 'uploading' | 'success' | 'error'>('select');
     const [selectedFile, setSelectedFile] = useState<File | null>(null);
     const [previewUrl, setPreviewUrl] = useState<string | null>(null);
     const [zoom, setZoom] = useState(1);
@@ -36,8 +36,6 @@ export default function ProfileImageAddModal({
     const [isDragging, setIsDragging] = useState(false);
     const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
     const [error, setError] = useState<string | null>(null);
-    const [croppedImageUrl, setCroppedImageUrl] = useState<string | null>(null);
-    const [croppedImageBlob, setCroppedImageBlob] = useState<Blob | null>(null);
     const [imgAspect, setImgAspect] = useState(1);
 
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -50,7 +48,6 @@ export default function ProfileImageAddModal({
         if (!isOpen) {
             // Cleanup blob URLs to prevent memory leaks
             revokeObjectUrl(previewUrl);
-            revokeObjectUrl(croppedImageUrl);
             
             setStep('select');
             setSelectedFile(null);
@@ -58,15 +55,13 @@ export default function ProfileImageAddModal({
             setZoom(1);
             setPosition({ x: 0, y: 0 });
             setError(null);
-            setCroppedImageUrl(null);
-            setCroppedImageBlob(null);
             setImgAspect(1);
             // Reset file input
             if (fileInputRef.current) {
                 fileInputRef.current.value = '';
             }
         }
-    }, [isOpen, previewUrl, croppedImageUrl]);
+    }, [isOpen, previewUrl]);
 
     const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
@@ -88,19 +83,16 @@ export default function ProfileImageAddModal({
         setSelectedFile(file);
 
         revokeObjectUrl(previewUrl);
-        revokeObjectUrl(croppedImageUrl);
 
         setPreviewUrl(URL.createObjectURL(file));
-        setCroppedImageUrl(null);
-        setCroppedImageBlob(null);
         setZoom(1);
         setPosition({ x: 0, y: 0 });
         setStep('crop');
     };
 
     const handleDragStart = (e: React.MouseEvent | React.TouchEvent) => {
-        // Only prevent default for mouse events, touch events are passive
-        if ('touches' in e === false) {
+        // Prevent default browser behavior (e.g. image dragging, page scroll)
+        if (e.cancelable) {
             e.preventDefault();
         }
         setIsDragging(true);
@@ -111,6 +103,11 @@ export default function ProfileImageAddModal({
 
     const handleDragMove = useCallback((e: MouseEvent | TouchEvent) => {
         if (!isDragging) return;
+        if ('touches' in e) {
+            if (e.cancelable) {
+                e.preventDefault();
+            }
+        }
         const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
         const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
         setPosition({
@@ -127,7 +124,7 @@ export default function ProfileImageAddModal({
         if (isDragging) {
             window.addEventListener('mousemove', handleDragMove);
             window.addEventListener('mouseup', handleDragEnd);
-            window.addEventListener('touchmove', handleDragMove);
+            window.addEventListener('touchmove', handleDragMove, { passive: false });
             window.addEventListener('touchend', handleDragEnd);
         }
         return () => {
@@ -157,72 +154,46 @@ export default function ProfileImageAddModal({
         const natHeight = img.naturalHeight;
 
         // Calculate how object-fit: cover displays the image
-        // It scales the image to cover the container while maintaining aspect ratio
         const containerAspect = 1; // Square container
         const imgAspect = natWidth / natHeight;
 
         let drawWidth: number, drawHeight: number;
 
         if (imgAspect > containerAspect) {
-            // Image is wider - height matches container, width extends beyond
             drawHeight = containerSize;
             drawWidth = containerSize * imgAspect;
         } else {
-            // Image is taller - width matches container, height extends beyond
             drawWidth = containerSize;
             drawHeight = containerSize / imgAspect;
         }
 
-        // Center position of image within container (object-fit: cover centers the image)
         const baseX = (containerSize - drawWidth) / 2;
         const baseY = (containerSize - drawHeight) / 2;
 
-        // Clear canvas
         ctx.clearRect(0, 0, outputSize, outputSize);
         ctx.save();
 
-        // Set up circular clipping path (scaled to output size)
         ctx.beginPath();
         ctx.arc(outputSize / 2, outputSize / 2, outputSize / 2, 0, Math.PI * 2);
         ctx.clip();
 
-        // Fill background
         ctx.fillStyle = '#1f2937';
         ctx.fillRect(0, 0, outputSize, outputSize);
 
-        // CSS transform is: translate(position.x, position.y) scale(zoom)
-        // with transformOrigin: center
-        // 
-        // This means:
-        // 1. Move origin to image center
-        // 2. Apply transforms (translate then scale)
-        // 3. Move origin back
-        //
-        // The image center is at (containerSize/2, containerSize/2) before transform
-        // After translate, it's at (containerSize/2 + position.x, containerSize/2 + position.y)
-        // Then scale is applied from this new center
-
-        // Scale everything to output size
         ctx.translate(outputSize / 2, outputSize / 2);
         ctx.scale(outputScale, outputScale);
         ctx.translate(-containerSize / 2, -containerSize / 2);
 
-        // Now apply the CSS transforms
-        // translateOrigin is center of container (128, 128 for 256px container)
         const originX = containerSize / 2;
         const originY = containerSize / 2;
 
-        // Move to origin
         ctx.translate(originX, originY);
 
-        // Apply the transform: translate then scale
         ctx.translate(position.x, position.y);
         ctx.scale(zoom, zoom);
 
-        // Move back from origin
         ctx.translate(-originX, -originY);
 
-        // Draw the image at its base position (centered for object-fit: cover)
         ctx.drawImage(
             img,
             baseX,
@@ -238,25 +209,18 @@ export default function ProfileImageAddModal({
     }, [previewUrl, zoom, position]);
 
     const handleCropConfirm = async () => {
-        const croppedBlob = await cropImage();
-        if (croppedBlob) {
-            revokeObjectUrl(croppedImageUrl);
-            setCroppedImageBlob(croppedBlob);
-            setCroppedImageUrl(URL.createObjectURL(croppedBlob));
-            setStep('confirm');
-        } else {
-            setError('Failed to crop image');
-        }
-    };
-
-    const handleFinalConfirm = async () => {
-        if (!croppedImageBlob || !selectedFile) return;
+        if (!selectedFile) return;
 
         setStep('uploading');
         setError(null);
 
         try {
-            const croppedFile = new File([croppedImageBlob], selectedFile.name.replace(/\.[^/.]+$/, '.jpg'), { type: 'image/jpeg' });
+            const croppedBlob = await cropImage();
+            if (!croppedBlob) {
+                throw new Error('Failed to crop image');
+            }
+
+            const croppedFile = new File([croppedBlob], selectedFile.name.replace(/\.[^/.]+$/, '.jpg'), { type: 'image/jpeg' });
 
             if (immediateUpload) {
                 // Upload to Cloudinary
@@ -270,7 +234,6 @@ export default function ProfileImageAddModal({
                 await onConfirm(uploadedUrl);
             } else {
                 // Local handling - Create a persistent local URL
-                // Note: The parent component should handle revoking this URL if needed
                 const localUrl = URL.createObjectURL(croppedFile);
 
                 // Call confirm with local URL and file
@@ -301,7 +264,6 @@ export default function ProfileImageAddModal({
                         <Camera className="h-5 w-5 text-blue-400" />
                         {step === 'select' && 'Add Profile Photo'}
                         {step === 'crop' && 'Adjust Photo'}
-                        {step === 'confirm' && 'Confirm Photo'}
                         {step === 'uploading' && 'Uploading...'}
                         {step === 'success' && 'Success!'}
                         {step === 'error' && 'Upload Failed'}
@@ -309,7 +271,6 @@ export default function ProfileImageAddModal({
                     <DialogDescription className="text-gray-400">
                         {step === 'select' && 'Select a profile photo for the new user (max 5MB)'}
                         {step === 'crop' && 'Drag to position and zoom to fit'}
-                        {step === 'confirm' && 'Review the profile photo'}
                         {step === 'uploading' && (immediateUpload ? 'Please wait while we upload the photo...' : 'Processing image...')}
                         {step === 'success' && 'Profile photo ready!'}
                         {step === 'error' && 'Something went wrong. Please try again.'}
@@ -351,7 +312,7 @@ export default function ProfileImageAddModal({
                         <div className="space-y-4">
                             <div
                                 ref={containerRef}
-                                className="relative w-64 h-64 mx-auto rounded-full overflow-hidden bg-gray-800 border-4 border-gray-700 cursor-move flex items-center justify-center"
+                                className="relative w-64 h-64 mx-auto rounded-full overflow-hidden bg-gray-800 border-4 border-gray-700 cursor-move flex items-center justify-center touch-none select-none"
                                 onMouseDown={handleDragStart}
                                 onTouchStart={handleDragStart}
                             >
@@ -414,40 +375,7 @@ export default function ProfileImageAddModal({
                                     onClick={handleCropConfirm}
                                     className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
                                 >
-                                    Continue
-                                </Button>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Step: Confirm */}
-                    {step === 'confirm' && croppedImageUrl && (
-                        <div className="space-y-4">
-                            <div className="flex justify-center items-center">
-                                <div className="text-center">
-                                    <img
-                                        src={croppedImageUrl}
-                                        alt="New"
-                                        className="w-40 h-40 rounded-full object-cover border-4 border-blue-500 shadow-xl"
-                                    />
-                                    <p className="text-sm text-gray-400 mt-2">New Profile Photo</p>
-                                </div>
-                            </div>
-
-                            <div className="flex gap-2">
-                                <Button
-                                    variant="outline"
-                                    onClick={() => setStep('crop')}
-                                    className="flex-1 border-gray-600 text-gray-300 hover:bg-gray-800"
-                                >
-                                    Back
-                                </Button>
-                                <Button
-                                    onClick={handleFinalConfirm}
-                                    className="flex-1 bg-green-600 hover:bg-green-700 text-white"
-                                >
-                                    <Check className="h-4 w-4 mr-1" />
-                                    Set Photo
+                                    Confirm
                                 </Button>
                             </div>
                         </div>
@@ -492,7 +420,7 @@ export default function ProfileImageAddModal({
                                     Cancel
                                 </Button>
                                 <Button
-                                    onClick={() => setStep('confirm')}
+                                    onClick={() => setStep('crop')}
                                     className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
                                 >
                                     Try Again

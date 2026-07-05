@@ -14,12 +14,8 @@ import {
     doc,
     runTransaction,
     serverTimestamp,
-    Timestamp,
-    collection,
-    addDoc,
-    FieldValue,
 } from "firebase/firestore";
-import { ChangeRecord } from './reassignment-logs-supabase';
+import type { ChangeRecord } from './reassignment-logs-supabase';
 import { generatePrefixedId } from '@/lib/security/random-id';
 
 // ============================================
@@ -587,7 +583,7 @@ export async function commitNetChanges(
 
 /**
  * Writes an audit log entry for the assignment operation.
- * Writes to both Firestore (legacy adminActions) and Supabase (reassignment_logs).
+ * Writes to Supabase reassignment_logs.
  */
 async function writeAssignmentAuditLog(
     adminUid: string,
@@ -599,40 +595,7 @@ async function writeAssignmentAuditLog(
     actorInfo?: { name: string; role: string; label?: string }
 ): Promise<void> {
 
-    const ttlDate = new Date();
-    ttlDate.setDate(ttlDate.getDate() + 30); // 30-day TTL
-
-    // Write to legacy Firestore adminActions - REMOVED per user request (permission issues)
-    /*
-    console.log('📝 [writeAssignmentAuditLog] Writing to Firestore adminActions...');
-    await addDoc(collection(db, "adminActions"), {
-        actionType: "driver_assignment_commit",
-        actorUid: adminUid,
-        summary: `Committed ${updatedDrivers.length} driver assignment(s) affecting ${updatedBuses.length} bus(es)`,
-        busesAffected: updatedBuses,
-        driversAffected: updatedDrivers,
-        busChanges: busChanges.map(c => ({
-            busId: c.busId,
-            busLabel: c.busLabel,
-            from: c.prevAssignedDriverName,
-            to: c.newAssignedDriverName,
-        })),
-        driverChanges: driverChanges.map(d => ({
-            driverId: d.driverId,
-            driverName: d.driverName,
-            fromBus: d.initialBusLabel,
-            toBus: d.finalBusLabel,
-            isReserved: d.isReserved,
-        })),
-        stagingSnapshot: stagingSnapshot ? JSON.stringify(stagingSnapshot) : null,
-        timestamp: serverTimestamp(),
-        expiresAt: Timestamp.fromDate(ttlDate),
-    });
-    console.log('✅ [writeAssignmentAuditLog] Firestore write complete');
-    */
-
-
-    // Also write to Supabase reassignment_logs with full change records for rollback
+    // Write to Supabase reassignment_logs with full change records for rollback
     try {
         // Build change records with before/after for rollback support
         const supabaseChanges: ChangeRecord[] = [];

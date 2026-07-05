@@ -18,6 +18,7 @@ import { getAllRoutes, getAllBuses, getAllDrivers, getModeratorById, updateDrive
 import { Route, Driver } from '@/lib/types';
 import { signalCollectionRefresh } from "@/hooks/useEventDrivenRefresh";
 import RouteSelect from '@/components/RouteSelect';
+import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import { useDebouncedStorage } from '@/hooks/useDebouncedStorage';
 import {
   Select,
@@ -85,7 +86,7 @@ export default function AddDriver() {
     driverId: '',
     address: '',
     approvedBy: '',
-    shift: 'Morning & Evening',
+    shift: 'Both',
   };
 
   // Always initialize with empty form data - no auto-fill
@@ -227,7 +228,7 @@ export default function AddDriver() {
         setFormData(prev => ({ ...prev, shift: 'Evening' }));
       } else if (existingShift === 'evening') {
         setFormData(prev => ({ ...prev, shift: 'Morning' }));
-      } else if (existingShift === 'both' && (formData.shift === 'Both' || formData.shift === 'Morning & Evening')) {
+      } else if (existingShift === 'both' && formData.shift === 'Both') {
         setFormData(prev => ({ ...prev, shift: 'Morning' })); 
       }
     } else {
@@ -444,7 +445,7 @@ export default function AddDriver() {
       if (existingDriver) {
         let isConflict = false;
         const eShift = existingDriver.shift?.toLowerCase();
-        const fShift = (formData.shift === 'Morning & Evening' ? 'both' : formData.shift).toLowerCase();
+        const fShift = formData.shift.toLowerCase();
         
         if (eShift === 'both' || eShift === fShift) {
           isConflict = true;
@@ -515,7 +516,7 @@ export default function AddDriver() {
           assignedBusId: assignedBusId,
           assignedRouteId: assignedRouteId,
           approvedBy: formData.approvedBy,
-          shift: formData.shift === 'Morning & Evening' ? 'Both' : formData.shift
+          shift: formData.shift
         }),
       });
 
@@ -576,11 +577,7 @@ export default function AddDriver() {
   };
 
   if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
-      </div>
-    );
+    return <PremiumPageLoader message="Preparing driver form..." subMessage="Loading resources..." />;
   }
 
   if (!currentUser || !userData || (userData.role !== 'admin' && userData.role !== 'moderator')) {
@@ -946,7 +943,7 @@ export default function AddDriver() {
                     Shift <span className="text-red-500">*</span>
                   </Label>
                   <Select
-                    value={formData.shift === 'Morning & Evening' ? 'Both' : formData.shift}
+                    value={formData.shift}
                     onValueChange={(value) => setFormData(prev => ({ ...prev, shift: value }))}
                     disabled={!formData.busId && formData.routeId !== 'reserved'}
                   >

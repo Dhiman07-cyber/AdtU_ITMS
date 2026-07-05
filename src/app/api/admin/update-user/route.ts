@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { adminDb } from '@/lib/firebase-admin';
-import { FieldValue, Transaction, DocumentSnapshot, DocumentReference } from 'firebase-admin/firestore';
+import { FieldValue, Transaction, DocumentSnapshot } from 'firebase-admin/firestore';
 import { withSecurity } from '@/lib/security/api-security';
 import { UpdateStudentSchema } from '@/lib/security/validation-schemas';
 import { RateLimits } from '@/lib/security/rate-limiter';
@@ -8,6 +8,8 @@ import { wasSeatReleased } from '@/lib/config/capacity-flags';
 import { safeErrorMessage } from '@/lib/security/safe-error';
 import { computeBlockDatesFromValidUntil } from '@/lib/utils/deadline-computation';
 import { getDeadlineConfig } from '@/lib/deadline-config-service';
+import { buildCapacityDelta } from '@/lib/busCapacityService';
+import { getShiftDeltas } from '@/lib/utils/shift-utils';
 
 /**
  * POST /api/admin/update-user
@@ -76,27 +78,35 @@ export const POST = withSecurity(
                     if (oldBusId && !seatAlreadyReleased) {
                         const oldBusSnap = busSnaps.get(oldBusId);
                         if (oldBusSnap?.exists) {
-                            const updates: any = {};
                             if (busChanged) {
-                                updates.currentMembers = FieldValue.increment(-1);
+                                // Bus changed → full decrement (currentMembers + shift bucket)
+                                // buildCapacityDelta maintains currentMembers = morningCount + eveningCount.
+                                const delta = buildCapacityDelta(oldBusSnap.data(), oldShift, -1);
+                                transaction.update(oldBusSnap.ref, delta.updates);
+                            } else {
+                                // Shift changed on the SAME bus → only swap the shift bucket.
+                                // currentMembers is the total occupancy and does NOT change.
+                                // Applying buildCapacityDelta twice on the same snapshot would
+                                // produce conflicting absolute-value writes; use FieldValue for
+                                // the bucket-only change so Firestore merges them safely.
+                                const shiftOnlyUpdates: Record<string, unknown> = {};
+                                const oldDeltas = getShiftDeltas(oldShift);
+                                const newDeltas = getShiftDeltas(newShift);
+                                if (oldDeltas.affectsMorning) shiftOnlyUpdates['load.morningCount'] = FieldValue.increment(-1);
+                                if (oldDeltas.affectsEvening) shiftOnlyUpdates['load.eveningCount'] = FieldValue.increment(-1);
+                                if (newDeltas.affectsMorning) shiftOnlyUpdates['load.morningCount'] = FieldValue.increment(1);
+                                if (newDeltas.affectsEvening) shiftOnlyUpdates['load.eveningCount'] = FieldValue.increment(1);
+                                transaction.update(oldBusSnap.ref, shiftOnlyUpdates);
                             }
-                            if (oldShift === 'Morning' || oldShift === 'Both') updates['load.morningCount'] = FieldValue.increment(-1);
-                            if (oldShift === 'Evening' || oldShift === 'Both') updates['load.eveningCount'] = FieldValue.increment(-1);
-                            transaction.update(oldBusSnap.ref, updates);
                         }
                     }
 
-                    // 2. Increment new bus capacity
-                    if (newBusId) {
+                    // 2. Increment new bus capacity (only when bus actually changed)
+                    if (busChanged && newBusId) {
                         const newBusSnap = busSnaps.get(newBusId);
                         if (newBusSnap?.exists) {
-                            const updates: any = {};
-                            if (busChanged) {
-                                updates.currentMembers = FieldValue.increment(1);
-                            }
-                            if (newShift === 'Morning' || newShift === 'Both') updates['load.morningCount'] = FieldValue.increment(1);
-                            if (newShift === 'Evening' || newShift === 'Both') updates['load.eveningCount'] = FieldValue.increment(1);
-                            transaction.update(newBusSnap.ref, updates);
+                            const delta = buildCapacityDelta(newBusSnap.data(), newShift, 1);
+                            transaction.update(newBusSnap.ref, delta.updates);
                         }
                     }
                 }

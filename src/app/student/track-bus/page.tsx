@@ -32,9 +32,9 @@ import dynamic from "next/dynamic";
 import { useMissedBus, generateOpId, MISSED_BUS_MESSAGES } from "@/hooks/useMissedBus";
 import { useBusLocation } from '@/hooks/useBusLocation';
 import TransportEntitlementGuard from "@/components/transport/TransportEntitlementGuard";
-import { useSystemConfig } from "@/contexts/SystemConfigContext";
 import { formatIdForDisplay } from "@/lib/utils";
 import ErrorBoundary from "@/components/ErrorBoundary";
+import { PremiumPageLoader } from "@/components/LoadingSpinner";
 
 const LiveTrackingBusMap = dynamic(() => import("@/components/maps/LiveTrackingBusMap"), {
   ssr: false,
@@ -57,7 +57,6 @@ function TrackBusLive() {
   const { currentUser, userData, loading } = useAuth();
   const router = useRouter();
   const { addToast } = useToast();
-  const { refreshConfig } = useSystemConfig();
 
   const [studentData, setStudentData] = useState<any>(null);
   const [busData, setBusData] = useState<any>(null);
@@ -335,16 +334,6 @@ function TrackBusLive() {
     const mins = minutes % 60;
     return `${hrs}h ${mins}m`;
   };
-
-  useEffect(() => {
-    const onVis = () => {
-      if (document.visibilityState === "visible") {
-        void refreshConfig();
-      }
-    };
-    document.addEventListener("visibilitychange", onVis);
-    return () => document.removeEventListener("visibilitychange", onVis);
-  }, [refreshConfig]);
 
   // Get student's current location 
   useEffect(() => {
@@ -1052,14 +1041,7 @@ function TrackBusLive() {
 
   // Show loading while auth is loading
   if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-center">
-          <Bus className="h-12 w-12 animate-bounce mx-auto mb-4" />
-          <p className="text-lg">Loading authentication...</p>
-        </div>
-      </div>
-    );
+    return <PremiumPageLoader message="Loading Bus Tracker" subMessage="Preparing tracking interface..." />;
   }
 
   // NOTE (Phase 3): the soft-block / entitlement gate that used to live here has
@@ -1068,70 +1050,7 @@ function TrackBusLive() {
   // realtime subscriptions above are guaranteed to run only for entitled students.
 
   if (dataLoading) {
-    return (
-      <div className="flex-1 min-h-[calc(100dvh-120px)] flex items-center justify-center bg-gray-900 dark:bg-gray-950 relative overflow-hidden">
-        {/* Animated road lines */}
-        <div className="absolute inset-0 overflow-hidden opacity-20">
-          <div className="absolute top-0 left-1/2 w-1 h-full bg-gradient-to-b from-transparent via-white to-transparent animate-pulse"></div>
-          <div className="absolute top-0 left-1/4 w-px h-full bg-gradient-to-b from-transparent via-blue-400 to-transparent" style={{ animationDelay: '0.5s' }}></div>
-          <div className="absolute top-0 right-1/4 w-px h-full bg-gradient-to-b from-transparent via-blue-400 to-transparent" style={{ animationDelay: '1s' }}></div>
-        </div>
-
-        {/* Moving stars/points (like journey markers) */}
-        <div className="absolute inset-0">
-          <div className="absolute top-1/4 left-1/4 w-2 h-2 bg-blue-400 rounded-full animate-ping"></div>
-          <div className="absolute top-1/2 right-1/3 w-2 h-2 bg-cyan-400 rounded-full animate-ping" style={{ animationDelay: '0.7s' }}></div>
-          <div className="absolute bottom-1/3 left-1/3 w-2 h-2 bg-purple-400 rounded-full animate-ping" style={{ animationDelay: '1.4s' }}></div>
-        </div>
-
-        <div className="text-center space-y-6 relative z-10">
-          {/* Bus journey animation */}
-          <div className="relative flex items-center justify-center h-32">
-            {/* Road/path line */}
-            <div className="absolute w-64 h-1 bg-gradient-to-r from-transparent via-blue-500 to-transparent rounded-full"></div>
-
-            {/* Moving bus on path */}
-            <div className="relative">
-              {/* Outer glow ring */}
-              <div className="absolute inset-0 w-24 h-24 -m-6 bg-blue-500/20 rounded-full animate-pulse"></div>
-
-              {/* Bus container with forward motion */}
-              <div className="relative p-4 bg-gradient-to-br from-blue-600 via-cyan-600 to-blue-700 rounded-2xl shadow-2xl">
-                <Bus className="h-10 w-10 text-white" />
-                {/* Motion lines */}
-                <div className="absolute -left-2 top-1/2 -translate-y-1/2 flex gap-1">
-                  <div className="w-1 h-0.5 bg-blue-300 animate-pulse"></div>
-                  <div className="w-1 h-0.5 bg-blue-300 animate-pulse" style={{ animationDelay: '0.2s' }}></div>
-                  <div className="w-1 h-0.5 bg-blue-300 animate-pulse" style={{ animationDelay: '0.4s' }}></div>
-                </div>
-              </div>
-
-              {/* Destination marker */}
-              <div className="absolute -right-24 top-1/2 -translate-y-1/2">
-                <MapPin className="h-6 w-6 text-green-400 animate-bounce" />
-              </div>
-            </div>
-          </div>
-
-          {/* Loading text */}
-          <div className="space-y-2">
-            <h3 className="text-2xl font-bold text-white">
-              Loading Bus Tracker
-            </h3>
-            <p className="text-sm text-blue-200">
-              Fetching live bus location...
-            </p>
-
-            {/* Progress bar */}
-            <div className="w-64 mx-auto mt-4">
-              <div className="h-1 bg-gray-700 rounded-full overflow-hidden">
-                <div className="h-full bg-gradient-to-r from-blue-500 via-cyan-500 to-blue-500 rounded-full animate-pulse" style={{ width: '70%' }}></div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
+    return <PremiumPageLoader message="Loading Bus Tracker" subMessage="Initializing maps and fetching real-time location..." />;
   }
 
   if (!busData || !routeData) {
@@ -1414,7 +1333,7 @@ function TrackBusLive() {
                       <span className="relative z-10 flex items-center justify-center gap-2">
                         {submittingFlag ? (
                           <>
-                            <div className="h-5 w-5 animate-spin rounded-full border-3 border-current border-t-transparent"></div>
+                            <div className="h-5 w-5 animate-spin rounded-full border-[3px] border-current border-t-transparent"></div>
                             <span>{pendingRaise ? "Cancelling..." : "Processing..."}</span>
                           </>
                         ) : isWaiting ? (

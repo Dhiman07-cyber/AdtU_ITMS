@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useEffect, useState, useCallback, useRef, ReactNode } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback, useRef, useMemo, ReactNode } from 'react';
 import { useAuth } from '@/contexts/auth-context';
 import { db } from '@/lib/firebase';
 import {
@@ -80,6 +80,11 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
 
         const userNotifications: UserNotificationView[] = [];
         let unread = 0;
+        const currentUserId = currentUser.uid;
+        const currentUserRole = userData.role;
+        const userRouteId = userData.routeId || userData.assignedRouteId || null;
+        const thirtyDaysAgo = new Date();
+        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
         for (const docData of docs) {
             const data = docData.data ? docData.data() : docData;
@@ -122,25 +127,25 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
             try {
                 visibility = notificationService.isNotificationVisibleToUser(
                     normalizedData,
-                    currentUser.uid,
-                    userData.role,
-                    userData.routeId || userData.assignedRouteId || null
+                    currentUserId,
+                    currentUserRole,
+                    userRouteId
                 );
             } catch (e) {
                 continue;
             }
 
             if (visibility.visible) {
-                const isRead = data.readByUserIds?.includes(currentUser.uid) || false;
+                const isRead = data.readByUserIds?.includes(currentUserId) || false;
 
                 const canEdit = sender.userId !== 'system' &&
-                    (userData.role === 'admin' || userData.role === 'moderator')
-                    ? sender.userId === currentUser.uid
+                    (currentUserRole === 'admin' || currentUserRole === 'moderator')
+                    ? sender.userId === currentUserId
                     : false;
 
                 const canDeleteGlobally = sender.userId !== 'system' &&
-                    (userData.role === 'admin' ||
-                        (userData.role === 'moderator' && sender.userId === currentUser.uid));
+                    (currentUserRole === 'admin' ||
+                        (currentUserRole === 'moderator' && sender.userId === currentUserId));
 
                 const userNotificationView: UserNotificationView = {
                     id: notificationId,
@@ -161,15 +166,12 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
 
                 userNotifications.push(userNotificationView);
 
-                const isSender = sender.userId === currentUser.uid;
+                const isSender = sender.userId === currentUserId;
                 if (!isRead && !data.isDeletedGlobally && !isSender) {
                     unread++;
                 }
             }
         }
-
-        const thirtyDaysAgo = new Date();
-        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
         const recentNotifications = userNotifications.filter(n => {
             const createdAt = n.createdAt?.toDate ? n.createdAt.toDate() : new Date(n.createdAt);
@@ -369,7 +371,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
         setRefreshTrigger(prev => prev + 1);
     }, []);
 
-    const value = React.useMemo(() => ({
+    const value = useMemo<NotificationContextType>(() => ({
         notifications,
         unreadCount,
         loading,

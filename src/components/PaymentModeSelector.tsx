@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -33,11 +33,13 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import Image from 'next/image';
 import { useRazorpay } from '@/hooks/useRazorpay';
+import { useAuth } from '@/contexts/auth-context';
 import { toast } from 'sonner';
 import {
   PaymentSession,
   savePaymentSession,
   getCurrentPaymentSession,
+  getPaymentSession,
   updatePaymentSessionStatus,
   storePaymentReceipt,
   hasCompletedPayment,
@@ -45,6 +47,9 @@ import {
 } from '@/lib/payment/application-payment.service';
 import { uploadImage } from '@/lib/upload';
 import { isMobileDevice } from '@/lib/mobile-utils';
+import { PaymentStatusPanel } from '@/components/PaymentStatusPanel';
+import { usePaymentRecovery } from '@/hooks/usePaymentRecovery';
+import type { PaymentFrontendStatus } from '@/lib/payment/payment-state';
 
 interface PaymentModeSelectorProps {
   amount: number;
@@ -61,8 +66,9 @@ interface PaymentModeSelectorProps {
   showHeader?: boolean;
   initialPaymentId?: string;
   initialReceiptPreview?: string;
+  initialPaidAt?: string;
   onPaymentComplete?: (paymentDetails: any) => void;
-  onOfflineSelected?: (data: { paymentId?: string; receiptUrl?: string }) => void;
+  onOfflineSelected?: (data: { paymentId?: string; receiptUrl?: string; paidAt?: string }) => void;
   onReceiptFileSelect?: (file: File) => void;
   onReceiptRemove?: () => void;
   onBack?: () => void;
@@ -86,6 +92,7 @@ export default function PaymentModeSelector({
   showHeader = true,
   initialPaymentId = '',
   initialReceiptPreview = '',
+  initialPaidAt = '',
   onPaymentComplete,
   onOfflineSelected,
   onReceiptFileSelect,
@@ -95,19 +102,136 @@ export default function PaymentModeSelector({
   isReadOnly = false,
   isVerified = false
 }: PaymentModeSelectorProps) {
+  const { currentUser } = useAuth();
   const [paymentMode, setPaymentMode] = useState<'online' | 'offline'>('online');
-  const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+  const [isProcessingPayment, _setIsProcessingPayment] = useState(false);
+  const setIsProcessingPayment = (val: boolean | ((prev: boolean) => boolean)) => {
+    const stack = new Error().stack;
+    const stackLine = stack ? stack.split('\n')[2] : 'unknown';
+    _setIsProcessingPayment((prev) => {
+      const nextVal = typeof val === 'function' ? val(prev) : val;
+      console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] setIsProcessingPayment changed: old=${prev} new=${nextVal} | source=${stackLine}`);
+      return nextVal;
+    });
+  };
+
   const [isProcessingOffline, setIsProcessingOffline] = useState(false);
-  const [paymentCompleted, setPaymentCompleted] = useState(false);
+  
+  const [paymentCompleted, _setPaymentCompleted] = useState(false);
+  const setPaymentCompleted = (val: boolean | ((prev: boolean) => boolean)) => {
+    const stack = new Error().stack;
+    const stackLine = stack ? stack.split('\n')[2] : 'unknown';
+    _setPaymentCompleted((prev) => {
+      const nextVal = typeof val === 'function' ? val(prev) : val;
+      console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] setPaymentCompleted changed: old=${prev} new=${nextVal} | source=${stackLine}`);
+      return nextVal;
+    });
+  };
+
   const [paymentDetails, setPaymentDetails] = useState<any>(null);
+
+  // Canonical payment status for the online-payment UI panel
+  const [onlinePaymentStatus, _setOnlinePaymentStatus] = useState<PaymentFrontendStatus | null>(null);
+  const setOnlinePaymentStatus = (val: PaymentFrontendStatus | null | ((prev: PaymentFrontendStatus | null) => PaymentFrontendStatus | null)) => {
+    const stack = new Error().stack;
+    const stackLine = stack ? stack.split('\n')[2] : 'unknown';
+    _setOnlinePaymentStatus((prev) => {
+      const nextVal = typeof val === 'function' ? val(prev) : val;
+      console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] setOnlinePaymentStatus changed: old=${prev} new=${nextVal} | source=${stackLine}`);
+      return nextVal;
+    });
+  };
+  const [paymentErrorCode, setPaymentErrorCode] = useState<string | undefined>();
+  const [paymentErrorReason, setPaymentErrorReason] = useState<string | undefined>();
+  // Store IDs from in-progress session so recovery hook can query them
+  const [sessionOrderId, setSessionOrderId] = useState<string | undefined>();
+  const [sessionPaymentId, setSessionPaymentId] = useState<string | undefined>();
+
+  const dateInputRef = useRef<HTMLInputElement>(null);
+  const timeInputRef = useRef<HTMLInputElement>(null);
+
+  // Get max date for input (today in local time)
+  const maxDate = new Date(Date.now() - (new Date()).getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+
+  useEffect(() => {
+    // Only attach programmatic click/focus showPicker on desktop to prevent mobile picker conflicts
+    if (isMobileDevice()) return;
+    if (paymentMode !== 'offline') return;
+
+    const dateEl = dateInputRef.current;
+    const timeEl = timeInputRef.current;
+
+    const triggerDatePicker = () => {
+      if (!dateEl || dateEl.disabled || dateEl.readOnly) return;
+      try {
+        if (typeof dateEl.showPicker === 'function') dateEl.showPicker();
+      } catch (err) {}
+    };
+
+    const triggerTimePicker = () => {
+      if (!timeEl || timeEl.disabled || timeEl.readOnly) return;
+      try {
+        if (typeof timeEl.showPicker === 'function') timeEl.showPicker();
+      } catch (err) {}
+    };
+
+    if (dateEl) {
+      dateEl.addEventListener('click', triggerDatePicker);
+      dateEl.addEventListener('focus', triggerDatePicker);
+    }
+    if (timeEl) {
+      timeEl.addEventListener('click', triggerTimePicker);
+      timeEl.addEventListener('focus', triggerTimePicker);
+    }
+
+    return () => {
+      if (dateEl) {
+        dateEl.removeEventListener('click', triggerDatePicker);
+        dateEl.removeEventListener('focus', triggerDatePicker);
+      }
+      if (timeEl) {
+        timeEl.removeEventListener('click', triggerTimePicker);
+        timeEl.removeEventListener('focus', triggerTimePicker);
+      }
+    };
+  }, [paymentMode]);
 
   // Offline payment states
   const [offlinePaymentId, setOfflinePaymentId] = useState(initialPaymentId);
+  const [offlinePaidDate, setOfflinePaidDate] = useState('');
+  const [offlinePaidTime, setOfflinePaidTime] = useState('');
+  const [offlinePaidAt, setOfflinePaidAt] = useState('');
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
   const [receiptPreview, setReceiptPreview] = useState<string>(initialReceiptPreview);
   const [showOfflineSuccess, setShowOfflineSuccess] = useState(false);
 
   const { processPayment, isProcessing } = useRazorpay();
+
+  // Helper to format ISO to date (YYYY-MM-DD)
+  const formatISOToDate = (isoString: string) => {
+    if (!isoString) return '';
+    try {
+      const date = new Date(isoString);
+      if (isNaN(date.getTime())) return '';
+      const tzoffset = date.getTimezoneOffset() * 60000;
+      return new Date(date.getTime() - tzoffset).toISOString().slice(0, 10);
+    } catch (e) {
+      return '';
+    }
+  };
+
+  // Helper to format ISO to time (HH:MM)
+  const formatISOToTime = (isoString: string) => {
+    if (!isoString) return '';
+    try {
+      const date = new Date(isoString);
+      if (isNaN(date.getTime())) return '';
+      const tzoffset = date.getTimezoneOffset() * 60000;
+      return new Date(date.getTime() - tzoffset).toISOString().slice(11, 16);
+    } catch (e) {
+      return '';
+    }
+  };
 
   // Update local state when initial props change (for draft loading)
   useEffect(() => {
@@ -117,6 +241,28 @@ export default function PaymentModeSelector({
       setPaymentMode('offline');
     }
   }, [initialPaymentId]);
+
+  useEffect(() => {
+    if (initialPaidAt) {
+      setOfflinePaidDate(formatISOToDate(initialPaidAt));
+      setOfflinePaidTime(formatISOToTime(initialPaidAt));
+    } else {
+      // Default to current date & time formatted
+      const tzoffset = (new Date()).getTimezoneOffset() * 60000;
+      const currentLocal = new Date(Date.now() - tzoffset).toISOString();
+      setOfflinePaidDate(currentLocal.slice(0, 10));
+      setOfflinePaidTime(currentLocal.slice(11, 16));
+    }
+  }, [initialPaidAt]);
+
+  // Sync date/time to offlinePaidAt state
+  useEffect(() => {
+    if (offlinePaidDate && offlinePaidTime) {
+      setOfflinePaidAt(`${offlinePaidDate}T${offlinePaidTime}`);
+    } else {
+      setOfflinePaidAt('');
+    }
+  }, [offlinePaidDate, offlinePaidTime]);
 
   useEffect(() => {
     if (initialReceiptPreview) {
@@ -129,26 +275,95 @@ export default function PaymentModeSelector({
     }
   }, [initialReceiptPreview, paymentCompleted]);
 
-  // Check for existing payment session
+  // ── Recovery hook (drives automatic polling & manual check) ──────────────
+  const getToken = useCallback(async (): Promise<string | null> => {
+    try {
+      return (await currentUser?.getIdToken()) ?? null;
+    } catch {
+      return null;
+    }
+  }, [currentUser]);
+
+  const handleRecoverySuccess = useCallback(() => {
+    const session = getCurrentPaymentSession();
+    const verifiedDetails = {
+      paymentId: session?.razorpayPaymentId || sessionPaymentId,
+      orderId: session?.razorpayOrderId || sessionOrderId,
+      amount: session?.amount || amount,
+      paymentStatus: 'success',
+      paymentMethod: 'online',
+      paymentTime: new Date().toISOString(),
+    };
+    if (session) {
+      session.status = 'completed';
+      savePaymentSession(session);
+    }
+    setPaymentCompleted(true);
+    setPaymentDetails(verifiedDetails);
+    setOnlinePaymentStatus('success');
+    if (onPaymentComplete) onPaymentComplete(verifiedDetails);
+  }, [sessionPaymentId, sessionOrderId, amount, onPaymentComplete]);
+
+  // Determine whether there is an unfinished online session that warrants polling
+  const [hasOnlineSession, setHasOnlineSession] = useState(false);
+
+  // ── Check for existing payment session on mount ───────────────────────────
   useEffect(() => {
+    // 1. Check if payment is already completed (via hasCompletedPayment or currentSession)
+    const isCompleted = hasCompletedPayment(userId, purpose);
     const existingSession = getCurrentPaymentSession();
+    let isAlreadyCompleted = isCompleted;
+
+    if (isCompleted) {
+      setPaymentCompleted(true);
+      const session = getPaymentSession(userId, purpose);
+      if (session) {
+        setPaymentDetails({
+          paymentId: session.razorpayPaymentId,
+          orderId: session.razorpayOrderId,
+          amount: session.amount
+        });
+      }
+      return; // Stop here, do not check for recovery or set status to processing
+    }
+
     if (existingSession && existingSession.userId === userId && existingSession.purpose === purpose) {
       if (existingSession.status === 'completed') {
+        isAlreadyCompleted = true;
         setPaymentCompleted(true);
         setPaymentDetails({
           paymentId: existingSession.razorpayPaymentId,
           orderId: existingSession.razorpayOrderId,
           amount: existingSession.amount
         });
+      } else if (existingSession.paymentMode === 'online' && existingSession.status === 'processing') {
+        // Unfinished active online session — surface IDs for recovery hook
+        setSessionOrderId(existingSession.razorpayOrderId);
+        setSessionPaymentId(existingSession.razorpayPaymentId);
+        setHasOnlineSession(true);
+        setOnlinePaymentStatus('processing');
       }
     }
+  }, [userId, purpose]); // run once on mount
 
-    // Check if user has already completed payment
-    if (hasCompletedPayment(userId, purpose)) {
-      setPaymentCompleted(true);
-      toast.info('Payment already completed for this registration');
+  // ── Recovery hook — auto-polls when session is unfinished ─────────────────
+  const { state: recoveryState, triggerManualCheck } = usePaymentRecovery({
+    getToken,
+    onSuccess: handleRecoverySuccess,
+    autoStart: hasOnlineSession,
+    orderId: sessionOrderId,
+    paymentId: sessionPaymentId,
+  });
+
+  // Sync recoveryState.status → onlinePaymentStatus when it changes.
+  // GUARD: never overwrite the status while a live checkout is in progress —
+  // the recovery hook may fire during that window (e.g. on a previous session)
+  // and must not clobber the active checkout's 'processing' state.
+  useEffect(() => {
+    if (recoveryState.status && !paymentCompleted && !isProcessingPayment) {
+      setOnlinePaymentStatus(recoveryState.status);
     }
-  }, [userId, purpose]);
+  }, [recoveryState.status, paymentCompleted, isProcessingPayment]);
 
   const handleOnlinePayment = async () => {
     if (paymentCompleted) {
@@ -157,9 +372,10 @@ export default function PaymentModeSelector({
     }
 
     setIsProcessingPayment(true);
+    // Show processing state while modal is open (resilient to browser close)
+    setOnlinePaymentStatus('processing');
 
     try {
-      // Create payment session
       const session: PaymentSession = {
         userId,
         userName,
@@ -177,19 +393,19 @@ export default function PaymentModeSelector({
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
       };
-
       savePaymentSession(session);
+      setSessionOrderId(undefined);
+      setSessionPaymentId(undefined);
 
-      // Process payment with Razorpay - pass all required fields for renewal
       const result = await processPayment({
         amount,
         userId,
         userName,
         userEmail,
         userPhone,
-        enrollmentId: enrollmentId,  // Pass enrollmentId directly
-        durationYears: duration,      // Pass duration as number (top level allows number)
-        purpose: purpose, // Must be one of the allowed enums: 'new_registration' | 'renewal'
+        enrollmentId,
+        durationYears: duration,
+        purpose,
         notes: {
           enrollmentId: enrollmentId || 'N/A',
           sessionStartYear: String(sessionStartYear),
@@ -202,14 +418,11 @@ export default function PaymentModeSelector({
       });
 
       if (result.success) {
-        // Update payment session
         updatePaymentSessionStatus(userId, purpose, 'completed', {
           razorpayOrderId: result.orderId,
           razorpayPaymentId: result.paymentId,
           paymentReceipt: result.signature
         });
-
-        // Store payment receipt
         storePaymentReceipt(userId, purpose, {
           orderId: result.orderId!,
           paymentId: result.paymentId!,
@@ -217,19 +430,16 @@ export default function PaymentModeSelector({
           amount,
           timestamp: new Date().toISOString()
         });
-
         setPaymentCompleted(true);
+        setOnlinePaymentStatus('success');
         setPaymentDetails({
           paymentId: result.paymentId,
           orderId: result.orderId,
-          amount: amount,
+          amount,
           status: 'success',
           method: result.details?.method || 'card',
           time: new Date().toISOString()
         });
-
-        toast.success('Payment completed successfully!');
-
         if (onPaymentComplete) {
           onPaymentComplete({
             razorpayPaymentId: result.paymentId,
@@ -238,31 +448,31 @@ export default function PaymentModeSelector({
             paymentStatus: 'success',
             paymentMethod: result.details?.method || 'card',
             paymentTime: new Date().toISOString(),
-            sessionInfo: {
-              sessionStartYear,
-              sessionEndYear,
-              duration,
-              validUntil
-            }
+            sessionInfo: { sessionStartYear, sessionEndYear, duration, validUntil }
           });
         }
       } else {
-        // Update session status to failed
-        updatePaymentSessionStatus(userId, purpose, 'failed');
-        // Display generic error only if specific error details aren't present (hook handles rich errors)
-        if (!result.errorCode && !result.errorReason) {
-          console.log('Payment failed without specific code/reason, showing generic toast');
-          // optional: toast.error(result.error || 'Payment failed'); 
-          // We rely on useRazorpay to show the error toast to avoid duplicates
+        // Checkout closed without success — the Promise resolved via ondismiss
+        // with either the buffered pendingFailure or USER_CANCELLED.
+        // Only finalize if we haven't already completed (race-safety).
+        if (!paymentCompleted) {
+          const mapped = result.frontendStatus || 'failed';
+          setOnlinePaymentStatus(mapped);
+          setPaymentErrorCode(result.errorCode);
+          setPaymentErrorReason(result.errorReason);
+          updatePaymentSessionStatus(userId, purpose, 'failed');
+          if (process.env.NODE_ENV === 'development') {
+            console.info(
+              `[PaymentModeSelector] payment outcome: status=${mapped}, ` +
+              `code=${result.errorCode || ''}, reason=${result.errorReason || ''}`
+            );
+          }
         }
       }
     } catch (error: any) {
-      console.error('Payment error:', error);
+      console.error('[PaymentModeSelector] unexpected error:', error);
+      setOnlinePaymentStatus('verification_pending');
       updatePaymentSessionStatus(userId, purpose, 'failed');
-      // Only show toast if it wasn't already handled by the hook (which catches most internal errors)
-      if (!error.message?.includes('Payment cancelled') && !error.message?.includes('Payment failed')) {
-        toast.error('Payment processing initialization failed. Please try again.');
-      }
     } finally {
       setIsProcessingPayment(false);
     }
@@ -272,17 +482,11 @@ export default function PaymentModeSelector({
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Validate file size (5MB max)
-    const maxSize = 5 * 1024 * 1024;
-    if (file.size > maxSize) {
-      toast.error('File size must be less than 5MB');
-      return;
-    }
-
     // Validate file type
-    const allowedTypes = ['image/png', 'image/jpeg', 'image/jpg'];
+    const allowedTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp'];
     if (!allowedTypes.includes(file.type)) {
-      toast.error('Only PNG, JPG, and JPEG files are allowed');
+      toast.error('Only PNG, JPG, JPEG, and WebP files are allowed');
+      e.target.value = '';
       return;
     }
 
@@ -293,16 +497,24 @@ export default function PaymentModeSelector({
     });
 
     try {
-      // Mobile optimization: Compress image if on mobile device
+      // Compress if file size > 1MB (mobile or desktop) to optimize and prevent connection resets
       let processedFile = file;
-      if (isMobileDevice() && file.size > 1 * 1024 * 1024) { // 1MB threshold for mobile
-        console.log('📱 Mobile device detected, compressing receipt image...');
-        toast.info('Optimizing image for mobile...', { duration: 2000 });
+      if (file.size > 1 * 1024 * 1024) {
+        console.log('Optimizing receipt image...');
+        toast.info('Optimizing image for upload...', { duration: 2000 });
 
         // Import mobile utils dynamically to avoid SSR issues
         const { compressImageForMobile } = await import('@/lib/mobile-utils');
         processedFile = await compressImageForMobile(file, 2);
-        console.log(`📱 Receipt compressed: ${(file.size / 1024 / 1024).toFixed(2)}MB → ${(processedFile.size / 1024 / 1024).toFixed(2)}MB`);
+        console.log(`Receipt compressed: ${(file.size / 1024 / 1024).toFixed(2)}MB → ${(processedFile.size / 1024 / 1024).toFixed(2)}MB`);
+      }
+
+      // Validate file size on final processed image
+      const maxSize = 5 * 1024 * 1024;
+      if (processedFile.size > maxSize) {
+        toast.error('File size must be less than 5MB');
+        e.target.value = '';
+        return;
       }
 
       // Clean up previous object URL if it exists
@@ -323,7 +535,11 @@ export default function PaymentModeSelector({
       if (purpose === 'new_registration') {
         toast.success('✅ Receipt attached to application');
         if (offlinePaymentId && onOfflineSelected) {
-          onOfflineSelected({ paymentId: offlinePaymentId });
+          onOfflineSelected({ 
+            paymentId: offlinePaymentId,
+            receiptUrl: previewUrl,
+            paidAt: offlinePaidAt ? new Date(offlinePaidAt).toISOString() : new Date().toISOString()
+          });
         }
       } else {
         toast.success('✅ Receipt ready! Click "Complete Offline Payment" below to submit.');
@@ -331,6 +547,9 @@ export default function PaymentModeSelector({
     } catch (error) {
       console.error('Error processing receipt:', error);
       toast.error('Error processing image. Please try again.');
+    } finally {
+      // Always clear value so that user can select same file again if they remove and re-choose
+      e.target.value = '';
     }
   };
 
@@ -342,6 +561,19 @@ export default function PaymentModeSelector({
 
     if (!offlinePaymentId.trim()) {
       toast.error('Please enter UPI Transaction ID');
+      return;
+    }
+
+    if (!offlinePaidDate || !offlinePaidTime) {
+      toast.error('Please select both the payment date and time');
+      return;
+    }
+
+    // Validate that the payment date is not in the future
+    const selectedDate = new Date(`${offlinePaidDate}T${offlinePaidTime}`);
+    const now = new Date();
+    if (selectedDate > now) {
+      toast.error('Payment date and time cannot be in the future');
       return;
     }
 
@@ -385,6 +617,7 @@ export default function PaymentModeSelector({
         paymentMode: 'offline',
         status: 'pending',
         offlinePaymentId,
+        paidAt: offlinePaidAt ? new Date(offlinePaidAt).toISOString() : new Date().toISOString(),
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
       };
@@ -398,7 +631,8 @@ export default function PaymentModeSelector({
       if (onOfflineSelected) {
         onOfflineSelected({
           paymentId: offlinePaymentId,
-          receiptUrl: cloudinaryReceiptUrl
+          receiptUrl: cloudinaryReceiptUrl,
+          paidAt: offlinePaidAt ? new Date(offlinePaidAt).toISOString() : new Date().toISOString()
         });
       }
 
@@ -483,7 +717,7 @@ export default function PaymentModeSelector({
 
             {/* Summary Grid */}
             <div className="grid grid-cols-3 gap-1 sm:gap-2">
-              <div className="p-1 sm:p-2 bg-white/[0.08] border border-white/5 rounded-lg lg:rounded-xl">
+              <div className="p-1 sm:p-2 bg-white/[0.12] rounded-lg lg:rounded-xl">
                 <div className="flex items-center gap-0.5 mb-0.5">
                   <Clock className="h-2.5 w-2.5 sm:h-3 sm:w-3 text-blue-200" />
                   <span className="text-[7px] sm:text-[9px] text-blue-100 font-semibold uppercase tracking-wider">Duration</span>
@@ -491,7 +725,7 @@ export default function PaymentModeSelector({
                 <p className="font-black text-[9px] sm:text-xs text-white uppercase">{duration} Year{duration > 1 ? 's' : ''}</p>
               </div>
 
-              <div className="p-1 sm:p-2 bg-white/[0.08] border border-white/5 rounded-lg lg:rounded-xl">
+              <div className="p-1 sm:p-2 bg-white/[0.12] rounded-lg lg:rounded-xl">
                 <div className="flex items-center gap-0.5 mb-0.5">
                   <Calendar className="h-2.5 w-2.5 sm:h-3 sm:w-3 text-purple-200" />
                   <span className="text-[7px] sm:text-[9px] text-purple-100 font-semibold uppercase tracking-wider">Session</span>
@@ -499,19 +733,19 @@ export default function PaymentModeSelector({
                 <p className="font-black text-[9px] sm:text-xs text-white">{sessionStartYear}-{sessionEndYear}</p>
               </div>
 
-              <div className="p-1 sm:p-2 bg-white/[0.08] border border-white/5 rounded-lg lg:rounded-xl">
+              <div className="p-1 sm:p-2 bg-white/[0.12] rounded-lg lg:rounded-xl">
                 <div className="flex items-center gap-0.5 mb-0.5">
                   <CheckCircle className="h-2.5 w-2.5 sm:h-3 sm:w-3 text-green-300" />
                   <span className="text-[7px] sm:text-[9px] text-green-100 font-semibold uppercase tracking-wider text-nowrap">Valid Until</span>
                 </div>
                 <p className="font-black text-[9px] sm:text-xs text-white">
-                  {new Date(validUntil).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' })}
+                  {new Date(validUntil).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
                 </p>
               </div>
             </div>
 
             {/* Total Amount */}
-            <div className="relative overflow-hidden p-2 sm:p-3 bg-white/[0.06] rounded-lg sm:rounded-xl border border-white/5">
+            <div className="relative overflow-hidden p-2 sm:p-3 bg-white/[0.10] rounded-lg sm:rounded-xl">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-1.5 sm:gap-2">
                   <div className="p-1 sm:p-1.5 rounded-md lg:rounded-lg bg-gradient-to-br from-green-400 to-emerald-500 shadow-lg">
@@ -533,8 +767,8 @@ export default function PaymentModeSelector({
           <div className="relative overflow-hidden rounded-2xl">
             <div className="absolute inset-0 bg-gradient-to-br from-green-500 to-emerald-600"></div>
             <div className="relative p-5 sm:p-6">
-              <div className="flex items-start gap-3 sm:gap-4 mb-4">
-                <div className="p-2 sm:p-2.5 bg-white/[0.08] border border-white/5 rounded-xl">
+              <div className="flex flex-col sm:flex-row items-center sm:items-start gap-3 sm:gap-4 mb-4 text-center sm:text-left">
+                <div className="p-2 sm:p-2.5 bg-white/[0.08] rounded-xl">
                   <CheckCircle className="h-6 w-6 sm:h-7 sm:w-7 text-white" />
                 </div>
                 <div className="flex-1">
@@ -544,29 +778,29 @@ export default function PaymentModeSelector({
               </div>
 
               {paymentDetails && (
-                <div className="space-y-2 bg-white/[0.05] border border-white/5 rounded-xl p-3 sm:p-4">
-                  <div className="flex justify-between items-center text-xs sm:text-sm">
-                    <span className="text-green-50">Payment ID</span>
-                    <span className="font-mono font-semibold text-white">{paymentDetails.paymentId}</span>
+                <div className="space-y-3 bg-white/[0.12] rounded-xl p-3 sm:p-4">
+                  <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
+                    <span className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-green-200/70">Payment ID</span>
+                    <span className="font-mono font-medium text-white break-all text-left sm:text-right text-xs sm:text-sm">{paymentDetails.paymentId}</span>
                   </div>
-                  <div className="flex justify-between items-center text-xs sm:text-sm">
-                    <span className="text-green-50">Order ID</span>
-                    <span className="font-mono font-semibold text-white">{paymentDetails.orderId}</span>
+                  <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
+                    <span className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-green-200/70">Order ID</span>
+                    <span className="font-mono font-medium text-white break-all text-left sm:text-right text-xs sm:text-sm">{paymentDetails.orderId}</span>
                   </div>
-                  <div className="flex justify-between items-center text-xs sm:text-sm">
-                    <span className="text-green-50">Amount</span>
-                    <span className="font-bold text-white">₹{paymentDetails.amount || amount}</span>
+                  <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
+                    <span className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-green-200/70">Amount</span>
+                    <span className="font-bold text-white text-xs sm:text-sm text-left sm:text-right">₹{(paymentDetails.amount || amount).toLocaleString()}</span>
                   </div>
                   {paymentDetails.method && (
-                    <div className="flex justify-between items-center text-xs sm:text-sm">
-                      <span className="text-green-50">Method</span>
-                      <span className="capitalize font-semibold text-white">{paymentDetails.method}</span>
+                    <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
+                      <span className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-green-200/70">Method</span>
+                      <span className="capitalize font-semibold text-white text-xs sm:text-sm text-left sm:text-right">{paymentDetails.method}</span>
                     </div>
                   )}
                   {paymentDetails.time && (
-                    <div className="flex justify-between items-center text-xs sm:text-sm">
-                      <span className="text-green-50">Time</span>
-                      <span className="font-semibold text-white">
+                    <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1">
+                      <span className="text-[10px] sm:text-xs font-bold uppercase tracking-wider text-green-200/70">Time</span>
+                      <span className="font-semibold text-white text-xs sm:text-sm text-left sm:text-right">
                         {new Date(paymentDetails.time).toLocaleString('en-US', {
                           month: 'short',
                           day: 'numeric',
@@ -614,8 +848,8 @@ export default function PaymentModeSelector({
                   {/* Online Payment Option */}
                   <button
                     type="button"
-                    onClick={() => !(isReadOnly || isVerified) && setPaymentMode('online')}
-                    disabled={isReadOnly || isVerified}
+                    onClick={() => !isReadOnly && setPaymentMode('online')}
+                    disabled={isReadOnly}
                     className={`relative group px-1.5 sm:px-4 py-2.5 sm:py-3.5 rounded-xl transition-all duration-300 select-none touch-manipulation ${isReadOnly ? 'cursor-not-allowed opacity-80' : 'cursor-pointer'}`}
                   >
                     <div className="flex items-center justify-center gap-1.5 sm:gap-2.5">
@@ -653,8 +887,8 @@ export default function PaymentModeSelector({
                   {/* Offline Payment Option */}
                   <button
                     type="button"
-                    onClick={() => !(isReadOnly || isVerified) && setPaymentMode('offline')}
-                    disabled={isReadOnly || isVerified}
+                    onClick={() => !isReadOnly && setPaymentMode('offline')}
+                    disabled={isReadOnly}
                     className={`relative group px-1.5 sm:px-4 py-2.5 sm:py-3.5 rounded-xl transition-all duration-300 select-none touch-manipulation ${isReadOnly ? 'cursor-not-allowed opacity-80' : 'cursor-pointer'}`}
                   >
                     <div className="flex items-center justify-center gap-1.5 sm:gap-2.5">
@@ -733,13 +967,106 @@ export default function PaymentModeSelector({
 
                       // For new registration, sync to parent immediately
                       if (purpose === 'new_registration' && onOfflineSelected) {
-                        onOfflineSelected({ paymentId: value });
+                        onOfflineSelected({ 
+                          paymentId: value,
+                          receiptUrl: receiptPreview,
+                          paidAt: offlinePaidAt ? new Date(offlinePaidAt).toISOString() : new Date().toISOString()
+                        });
                       }
                     }}
                     placeholder="e.g., 234567890123"
                     required
-                    className={`h-10 sm:h-11 font-mono text-xs sm:text-sm bg-white/5 border-2 border-violet-500/30 text-white focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20 ${(isReadOnly || isVerified) ? 'opacity-60 cursor-not-allowed border-gray-700' : ''}`}
+                    className={`h-10 sm:h-11 font-mono text-xs sm:text-sm bg-white/5 border-2 border-violet-500/30 text-white focus:border-violet-500 focus:ring-2 focus:ring-violet-500/20 ${isReadOnly ? 'opacity-60 cursor-not-allowed border-gray-700' : ''}`}
                   />
+                </div>
+
+                {/* Split Date & Time Inputs */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                  {/* Date Input */}
+                  <div className="space-y-1.5 sm:space-y-2">
+                    <Label htmlFor="offlinePaidDate" className="text-xs sm:text-sm font-semibold flex items-center gap-1.5 text-blue-300">
+                      <div className="p-1 rounded-md bg-blue-500 shadow-md">
+                        <Calendar className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-white" />
+                      </div>
+                      Payment Date <span className="text-red-500 ml-1">*</span>
+                    </Label>
+                    <input
+                      ref={dateInputRef}
+                      id="offlinePaidDate"
+                      type="date"
+                      value={offlinePaidDate}
+                      max={maxDate}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        
+                        // Prevent future date
+                        let finalVal = val;
+                        if (val && val > maxDate) {
+                          finalVal = maxDate;
+                          toast.error('Payment date cannot be in the future');
+                        }
+
+                        setOfflinePaidDate(finalVal);
+
+                        // Sync immediately for new registration
+                        if (purpose === 'new_registration' && onOfflineSelected) {
+                          const updatedPaidAt = finalVal && offlinePaidTime ? `${finalVal}T${offlinePaidTime}` : '';
+                          onOfflineSelected({
+                            paymentId: offlinePaymentId,
+                            receiptUrl: receiptPreview,
+                            paidAt: updatedPaidAt ? new Date(updatedPaidAt).toISOString() : ''
+                          });
+                        }
+                      }}
+                      required
+                      disabled={isReadOnly}
+                      className={`h-10 sm:h-11 w-full min-w-0 rounded-md border-2 px-3 py-2 shadow-sm transition-[color,box-shadow,border-color] outline-none hover:border-gray-400 dark:hover:border-gray-500 focus-visible:border-blue-500 focus-visible:ring-2 focus-visible:ring-blue-500/20 text-xs sm:text-sm bg-white/5 border-blue-500/30 text-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 ${isReadOnly ? 'opacity-60 cursor-not-allowed border-gray-700' : ''} cursor-pointer`}
+                    />
+                  </div>
+
+                  {/* Time Input */}
+                  <div className="space-y-1.5 sm:space-y-2">
+                    <Label htmlFor="offlinePaidTime" className="text-xs sm:text-sm font-semibold flex items-center gap-1.5 text-blue-300">
+                      <div className="p-1 rounded-md bg-blue-500 shadow-md">
+                        <Clock className="h-3 w-3 sm:h-3.5 sm:w-3.5 text-white" />
+                      </div>
+                      Payment Time <span className="text-red-500 ml-1">*</span>
+                    </Label>
+                    <input
+                      ref={timeInputRef}
+                      id="offlinePaidTime"
+                      type="time"
+                      value={offlinePaidTime}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        let finalVal = val;
+                        
+                        // If selected date is today, prevent future time
+                        if (offlinePaidDate === maxDate && val) {
+                          const currentTime = new Date(Date.now() - (new Date()).getTimezoneOffset() * 60000).toISOString().slice(11, 16);
+                          if (val > currentTime) {
+                            finalVal = currentTime;
+                            toast.error('Payment time cannot be in the future');
+                          }
+                        }
+
+                        setOfflinePaidTime(finalVal);
+
+                        // Sync immediately for new registration
+                        if (purpose === 'new_registration' && onOfflineSelected) {
+                          const updatedPaidAt = offlinePaidDate && finalVal ? `${offlinePaidDate}T${finalVal}` : '';
+                          onOfflineSelected({
+                            paymentId: offlinePaymentId,
+                            receiptUrl: receiptPreview,
+                            paidAt: updatedPaidAt ? new Date(updatedPaidAt).toISOString() : ''
+                          });
+                        }
+                      }}
+                      required
+                      disabled={isReadOnly}
+                      className={`h-10 sm:h-11 w-full min-w-0 rounded-md border-2 px-3 py-2 shadow-sm transition-[color,box-shadow,border-color] outline-none hover:border-gray-400 dark:hover:border-gray-500 focus-visible:border-blue-500 focus-visible:ring-2 focus-visible:ring-blue-500/20 text-xs sm:text-sm bg-white/5 border-blue-500/30 text-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 ${isReadOnly ? 'opacity-60 cursor-not-allowed border-gray-700' : ''} cursor-pointer`}
+                    />
+                  </div>
                 </div>
 
                 {/* Receipt Upload */}
@@ -766,13 +1093,18 @@ export default function PaymentModeSelector({
                             <Button
                               size="sm"
                               variant="destructive"
-                              className="absolute -top-2 -right-2 h-7 w-7 sm:h-8 sm:w-8 rounded-full shadow-xl opacity-0 group-hover:opacity-100 transition-opacity"
+                              className="absolute -top-2 -right-2 h-7 w-7 sm:h-8 sm:w-8 rounded-full shadow-xl opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity"
                               onClick={() => {
                                 if (receiptPreview.startsWith('blob:')) {
                                   URL.revokeObjectURL(receiptPreview);
                                 }
                                 setReceiptPreview('');
                                 setReceiptFile(null);
+                                // Clear file input element value by ID
+                                const input = document.getElementById('receiptUploadOffline') as HTMLInputElement;
+                                if (input) {
+                                  input.value = '';
+                                }
                                 if (onReceiptRemove) {
                                   onReceiptRemove();
                                 }
@@ -853,41 +1185,61 @@ export default function PaymentModeSelector({
             {/* Online Payment Section */}
             {paymentMode === 'online' && (
               <div className="space-y-3 sm:space-y-4">
-                {/* Payment Flow */}
-                <div className="p-3 sm:p-4 bg-white/[0.03] border border-white/10 rounded-xl">
-                  <div className="flex items-center gap-2 mb-3">
-                    <div className="p-1.5 bg-blue-600 rounded-lg">
-                      <Info className="h-3.5 w-3.5 text-white" />
+                {/* Payment Flow info — only show before first attempt */}
+                {!onlinePaymentStatus && (
+                  <div className="p-3 sm:p-4 bg-white/[0.03] border border-white/10 rounded-xl">
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className="p-1.5 bg-blue-600 rounded-lg">
+                        <Info className="h-3.5 w-3.5 text-white" />
+                      </div>
+                      <h4 className="text-xs sm:text-sm font-bold text-blue-100">How Online Payment Works</h4>
                     </div>
-                    <h4 className="text-xs sm:text-sm font-bold text-blue-100">How Online Payment Works</h4>
+                    <div className="space-y-1.5">
+                      <div className="flex items-start gap-2.5">
+                        <div className="flex-shrink-0 w-4 h-4 rounded-full bg-blue-600 flex items-center justify-center text-white text-[9px] font-bold">1</div>
+                        <p className="text-[9px] text-gray-400 font-medium">Click the &quot;Pay Securely&quot; button below</p>
+                      </div>
+                      <div className="flex items-start gap-2.5">
+                        <div className="flex-shrink-0 w-4 h-4 rounded-full bg-indigo-600 flex items-center justify-center text-white text-[9px] font-bold">2</div>
+                        <p className="text-[9px] text-gray-400 font-medium">Complete payment via Razorpay</p>
+                      </div>
+                      <div className="flex items-start gap-2.5">
+                        <div className="flex-shrink-0 w-4 h-4 rounded-full bg-purple-600 flex items-center justify-center text-white text-[9px] font-bold">3</div>
+                        <p className="text-[9px] text-gray-400 font-medium">Instant confirmation &amp; auto-activation</p>
+                      </div>
+                    </div>
                   </div>
-                  <div className="space-y-1.5">
-                    <div className="flex items-start gap-2.5">
-                      <div className="flex-shrink-0 w-4 h-4 rounded-full bg-blue-600 flex items-center justify-center text-white text-[9px] font-bold">1</div>
-                      <p className="text-[9px] text-gray-400 font-medium">Click the "Pay Securely" button below</p>
-                    </div>
-                    <div className="flex items-start gap-2.5">
-                      <div className="flex-shrink-0 w-4 h-4 rounded-full bg-indigo-600 flex items-center justify-center text-white text-[9px] font-bold">2</div>
-                      <p className="text-[9px] text-gray-400 font-medium">Complete payment via Razorpay</p>
-                    </div>
-                    <div className="flex items-start gap-2.5">
-                      <div className="flex-shrink-0 w-4 h-4 rounded-full bg-purple-600 flex items-center justify-center text-white text-[9px] font-bold">3</div>
-                      <p className="text-[9px] text-gray-400 font-medium">Instant confirmation & auto-activation</p>
-                    </div>
-                  </div>
-                </div>
+                )}
 
-                {/* Security Info */}
-                {!isFormComplete ? (
+                {/* Canonical Payment Status Panel */}
+                {onlinePaymentStatus && onlinePaymentStatus !== 'success' && (
+                  <PaymentStatusPanel
+                    status={onlinePaymentStatus}
+                    isPolling={recoveryState.isPolling}
+                    timedOut={recoveryState.timedOut}
+                    errorCode={paymentErrorCode}
+                    errorReason={paymentErrorReason}
+                    onManualCheck={triggerManualCheck}
+                    onRetry={() => {
+                      setOnlinePaymentStatus(null);
+                      setPaymentErrorCode(undefined);
+                      setPaymentErrorReason(undefined);
+                    }}
+                  />
+                )}
+
+                {/* Security Info — only show when no status yet and form is complete */}
+                {!onlinePaymentStatus && !isFormComplete && (
                   <Alert className="border py-2 sm:py-3 border-amber-500/30 bg-amber-500/5">
                     <div className="flex items-start gap-2 sm:gap-3">
                       <AlertCircle className="h-4 w-4 sm:h-5 sm:w-5 flex-shrink-0 text-amber-500" />
                       <AlertDescription className="text-[9px] sm:text-sm text-amber-500 font-medium">
-                        Please complete the application form (upload photo, fill all details) before ensuring online payment.
+                        Please complete the application form (upload photo, fill all details) before making online payment.
                       </AlertDescription>
                     </div>
                   </Alert>
-                ) : (
+                )}
+                {!onlinePaymentStatus && isFormComplete && (
                   <Alert className="border py-2 sm:py-3 border-blue-500/30 bg-blue-500/5">
                     <div className="flex items-start gap-2 sm:gap-3">
                       <Lock className="h-4 w-4 sm:h-5 sm:w-5 flex-shrink-0 text-blue-400" />
@@ -898,31 +1250,49 @@ export default function PaymentModeSelector({
                   </Alert>
                 )}
 
-                {/* Online Payment Button */}
-                <Button
-                  onClick={() => {
-                    if (!isFormComplete) {
-                      toast.error("Please fill out all required fields in steps 1, 2, and 3 before making payment.");
-                      return;
-                    }
-                    handleOnlinePayment();
-                  }}
-                  disabled={isProcessingPayment || isProcessing}
-                  className={`w-full h-11 sm:h-14 text-xs sm:text-base font-bold bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 hover:from-emerald-700 hover:via-teal-700 hover:to-cyan-700 text-white shadow-xl hover:shadow-2xl transition-all duration-200 cursor-pointer active:scale-[0.98] ${!isFormComplete ? 'opacity-50' : ''}`}
-                >
-                  {isProcessingPayment || isProcessing ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 sm:h-6 sm:w-6 animate-spin" />
-                      Processing...
-                    </>
-                  ) : (
-                    <>
-                      <Lock className="mr-2 h-4 w-4 sm:h-6 sm:w-6" />
-                      Pay ₹{amount.toLocaleString()} Securely
-                      <Zap className="ml-2 h-4 w-4 sm:h-6 sm:w-6" />
-                    </>
-                  )}
-                </Button>
+                {/* Online Payment Button — disabled while processing or success, re-enabled on failed/banking_issue for retry */}
+                {(() => {
+                  const isTerminalSuccess = onlinePaymentStatus === 'success';
+                  const isActivelyProcessing =
+                    isProcessingPayment ||
+                    isProcessing ||
+                    onlinePaymentStatus === 'processing' ||
+                    onlinePaymentStatus === 'verification_pending' ||
+                    recoveryState.isPolling;
+                  const isRetryable =
+                    onlinePaymentStatus === 'failed' ||
+                    onlinePaymentStatus === 'banking_issue';
+                  const disabled = isTerminalSuccess || (isActivelyProcessing && !isRetryable);
+
+                  if (isTerminalSuccess) return null; // Success panel already shown above
+
+                  return (
+                    <Button
+                      onClick={() => {
+                        if (!isFormComplete) {
+                          toast.error('Please fill out all required fields in steps 1, 2, and 3 before making payment.');
+                          return;
+                        }
+                        handleOnlinePayment();
+                      }}
+                      disabled={disabled}
+                      className={`w-full h-11 sm:h-14 text-xs sm:text-base font-bold bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 hover:from-emerald-700 hover:via-teal-700 hover:to-cyan-700 text-white shadow-xl hover:shadow-2xl transition-all duration-200 cursor-pointer active:scale-[0.98] ${!isFormComplete ? 'opacity-50' : ''} ${disabled && !isRetryable ? 'opacity-60 cursor-not-allowed' : ''}`}
+                    >
+                      {isActivelyProcessing && !isRetryable ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 sm:h-6 sm:w-6 animate-spin" />
+                          Processing…
+                        </>
+                      ) : (
+                        <>
+                          <Lock className="mr-2 h-4 w-4 sm:h-6 sm:w-6" />
+                          {isRetryable ? `Try Again — ₹${amount.toLocaleString()}` : `Pay ₹${amount.toLocaleString()} Securely`}
+                          <Zap className="ml-2 h-4 w-4 sm:h-6 sm:w-6" />
+                        </>
+                      )}
+                    </Button>
+                  );
+                })()}
               </div>
             )}
 

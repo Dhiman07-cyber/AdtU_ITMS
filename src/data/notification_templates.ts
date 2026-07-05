@@ -8,7 +8,7 @@
 
 export type NotificationType = 'notice' | 'pickup' | 'dropoff' | 'trip' | 'announcement';
 export type AudienceScope = 'all' | 'shift' | 'route';
-export type ShiftType = 'morning' | 'evening' | null;
+export type ShiftType = 'Morning' | 'Evening' | null;
 
 export interface NotificationTemplate {
   type: NotificationType;

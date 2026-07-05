@@ -4,6 +4,7 @@ import { calculateRenewalDate, toFirestoreTimestamp, formatRenewalDate } from '@
 import { computeBlockDatesFromValidUntil } from '@/lib/utils/deadline-computation';
 import { getDeadlineConfig } from '@/lib/deadline-config-service';
 import { buildCapacityDelta } from '@/lib/busCapacityService';
+import { getShiftLoad } from '@/lib/utils/shift-utils';
 import { wasSeatReleased } from '@/lib/config/capacity-flags';
 import { paymentsSupabaseService } from '@/lib/services/payments-supabase';
 import crypto from 'crypto';
@@ -297,7 +298,12 @@ export async function POST(request: NextRequest) {
               const busDoc = await txn.get(busRef);
               if (!busDoc.exists) throw new Error('Assigned bus not found');
               const busData = busDoc.data();
-              if ((busData?.currentMembers || 0) >= (busData?.capacity || 55)) {
+              // CANONICAL PER-SHIFT CAPACITY GATE: gate on the student's shift trip
+              // counter, never on the combined total currentMembers. Students share the
+              // same physical seats across Morning and Evening — each shift runs
+              // independently up to `capacity` seats.
+              const shiftLoad = getShiftLoad(busData, studentData.shift);
+              if (shiftLoad >= (busData?.capacity || 55)) {
                 throw new CapacityFullError();
               }
               const delta = buildCapacityDelta(busData, studentData.shift, 1);

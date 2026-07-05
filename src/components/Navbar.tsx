@@ -14,7 +14,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { SignOutButton } from "@/components/signout-button";
 import { CompactPingIndicator } from '@/components/PingIndicator';
-import { useSystemConfig } from '@/contexts/SystemConfigContext';
+import { APP_NAME } from '@/config/runtime';
 import { useNotifications } from '@/contexts/NotificationContext';
 import { cn } from "@/lib/utils";
 import { safeImageSrc } from "@/lib/security/url-sanitizer";
@@ -51,7 +51,7 @@ const Navbar = React.memo(function Navbar({ onMenuToggle, isSidebarOpen = false 
     : (userData?.fullName || userData?.name || "User");
   const router = useRouter();
   const pathname = usePathname();
-  const { appName } = useSystemConfig();
+  const appName = APP_NAME;
   const { unreadCount } = useNotifications();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSignOutDialogOpen, setIsSignOutDialogOpen] = useState(false);

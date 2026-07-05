@@ -10,6 +10,7 @@ import {
   addDoc
 } from 'firebase/firestore';
 import { toast } from 'react-hot-toast';
+import { getShiftDeltas, normalizeShift } from '@/lib/utils/shift-utils';
 import type { ReassignmentPlan } from '@/app/admin/smart-allocation/page';
 
 interface UndoAction {
@@ -86,26 +87,23 @@ export class ReassignmentService {
           eveningDelta: number;
         }>();
 
-        // First, we need to get student shifts to calculate proper deltas
-        const studentShifts = new Map<string, string>();
+        // Read student documents to get ORIGINAL shifts for source bus decrement.
+        // The TARGET shift (plan.studentShift) is used for destination bus increment.
+        const studentOriginalShifts = new Map<string, string>();
         for (const plan of plans) {
-          // Optimization: If shift is already provided in the plan, use it!
-          if (plan.studentShift) {
-            studentShifts.set(plan.studentId, plan.studentShift);
-            continue;
-          }
-
-          // Fallback only if shift is missing (e.g., from older client versions or different logic)
           const studentDoc = await transaction.get(doc(db, 'students', plan.studentId));
           if (studentDoc.exists()) {
-            const shift = studentDoc.data().shift || 'Morning';
-            studentShifts.set(plan.studentId, shift);
+            // Original Shift: what the student currently has in Firestore
+            studentOriginalShifts.set(plan.studentId, normalizeShift(studentDoc.data().shift || 'Morning'));
           }
         }
 
-        // Pre-calculate bus load changes
+        // Pre-calculate bus load changes using Original Shift vs Target Shift
         for (const plan of plans) {
-          const shift = studentShifts.get(plan.studentId) || 'Morning';
+          // Original Shift: used for SOURCE bus DECREMENT
+          const originalShift = studentOriginalShifts.get(plan.studentId) || 'Morning';
+          // Target Shift: used for DESTINATION bus INCREMENT
+          const targetShift = normalizeShift(plan.studentShift || originalShift);
 
           // Initialize changes for buses
           if (!busLoadChanges.has(plan.fromBusId)) {
@@ -122,16 +120,15 @@ export class ReassignmentService {
           fromChanges.totalDelta -= 1;
           toChanges.totalDelta += 1;
 
-          // Update shift-specific deltas
-          const normalizedShift = shift.toLowerCase();
-          if (normalizedShift.includes('morning') || normalizedShift === 'both') {
-            fromChanges.morningDelta -= 1;  // Remove from source bus
-            toChanges.morningDelta += 1;    // Add to target bus
-          }
-          if (normalizedShift.includes('evening') || normalizedShift === 'both') {
-            fromChanges.eveningDelta -= 1;  // Remove from source bus
-            toChanges.eveningDelta += 1;    // Add to target bus
-          }
+          // Source bus: DECREMENT using ORIGINAL shift
+          const srcDeltas = getShiftDeltas(originalShift);
+          if (srcDeltas.affectsMorning) fromChanges.morningDelta -= 1;
+          if (srcDeltas.affectsEvening) fromChanges.eveningDelta -= 1;
+
+          // Destination bus: INCREMENT using TARGET shift
+          const dstDeltas = getShiftDeltas(targetShift);
+          if (dstDeltas.affectsMorning) toChanges.morningDelta += 1;
+          if (dstDeltas.affectsEvening) toChanges.eveningDelta += 1;
         }
 
         // Read all affected bus documents (must be done before writes in transaction)
@@ -158,7 +155,7 @@ export class ReassignmentService {
           const newMorning = Math.max(0, (currentLoad.morningCount || 0) + changes.morningDelta);
           const newEvening = Math.max(0, (currentLoad.eveningCount || 0) + changes.eveningDelta);
 
-          // Validate capacity for increases
+          // Validate capacity for increases (per-shift: independent trips)
           if (changes.morningDelta > 0 && newMorning > busData.capacity) {
             throw new Error(`Bus ${busData.busNumber} would exceed morning capacity (${newMorning}/${busData.capacity})`);
           }
@@ -186,7 +183,7 @@ export class ReassignmentService {
           console.log(`🚌 Bus ${busId}: morning ${currentLoad.morningCount || 0}→${newMorningCount}, evening ${currentLoad.eveningCount || 0}→${newEveningCount}`);
         }
 
-        // Update student documents
+        // Update student documents — including the NEW shift
         for (const plan of plans) {
           const studentRef = doc(db, 'students', plan.studentId);
 
@@ -194,13 +191,17 @@ export class ReassignmentService {
           const targetBusInfo = busSnapshots.get(plan.toBusId);
           const targetRouteId = targetBusInfo?.data?.route?.routeId || targetBusInfo?.data?.routeId || '';
 
+          // Target Shift: what the student will now have
+          const targetShift = normalizeShift(plan.studentShift || studentOriginalShifts.get(plan.studentId) || 'Morning');
+
           transaction.update(studentRef, {
             busId: plan.toBusId,
             routeId: targetRouteId,
+            shift: targetShift,
             updatedAt: serverTimestamp()
           });
 
-          console.log(`👤 Student ${plan.studentId}: moved to bus ${plan.toBusId}`);
+          console.log(`👤 Student ${plan.studentId}: moved to bus ${plan.toBusId}, shift → ${targetShift}`);
         }
       });
 
@@ -225,12 +226,16 @@ export class ReassignmentService {
 
     console.log(`⏪ Undoing reassignment: ${action.plans.length} students`);
 
-    // Reverse the plans
+    // Reverse the plans: swap from/to buses
+    // Each plan stores: studentShift = TARGET shift (what the student now has)
+    // For undo: we need to restore the student to their ORIGINAL bus and shift.
+    // The ORIGINAL shift is not stored in the plan, so we must read it from Firestore.
     const reversePlans = action.plans.map(plan => ({
       ...plan,
       fromBusId: plan.toBusId,
       toBusId: plan.fromBusId,
-      toBusNumber: 'Original', // This would need to be stored
+      toBusNumber: 'Original',
+      // studentShift will be resolved from Firestore in executeBatch (original shift)
       reason: `Undo: ${plan.reason}`
     }));
 
@@ -392,12 +397,28 @@ export class ReassignmentService {
     actorName: string
   ): Promise<void> {
     try {
-      const auditLog = {
-        type: 'bus_reassignment',
-        actorId,
-        actorName,
-        timestamp: serverTimestamp(),
-        details: {
+      const auditLogsRef = collection(db, 'audit_logs');
+      const expiresAt = new Date();
+      expiresAt.setMonth(expiresAt.getMonth() + 6); // 6 months retention for medium severity
+
+      await addDoc(auditLogsRef, {
+        category: 'reassignments',
+        action: 'bus_reassignment',
+        summary: `Bus reassigned: ${plans.length} student(s)`,
+        description: '',
+        severity: 'medium',
+        performedBy: actorId,
+        performedByName: actorName,
+        performedByRole: 'admin',
+        performedAt: serverTimestamp(),
+        createdAt: serverTimestamp(),
+        expiresAt: expiresAt,
+        targetType: 'bus',
+        targetId: plans[0]?.fromBusId || '',
+        targetName: '',
+        ipAddress: '',
+        userAgent: typeof window !== 'undefined' ? window.navigator.userAgent : '',
+        metadata: {
           studentCount: plans.length,
           reason,
           plans: plans.map(p => ({
@@ -405,15 +426,10 @@ export class ReassignmentService {
             studentName: p.studentName,
             fromBusId: p.fromBusId,
             toBusId: p.toBusId,
-            toBusNumber: p.toBusNumber
-          }))
-        }
-      };
-
-      const activityLogsRef = collection(db, 'activity_logs');
-      await addDoc(activityLogsRef, auditLog);
-      console.log('📝 Audit log created');
-
+            toBusNumber: p.toBusNumber,
+          })),
+        },
+      });
     } catch (error) {
       console.error('Failed to create audit log:', error);
       // Don't throw - audit logs are not critical

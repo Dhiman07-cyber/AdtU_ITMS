@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { useToast } from '@/contexts/toast-context';
 import { Route } from '@/lib/types';
 import { Loader2, AlertCircle, CheckCircle, Info } from 'lucide-react';
@@ -30,6 +30,7 @@ interface RouteSelectionSectionProps {
   shiftContent?: React.ReactNode;
   children?: React.ReactNode;
   extraLabelMargin?: boolean;
+  hideCapacityAlerts?: boolean;
 }
 
 export default function RouteSelectionSection({
@@ -45,7 +46,8 @@ export default function RouteSelectionSection({
   isReadOnly = false,
   shiftContent,
   children,
-  extraLabelMargin = false
+  extraLabelMargin = false,
+  hideCapacityAlerts = false
 }: RouteSelectionSectionProps) {
   const { showToast } = useToast();
 
@@ -276,7 +278,7 @@ export default function RouteSelectionSection({
       if (onCapacityCheckResult) onCapacityCheckResult(result);
 
       // Handle the three cases with appropriate UI logic (Toasts muted per requirement)
-      if (result.isFull || result.needsCapacityReview) {
+      if (!hideCapacityAlerts && (result.isFull || result.needsCapacityReview)) {
         if (result.hasAlternatives && result.alternativeBuses.length > 0) {
           // Case 2A: Bus is full but alternatives exist
           // Auto-select alternative if only one exists
@@ -374,24 +376,27 @@ export default function RouteSelectionSection({
             </div>
 
             {selectedRouteId && (
-              <HoverCard>
-                <HoverCardTrigger asChild>
-                  <div
-                    className="h-10 w-10 flex items-center justify-center bg-slate-900 border border-slate-800 rounded-md cursor-pointer text-indigo-400 hover:text-indigo-300 hover:bg-slate-800 transition-colors shrink-0"
+              <Dialog>
+                <DialogTrigger asChild>
+                  <button
+                    type="button"
+                    className="h-10 w-10 flex items-center justify-center bg-slate-900 border border-slate-800 rounded-md cursor-pointer text-indigo-400 hover:text-indigo-300 hover:bg-slate-800 transition-colors shrink-0 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                   >
                     <Info className="h-4 w-4" />
-                  </div>
-                </HoverCardTrigger>
-                <HoverCardContent align="end" className="w-64 md:w-80 p-4 bg-slate-900 rounded-xl shadow-2xl border border-slate-800 z-[100]">
-                  <p className="text-[10px] font-black uppercase tracking-widest text-indigo-500 mb-3 border-b border-slate-800 pb-2">
-                    Stops in this route
-                  </p>
+                  </button>
+                </DialogTrigger>
+                <DialogContent className="max-w-xs md:max-w-sm bg-[#12131A] text-white border-white/10 shadow-2xl rounded-2xl p-6">
+                  <DialogHeader className="border-b border-slate-800 pb-3 mb-4">
+                    <DialogTitle className="text-sm font-bold uppercase tracking-wider text-indigo-400">
+                      Stops in this route
+                    </DialogTitle>
+                  </DialogHeader>
                   <div className="max-h-60 overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-slate-700">
                     {stops.length > 0 ? (
-                      <ul className="space-y-2">
+                      <ul className="space-y-3">
                         {stops.map((stop: any, idx) => (
                           <li key={idx} className="text-xs text-slate-300 flex items-start gap-3">
-                            <div className="mt-1 h-1.5 w-1.5 rounded-full bg-indigo-500 shrink-0 shadow-[0_0_8px_rgba(99,102,241,0.5)]" />
+                            <div className="mt-1.5 h-1.5 w-1.5 rounded-full bg-indigo-500 shrink-0 shadow-[0_0_8px_rgba(99,102,241,0.5)]" />
                             <span className="leading-tight font-medium">{stop.name || stop.stopName || stop}</span>
                           </li>
                         ))}
@@ -400,8 +405,8 @@ export default function RouteSelectionSection({
                       <p className="text-xs text-slate-500 italic">No stops data available.</p>
                     )}
                   </div>
-                </HoverCardContent>
-              </HoverCard>
+                </DialogContent>
+              </Dialog>
             )}
           </div>
         </div>
@@ -498,7 +503,7 @@ export default function RouteSelectionSection({
 
       {/* Detailed Capacity Feedback Alert - Full width below the grid */}
       {
-        detailedCapacityResult && !checkingCapacity && (
+        !hideCapacityAlerts && detailedCapacityResult && !checkingCapacity && (
           // Only show if there's an issue
           detailedCapacityResult.isFull ? (
             detailedCapacityResult.hasAlternatives && detailedCapacityResult.alternativeBuses.length > 0 ? (

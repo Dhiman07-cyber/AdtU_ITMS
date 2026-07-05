@@ -22,11 +22,13 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import {
     TooltipProvider,
 } from "@/components/ui/tooltip";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
+import { normalizeShift } from "@/lib/utils/shift-utils";
 import { motion, AnimatePresence } from "framer-motion";
 import Avatar from "@/components/Avatar";
 
@@ -114,18 +116,6 @@ interface RouteData {
     totalStops: number;
     stops?: Array<{ name: string; sequence: number; stopId?: string }>;
     estimatedTime?: string;
-}
-
-// ============================================
-// HELPER: Normalize bus shift value
-// ============================================
-function normalizeBusShift(shift?: string): "Morning" | "Evening" | "Both" {
-    if (!shift) return "Both";
-    const s = shift.toLowerCase().trim();
-    if (s === "morning") return "Morning";
-    if (s === "evening") return "Evening";
-    if (s.includes("&") || s.includes("both") || s.includes("morning") && s.includes("evening")) return "Both";
-    return "Both";
 }
 
 // ============================================
@@ -449,7 +439,7 @@ export default function SmartDriverAssignmentPage() {
             id: `stg-${Date.now()}-${typeof window !== 'undefined' && window.crypto?.randomUUID ? window.crypto.randomUUID().substring(0, 6) : Math.random().toString(36).slice(2, 8)}`,
             busId: currentBus?.id || "",
             busNumber: currentBus?.busNumber || "N/A",
-            busShift: currentBus ? normalizeBusShift(currentBus.shift) : "Both",
+            busShift: currentBus ? normalizeShift(currentBus.shift) : "Both",
             action: "make_reserved",
             newDriver: {
                 id: driver.id,
@@ -710,17 +700,7 @@ export default function SmartDriverAssignmentPage() {
     // ============================================
 
     if (loading || authLoading) {
-        return (
-            <div className="flex items-center justify-center min-h-screen" style={{ backgroundColor: tokens.darkBg }}>
-                <div className="flex flex-col items-center gap-4">
-                    <div className="w-16 h-16 border-4 border-t-transparent rounded-full animate-spin"
-                        style={{ borderColor: `${tokens.primaryOrange}40`, borderTopColor: tokens.primaryOrange }} />
-                    <p className="text-lg font-semibold animate-pulse" style={{ color: tokens.primaryOrange }}>
-                        Loading driver assignment system...
-                    </p>
-                </div>
-            </div>
-        );
+        return <PremiumPageLoader message="Loading driver assignment system..." subMessage="Configuring shift slots..." />;
     }
 
     // ============================================
@@ -955,7 +935,7 @@ export default function SmartDriverAssignmentPage() {
                                                     const route = getRouteForBus(bus);
                                                     const displayedDriver = mergedDriverInfo.driver;
                                                     const displayedDriverName = mergedDriverInfo.stagedDriverName || displayedDriver?.fullName || displayedDriver?.name;
-                                                    const busShift = normalizeBusShift(bus.shift);
+                                                    const busShift = normalizeShift(bus.shift);
 
                                                     return (
                                                         <motion.div
@@ -1104,7 +1084,7 @@ export default function SmartDriverAssignmentPage() {
                         onStage={handleSlotStage}
                         busId={slotPromptBus.id}
                         busNumber={slotPromptBus.busNumber}
-                        busShift={normalizeBusShift(slotPromptBus.shift)}
+                        busShift={normalizeShift(slotPromptBus.shift)}
                         routeName={getRouteForBus(slotPromptBus)?.routeName || slotPromptBus.routeName}
                         newDriver={promptNewDriver}
                         existingDrivers={promptExistingDrivers}
@@ -1153,7 +1133,7 @@ export default function SmartDriverAssignmentPage() {
 // ============================================
 
 function CurrentAssignmentCard({ bus, route, driver }: { bus: BusData; route: RouteData | null; driver: DriverData }) {
-    const busShift = normalizeBusShift(bus.shift);
+    const busShift = normalizeShift(bus.shift);
     return (
         <div className="p-4 rounded-xl border" style={{ backgroundColor: `${tokens.success}10`, borderColor: `${tokens.success}50` }}>
             <div className="flex items-start justify-between mb-3">

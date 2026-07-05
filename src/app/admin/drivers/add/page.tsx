@@ -19,6 +19,7 @@ import Image from 'next/image';
 import { getAllRoutes, getAllBuses, getAllDrivers, getModeratorById, updateDriver } from '@/lib/dataService';
 import { Route } from '@/lib/types';
 import RouteSelect from '@/components/RouteSelect';
+import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import { useDebouncedStorage } from '@/hooks/useDebouncedStorage';
 import {
   Select,
@@ -218,29 +219,29 @@ export default function AddDriver() {
       (d.busId === formData.busId || d.assignedBusId === formData.busId) && !d.isReserved
     );
 
-    if (existingDriver) {
-      const existingShift = (existingDriver.shift || '').toLowerCase();
-      
-      // Update available shifts base on what's occupied
-      if (existingShift === 'both' || existingShift === 'morning & evening') {
-        // Bus is fully covered, but we allow adding another if user confirms later
-        setAvailableShifts(['Morning', 'Evening']); 
-        setConflictDriver(existingDriver);
-      } else if (existingShift === 'morning') {
-        setAvailableShifts(['Morning', 'Evening']);
-        // Auto-suggest the other shift
-        if (formData.shift === 'Morning' || formData.shift === 'Both' || formData.shift === 'Morning & Evening') {
-          setFormData(prev => ({ ...prev, shift: 'Evening' }));
+      if (existingDriver) {
+        const existingShift = (existingDriver.shift || '').toLowerCase();
+        
+        // Update available shifts base on what's occupied
+        if (existingShift === 'both') {
+          // Bus is fully covered, but we allow adding another if user confirms later
+          setAvailableShifts(['Morning', 'Evening']); 
+          setConflictDriver(existingDriver);
+        } else if (existingShift === 'morning') {
+          setAvailableShifts(['Morning', 'Evening']);
+          // Auto-suggest the other shift
+          if (formData.shift === 'Morning' || formData.shift === 'Both') {
+            setFormData(prev => ({ ...prev, shift: 'Evening' }));
+          }
+          setConflictDriver(null);
+        } else if (existingShift === 'evening') {
+          setAvailableShifts(['Morning', 'Evening']);
+          // Auto-suggest the other shift
+          if (formData.shift === 'Evening' || formData.shift === 'Both') {
+            setFormData(prev => ({ ...prev, shift: 'Morning' }));
+          }
+          setConflictDriver(null);
         }
-        setConflictDriver(null);
-      } else if (existingShift === 'evening') {
-        setAvailableShifts(['Morning', 'Evening']);
-        // Auto-suggest the other shift
-        if (formData.shift === 'Evening' || formData.shift === 'Both' || formData.shift === 'Morning & Evening') {
-          setFormData(prev => ({ ...prev, shift: 'Morning' }));
-        }
-        setConflictDriver(null);
-      }
     } else {
       setAvailableShifts(['Morning', 'Evening', 'Both']);
       setConflictDriver(null);
@@ -456,10 +457,10 @@ export default function AddDriver() {
       
       if (existingDriver) {
         const eShift = (existingDriver.shift || '').toLowerCase();
-        const fShift = (formData.shift === 'Morning & Evening' ? 'both' : formData.shift).toLowerCase();
+        const fShift = formData.shift.toLowerCase();
         
         // CONFLICT: Either already Both, or same shift
-        if (eShift === 'both' || eShift === 'morning & evening' || eShift === fShift) {
+        if (eShift === 'both' || eShift === fShift) {
           setConflictDriver(existingDriver);
           setShowConflictModal(true);
           return; 
@@ -527,7 +528,7 @@ export default function AddDriver() {
           assignedBusId: assignedBusId,
           assignedRouteId: assignedRouteId,
           approvedBy: formData.approvedBy,
-          shift: formData.shift === 'Morning & Evening' ? 'Both' : formData.shift
+          shift: formData.shift
         }),
       });
 
@@ -590,13 +591,7 @@ export default function AddDriver() {
   };
 
   if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="w-full max-w-7xl relative flex justify-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
-        </div>
-      </div>
-    );
+    return <PremiumPageLoader message="Preparing driver form..." subMessage="Loading resources..." />;
   }
 
   if (!currentUser || !userData || userData.role !== 'admin') {
@@ -927,7 +922,7 @@ export default function AddDriver() {
                     Shift <span className="text-red-500">*</span>
                   </Label>
                   <Select
-                    value={formData.shift === 'Morning & Evening' ? 'Both' : formData.shift}
+                    value={formData.shift}
                     onValueChange={(value) => setFormData(prev => ({ ...prev, shift: value }))}
                     disabled={!formData.busId && formData.routeId !== 'reserved'}
                   >
@@ -1008,7 +1003,7 @@ export default function AddDriver() {
             
             <div className="space-y-4 mb-6">
               <p className="text-gray-300 text-sm leading-relaxed">
-                There already exists a driver named <span className="text-blue-400 font-semibold">{conflictDriver.fullName || conflictDriver.name || 'Unknown'}</span> who is looking for <span className="text-amber-400 font-semibold">{(conflictDriver.shift === 'Both' || conflictDriver.shift === 'Morning & Evening') ? 'both Morning & Evening' : conflictDriver.shift}</span> shift(s).
+                There already exists a driver named <span className="text-blue-400 font-semibold">{conflictDriver.fullName || conflictDriver.name || 'Unknown'}</span> who is looking for <span className="text-amber-400 font-semibold">{conflictDriver.shift === 'Both' ? 'Both' : conflictDriver.shift}</span> shift(s).
               </p>
               <div className="bg-white/5 border border-white/10 rounded-xl p-4">
                 <p className="text-[10px] text-gray-500 uppercase tracking-wider font-bold mb-1">Impact Analysis</p>
@@ -1018,7 +1013,7 @@ export default function AddDriver() {
                 </div>
                 <div className="flex items-center justify-between mt-1">
                   <span className="text-xs text-gray-400">Current Occupancy:</span>
-                  <span className="text-xs text-amber-500 font-bold">{(conflictDriver.shift === 'Both' || conflictDriver.shift === 'Morning & Evening') ? 'Full' : 'Partial'}</span>
+                  <span className="text-xs text-amber-500 font-bold">{conflictDriver.shift === 'Both' ? 'Full' : 'Partial'}</span>
                 </div>
               </div>
             </div>

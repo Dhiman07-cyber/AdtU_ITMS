@@ -32,6 +32,7 @@
  */
 
 import { adminDb } from '../firebase-admin';
+import { getShiftDeltas } from '@/lib/utils/shift-utils';
 
 export interface BusCounterSnapshot {
   currentMembers: number;
@@ -86,15 +87,13 @@ function occupiesSeat(s: Record<string, any>): boolean {
 }
 
 /**
- * Shift contribution — normalized EXACTLY like `buildCapacityDelta`:
- * `includes('morning')`/`includes('evening')`, with `'both'` contributing to both.
+ * Shift contribution — uses canonical getShiftDeltas from shift-utils.
+ * Normalizes EXACTLY like `buildCapacityDelta`: uses canonical normalization.
  */
 function shiftContribution(shift: unknown): { morning: boolean; evening: boolean; valid: boolean } {
   if (!shift || typeof shift !== 'string') return { morning: false, evening: false, valid: false };
-  const n = shift.toLowerCase();
-  const morning = n.includes('morning') || n === 'both';
-  const evening = n.includes('evening') || n === 'both';
-  return { morning, evening, valid: morning || evening };
+  const deltas = getShiftDeltas(shift);
+  return { morning: deltas.affectsMorning, evening: deltas.affectsEvening, valid: deltas.affectsMorning || deltas.affectsEvening };
 }
 
 export async function adminReconcileBusLoads(options: ReconcileOptions = {}): Promise<ReconcileSummary> {
@@ -208,19 +207,32 @@ export async function adminReconcileBusLoads(options: ReconcileOptions = {}): Pr
     try {
       const adminsSnap = await adminDb.collection('admins').get();
       const batch = adminDb.batch();
-      const body = `Bus load reconciliation found large discrepancies on ${largeDeltaBuses.length} bus(es): ${largeDeltaBuses.join(', ')}. Counts were corrected to the recounted values; investigate the systemic cause.`;
+      const content = `Bus load reconciliation found large discrepancies on ${largeDeltaBuses.length} bus(es): ${largeDeltaBuses.join(', ')}. Counts were corrected to the recounted values; investigate the systemic cause.`;
       adminsSnap.docs.forEach((adminDoc) => {
         const ref = adminDb.collection('notifications').doc();
         batch.set(ref, {
-          notifId: ref.id,
-          toUid: adminDoc.id,
-          toRole: 'admin',
-          type: 'ReconciliationAlert',
-          title: '⚠️ Bus Load Reconciliation — Large Delta',
-          body,
-          priority: 'high',
-          read: false,
+          title: 'Bus Load Reconciliation — Large Delta',
+          content,
+          type: 'emergency',
+          sender: {
+            userId: 'system',
+            userName: 'System',
+            userRole: 'admin'
+          },
+          target: {
+            type: 'specific_users',
+            specificUserIds: [adminDoc.id]
+          },
+          recipientIds: [adminDoc.id],
+          autoInjectedRecipientIds: [],
+          readByUserIds: [],
+          isEdited: false,
+          isDeletedGlobally: false,
+          hiddenForUserIds: [],
           createdAt: new Date().toISOString(),
+          metadata: {
+            priority: 'high'
+          }
         });
       });
       await batch.commit();

@@ -25,6 +25,7 @@ export interface PaymentSession {
   razorpayPaymentId?: string;
   offlinePaymentId?: string;
   paymentReceipt?: string;
+  paidAt?: string;
   verifiedAt?: string;
   createdAt: string;
   updatedAt: string;

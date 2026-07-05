@@ -352,7 +352,7 @@ export default function AddStudentForm() {
     }
   };
 
-  // Calculate session end year and validUntil date using deadline-config.json
+  // Calculate session end year and validUntil date using canonical deadline config
   const calculateSessionEnd = (startYear: number, durationYears: number) => {
     // Ensure valid numbers
     const validStartYear = isNaN(startYear) ? new Date().getUTCFullYear() : startYear;

@@ -126,18 +126,29 @@ export async function POST(request: NextRequest) {
         const notifRef = adminDb.collection('notifications').doc();
         notificationPromises.push(
           notifRef.set({
-            notifId: notifRef.id,
-            toUid: adminDoc.id,
-            toRole: 'admin',
-            type: 'Submitted',
             title: 'New Application Submitted',
-            body: `${formData.fullName} (${formData.enrollmentId}) has submitted a new bus service application.`,
-            links: {
+            content: `${formData.fullName} (${formData.enrollmentId}) has submitted a new bus service application.`,
+            type: 'info',
+            sender: {
+              userId: uid,
+              userName: formData.fullName || 'Student',
+              userRole: 'student'
+            },
+            target: {
+              type: 'specific_users',
+              specificUserIds: [adminDoc.id]
+            },
+            recipientIds: [adminDoc.id],
+            autoInjectedRecipientIds: [],
+            readByUserIds: [],
+            isEdited: false,
+            isDeletedGlobally: false,
+            hiddenForUserIds: [],
+            createdAt: submittedAt,
+            metadata: {
               applicationId,
               reviewPage: `/admin/applications/${applicationId}`
-            },
-            read: false,
-            createdAt: submittedAt
+            }
           }).catch(err => console.warn('Failed to notify admin:', err))
         );
       }
@@ -147,18 +158,29 @@ export async function POST(request: NextRequest) {
         const notifRef = adminDb.collection('notifications').doc();
         notificationPromises.push(
           notifRef.set({
-            notifId: notifRef.id,
-            toUid: modDoc.id,
-            toRole: 'moderator',
-            type: 'Submitted',
             title: 'New Application Submitted',
-            body: `${formData.fullName} (${formData.enrollmentId}) has submitted a new bus service application.`,
-            links: {
+            content: `${formData.fullName} (${formData.enrollmentId}) has submitted a new bus service application.`,
+            type: 'info',
+            sender: {
+              userId: uid,
+              userName: formData.fullName || 'Student',
+              userRole: 'student'
+            },
+            target: {
+              type: 'specific_users',
+              specificUserIds: [modDoc.id]
+            },
+            recipientIds: [modDoc.id],
+            autoInjectedRecipientIds: [],
+            readByUserIds: [],
+            isEdited: false,
+            isDeletedGlobally: false,
+            hiddenForUserIds: [],
+            createdAt: submittedAt,
+            metadata: {
               applicationId,
               reviewPage: `/moderator/applications/${applicationId}`
-            },
-            read: false,
-            createdAt: submittedAt
+            }
           }).catch(err => console.warn('Failed to notify moderator:', err))
         );
       }
@@ -168,18 +190,29 @@ export async function POST(request: NextRequest) {
       // Send confirmation to student
       const studentNotifRef = adminDb.collection('notifications').doc();
       await studentNotifRef.set({
-        notifId: studentNotifRef.id,
-        toUid: uid,
-        toRole: 'student',
-        type: 'Submitted',
         title: 'Application Submitted',
-        body: 'Your bus service application has been submitted successfully. You will be notified once it is reviewed.',
-        links: {
+        content: 'Your bus service application has been submitted successfully. You will be notified once it is reviewed.',
+        type: 'info',
+        sender: {
+          userId: 'system',
+          userName: 'System',
+          userRole: 'admin'
+        },
+        target: {
+          type: 'specific_users',
+          specificUserIds: [uid]
+        },
+        recipientIds: [uid],
+        autoInjectedRecipientIds: [],
+        readByUserIds: [],
+        isEdited: false,
+        isDeletedGlobally: false,
+        hiddenForUserIds: [],
+        createdAt: submittedAt,
+        metadata: {
           applicationId,
           statusPage: `/apply/status/${applicationId}`
-        },
-        read: false,
-        createdAt: submittedAt
+        }
       }).catch(err => console.warn('Failed to notify student of submission:', err));
     } catch (notifErr) {
       console.warn('Non-critical: notification batch failed after application submit:', notifErr);

@@ -111,14 +111,14 @@ service cloud.firestore {
         ]) &&
         // Validate shift if being changed (shouldn't be by students)
         (!request.resource.data.keys().hasAll(['shift']) ||
-         request.resource.data.shift in ['Morning', 'Evening', 'Morning & Evening']);
+         request.resource.data.shift in ['Morning', 'Evening']);
       
       // Moderators and admins can update any field
       allow update: if request.auth != null &&
         (isModerator(request.auth.uid) || isAdmin(request.auth.uid)) &&
         // Validate shift field
         (!request.resource.data.keys().hasAll(['shift']) ||
-         request.resource.data.shift in ['Morning', 'Evening', 'Morning & Evening']);
+         request.resource.data.shift in ['Morning', 'Evening']);
       
       // Only moderators/admins can create student documents
       allow create: if request.auth != null &&
@@ -149,7 +149,7 @@ service cloud.firestore {
          isModerator(request.auth.uid) || isAdmin(request.auth.uid)) &&
         // Validate shift field
         (!request.resource.data.keys().hasAll(['shift']) ||
-         request.resource.data.shift in ['Morning', 'Evening', 'Morning & Evening']) &&
+         request.resource.data.shift in ['Morning', 'Evening', 'Both']) &&
         // Normal users cannot modify approvedBy field
         (!request.resource.data.keys().hasAll(['approvedBy']) ||
          isModerator(request.auth.uid) || isAdmin(request.auth.uid));
@@ -326,25 +326,6 @@ service cloud.firestore {
     }
 
     // ============================================================================
-    // NOTIFICATION READ RECEIPTS
-    // ============================================================================
-    
-    match /notification_read_receipts/{receiptId} {
-      // Users can read their own read receipts
-      allow read: if request.auth != null && (
-        resource.data.userId == request.auth.uid ||
-        isAdmin(request.auth.uid)
-      );
-      
-      // Users can create/update their own read receipts
-      allow create, update: if request.auth != null && 
-        request.resource.data.userId == request.auth.uid;
-      
-      // Only allow deleting own receipts  
-      allow delete: if request.auth != null && resource.data.userId == request.auth.uid;
-    }
-    
-    // ============================================================================
     // APPLICATIONS COLLECTION (Bus Service Applications)
     // ============================================================================
     
@@ -373,45 +354,6 @@ service cloud.firestore {
         (isModerator(request.auth.uid) || isAdmin(request.auth.uid));
     }
     
-    // ============================================================================
-    // VERIFICATION CODES COLLECTION
-    // ============================================================================
-    
-    match /verificationCodes/{codeId} {
-      // Students can read their own codes, moderators can read assigned codes
-      allow read: if request.auth != null && 
-        (resource.data.studentUid == request.auth.uid || 
-         resource.data.moderatorUid == request.auth.uid ||
-         isModerator(request.auth.uid) ||
-         isAdmin(request.auth.uid));
-      
-      // Only system/moderators can create verification codes
-      allow create: if request.auth != null && 
-        (isModerator(request.auth.uid) || isAdmin(request.auth.uid));
-      
-      // Students can update (mark as used), moderators can regenerate
-      allow update: if request.auth != null && 
-        (resource.data.studentUid == request.auth.uid || 
-         resource.data.moderatorUid == request.auth.uid ||
-         isModerator(request.auth.uid) ||
-         isAdmin(request.auth.uid));
-      
-      // Only moderators/admins can delete codes
-      allow delete: if request.auth != null && 
-        (isModerator(request.auth.uid) || isAdmin(request.auth.uid));
-    }
-    
-    // ============================================================================
-    // INVITATIONS COLLECTION
-    // ============================================================================
-    
-    match /invitations/{invitationId} {
-      allow read: if request.auth != null && (
-        isAdmin(request.auth.uid) ||
-        isModerator(request.auth.uid)
-      );
-      allow write: if request.auth != null && isModerator(request.auth.uid);
-    }
     
     // ============================================================================
     // BUS LOCATIONS COLLECTION (Real-time GPS tracking)
@@ -461,56 +403,9 @@ service cloud.firestore {
     // ============================================================================
     
     match /audit_logs/{logId} {
-      // COMPLETELY BLOCKED - Use Supabase reassignment_logs instead
-      allow read: if false;
-      allow write: if false;
-    }
-    
-    // ============================================================================
-    // BUS PASS TOKENS COLLECTION (Digital QR Bus Passes)
-    // ============================================================================
-    
-    match /busPassTokens/{tokenId} {
-      // NO direct client reads - tokens must be verified server-side only
-      allow read: if false;
-      
-      // NO direct client writes - tokens created/managed server-side only via Admin SDK
-      allow write: if false;
-    }
-    
-    // ============================================================================
-    // BUS PASS SCANS COLLECTION (Audit Trail)
-    // ============================================================================
-    
-    match /scans/{scanId} {
-      // Students can read their own scans
-      // Drivers can read scans they performed
-      // Admins and moderators can read all scans
-      allow read: if request.auth != null && 
-        (resource.data.studentUid == request.auth.uid || 
-         resource.data.driverUid == request.auth.uid ||
-         isModerator(request.auth.uid) || 
-         isAdmin(request.auth.uid));
-      
-      // NO direct client writes - scans created server-side only via verify endpoint
-      allow write: if false;
-    }
-    
-    // ============================================================================
-    // BOARDING ACTIONS COLLECTION (Boarding Allow/Deny Log)
-    // ============================================================================
-    
-    match /boardingActions/{actionId} {
-      // Students can read their own boarding actions
-      // Drivers can read actions they performed
-      // Admins and moderators can read all boarding actions
-      allow read: if request.auth != null && 
-        (resource.data.studentUid == request.auth.uid || 
-         resource.data.driverUid == request.auth.uid ||
-         isModerator(request.auth.uid) || 
-         isAdmin(request.auth.uid));
-      
-      // NO direct client writes - boarding actions created server-side only
+      // Admin-only read access for the audit logs dashboard
+      allow read: if request.auth != null && isAdmin(request.auth.uid);
+      // No direct client writes — all writes go through Admin SDK server-side
       allow write: if false;
     }
     
@@ -661,23 +556,6 @@ service cloud.firestore {
     }
 
     // ============================================================================
-    // ADMIN ACTIONS COLLECTION
-    // ============================================================================
-    
-    match /adminActions/{actionId} {
-      // Only admins can read admin action logs
-      allow read: if request.auth != null && isAdmin(request.auth.uid);
-      
-      // Allow admins and moderators to create action logs
-      allow create: if request.auth != null && (
-        isAdmin(request.auth.uid) ||
-        isModerator(request.auth.uid)
-      );
-      
-      allow update, delete: if false;
-    }
-    
-    // ============================================================================
     // PROCESSED PAYMENTS COLLECTION (Idempotency tracking)
     // ============================================================================
     
@@ -698,20 +576,6 @@ service cloud.firestore {
       
       // Only admins can write config
       allow write: if request.auth != null && isAdmin(request.auth.uid);
-    }
-    
-    // ============================================================================
-    // SYSTEM SIGNALS COLLECTION (Admin Sync Signals)
-    // Used to notify admin pages of data changes without full collection listeners
-    // ============================================================================
-    
-    match /systemSignals/{signalPath=**} {
-      // Any authenticated user can read signals
-      allow read: if request.auth != null;
-      
-      // Only server-side writes (via Admin SDK for security)
-      // This ensures only trusted backend can emit signals
-      allow write: if false;
     }
     
     // ============================================================================

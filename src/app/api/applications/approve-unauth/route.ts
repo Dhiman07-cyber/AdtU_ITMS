@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { adminAuth, adminDb } from '@/lib/firebase-admin';
 import { v2 as cloudinary } from 'cloudinary';
-import { writeAuditInTransaction, type AuditActorRole } from '@/lib/audit/audit-service';
+import { createAuditLogInTransaction, type AuditActorRole } from '@/lib/services/audit.service';
 import { calculateRenewalDate } from '@/lib/utils/renewal-utils';
 import { calculateValidUntilDate } from '@/lib/utils/date-utils';
 import { buildCapacityDelta, sendBusFullAlert, validateAndSuggestBus } from '@/lib/busCapacityService';
@@ -14,6 +14,7 @@ import { isApprovalEligible, isUpcomingApplication } from '@/lib/utils/applicati
 import type { Application } from '@/lib/types/application';
 import { CapacityFullError, ApprovalConflictError } from '@/lib/errors/sentinel-errors';
 import { safeErrorMessage } from '@/lib/security/safe-error';
+import { normalizeShift, getShiftLoad } from '@/lib/utils/shift-utils';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -31,14 +32,6 @@ function asRecord(value: unknown): JsonRecord {
 
 function asString(value: unknown): string {
   return typeof value === 'string' ? value : '';
-}
-
-function normalizeShiftValue(shift: unknown): string {
-  const value = asString(shift).toLowerCase().trim();
-  if (value.includes('evening')) return 'Evening';
-  if (value.includes('morning')) return 'Morning';
-  if (value === 'both') return 'Both';
-  return 'Morning';
 }
 
 function extractPublicIdFromUrl(url: string): string | null {
@@ -122,17 +115,22 @@ export async function POST(request: NextRequest) {
             verifiedUpcomingById: moderatorUid,
             updatedAt: nowIsoVU,
           });
-          writeAuditInTransaction(transaction, {
+          createAuditLogInTransaction(transaction, {
+            category: 'applications',
             action: 'application_verified_upcoming',
-            actor: { id: moderatorUid, role: approverRole as AuditActorRole, name: approverNameVU },
-            targetId: asString(appData.applicantUid) || studentUid,
+            summary: `Application verified for upcoming session: ${asString(formDataVU.fullName)}`,
+            severity: 'medium',
+            performedBy: moderatorUid,
+            performedByName: approverNameVU,
+            performedByRole: approverRole as any,
             targetType: 'application',
+            targetId: asString(appData.applicantUid) || studentUid,
             targetName: asString(formDataVU.fullName),
-            reason: 'future_session_verified_pre_activation',
-            before: { applicationId: studentUid, state: 'submitted', channel: 'unauthenticated' },
-            after: { applicationId: studentUid, state: 'verified_upcoming', eligibleApproval: appData.eligibleApproval, targetSession: appData.targetSession },
-            details: { applicationId: studentUid, channel: 'unauthenticated' },
-            correlationId: studentUid,
+            metadata: {
+              before: { applicationId: studentUid, state: 'submitted', channel: 'unauthenticated' },
+              after: { applicationId: studentUid, state: 'verified_upcoming', eligibleApproval: appData.eligibleApproval, targetSession: appData.targetSession },
+              details: { applicationId: studentUid, channel: 'unauthenticated' },
+            },
           });
         });
       } catch (vuErr: any) {
@@ -145,15 +143,29 @@ export async function POST(request: NextRequest) {
       try {
         const notifRef = adminDb.collection('notifications').doc();
         await notifRef.set({
-          notifId: notifRef.id,
-          toUid: asString(appData.applicantUid) || studentUid,
-          toRole: 'student',
-          type: 'VerifiedUpcoming',
           title: 'Application verified — awaiting new session',
-          body: 'Your application has been verified and will become active when the new academic session begins.',
-          links: { applicationId: studentUid, statusPage: `/apply/status/${studentUid}` },
-          read: false,
+          content: 'Your application has been verified and will become active when the new academic session begins.',
+          type: 'info',
+          sender: {
+            userId: 'system',
+            userName: 'System',
+            userRole: 'admin'
+          },
+          target: {
+            type: 'specific_users',
+            specificUserIds: [asString(appData.applicantUid) || studentUid]
+          },
+          recipientIds: [asString(appData.applicantUid) || studentUid],
+          autoInjectedRecipientIds: [],
+          readByUserIds: [],
+          isEdited: false,
+          isDeletedGlobally: false,
+          hiddenForUserIds: [],
           createdAt: nowIsoVU,
+          metadata: {
+            applicationId: studentUid,
+            statusPage: `/apply/status/${studentUid}`
+          }
         });
       } catch (notifErr) {
         console.warn('verified_upcoming notify failed:', notifErr);
@@ -196,7 +208,7 @@ export async function POST(request: NextRequest) {
     let busId = asString(formData.routeId) ? asString(formData.routeId).replace('route_', 'bus_') : '';
     const requestedBusId = busId; // preserved for audit when overridden
     const overrideBusId = asString(body.overrideBusId);
-    const shift = normalizeShiftValue(formData.shift);
+    const shift = normalizeShift(asString(formData.shift));
 
     // ── Override bus (Case 2: alternative-bus picker) ──────────────────────────
     // When the moderator explicitly selects a different bus (the original is full
@@ -217,8 +229,8 @@ export async function POST(request: NextRequest) {
       if (!shiftCompatible) {
         return NextResponse.json({ error: 'Selected bus is not compatible with the required shift' }, { status: 400 });
       }
-      // Pre-check capacity (non-authoritative; the txn gate is binding).
-      if ((overrideData.currentMembers || 0) >= (overrideData.capacity || 55)) {
+      // Pre-check capacity for the applicant's trip only (non-authoritative; the txn gate is binding).
+      if (getShiftLoad(overrideData, shift) >= (overrideData.capacity || 55)) {
         return NextResponse.json({ error: 'Selected alternative bus is also full' }, { status: 400 });
       }
       busId = overrideBusId;
@@ -304,6 +316,7 @@ export async function POST(request: NextRequest) {
     const busRef = busId ? adminDb.collection('buses').doc(busId) : null;
 
     let capacityNewMembers = 0;
+    let capacityNewShiftLoad = 0;
     let capacityLimit = 0;
     let busNumberForAlert = '';
     let routeIdForAlert = '';
@@ -332,10 +345,12 @@ export async function POST(request: NextRequest) {
           if (busSnap && busSnap.exists) {
             const busData = busSnap.data();
             delta = buildCapacityDelta(busData, studentDoc.shift, 1);
-            if (delta.oldMembers >= delta.capacity) {
+            // Per-shift gate: only the student's own trip counter is constrained.
+            if (delta.oldShiftLoad >= delta.capacity) {
               throw new CapacityFullError();
             }
             capacityNewMembers = delta.newMembers;
+            capacityNewShiftLoad = delta.newShiftLoad;
             capacityLimit = delta.capacity;
             busNumberForAlert = busData?.busNumber || '';
             routeIdForAlert = busData?.routeId || '';
@@ -362,24 +377,30 @@ export async function POST(request: NextRequest) {
           (Number(sessionInfo.sessionStartYear || 0) !== finalStartYear ||
             Number(sessionInfo.sessionEndYear || 0) !== finalEndYear);
         const usedAlternativeBus = !!overrideBusId && overrideBusId !== requestedBusId;
-        writeAuditInTransaction(transaction, {
+        createAuditLogInTransaction(transaction, {
+          category: 'applications',
           action: 'application_approved',
-          actor: { id: moderatorUid, role: approverRole as AuditActorRole, name: approverName },
-          targetId: applicantUid,
+          summary: `Application approved: ${asString(formData.fullName)}`,
+          severity: 'high',
+          performedBy: moderatorUid,
+          performedByName: approverName,
+          performedByRole: approverRole as any,
           targetType: 'student',
+          targetId: applicantUid,
           targetName: asString(formData.fullName),
-          reason: usedAlternativeBus ? 'capacity_reallocation' : 'application_approval_unauth',
-          before: { applicationId: studentUid, applicationState: 'submitted', requestedBusId: requestedBusId || null },
-          after: { studentUid: applicantUid, busId: busId || null, shift: studentDoc.shift, sessionStartYear: finalStartYear, sessionEndYear: finalEndYear, validUntil, status: 'active' },
-          details: {
-            applicationId: studentUid,
-            channel: 'unauthenticated',
-            sessionModified,
-            previousStartYear: Number(sessionInfo.sessionStartYear || 0),
-            previousEndYear: Number(sessionInfo.sessionEndYear || 0),
-            alternativeBus: usedAlternativeBus ? { requestedBusId: requestedBusId || null, approvedBusId: overrideBusId } : null,
+          metadata: {
+            reason: usedAlternativeBus ? 'capacity_reallocation' : 'application_approval_unauth',
+            before: { applicationId: studentUid, applicationState: 'submitted', requestedBusId: requestedBusId || null },
+            after: { studentUid: applicantUid, busId: busId || null, shift: studentDoc.shift, sessionStartYear: finalStartYear, sessionEndYear: finalEndYear, validUntil, status: 'active' },
+            details: {
+              applicationId: studentUid,
+              channel: 'unauthenticated',
+              sessionModified,
+              previousStartYear: Number(sessionInfo.sessionStartYear || 0),
+              previousEndYear: Number(sessionInfo.sessionEndYear || 0),
+              alternativeBus: usedAlternativeBus ? { requestedBusId: requestedBusId || null, approvedBusId: overrideBusId } : null,
+            },
           },
-          correlationId: studentUid,
         });
       });
     } catch (txErr: any) {
@@ -488,8 +509,8 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Post-commit: bus full alert if this approval consumed the last seat (never affects committed state).
-    if (busId && capacityLimit > 0 && capacityNewMembers >= capacityLimit) {
+    // Post-commit: bus full alert if this approval consumed the last seat on the affected shift (never affects committed state).
+    if (busId && capacityLimit > 0 && capacityNewShiftLoad >= capacityLimit) {
       await sendBusFullAlert(busId, busNumberForAlert, routeIdForAlert).catch(error => {
         console.error(`Failed to send bus full alert for ${busId}:`, error);
       });

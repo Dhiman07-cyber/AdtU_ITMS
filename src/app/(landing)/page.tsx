@@ -4,7 +4,7 @@ import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { useAuth } from "@/contexts/auth-context";
-import { useSystemConfig } from '@/contexts/SystemConfigContext';
+import { APP_NAME } from '@/config/runtime';
 import {
   MapPin, Bell, Shield, Bus, Clock, GraduationCap, ArrowRight, Check,
   PlayCircle, Users, CheckCircle2, Navigation, FileText, UserCheck,
@@ -183,7 +183,7 @@ function LandingVideo() {
 
 export default function PremiumLanding() {
   const { currentUser, userData, loading, needsApplication } = useAuth();
-  const { appName } = useSystemConfig();
+  const appName = APP_NAME;
   const router = useRouter();
   const [landingConfig, setLandingConfig] = useState<any>(null);
 

@@ -68,9 +68,16 @@ export async function PUT(request: Request) {
                 }
             }
 
-            // C. Capacity Check
-            if (newCapacity < newCurrentMembers) {
-                throw new Error(`Capacity (${newCapacity}) cannot be less than current assigned students (${newCurrentMembers}).`);
+            // C. Capacity Check (per-shift model: morning and evening are independent trips)
+            // Each shift must independently fit within capacity. The total currentMembers
+            // (morning + evening) is a derived statistic and may exceed capacity for Both buses.
+            if (newCapacity > 0) {
+                if (inputMorning > newCapacity) {
+                    throw new Error(`Morning count (${inputMorning}) exceeds bus capacity (${newCapacity}).`);
+                }
+                if (inputEvening > newCapacity) {
+                    throw new Error(`Evening count (${inputEvening}) exceeds bus capacity (${newCapacity}).`);
+                }
             }
 
             // D. Shift Validation

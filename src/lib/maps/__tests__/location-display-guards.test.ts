@@ -7,7 +7,6 @@ import {
     shouldEmitDisplayUpdate,
 } from '../location-display-guards';
 import { engineFromMapProvider } from '../map-provider-types';
-import { sanitizeMapProviderInput } from '../system-config-map-schema';
 
 describe('location-display-guards', () => {
     it('isValidLatLng rejects out of range', () => {
@@ -60,17 +59,7 @@ describe('location-display-guards', () => {
 
 describe('map-provider-types', () => {
     it('engineFromMapProvider', () => {
-        expect(engineFromMapProvider('google')).toBe('google');
-        expect(engineFromMapProvider('carto')).toBe('guwahati');
-        expect(engineFromMapProvider('osm')).toBe('guwahati');
+        expect(engineFromMapProvider('guwahati')).toBe('guwahati');
         expect(engineFromMapProvider(undefined)).toBe('guwahati');
-    });
-});
-
-describe('system-config-map-schema', () => {
-    it('sanitizeMapProviderInput', () => {
-        expect(sanitizeMapProviderInput('google')).toBe('google');
-        expect(sanitizeMapProviderInput('invalid')).toBe(undefined);
-        expect(sanitizeMapProviderInput(undefined)).toBe(undefined);
     });
 });

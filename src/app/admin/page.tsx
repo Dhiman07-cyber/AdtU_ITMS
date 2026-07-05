@@ -10,7 +10,6 @@ import HighLoadAlert from '@/components/HighLoadAlert';
 
 import DashboardHeader from '@/components/admin/dashboard/DashboardHeader';
 import type { DashboardStats } from '@/components/admin/dashboard/types';
-import { useSystemConfig } from '@/contexts/SystemConfigContext';
 import { authApiFetch } from '@/lib/secure-api-client';
 
 const DashboardPanelFallback = () => (
@@ -102,7 +101,7 @@ function setCachedDashboard(data: Parameters<typeof dashboardCache.setCached>[0]
 
 export default function EnhancedAdminDashboard() {
   const { currentUser, userData, loading: authLoading } = useAuth();
-  const { config: systemConfig, appName, loading: configLoading, refreshConfig } = useSystemConfig();
+
   const router = useRouter();
 
   // State
@@ -251,7 +250,7 @@ export default function EnhancedAdminDashboard() {
     fetchRealTotalCounts();
   }, [fetchRealTotalCounts]);
 
-  const allDataLoading = authLoading || configLoading;
+  const allDataLoading = authLoading;
 
   const [stats, setStats] = useState({
     totalStudents: 0,
@@ -287,10 +286,7 @@ export default function EnhancedAdminDashboard() {
   const handleRefreshAll = async () => {
     setIsRefreshing(true);
     try {
-      await Promise.all([
-        fetchRealTotalCounts(),
-        refreshConfig()
-      ]);
+      await fetchRealTotalCounts();
       setLastUpdated(new Date());
     } catch (error) {
       console.error('Error refreshing dashboard:', error);

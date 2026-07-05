@@ -1,33 +1,15 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '@/contexts/auth-context';
 import dynamic from 'next/dynamic';
 import { supabase } from '@/lib/supabase-client';
 
-// Dynamic imports to avoid SSR issues
-const AssamRestrictedMap = dynamic(() => import('@/components/AssamRestrictedMap').then(async (mod) => {
-  await import('leaflet');
-  return mod;
-}), { ssr: false });
-
-// Import MapIcons separately
-let MapIcons: any = null;
-const getMapIcons = async () => {
-  if (!MapIcons) {
-    const { MapIcons: importedMapIcons } = await import('@/components/AssamRestrictedMap');
-    MapIcons = importedMapIcons();
-  }
-  return MapIcons;
-};
-const Marker = dynamic(() => import('react-leaflet').then(async (mod) => {
-  await import('leaflet');
-  return { default: mod.Marker };
-}), { ssr: false });
-const Popup = dynamic(() => import('react-leaflet').then(async (mod) => {
-  await import('leaflet');
-  return { default: mod.Popup };
-}), { ssr: false });
+// Dynamic import for vector PMTiles map
+const GuwahatiMap = dynamic(() => import('@/components/maps/GuwahatiMap'), {
+  ssr: false,
+  loading: () => <div className="w-full h-[500px] bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-800 dark:to-gray-900 rounded-3xl animate-pulse flex items-center justify-center text-slate-500 font-bold">Loading Guwahati Vector Map...</div>,
+});
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -86,20 +68,43 @@ function DynamicStudentMap({
   const [currentFlagId, setCurrentFlagId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [mapIcons, setMapIcons] = useState<any>(null);
+  // Memoized points for Guwahati PMTiles Map
+  const points = useMemo(() => {
+    const list: any[] = [];
+    
+    // Student's Own Location
+    if (studentLocation && studentLocation.lat && studentLocation.lng) {
+      list.push({
+        id: 'student',
+        lat: studentLocation.lat,
+        lng: studentLocation.lng,
+        kind: 'student' as const,
+        label: 'Me',
+      });
+    }
 
-  // Load MapIcons on component mount
-  useEffect(() => {
-    const loadMapIcons = async () => {
-      try {
-        const icons = await getMapIcons();
-        setMapIcons(icons);
-      } catch (error) {
-        console.error('Failed to load map icons:', error);
-      }
-    };
-    loadMapIcons();
-  }, []);
+    // Other Students' Waiting Flags
+    if (journeyActive) {
+      waitingFlags.forEach((flag) => {
+        list.push({
+          id: flag.id,
+          lat: flag.lat,
+          lng: flag.lng,
+          kind: 'waiting' as const,
+          label: flag.student_uid === currentUser?.uid ? 'Me (Waiting)' : flag.student_name,
+        });
+      });
+    }
+    
+    return list;
+  }, [studentLocation, waitingFlags, journeyActive, currentUser?.uid]);
+
+  const busPosition = useMemo(() => {
+    if (journeyActive && busLocation && busLocation.lat && busLocation.lng) {
+      return { lat: busLocation.lat, lng: busLocation.lng };
+    }
+    return null;
+  }, [journeyActive, busLocation]);
 
   // Subscribe to real-time bus location updates
   useEffect(() => {
@@ -342,67 +347,15 @@ function DynamicStudentMap({
               </div>
             </div>
           )}
-          <AssamRestrictedMap key={`student-map-${busId}`} restrictToGuwahati={true} style={{ height: '500px' }}>
-            {/* Bus Location Marker - Only show when journey is active */}
-            {journeyActive && busLocation && busLocation.lat && busLocation.lng && mapIcons && (
-              <Marker
-                position={[busLocation.lat, busLocation.lng]}
-                icon={mapIcons.bus}
-              >
-                <Popup>
-                  <div className="text-sm">
-                    <div className="font-bold">🚌 Bus {busId}</div>
-                    <div>Speed: {busLocation.speed?.toFixed(1) || 0} km/h</div>
-                    <div className="text-xs text-gray-600">
-                      Updated: {new Date(busLocation.updated_at).toLocaleTimeString()}
-                    </div>
-                    {busLocation.accuracy && (
-                      <div className="text-xs text-gray-500">
-                        Accuracy: ±{busLocation.accuracy.toFixed(0)}m
-                      </div>
-                    )}
-                  </div>
-                </Popup>
-              </Marker>
-            )}
-
-            {/* Student's Own Location */}
-            {studentLocation && studentLocation.lat && studentLocation.lng && mapIcons && (
-              <Marker
-                position={[studentLocation.lat, studentLocation.lng]}
-                icon={mapIcons.student}
-              >
-                <Popup>
-                  <div className="text-sm">
-                    <div className="font-bold">📍 Your Location</div>
-                    <div className="text-xs text-gray-600">Accuracy: {studentLocation.accuracy}m</div>
-                  </div>
-                </Popup>
-              </Marker>
-            )}
-
-            {/* Other Students' Waiting Flags - Only show when journey is active */}
-            {journeyActive && mapIcons && waitingFlags.map((flag) => (
-              <Marker
-                key={flag.id}
-                position={[flag.lat, flag.lng]}
-                icon={flag.student_uid === currentUser?.uid ? mapIcons.waitingFlag : mapIcons.waitingFlagOther}
-              >
-                <Popup>
-                  <div className="text-sm">
-                    <div className="font-bold">
-                      {flag.student_uid === currentUser?.uid ? '🚩 You are waiting' : '🚩 Student waiting'}
-                    </div>
-                    <div>{flag.student_name}</div>
-                    <div className="text-xs text-gray-600">{flag.message}</div>
-                    <div className="text-xs text-gray-500">
-                      {new Date(flag.created_at).toLocaleTimeString()}
-                    </div>
-                  </div>
-                </Popup>
-              </Marker>
-            ))}
-          </AssamRestrictedMap>
+          <div className="w-full h-[500px] rounded-3xl overflow-hidden relative">
+            <GuwahatiMap
+              theme="dark"
+              busPosition={busPosition}
+              points={points}
+              restrictToGuwahati={true}
+              className="w-full h-full"
+            />
+          </div>
         </CardContent>
       </Card>
 

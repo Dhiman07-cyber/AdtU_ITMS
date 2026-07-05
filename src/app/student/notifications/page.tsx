@@ -23,6 +23,7 @@ import { useNotifications } from "@/contexts/NotificationContext";
 import { useToast } from "@/contexts/toast-context";
 import NotificationCardV2 from "@/components/NotificationCardV2";
 import { Timestamp } from "firebase/firestore";
+import { PremiumPageLoader } from "@/components/LoadingSpinner";
 
 type TabType = 'all' | 'trip' | 'notice' | 'pickup' | 'dropoff' | 'announcement';
 
@@ -105,47 +106,7 @@ export default function StudentNotificationsPage() {
 
 
   if (!currentUser || loading) {
-    return (
-      <div className="flex-1 min-h-[calc(100dvh-120px)] flex items-center justify-center bg-gray-900 dark:bg-gray-950 relative overflow-hidden">
-        {/* Animated background gradient orbs */}
-        <div className="absolute inset-0 overflow-hidden">
-          <div className="absolute -top-40 -right-40 w-80 h-80 bg-purple-400 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-blob"></div>
-          <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-blue-400 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-blob animation-delay-2000"></div>
-          <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-80 h-80 bg-cyan-400 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-blob animation-delay-4000"></div>
-        </div>
-
-        <div className="text-center space-y-12 relative z-10">
-          {/* Premium spinner with gradient ring */}
-          <div className="relative flex items-center justify-center">
-            {/* Gradient ring structure */}
-            <div className="absolute w-18 h-18 rounded-full bg-gradient-to-r from-purple-500 via-blue-500 to-purple-500 animate-spin"></div>
-            <div className="absolute w-16 h-16 rounded-full bg-gray-900 dark:bg-gray-950"></div>
-
-            {/* Center icon with pulse effect */}
-            <div className="relative animate-pulse">
-              <Bell className="h-8 w-8 text-purple-500 dark:text-purple-400" />
-            </div>
-          </div>
-
-          {/* Loading text with gradient */}
-          <div className="space-y-3">
-            <h3 className="text-2xl font-bold bg-gradient-to-r from-purple-600 via-blue-600 to-cyan-600 bg-clip-text text-transparent animate-pulse">
-              Loading Notifications
-            </h3>
-            <p className="text-sm font-medium text-gray-600 dark:text-gray-400">
-              Preparing your notification center...
-            </p>
-
-            {/* Loading dots animation */}
-            <div className="flex items-center justify-center gap-2">
-              <div className="w-2 h-2 bg-purple-500 rounded-full animate-bounce"></div>
-              <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
-              <div className="w-2 h-2 bg-cyan-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
+    return <PremiumPageLoader message="Loading Notifications" subMessage="Preparing your notification center..." />;
   }
 
   return (

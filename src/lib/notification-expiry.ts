@@ -4,12 +4,105 @@
  */
 
 import { adminDb } from './firebase-admin';
+
 export function calculateNotificationExpiry(startDate: Date, daysToLive: number = 0): string {
   const expiresAt = new Date(startDate);
   expiresAt.setDate(expiresAt.getDate() + daysToLive);
   expiresAt.setHours(23, 59, 59, 999);
   return expiresAt.toISOString();
 }
+
+/**
+ * Clean up expired processed_payments documents in Firestore.
+ * Documents are kept for 7 days for idempotency/retry safety, then deleted.
+ */
+export async function deleteExpiredProcessedPayments(): Promise<{
+  deletedPayments: number;
+  errors: string[];
+}> {
+  const result = {
+    deletedPayments: 0,
+    errors: [] as string[]
+  };
+
+  try {
+    const nowMs = Date.now();
+    const PAGE_SIZE = 500;
+    let lastDoc: any = null;
+    let hasMore = true;
+
+    while (hasMore) {
+      let query = adminDb.collection('processed_payments')
+        .orderBy('__name__')
+        .limit(PAGE_SIZE);
+
+      if (lastDoc) {
+        query = query.startAfter(lastDoc);
+      }
+
+      const snapshot = await query.get();
+
+      if (snapshot.empty || snapshot.size < PAGE_SIZE) {
+        hasMore = false;
+      }
+
+      if (snapshot.docs.length > 0) {
+        lastDoc = snapshot.docs[snapshot.docs.length - 1];
+      }
+
+      const idsToDelete: string[] = [];
+
+      for (const doc of snapshot.docs) {
+        const data = doc.data();
+        let expiryMillis = 0;
+
+        if (data.expiresAt) {
+          expiryMillis = new Date(data.expiresAt).getTime();
+        } else if (data.processedAt) {
+          // Fallback: if no expiresAt exists, expire 7 days after processedAt
+          let processedDate: Date;
+          if (typeof data.processedAt.toDate === 'function') {
+            processedDate = data.processedAt.toDate();
+          } else {
+            processedDate = new Date(data.processedAt);
+          }
+          expiryMillis = processedDate.getTime() + 7 * 24 * 60 * 60 * 1000;
+        }
+
+        if (expiryMillis > 0 && expiryMillis <= nowMs) {
+          idsToDelete.push(doc.id);
+        }
+      }
+
+      if (idsToDelete.length > 0) {
+        console.log(`   Found ${idsToDelete.length} expired processed payments in this page.`);
+
+        const chunkSize = 400;
+        for (let i = 0; i < idsToDelete.length; i += chunkSize) {
+          const batch = adminDb.batch();
+          const chunk = idsToDelete.slice(i, i + chunkSize);
+
+          chunk.forEach(id => {
+            const ref = adminDb.collection('processed_payments').doc(id);
+            batch.delete(ref);
+          });
+
+          await batch.commit();
+        }
+
+        result.deletedPayments += idsToDelete.length;
+      }
+    }
+
+    console.log(`   Deleted ${result.deletedPayments} expired processed payments.`);
+    return result;
+  } catch (error: any) {
+    console.error('❌ Error in processed payments cleanup:', error);
+    result.errors.push(`Processed payments cleanup error: ${error.message}`);
+    return result;
+  }
+}
+
 /**
  * Delete expired notifications (run at midnight)
  * Deletes notifications where expiry date is before current date.
@@ -17,13 +110,13 @@ export function calculateNotificationExpiry(startDate: Date, daysToLive: number 
  */
 export async function deleteExpiredNotifications(): Promise<{
   deletedNotifications: number;
-  deletedReceipts: number;
+  deletedProcessedPayments?: number;
   errors: string[];
   debug?: any;
 }> {
   const result: any = {
     deletedNotifications: 0,
-    deletedReceipts: 0,
+    deletedProcessedPayments: 0,
     errors: [] as string[],
     debug: { method: 'paginated-filtering', scanned: 0 }
   };
@@ -31,6 +124,18 @@ export async function deleteExpiredNotifications(): Promise<{
   try {
     const nowMs = Date.now();
     console.log(`🧹 Starting Robust Cleanup at ${new Date().toISOString()}`);
+
+    // 1. Clean up expired processed payments
+    try {
+      const payResult = await deleteExpiredProcessedPayments();
+      result.deletedProcessedPayments = payResult.deletedPayments;
+      if (payResult.errors.length > 0) {
+        result.errors.push(...payResult.errors);
+      }
+    } catch (payErr: any) {
+      console.error('❌ Exception in deleteExpiredProcessedPayments:', payErr);
+      result.errors.push(`Processed payments cleanup exception: ${payErr.message}`);
+    }
 
     // Paginate through notifications instead of loading all into memory.
     // Firestore limits `in` queries to 30 items, so we batch deletes
@@ -103,9 +208,6 @@ export async function deleteExpiredNotifications(): Promise<{
         }
 
         result.deletedNotifications += idsToDelete.length;
-
-        // Delete receipts for this page's expired notifications
-        await deleteAssociatedReceipts(idsToDelete, result);
       }
     }
 
@@ -118,139 +220,4 @@ export async function deleteExpiredNotifications(): Promise<{
   }
 }
 
-
-
-/**
- * Helper to delete receipts for a batch of notifications.
- * Processes in batches to avoid N+1 query overhead.
- */
-async function deleteAssociatedReceipts(
-  notificationIds: string[],
-  result: { deletedReceipts: number; errors: string[] }
-) {
-  // Firestore `in` queries support up to 30 values. Process in chunks.
-  const IN_CHUNK = 30;
-  const DELETE_CHUNK = 400;
-
-  for (let i = 0; i < notificationIds.length; i += IN_CHUNK) {
-    const chunk = notificationIds.slice(i, i + IN_CHUNK);
-    try {
-      const receiptsQuery = await adminDb.collection('notification_read_receipts')
-        .where('notificationId', 'in', chunk)
-        .get();
-
-      if (!receiptsQuery.empty) {
-        // Batch delete in chunks of 400
-        for (let j = 0; j < receiptsQuery.docs.length; j += DELETE_CHUNK) {
-          const batch = adminDb.batch();
-          const deleteChunk = receiptsQuery.docs.slice(j, j + DELETE_CHUNK);
-          deleteChunk.forEach((doc: { ref: any }) => {
-            batch.delete(doc.ref);
-          });
-          await batch.commit();
-        }
-        result.deletedReceipts += receiptsQuery.size;
-      }
-    } catch (error: any) {
-      console.error(`   Error deleting receipts for batch starting at index ${i}:`, error);
-      result.errors.push(`Failed to delete receipts batch at index ${i}: ${error.message}`);
-    }
-  }
-}
-
-
-
-/**
- * Create notification with automatic expiry
- */
-export async function createNotificationWithExpiry(
-  notification: {
-    toUid: string;
-    toRole: string;
-    type: string;
-    title: string;
-    body: string;
-    links?: any;
-    read?: boolean;
-  },
-  daysToLive: number = 0 // 0 = expires same day at midnight
-): Promise<string> {
-  try {
-    const notifRef = adminDb.collection('notifications').doc();
-    const now = new Date();
-    const expiresAt = calculateNotificationExpiry(now, daysToLive);
-
-    const notificationData = {
-      notifId: notifRef.id,
-      ...notification,
-      read: notification.read ?? false,
-      createdAt: now.toISOString(),
-      expiresAt
-    };
-
-    await notifRef.set(notificationData);
-
-    console.log(`📬 Created notification ${notifRef.id} (expires: ${expiresAt})`);
-
-    return notifRef.id;
-  } catch (error) {
-    console.error('Error creating notification with expiry:', error);
-    throw error;
-  }
-}
-
-/**
- * Extend notification expiry (useful for important notifications)
- */
-export async function extendNotificationExpiry(
-  notificationId: string,
-  additionalDays: number
-): Promise<boolean> {
-  try {
-    const notifDoc = await adminDb.collection('notifications').doc(notificationId).get();
-
-    if (!notifDoc.exists) {
-      console.error('Notification not found:', notificationId);
-      return false;
-    }
-
-    const currentExpiry = new Date(notifDoc.data()?.expiresAt);
-    const newExpiry = new Date(currentExpiry);
-    newExpiry.setDate(newExpiry.getDate() + additionalDays);
-
-    await notifDoc.ref.update({
-      expiresAt: newExpiry.toISOString(),
-      expiryExtended: true,
-      expiryExtendedAt: new Date().toISOString()
-    });
-
-    console.log(`⏰ Extended notification ${notificationId} expiry to: ${newExpiry.toISOString()}`);
-
-    return true;
-  } catch (error) {
-    console.error('Error extending notification expiry:', error);
-    return false;
-  }
-}
-
-/**
- * Get count of notifications expiring today
- */
-export async function getExpiringTodayCount(): Promise<number> {
-  try {
-    const today = new Date();
-    const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0, 0);
-    const endOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59, 999);
-
-    const query = await adminDb.collection('notifications')
-      .where('expiresAt', '>=', startOfDay.toISOString())
-      .where('expiresAt', '<=', endOfDay.toISOString())
-      .get();
-
-    return query.size;
-  } catch (error) {
-    console.error('Error getting expiring count:', error);
-    return 0;
-  }
-}
 

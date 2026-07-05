@@ -18,6 +18,7 @@ import EnhancedDatePicker from "@/components/enhanced-date-picker";
 import { getAllRoutes, getAllBuses, getDriverById, updateDriver, getAllDrivers } from '@/lib/dataService';
 import { Route } from '@/lib/types';
 import RouteSelect from '@/components/RouteSelect';
+import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 // Define the form data type
@@ -131,7 +132,7 @@ export default function EditDriverPage({ params }: { params: Promise<{ id: strin
             employeeId: foundDriver.employeeId || foundDriver.driverId || '',
             address: foundDriver.address || foundDriver.location || '',
             approvedBy: foundDriver.approvedBy || '',
-            shift: foundDriver.shift === 'Morning & Evening' ? 'Both' : (foundDriver.shift || 'Both'),
+            shift: foundDriver.shift || 'Both',
           };
 
           // If busAssigned is derived from ID (legacy), format it correctly and recover ID
@@ -197,7 +198,7 @@ export default function EditDriverPage({ params }: { params: Promise<{ id: strin
           employeeId: foundDriver.employeeId || foundDriver.driverId || '',
           address: foundDriver.address || foundDriver.location || '',
           approvedBy: foundDriver.approvedBy || '',
-          shift: foundDriver.shift === 'Morning & Evening' ? 'Both' : (foundDriver.shift || 'Both'),
+          shift: foundDriver.shift || 'Both',
         };
 
         if (initialFormData.busAssigned && !initialFormData.busAssigned.includes('Bus-')) {
@@ -243,7 +244,7 @@ export default function EditDriverPage({ params }: { params: Promise<{ id: strin
       const existingShift = (existingDriver.shift || '').toLowerCase();
       
       // Update available shifts base on what's occupied
-      if (existingShift === 'both' || existingShift === 'morning & evening') {
+      if (existingShift === 'both') {
         // Bus is fully covered, but we allow editing if user confirms later
         setAvailableShifts(['Morning', 'Evening']); 
         setConflictDriver(existingDriver);
@@ -423,10 +424,10 @@ export default function EditDriverPage({ params }: { params: Promise<{ id: strin
       
       if (existingDriver) {
         const eShift = (existingDriver.shift || '').toLowerCase();
-        const fShift = (formData.shift === 'Morning & Evening' ? 'both' : formData.shift).toLowerCase();
+        const fShift = formData.shift.toLowerCase();
         
         // CONFLICT: Either already Both, or same shift
-        if (eShift === 'both' || eShift === 'morning & evening' || eShift === fShift) {
+        if (eShift === 'both' || eShift === fShift) {
           setConflictDriver(existingDriver);
           setShowConflictModal(true);
           return; 
@@ -511,7 +512,7 @@ export default function EditDriverPage({ params }: { params: Promise<{ id: strin
         assignedBusId: assignedBusId,
         assignedRouteId: assignedRouteId,
         approvedBy: formData.approvedBy,
-        shift: formData.shift === 'Morning & Evening' ? 'Both' : formData.shift,
+        shift: formData.shift,
         updatedAt: new Date().toISOString()
       };
 
@@ -561,11 +562,7 @@ export default function EditDriverPage({ params }: { params: Promise<{ id: strin
   };
 
   if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
-      </div>
-    );
+    return <PremiumPageLoader message="Loading driver profile..." subMessage="Preparing editing tools..." />;
   }
 
   if (!driver) {
@@ -858,7 +855,7 @@ export default function EditDriverPage({ params }: { params: Promise<{ id: strin
                       Shift <span className="text-red-500">*</span>
                     </Label>
                     <Select
-                      value={formData.shift === 'Morning & Evening' ? 'Both' : formData.shift}
+                      value={formData.shift}
                       onValueChange={(value) => handleSelectChange('shift', value)}
                     >
                       <SelectTrigger className="w-full h-9">
@@ -866,7 +863,7 @@ export default function EditDriverPage({ params }: { params: Promise<{ id: strin
                       </SelectTrigger>
                       <SelectContent>
                         {availableShifts.map(shift => (
-                          <SelectItem key={shift} value={shift}>{shift === 'Both' ? 'Morning & Evening' : shift}</SelectItem>
+                          <SelectItem key={shift} value={shift}>{shift}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
@@ -944,7 +941,7 @@ export default function EditDriverPage({ params }: { params: Promise<{ id: strin
             
             <div className="space-y-4 mb-6">
               <p className="text-gray-300 text-sm leading-relaxed">
-                There already exists a driver named <span className="text-blue-400 font-semibold">{conflictDriver.fullName || conflictDriver.name || 'Unknown'}</span> who is looking for <span className="text-amber-400 font-semibold">{(conflictDriver.shift === 'Both' || conflictDriver.shift === 'Morning & Evening') ? 'both Morning & Evening' : conflictDriver.shift}</span> shift(s).
+                There already exists a driver named <span className="text-blue-400 font-semibold">{conflictDriver.fullName || conflictDriver.name || 'Unknown'}</span> who is looking for <span className="text-amber-400 font-semibold">{conflictDriver.shift === 'Both' ? 'Both' : conflictDriver.shift}</span> shift(s).
               </p>
               <div className="bg-white/5 border border-white/10 rounded-xl p-4">
                 <p className="text-[10px] text-gray-500 uppercase tracking-wider font-bold mb-1">Impact Analysis</p>
@@ -954,7 +951,7 @@ export default function EditDriverPage({ params }: { params: Promise<{ id: strin
                 </div>
                 <div className="flex items-center justify-between mt-1">
                   <span className="text-xs text-gray-400">Current Occupancy:</span>
-                  <span className="text-xs text-amber-500 font-bold">{(conflictDriver.shift === 'Both' || conflictDriver.shift === 'Morning & Evening') ? 'Full' : 'Partial'}</span>
+                  <span className="text-xs text-amber-500 font-bold">{conflictDriver.shift === 'Both' ? 'Full' : 'Partial'}</span>
                 </div>
               </div>
             </div>

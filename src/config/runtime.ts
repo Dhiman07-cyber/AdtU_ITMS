@@ -48,12 +48,6 @@ export const POLLING_INTERVAL_MS = 86_400_000; // 24 hours (effectively off, rel
 export const NOTIFICATION_POLLING_INTERVAL_MS = 120_000; // 2 minutes (custom logic for notifications)
 
 /**
- * System signals polling interval (in milliseconds)
- * Set to 60s to balance responsiveness with quota safety
- */
-export const SYSTEM_SIGNALS_INTERVAL_MS = 60_000; // 60 seconds
-
-/**
  * Debounce time for visibility-based listener reattach (in milliseconds)
  */
 export const VISIBILITY_DEBOUNCE_MS = 3_000; // 3 seconds
@@ -109,3 +103,8 @@ export const ESTIMATED_DAILY_RECONNECTS = 10;
  * The authoritative value is in Firestore `config/system` → busFee.amount.
  */
 export const DEFAULT_BUS_FEE = 10_000;
+
+/**
+ * Static application name constant.
+ */
+export const APP_NAME = "AdtU Bus Services";

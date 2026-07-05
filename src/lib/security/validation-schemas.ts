@@ -41,7 +41,7 @@ export const ReassignStudentsSchema = z.object({
         fromBusId: z.string().min(1).max(100),
         toBusId: z.string().min(1).max(100),
         toBusNumber: z.string().min(1).max(50),
-        shift: z.enum(['Morning', 'Evening', 'Morning & Evening', 'Both']),
+        shift: z.enum(['Morning', 'Evening', 'Both']),
         stopId: z.string().max(100).optional(),
         stopName: z.string().max(200).optional(),
     })),
@@ -226,33 +226,17 @@ export const RenewalRequestSchema = z.object({
 // ============================================================================
 
 export const NotificationCreateSchema = z.object({
+    type: z.string().max(50).optional(),
     title: z.string().min(1).max(200),
     content: z.string().min(1).max(5000),
-    sender: z.object({
-        userId: UIDSchema,
-        userName: z.string().max(200),
-        userRole: z.enum(['admin', 'moderator', 'driver']),
-        empId: z.string().max(50).optional(),
-    }),
-    target: z.object({
-        type: z.enum(['global', 'role_based', 'route_based', 'specific_users']),
-        roleFilter: z.enum(['student', 'driver', 'moderator', 'admin', 'all']).optional(),
-        routeIds: z.array(z.string().max(50)).max(50).optional(),
-        userIds: z.array(UIDSchema).max(1000).optional(),
-    }),
-    metadata: z.object({
-        type: z.string().max(50).optional(),
-        priority: z.enum(['low', 'medium', 'high', 'urgent']).optional(),
-        expiresAt: DateSchema.optional(),
-        busInfo: z.object({
-            busId: z.string().max(50).optional(),
-            busNumber: z.string().max(20).optional(),
-            registrationPlate: z.string().max(20).optional(),
-        }).optional(),
-    }).optional(),
-    recipientIds: z.array(UIDSchema).max(1000),
-    autoInjectedRecipientIds: z.array(UIDSchema).max(100).optional(),
-    deleteAfterDays: z.number().int().min(1).max(7).optional().default(1),
+    targetType: z.enum(['all_users', 'all_role', 'shift_based', 'bus_based', 'route_based', 'specific_users']).optional(),
+    targetRole: z.enum(['student', 'driver', 'moderator', 'admin']).optional(),
+    targetShift: z.enum(['morning', 'evening', 'both']).optional(),
+    targetBusIds: z.array(z.string().max(50)).max(50).optional(),
+    targetRouteIds: z.array(z.string().max(50)).max(50).optional(),
+    targetUserIds: z.array(UIDSchema).max(1000).optional(),
+    expiryAt: z.number().optional(),
+    sendToAllRoles: z.boolean().optional(),
 });
 
 // ============================================================================

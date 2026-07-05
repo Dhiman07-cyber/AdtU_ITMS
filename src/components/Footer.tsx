@@ -8,7 +8,7 @@ import Image from 'next/image';
 import { Button } from '@/components/ui/button';
 import { MessageSquare } from 'lucide-react';
 import FeedbackModal from '@/components/FeedbackModal';
-import { useSystemConfig } from '@/contexts/SystemConfigContext';
+import { APP_NAME } from '@/config/runtime';
 
 interface FooterProps {
   className?: string;
@@ -16,7 +16,7 @@ interface FooterProps {
 
 const Footer = React.memo(function Footer({ className = '' }: FooterProps) {
   const { currentUser, userData } = useAuth();
-  const { appName } = useSystemConfig();
+  const appName = APP_NAME;
   const router = useRouter();
 
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);

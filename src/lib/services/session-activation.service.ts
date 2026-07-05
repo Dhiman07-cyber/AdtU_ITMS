@@ -43,8 +43,9 @@ import { getDeadlineConfig } from '@/lib/deadline-config-service';
 import { DeadlineConfig } from '@/lib/types/deadline-config';
 import { buildCapacityDelta, sendBusFullAlert } from '@/lib/busCapacityService';
 import { computeBlockDatesFromValidUntil } from '@/lib/utils/deadline-computation';
-import { writeAuditInTransaction, SYSTEM_ACTOR } from '@/lib/audit/audit-service';
+import { createAuditLogInTransaction, SYSTEM_ACTOR } from '@/lib/services/audit.service';
 import { CapacityFullError } from '@/lib/errors/sentinel-errors';
+import { normalizeShift, areShiftsCompatible, getShiftLoad } from '@/lib/utils/shift-utils';
 
 // Page size for paginating verified_upcoming applications.
 const PAGE_SIZE = 200;
@@ -91,8 +92,12 @@ export function getCurrentSessionStartYear(config: DeadlineConfig, now: Date = n
  * 1. Same requested route (true comes before false)
  * 2. Same stop (filter condition)
  * 3. Same shift (exact shift match comes before 'both')
- * 4. Lowest current occupancy (currentMembers ascending)
+ * 4. Lowest current occupancy (shiftLoad ascending)
  * 5. Lowest document ID (busId alphabetical comparison)
+ *
+ * CANONICAL CAPACITY MODEL (per-shift): each student is gated against their own
+ * shift's trip counter, never against the combined currentMembers total.
+ * Uses getShiftLoad from shift-utils so the filter is identical to the write-path.
  */
 async function findDeterministicAlternativeBuses(
   stopId: string,
@@ -107,10 +112,9 @@ async function findDeterministicAlternativeBuses(
     const busId = doc.id;
     const busRouteId = bus.routeId || '';
 
-    // Check shift compatibility
-    const busShift = (bus.shift || 'Both').toLowerCase();
-    const reqShift = requestedShift.toLowerCase();
-    const shiftCompatible = busShift === 'both' || busShift === reqShift;
+    // Check shift compatibility using canonical shift-utils
+    const busShift = bus.shift || 'Both';
+    const shiftCompatible = areShiftsCompatible(requestedShift, busShift);
     if (!shiftCompatible) continue;
 
     // Check if route passes through the stop
@@ -122,16 +126,19 @@ async function findDeterministicAlternativeBuses(
     );
     if (!passesThrough) continue;
 
-    // Check capacity
-    const currentMembers = Number(bus.currentMembers || 0);
+    // CANONICAL PER-SHIFT CAPACITY GATE.
+    // A student's capacity eligibility is gated ONLY against their shift's trip counter
+    // (morningCount or eveningCount), never against the combined total currentMembers.
+    // currentMembers = morningCount + eveningCount is a derived statistic for display.
+    const shiftLoad = getShiftLoad(bus, requestedShift);
     const capacity = Number(bus.capacity || 55);
-    if (currentMembers >= capacity) continue;
+    if (shiftLoad >= capacity) continue;
 
     alternatives.push({
       busId,
       routeId: busRouteId,
       shift: bus.shift || 'Both',
-      currentMembers,
+      currentMembers: shiftLoad, // per-shift load for correct sort (not total currentMembers)
       capacity
     });
   }
@@ -162,14 +169,6 @@ async function findDeterministicAlternativeBuses(
   });
 
   return alternatives;
-}
-
-function normalizeShift(shift: unknown): string {
-  const v = String(shift || '').toLowerCase().trim();
-  if (v.includes('even')) return 'Evening';
-  if (v.includes('morn')) return 'Morning';
-  if (v === 'both') return 'Both';
-  return 'Morning';
 }
 
 /**
@@ -283,7 +282,9 @@ async function activateOne(
       }
       const busData = busSnap.data();
       const delta = buildCapacityDelta(busData, shift, 1);
-      if (delta.oldMembers >= delta.capacity) {
+      // CANONICAL PER-SHIFT CAPACITY GATE: gate on the student's own trip counter,
+      // never on the combined currentMembers total.
+      if (delta.oldShiftLoad >= delta.capacity) {
         throw new CapacityFullError();
       }
 
@@ -293,38 +294,43 @@ async function activateOne(
       transaction.update(busRef, delta.updates);
       transaction.delete(appRef);
 
-      if (delta.newMembers >= delta.capacity) {
+      if (delta.newShiftLoad >= delta.capacity) {
         postCommitFullAlert = {
           busNumber: busData?.busNumber || '',
           routeId: busData?.routeId || '',
         };
       }
 
-      writeAuditInTransaction(transaction, {
+      createAuditLogInTransaction(transaction, {
         action: 'application_session_activated',
-        actor: SYSTEM_ACTOR,
+        performedBy: SYSTEM_ACTOR.id,
+        performedByName: SYSTEM_ACTOR.name,
+        performedByRole: SYSTEM_ACTOR.role,
         targetId: app.applicantUid,
         targetType: 'student',
         targetName: formData.fullName || '',
-        reason: trigger === 'cron' ? 'session_activation_cron' : 'session_activation_admin_trigger',
-        before: { applicationId: appId, state: 'verified_upcoming', targetSession },
-        after: {
-          studentUid: app.applicantUid,
-          busId: targetBusId,
-          shift,
-          sessionStartYear: startYear,
-          sessionEndYear: endYear,
-          validUntil,
-          status: 'active',
-        },
-        details: {
+        category: 'applications',
+        summary: 'Application session activated: ' + (formData.fullName || ''),
+        severity: 'high',
+        metadata: {
+          before: { applicationId: appId, state: 'verified_upcoming', targetSession },
+          after: {
+            studentUid: app.applicantUid,
+            busId: targetBusId,
+            shift,
+            sessionStartYear: startYear,
+            sessionEndYear: endYear,
+            validUntil,
+            status: 'active',
+          },
           applicationId: appId,
           trigger,
           alternativeBusAllocated: isAlternative,
           originalBusId: requestedBusId,
           originalRouteId: requestedRouteId,
+          reason: trigger === 'cron' ? 'session_activation_cron' : 'session_activation_admin_trigger',
+          correlationId: appId,
         },
-        correlationId: appId,
       });
     });
 
@@ -388,17 +394,26 @@ async function activateOne(
             pendingSeatAllocationAt: nowIso,
             updatedAt: nowIso,
           });
-          writeAuditInTransaction(transaction, {
+          createAuditLogInTransaction(transaction, {
             action: 'application_pending_seat_allocation',
-            actor: SYSTEM_ACTOR,
+            performedBy: SYSTEM_ACTOR.id,
+            performedByName: SYSTEM_ACTOR.name,
+            performedByRole: SYSTEM_ACTOR.role,
             targetId: app.applicantUid,
             targetType: 'application',
             targetName: formData.fullName || '',
-            reason: 'session_activation_capacity_full',
-            before: { applicationId: appId, state: 'verified_upcoming' },
-            after: { applicationId: appId, state: 'pending_seat_allocation' },
-            details: { busId: requestedBusId, shift, trigger },
-            correlationId: appId,
+            category: 'applications',
+            summary: 'Application pending seat allocation: ' + (formData.fullName || ''),
+            severity: 'high',
+            metadata: {
+              before: { applicationId: appId, state: 'verified_upcoming' },
+              after: { applicationId: appId, state: 'pending_seat_allocation' },
+              busId: requestedBusId,
+              shift,
+              trigger,
+              reason: 'session_activation_capacity_full',
+              correlationId: appId,
+            },
           });
         });
 
@@ -418,58 +433,101 @@ async function activateOne(
 async function notifyStudentActivated(app: Application, formData: any, validUntil: string): Promise<void> {
   const notifRef = adminDb.collection('notifications').doc();
   await notifRef.set({
-    notifId: notifRef.id,
-    toUid: app.applicantUid,
-    toRole: 'student',
-    type: 'Approved',
     title: 'Your transport service is now active',
-    body: `Your bus service for the ${(app as any).targetSession?.startYear}-${(app as any).targetSession?.endYear} session is now active. Valid until ${new Date(validUntil).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}.`,
-    links: { profile: '/student/profile' },
-    read: false,
+    content: `Your bus service for the ${(app as any).targetSession?.startYear}-${(app as any).targetSession?.endYear} session is now active. Valid until ${new Date(validUntil).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}.`,
+    type: 'info',
+    sender: {
+      userId: 'system',
+      userName: 'System',
+      userRole: 'admin'
+    },
+    target: {
+      type: 'specific_users',
+      specificUserIds: [app.applicantUid]
+    },
+    recipientIds: [app.applicantUid],
+    autoInjectedRecipientIds: [],
+    readByUserIds: [],
+    isEdited: false,
+    isDeletedGlobally: false,
+    hiddenForUserIds: [],
     createdAt: new Date().toISOString(),
+    metadata: {
+      profile: '/student/profile'
+    }
   });
 }
 
 async function notifyPendingSeatAllocation(appId: string, app: Application, formData: any): Promise<void> {
   const nowIso = new Date().toISOString();
+  
+  // Notify student
   const studentNotifRef = adminDb.collection('notifications').doc();
   await studentNotifRef.set({
-    notifId: studentNotifRef.id,
-    toUid: app.applicantUid,
-    toRole: 'student',
-    type: 'PendingSeatAllocation',
     title: 'Awaiting seat assignment',
-    body: 'Your application has been approved and payment is verified, but all seats are currently occupied. Your application is in the Seat Allocation Queue and you will be notified as soon as a seat becomes available.',
-    links: { statusPage: `/apply/status/${appId}` },
-    read: false,
+    content: 'Your application has been approved and payment is verified, but all seats are currently occupied. Your application is in the Seat Allocation Queue and you will be notified as soon as a seat becomes available.',
+    type: 'info',
+    sender: {
+      userId: 'system',
+      userName: 'System',
+      userRole: 'admin'
+    },
+    target: {
+      type: 'specific_users',
+      specificUserIds: [app.applicantUid]
+    },
+    recipientIds: [app.applicantUid],
+    autoInjectedRecipientIds: [],
+    readByUserIds: [],
+    isEdited: false,
+    isDeletedGlobally: false,
+    hiddenForUserIds: [],
     createdAt: nowIso,
+    metadata: {
+      statusPage: `/apply/status/${appId}`
+    }
   });
 
+  // Notify admins and moderators
   const [adminsSnap, modsSnap] = await Promise.all([
     adminDb.collection('admins').get(),
     adminDb.collection('moderators').get(),
   ]);
   const recipients = [
-    ...adminsSnap.docs.map((d: any) => ({ id: d.id, role: 'admin' as const })),
-    ...modsSnap.docs.map((d: any) => ({ id: d.id, role: 'moderator' as const })),
+    ...adminsSnap.docs.map((d: any) => d.id),
+    ...modsSnap.docs.map((d: any) => d.id),
   ];
   if (recipients.length === 0) return;
 
   for (let i = 0; i < recipients.length; i += 490) {
     const chunk = recipients.slice(i, i + 490);
     const batch = adminDb.batch();
-    for (const r of chunk) {
+    for (const staffId of chunk) {
       const ref = adminDb.collection('notifications').doc();
       batch.set(ref, {
-        notifId: ref.id,
-        toUid: r.id,
-        toRole: r.role,
-        type: 'PendingSeatAllocation',
         title: 'Verified application needs manual seat allocation',
-        body: `${formData.fullName} (${formData.enrollmentId}) has a verified application and completed payment but no seat is available. Please assign a seat or wait for one to free up.`,
-        links: { applicationId: appId, reviewPage: r.role === 'admin' ? `/admin/applications/${appId}` : `/moderator/applications/${appId}` },
-        read: false,
+        content: `${formData.fullName} (${formData.enrollmentId}) has a verified application and completed payment but no seat is available. Please assign a seat or wait for one to free up.`,
+        type: 'info',
+        sender: {
+          userId: 'system',
+          userName: 'System',
+          userRole: 'admin'
+        },
+        target: {
+          type: 'specific_users',
+          specificUserIds: [staffId]
+        },
+        recipientIds: [staffId],
+        autoInjectedRecipientIds: [],
+        readByUserIds: [],
+        isEdited: false,
+        isDeletedGlobally: false,
+        hiddenForUserIds: [],
         createdAt: nowIso,
+        metadata: {
+          applicationId: appId,
+          reviewPage: `/admin/applications/${appId}`
+        }
       });
     }
     await batch.commit();

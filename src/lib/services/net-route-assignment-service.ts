@@ -25,7 +25,6 @@ import { generatePrefixedId } from '@/lib/security/random-id';
 // ============================================
 
 import { writeToSupabaseViaAPI } from './reassignment-log-writer';
-
 // ============================================
 // TYPES
 // ============================================
@@ -416,7 +415,7 @@ export async function commitNetRouteChanges(
 
 /**
  * Writes an audit log entry for the route assignment operation.
- * Writes to both Firestore (legacy adminActions) and Supabase (reassignment_logs).
+ * Writes to Firestore audit_logs and Supabase reassignment_logs.
  */
 async function writeRouteAssignmentAuditLog(
     adminUid: string,
@@ -429,22 +428,38 @@ async function writeRouteAssignmentAuditLog(
 
     const updatedBuses = busChanges.map(c => c.busId);
 
-    // Write to legacy Firestore adminActions
-    await addDoc(collection(db, "adminActions"), {
-        actionType: "route_assignment_commit",
-        actorUid: adminUid,
-        summary: `Committed ${updatedBuses.length} route assignment(s)`,
-        busesAffected: updatedBuses,
-        busChanges: busChanges.map(c => ({
-            busId: c.busId,
-            busLabel: c.busLabel,
-            fromRoute: c.prevRouteName,
-            toRoute: c.newRouteName,
-        })),
-        stagingSnapshot: stagingSnapshot ? JSON.stringify(stagingSnapshot) : null,
-        timestamp: serverTimestamp(),
-        expiresAt: Timestamp.fromDate(ttlDate),
-    });
+    try {
+        const auditLogsRef = collection(db, 'audit_logs');
+        await addDoc(auditLogsRef, {
+            category: 'reassignments',
+            action: 'route_assignment_commit',
+            summary: `Committed ${updatedBuses.length} route assignment(s)`,
+            description: '',
+            severity: 'low',
+            performedBy: adminUid,
+            performedByName: actorInfo?.name || '',
+            performedByRole: (actorInfo?.role as any) || 'admin',
+            performedAt: serverTimestamp(),
+            createdAt: serverTimestamp(),
+            expiresAt: ttlDate,
+            targetType: 'bus',
+            targetId: adminUid,
+            targetName: '',
+            ipAddress: '',
+            userAgent: typeof window !== 'undefined' ? window.navigator.userAgent : '',
+            metadata: {
+                busesAffected: updatedBuses,
+                busChanges: busChanges.map(c => ({
+                    busId: c.busId,
+                    busLabel: c.busLabel,
+                    fromRoute: c.prevRouteName,
+                    toRoute: c.newRouteName,
+                })),
+            },
+        });
+    } catch (auditError) {
+        console.warn("Audit log write failed (non-critical):", auditError);
+    }
 
     // Also write to Supabase reassignment_logs with full change records for rollback
     try {

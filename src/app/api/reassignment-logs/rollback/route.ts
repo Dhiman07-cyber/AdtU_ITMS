@@ -11,7 +11,7 @@ import { NextResponse } from 'next/server';
 import { adminDb } from '@/lib/firebase-admin';
 import { withSecurity } from '@/lib/security/api-security';
 import { RateLimits } from '@/lib/security/rate-limiter';
-import { writeAuditInTransaction, type AuditActorRole } from '@/lib/audit/audit-service';
+import { createAuditLogInTransaction, type AuditActorRole } from '@/lib/services/audit.service';
 import { z } from 'zod';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -266,16 +266,23 @@ export const POST = withSecurity(
                     rollbackChanges.push({ ...change, before: change.after, after: change.before });
                 });
 
-                writeAuditInTransaction(transaction, {
+                createAuditLogInTransaction(transaction, {
                     action: 'reassignment_rolled_back',
-                    actor: { id: auth.uid, role: (auth.role as AuditActorRole) || 'admin', name: actorLabel },
+                    performedBy: auth.uid,
+                    performedByName: actorLabel,
+                    performedByRole: (auth.role as AuditActorRole) || 'admin',
                     targetId: operationId,
                     targetType: 'reassignment',
-                    reason: 'admin_rollback',
-                    before: { rolledBackOperation: operationId, status: 'committed' },
-                    after: { status: 'rolled_back', revertedDocCount: reverts.length },
-                    details: { rollbackOperationId: rollbackOpId, revertedDocs: reverts.map((c) => c.docPath) },
-                    correlationId: operationId,
+                    category: 'reassignments',
+                    summary: `Rolled back operation ${operationId}`,
+                    severity: 'high',
+                    metadata: {
+                        before: { rolledBackOperation: operationId, status: 'committed' },
+                        after: { status: 'rolled_back', revertedDocCount: reverts.length },
+                        rollbackOperationId: rollbackOpId,
+                        revertedDocs: reverts.map((c) => c.docPath),
+                        correlationId: operationId,
+                    },
                 });
             });
         } catch (err: unknown) {

@@ -8,6 +8,7 @@ import {
     ModeratorPermissions,
     DEFAULT_MODERATOR_PERMISSIONS
 } from '@/lib/types/moderator-permissions';
+import { getSigningOutState } from '@/lib/firestore-error-handler';
 
 interface UseModeratorPermissionsReturn {
     permissions: ModeratorPermissions;
@@ -157,6 +158,7 @@ export function useModeratorPermissions(): UseModeratorPermissionsReturn {
             setLoading(false);
         }, (err: any) => {
             if (!isMounted) return;
+            if (getSigningOutState()) return;
             console.error('[useModeratorPermissions] Realtime listener error:', err);
             setError('Failed to load permissions');
             setLoading(false);

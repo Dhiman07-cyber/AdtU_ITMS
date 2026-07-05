@@ -16,6 +16,7 @@ import ProfileImageAddModal from '@/components/ProfileImageAddModal';
 import Image from 'next/image';
 import EnhancedDatePicker from "@/components/enhanced-date-picker";
 import { signalCollectionRefresh } from '@/hooks/useEventDrivenRefresh';
+import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import { getAllModerators } from "@/lib/dataService";
 import { useDebouncedStorage } from '@/hooks/useDebouncedStorage';
 import { OptimizedInput, OptimizedSelect, OptimizedTextarea } from '@/components/forms';
@@ -377,11 +378,7 @@ export default function AddModeratorPage() {
   };
 
   if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
-      </div>
-    );
+    return <PremiumPageLoader message="Preparing moderator form..." subMessage="Loading resources..." />;
   }
 
   if (!currentUser || !userData || userData.role !== 'admin') {

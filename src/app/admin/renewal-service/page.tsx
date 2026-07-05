@@ -91,6 +91,7 @@ interface RenewalRequest {
   transactionId?: string;
   receiptImageUrl?: string;
   paymentMode: string;
+  paidAt?: string;
   status: 'pending' | 'approved' | 'rejected';
   rejectionReason?: string;
   createdAt: any;
@@ -1556,12 +1557,34 @@ export default function AdminRenewalServicePage() {
                     </div>
 
                     {/* Transaction Ref */}
-                    <div className="col-span-2 pt-2">
+                    <div className={selectedRequest?.paidAt ? "col-span-1 pt-2" : "col-span-2 pt-2"}>
                       <p className="text-[9px] sm:text-[10px] uppercase font-bold text-zinc-600 mb-1">Transaction Reference</p>
                       <p className="text-[10px] sm:text-sm font-mono text-zinc-400 break-all bg-zinc-900/50 p-2 rounded border border-zinc-800/50">
                         {selectedRequest?.transactionId || 'N/A'}
                       </p>
                     </div>
+
+                    {/* Paid At (Offline only) */}
+                    {selectedRequest?.paidAt && (
+                      <div className="col-span-1 pt-2 text-right">
+                        <p className="text-[9px] sm:text-[10px] uppercase font-bold text-zinc-600 mb-1">Payment Date/Time</p>
+                        <p className="text-[10px] sm:text-sm font-mono text-amber-400 break-all bg-zinc-900/50 p-2 rounded border border-zinc-800/50">
+                          {(() => {
+                            try {
+                              return new Date(selectedRequest.paidAt).toLocaleString('en-IN', {
+                                day: 'numeric',
+                                month: 'short',
+                                year: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit'
+                              });
+                            } catch (e) {
+                              return selectedRequest.paidAt;
+                            }
+                          })()}
+                        </p>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>

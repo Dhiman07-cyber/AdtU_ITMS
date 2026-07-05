@@ -19,7 +19,10 @@ import { adminDb } from '@/lib/firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
 import { paymentsSupabaseService, type PaymentRecord } from '@/lib/services/payments-supabase';
 import { ensureReceiptSignature } from '@/lib/services/receipt.service';
-import { recordOperationalEvent } from '@/lib/audit/audit-service';
+import { createAuditLog } from '@/lib/services/audit.service';
+import { getDeadlineConfig } from '@/lib/deadline-config-service';
+import { calculateValidUntilDate } from '@/lib/utils/date-utils';
+import { fetchOrderDetails } from '@/lib/payment/razorpay.service';
 import {
     PaymentDocument,
     OnlinePaymentDocument,
@@ -109,12 +112,394 @@ export async function createOnlinePayment(
         throw new Error(`Failed to create secured online payment ledger record: ${request.razorpayPaymentId}`);
     }
 
-    const storedPayment = await paymentsSupabaseService.getPaymentById(result);
-    if (storedPayment) {
-        await requireSecuredReceiptSignature(storedPayment);
-    }
-
     return paymentDoc;
+}
+
+/**
+ * Canonical online payment completion processing.
+ * Unifies webhook verification, client verification, and recovery actions.
+ * Strict idempotency checks ensure exactly one success processing.
+ */
+export async function processCapturedPayment(paymentDetails: {
+    paymentId: string;
+    orderId: string;
+    amount: number; // in rupees
+    method?: string;
+    notes?: any;
+    source?: string;
+}): Promise<{ status: 'success' | 'already_processed' | 'error' | 'already_paid_for_session'; error?: string }> {
+    const { paymentId, orderId, amount, method = 'Online', notes = {}, source = 'system' } = paymentDetails;
+    console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] processCapturedPayment ENTER. paymentId:`, paymentId, `orderId:`, orderId, `amount:`, amount, `source:`, source);
+
+    let markerAcquired = false;
+
+    try {
+        // 1. Idempotency Check: check if already processed
+        const isProcessed = await isPaymentProcessed(paymentId);
+        if (isProcessed) {
+            console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] processCapturedPayment: ${paymentId} is already processed (Supabase lookup).`);
+            return { status: 'already_processed' };
+        }
+
+        const enrollmentId = notes.enrollmentId || notes.studentId;
+        const userId = notes.userId;
+        const durationYears = parseInt(notes.durationYears || '1', 10) || 1;
+        const studentName = notes.studentName || notes.userName || 'Unknown';
+
+        if (!enrollmentId && !userId) {
+            console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] processCapturedPayment error: Missing enrollment/user ID in notes:`, JSON.stringify(notes));
+            return { status: 'error', error: 'Missing enrollment or user ID in payment notes' };
+        }
+
+        const rawPurpose = String(notes.purpose || notes.type || '');
+        const isNewRegistration = rawPurpose.toLowerCase().includes('registration') || rawPurpose.toLowerCase() === 'new_registration';
+
+        const deadlineConfig = await getDeadlineConfig();
+
+        if (isNewRegistration) {
+            let alreadyMarked = false;
+            console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] PROCESS_CAPTURED[1] marker acquired (attempt: new registration)`);
+            await adminDb.runTransaction(async (transaction: any) => {
+                const processedPaymentRef = adminDb.collection('processed_payments').doc(paymentId);
+                const processedPaymentDoc = await transaction.get(processedPaymentRef);
+                if (processedPaymentDoc.exists) {
+                    alreadyMarked = true;
+                    return;
+                }
+                transaction.set(processedPaymentRef, {
+                    paymentId,
+                    orderId,
+                    processedAt: FieldValue.serverTimestamp(),
+                    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(), // Expire in 7 days
+                    amount,
+                    enrollmentId: enrollmentId || '',
+                    userId: userId || '',
+                    source
+                });
+            });
+
+            if (alreadyMarked) {
+                const supabaseExists = await isPaymentProcessed(paymentId);
+                if (!supabaseExists) {
+                    await adminDb.collection('processed_payments').doc(paymentId).delete().catch(() => {});
+                    console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] processCapturedPayment (new registration): alreadyMarked true but Supabase ledger missing. Stale marker cleaned.`);
+                    return { status: 'error', error: 'Stale marker cleaned' };
+                }
+                console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] processCapturedPayment (new registration): alreadyMarked true, returning already_processed.`);
+                return { status: 'already_processed' };
+            }
+
+            markerAcquired = true;
+            console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] PROCESS_CAPTURED[1] marker acquired`);
+
+            let sessionStartYear: number | undefined;
+            let sessionEndYear: number | undefined;
+            let targetValidUntil: Date;
+            if (userId) {
+                const appSnap = await adminDb.collection('applications').doc(userId).get();
+                if (appSnap.exists) {
+                    const appDoc: any = appSnap.data() || {};
+                    const ts = appDoc.targetSession;
+                    if (ts && Number(ts.startYear) > 0 && Number(ts.endYear) > 0) {
+                        sessionStartYear = Number(ts.startYear);
+                        sessionEndYear = Number(ts.endYear);
+                    }
+                }
+            }
+            if (sessionStartYear && sessionEndYear) {
+                const anchorMonth = deadlineConfig.academicYear.anchorMonth;
+                const anchorDay = deadlineConfig.academicYear.anchorDay;
+                targetValidUntil = new Date(Date.UTC(sessionEndYear, anchorMonth, anchorDay, 23, 59, 59, 999));
+            } else {
+                sessionStartYear = new Date().getFullYear();
+                sessionEndYear = sessionStartYear + durationYears;
+                targetValidUntil = calculateValidUntilDate(sessionStartYear, durationYears, deadlineConfig);
+            }
+
+            // Save Completed online payment record to Supabase (Immutable Ledger)
+            console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] PROCESS_CAPTURED[2] Supabase insert`);
+            const result = await paymentsSupabaseService.createPayment({
+                paymentId,
+                studentId: enrollmentId || '',
+                studentUid: userId || '',
+                studentName,
+                amount,
+                method: 'Online',
+                status: 'Completed',
+                sessionStartYear,
+                sessionEndYear,
+                durationYears,
+                validUntil: targetValidUntil,
+                transactionDate: new Date(),
+                razorpayPaymentId: paymentId,
+                razorpayOrderId: orderId,
+                approvedBy: { type: 'SYSTEM' },
+                approvedAt: new Date(),
+            });
+
+            if (!result) {
+                console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] PROCESS_CAPTURED[2] Supabase insert FAILED`);
+                throw new Error(`Failed to create online payment ledger record: ${paymentId}`);
+            }
+
+            console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] PROCESS_CAPTURED[2] Supabase insert SUCCESS: ${result}`);
+            const storedPayment = await paymentsSupabaseService.getPaymentById(result);
+            if (storedPayment) {
+                try {
+                    await ensureReceiptSignature(storedPayment);
+                } catch (sigErr: any) {
+                    console.error(`[processCapturedPayment] Receipt signature failed:`, sigErr.message);
+                }
+            }
+
+            return { status: 'success' };
+        } else {
+            // Renewal Flow
+            let studentRef: any;
+            let studentDocId: string;
+
+            if (userId) {
+                studentRef = adminDb.collection('students').doc(userId);
+                studentDocId = userId;
+            } else {
+                const studentsQuery = await adminDb.collection('students')
+                    .where('enrollmentId', '==', enrollmentId)
+                    .limit(1)
+                    .get();
+
+                if (studentsQuery.empty) {
+                    return { status: 'error', error: 'Student profile not found' };
+                }
+
+                const studentDoc = studentsQuery.docs[0];
+                studentRef = studentDoc.ref;
+                studentDocId = studentDoc.id;
+            }
+
+            let newValidUntil: Date = new Date();
+            let newSessionStartYear: number = new Date().getFullYear();
+            let newSessionEndYear: number = new Date().getFullYear();
+            let totalDurationYears: number = 0;
+            let actualStudentName: string = studentName;
+            let studentEmail: string = '';
+            let studentPhone: string = '';
+            let transactionRecord: any = null;
+
+            console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] PROCESS_CAPTURED[1] marker acquired (attempt: renewal)`);
+            await adminDb.runTransaction(async (transaction: any) => {
+                const processedPaymentRef = adminDb.collection('processed_payments').doc(paymentId);
+                const processedPaymentDoc = await transaction.get(processedPaymentRef);
+
+                if (processedPaymentDoc.exists) {
+                    throw new Error('ALREADY_PROCESSED');
+                }
+
+                // Mark as processed
+                transaction.set(processedPaymentRef, {
+                    paymentId,
+                    orderId,
+                    processedAt: FieldValue.serverTimestamp(),
+                    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(), // Expire in 7 days
+                    amount,
+                    enrollmentId: enrollmentId || '',
+                    userId: studentDocId,
+                    source
+                });
+
+                const studentDoc = await transaction.get(studentRef);
+                if (!studentDoc.exists) {
+                    throw new Error('Student document not found');
+                }
+
+                const studentData = studentDoc.data();
+                actualStudentName = studentData?.fullName || studentName;
+                studentEmail = studentData?.email || '';
+                studentPhone = studentData?.phone || studentData?.phoneNumber || '';
+
+                const existingSessionStartYear = studentData?.sessionStartYear || new Date().getFullYear();
+                const existingSessionEndYear = studentData?.sessionEndYear || new Date().getFullYear();
+                const existingDurationYears = studentData?.durationYears || 0;
+                const existingValidUntil = studentData?.validUntil;
+                const previousValidUntilISO = existingValidUntil
+                    ? (existingValidUntil.toDate ? existingValidUntil.toDate().toISOString() : new Date(existingValidUntil).toISOString())
+                    : null;
+
+                let baseYear = new Date().getUTCFullYear();
+                const now = new Date();
+
+                if (existingValidUntil) {
+                    const existingDate = existingValidUntil.toDate ? existingValidUntil.toDate() : new Date(existingValidUntil);
+                    if (existingDate > now) {
+                        baseYear = existingSessionEndYear;
+                    }
+                }
+
+                newValidUntil = calculateValidUntilDate(baseYear, durationYears, deadlineConfig);
+                newSessionStartYear = existingSessionStartYear;
+                newSessionEndYear = baseYear + durationYears;
+                totalDurationYears = existingDurationYears + durationYears;
+
+                transactionRecord = {
+                    studentId: enrollmentId || studentData?.enrollmentId || '',
+                    studentName: actualStudentName,
+                    amount,
+                    paymentMethod: 'online' as const,
+                    paymentId,
+                    timestamp: new Date().toISOString(),
+                    durationYears,
+                    validUntil: newValidUntil.toISOString(),
+                    previousValidUntil: previousValidUntilISO,
+                    newValidUntil: newValidUntil.toISOString(),
+                    previousSessionEndYear: existingSessionEndYear,
+                    newSessionEndYear,
+                    previousDurationYears: existingDurationYears,
+                    newDurationYears: totalDurationYears,
+                    userId: studentDocId,
+                    status: 'completed' as const
+                };
+            }).catch((err: any) => {
+                if (err.message === 'ALREADY_PROCESSED') {
+                    transactionRecord = 'ALREADY_PROCESSED';
+                } else {
+                    throw err;
+                }
+            });
+            console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] processCapturedPayment (renewal): transaction finished. transactionRecord status:`, typeof transactionRecord === 'string' ? transactionRecord : 'success');
+
+            if (transactionRecord === 'ALREADY_PROCESSED') {
+                const supabaseExists = await isPaymentProcessed(paymentId);
+                if (!supabaseExists) {
+                    await adminDb.collection('processed_payments').doc(paymentId).delete().catch(() => {});
+                    console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] processCapturedPayment (renewal): transactionRecord ALREADY_PROCESSED but Supabase ledger missing. Stale marker cleaned.`);
+                    return { status: 'error', error: 'Stale marker cleaned' };
+                }
+                console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] processCapturedPayment (renewal): already processed, returning already_processed.`);
+                return { status: 'already_processed' };
+            }
+
+            if (transactionRecord) {
+                markerAcquired = true;
+                console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] PROCESS_CAPTURED[1] marker acquired`);
+            }
+
+            // Save Completed online payment record to Supabase (Immutable Ledger)
+            console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] PROCESS_CAPTURED[2] Supabase insert`);
+            const result = await paymentsSupabaseService.createPayment({
+                paymentId,
+                studentId: transactionRecord.studentId,
+                studentUid: transactionRecord.userId,
+                studentName: transactionRecord.studentName,
+                amount: transactionRecord.amount,
+                method: 'Online',
+                status: 'Completed',
+                sessionStartYear: newSessionStartYear,
+                sessionEndYear: newSessionEndYear,
+                durationYears: transactionRecord.durationYears,
+                validUntil: new Date(transactionRecord.validUntil),
+                transactionDate: new Date(),
+                razorpayPaymentId: paymentId,
+                razorpayOrderId: orderId,
+                approvedBy: { type: 'SYSTEM' },
+                approvedAt: new Date(),
+            });
+
+            if (!result) {
+                console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] PROCESS_CAPTURED[2] Supabase insert FAILED`);
+                throw new Error(`Failed to create online payment ledger record: ${paymentId}`);
+            }
+
+            console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] PROCESS_CAPTURED[2] Supabase insert SUCCESS: ${result}`);
+            const storedPayment = await paymentsSupabaseService.getPaymentById(result);
+            if (storedPayment) {
+                try {
+                    await ensureReceiptSignature(storedPayment);
+                } catch (sigErr: any) {
+                    console.error(`[processCapturedPayment] Receipt signature failed:`, sigErr.message);
+                }
+            }
+
+            // Create the PENDING renewal request for admin approval
+            const renewalRequestRef = adminDb.collection('renewal_requests').doc(`online_${paymentId}`);
+            const existingRequest = await renewalRequestRef.get();
+            if (!existingRequest.exists) {
+                await renewalRequestRef.set({
+                    studentId: studentDocId,
+                    enrollmentId: enrollmentId || transactionRecord?.studentId || '',
+                    studentName: actualStudentName,
+                    studentEmail,
+                    studentPhone,
+                    durationYears,
+                    totalFee: amount,
+                    paymentMode: 'online',
+                    paymentId,
+                    razorpayOrderId: orderId,
+                    paymentStatus: 'paid',
+                    requestedValidUntil: newValidUntil.toISOString(),
+                    status: 'pending',
+                    createdAt: FieldValue.serverTimestamp(),
+                    updatedAt: FieldValue.serverTimestamp(),
+                });
+
+                // Send notification to staff
+                try {
+                    const [adminsSnapshot, moderatorsSnapshot] = await Promise.all([
+                        adminDb.collection('admins').get(),
+                        adminDb.collection('moderators').get(),
+                    ]);
+                    const allStaffIds = [
+                        ...adminsSnapshot.docs.map((d: any) => d.id),
+                        ...moderatorsSnapshot.docs.map((d: any) => d.id),
+                    ];
+                    if (allStaffIds.length > 0) {
+                        const existingNotif = await adminDb.collection('notifications')
+                            .where('sender.userId', '==', studentDocId)
+                            .where('title', '==', 'Online Renewal Awaiting Approval')
+                            .limit(1)
+                            .get();
+                        if (existingNotif.empty) {
+                            const expiryDate = new Date();
+                            expiryDate.setHours(23, 59, 59, 999);
+                            await adminDb.collection('notifications').add({
+                                title: 'Online Renewal Awaiting Approval',
+                                content: `${actualStudentName} (${enrollmentId || ''}) paid online for a ${durationYears} year(s) renewal and is awaiting approval.`,
+                                sender: { userId: studentDocId, userName: actualStudentName, userRole: 'student', enrollmentId: enrollmentId || '' },
+                                target: { type: 'specific_users', specificUserIds: allStaffIds },
+                                recipientIds: allStaffIds,
+                                autoInjectedRecipientIds: [],
+                                readByUserIds: [],
+                                isEdited: false,
+                                isDeletedGlobally: false,
+                                createdAt: FieldValue.serverTimestamp(),
+                                expiresAt: expiryDate.toISOString(),
+                                metadata: { paymentId },
+                            });
+                        }
+                    }
+                } catch (notifyErr) {
+                    console.error('[processCapturedPayment] Failed to notify staff of online renewal request:', notifyErr);
+                }
+            }
+
+            console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] processCapturedPayment (renewal) returning success.`);
+            return { status: 'success' };
+        }
+    } catch (err: any) {
+        if (markerAcquired) {
+            console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] PROCESS_CAPTURED[2] Supabase insert FAILED`);
+            console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] Exception caught in processCapturedPayment:`, err.message || err);
+            await adminDb.collection('processed_payments').doc(paymentId).delete().catch(() => {});
+            console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] marker cleaned`);
+        }
+        if (err.message === 'ALREADY_PROCESSED') {
+            console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] processCapturedPayment returning already_processed`);
+            return { status: 'already_processed' };
+        }
+        if (err.message === 'DUPLICATE_SESSION_PAYMENT') {
+            console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] processCapturedPayment returning already_paid_for_session`);
+            return { status: 'already_paid_for_session' };
+        }
+        throw err;
+    }
 }
 
 /**
@@ -377,20 +762,24 @@ export async function approveOfflinePayment(
             console.error(`⚠️ Receipt signature failed for payment ${request.paymentId}:`, sigErr.message);
         }
 
-        await recordOperationalEvent({
+        await createAuditLog({
             action: 'payment_approved',
-            actor: {
-                id: request.approverUserId,
-                role: (request.approverRole?.toLowerCase() || 'admin') as any,
-                name: request.approverName,
-            },
+            performedBy: request.approverUserId,
+            performedByName: request.approverName,
+            performedByRole: (request.approverRole?.toLowerCase() || 'admin') as any,
             targetId: request.paymentId,
             targetType: 'payment',
             targetName: completedPayment.student_name || '',
-            reason: 'manual_offline_approval',
-            before: { status: 'Pending', amount: payment.amount },
-            after: { status: 'Completed', amount: completedPayment.amount, validUntil: completedPayment.valid_until },
-            details: { studentUid: completedPayment.student_uid, empId: request.approverEmpId },
+            category: 'renewals',
+            summary: 'Payment approved for ' + (completedPayment.student_name || ''),
+            severity: 'medium',
+            metadata: {
+                before: { status: 'Pending', amount: payment.amount },
+                after: { status: 'Completed', amount: completedPayment.amount, validUntil: completedPayment.valid_until },
+                studentUid: completedPayment.student_uid,
+                empId: request.approverEmpId,
+                reason: 'manual_offline_approval',
+            },
         }).catch((e) => console.error('Payment approval audit write failed:', e));
 
         // Return compatible format
@@ -473,20 +862,24 @@ export async function rejectOfflinePayment(
 
         console.log(`🗑️ Payment ${request.paymentId.substring(0,8)}... rejected by ${request.rejectorName?.substring(0,8) || 'admin'}...`);
 
-        await recordOperationalEvent({
+        await createAuditLog({
             action: 'payment_rejected',
-            actor: {
-                id: request.rejectorUserId,
-                role: (request.rejectorRole?.toLowerCase() || 'admin') as any,
-                name: request.rejectorName,
-            },
+            performedBy: request.rejectorUserId,
+            performedByName: request.rejectorName,
+            performedByRole: (request.rejectorRole?.toLowerCase() || 'admin') as any,
             targetId: request.paymentId,
             targetType: 'payment',
             targetName: payment.student_name || '',
-            reason: 'manual_offline_rejection',
-            before: { status: 'Pending', amount: payment.amount },
-            after: { status: 'Rejected' },
-            details: { studentUid: payment.student_uid, empId: request.rejectorEmpId },
+            category: 'renewals',
+            summary: 'Payment rejected for ' + (payment.student_name || ''),
+            severity: 'medium',
+            metadata: {
+                before: { status: 'Pending', amount: payment.amount },
+                after: { status: 'Rejected' },
+                studentUid: payment.student_uid,
+                empId: request.rejectorEmpId,
+                reason: 'manual_offline_rejection',
+            },
         }).catch((e) => console.error('Payment rejection audit write failed:', e));
 
         return { success: true };

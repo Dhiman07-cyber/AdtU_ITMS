@@ -13,6 +13,7 @@ import {
   Route
 } from "lucide-react";
 import { getAllBuses, getAllRoutes, getRouteById } from "@/lib/dataService";
+import { PremiumPageLoader } from "@/components/LoadingSpinner";
 
 export default function BusSwapPage() {
   const { currentUser, userData } = useAuth();
@@ -111,11 +112,7 @@ export default function BusSwapPage() {
   };
 
   if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
-      </div>
-    );
+    return <PremiumPageLoader message="Loading Bus Swap System..." subMessage="Preparing fleet configuration..." />;
   }
 
   if (error) {

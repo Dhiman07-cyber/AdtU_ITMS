@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useAuth } from '@/contexts/auth-context';
 import { useRouter, useParams } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -13,14 +13,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 
 import { useToast } from '@/contexts/toast-context';
 import {
-  Loader2, CheckCircle, XCircle, ArrowLeft, User as UserIcon, Phone,
+  Loader2, CheckCircle, XCircle, ArrowLeft, ArrowRightLeft, User as UserIcon, Phone,
   Mail, Calendar, CreditCard, FileText, Clock, Bus as BusIcon,
   Copy, Download, Users, Briefcase, Shield, Zap, Hash, Droplets,
-  MapPin, UserCheck, CalendarDays, ShieldCheck, AlertTriangle
+  MapPin, UserCheck, CalendarDays, ShieldCheck, AlertTriangle, RefreshCw
 } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { Application } from '@/lib/types/application';
+import { deriveAcademicLifecycle } from '@/lib/utils/deadline-computation';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { SectionCard } from '@/components/application/section-card';
 import { StatusBadge } from '@/components/application/status-badge';
@@ -29,6 +30,10 @@ import { downloadFile } from '@/lib/download-utils';
 import { PremiumPageLoader } from '@/components/LoadingSpinner';
 import { invalidateCollectionCache } from '@/hooks/usePaginatedCollection';
 import { safeImageSrc, safeMailtoHref, safeTelHref } from '@/lib/security/url-sanitizer';
+import { collection, query, where, getDocs } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
+import ReassignmentPanel, { type StudentData as RPStudentData, type BusData as RPBusData } from '@/components/smart-allocation/ReassignmentPanel';
+
 
 export default function AdminApplicationDetailPage() {
   const { currentUser, userData, loading } = useAuth();
@@ -53,10 +58,268 @@ export default function AdminApplicationDetailPage() {
   const [routeError, setRouteError] = useState(false);
   const [paymentData, setPaymentData] = useState<any>(null);
   const [fetchingPayment, setFetchingPayment] = useState(false);
+  const [verifyingPayment, setVerifyingPayment] = useState(false);
 
   const [sessionStartYear, setSessionStartYear] = useState<number>(0);
   const [sessionEndYear, setSessionEndYear] = useState<number>(0);
   const [approveConfirmOpen, setApproveConfirmOpen] = useState(false);
+  const [deadlineConfig, setDeadlineConfig] = useState<any>(null);
+  const [stagedBus, setStagedBus] = useState<{ busId: string; busNumber: string; routeId: string; routeName: string } | null>(null);
+
+  useEffect(() => {
+    if (applicationId) {
+      const staged = sessionStorage.getItem(`staged_bus_${applicationId}`);
+      if (staged) {
+        try {
+          setStagedBus(JSON.parse(staged));
+        } catch (e) {
+          console.error('Failed to parse staged bus', e);
+        }
+      }
+    }
+  }, [applicationId]);
+
+  const [reassignmentTarget, setReassignmentTarget] = useState<{
+    item: any;
+    busId: string;
+    busData: RPBusData;
+    busStudents: RPStudentData[];
+  } | null>(null);
+  const [allBuses, setAllBuses] = useState<RPBusData[]>([]);
+  const [allRoutes, setAllRoutes] = useState<any[]>([]);
+  const [loadingReassignmentData, setLoadingReassignmentData] = useState(false);
+
+  const capacityStatus = useMemo(() => {
+    if (!application || !busData) {
+      return { needsCapacityReview: false, reassignmentReason: 'no_issue' as const };
+    }
+
+    if (stagedBus) {
+      return { needsCapacityReview: false, reassignmentReason: 'no_issue' as const };
+    }
+
+    const studentShift = (application.formData?.shift || 'Morning').toLowerCase();
+    const totalCapacity = busData.totalCapacity || busData.capacity || 50;
+
+    let shiftLoad = 0;
+    if (studentShift === 'morning') {
+      shiftLoad = busData.load?.morningCount ?? busData.morningLoad ?? 0;
+    } else if (studentShift === 'evening') {
+      shiftLoad = busData.load?.eveningCount ?? busData.eveningLoad ?? 0;
+    } else {
+      const morningLoad = busData.load?.morningCount ?? busData.morningLoad ?? 0;
+      const eveningLoad = busData.load?.eveningCount ?? busData.eveningLoad ?? 0;
+      shiftLoad = Math.max(morningLoad, eveningLoad);
+    }
+
+    const availableSeats = totalCapacity - shiftLoad;
+    const isFull = availableSeats <= 0;
+
+    if (!isFull) {
+      return { needsCapacityReview: false, reassignmentReason: 'no_issue' as const };
+    }
+
+    // Bus is full, check for alternative buses serving this stop in the same shift
+    const stopId = application.formData?.stopId || '';
+    const stopName = (application.formData as any)?.stopName || '';
+    const normalizedStopId = stopId.toLowerCase().trim();
+    const normalizedStopName = stopName.toLowerCase().trim();
+
+    // Find routes that serve this stop
+    const matchingRouteIds: string[] = [];
+    allRoutes.forEach((route: any) => {
+      const routeStops = route.stops || [];
+      const hasStop = routeStops.some((stop: any) => {
+        const routeStopId = (stop.stopId || stop.id || stop.name || '').toLowerCase().trim();
+        const routeStopName = (stop.name || stop.stopName || '').toLowerCase().trim();
+        return routeStopId === normalizedStopId || routeStopName === normalizedStopName ||
+          routeStopName === normalizedStopId || routeStopId === normalizedStopName;
+      });
+      if (hasStop) {
+        matchingRouteIds.push(route.routeId || route.id);
+      }
+    });
+
+    // Find alternative buses
+    const alternativeBuses = allBuses.filter((bus: any) => {
+      const busIdVal = bus.id || bus.busId;
+      const currentBusIdVal = busData.id || busData.busId;
+      if (busIdVal === currentBusIdVal) return false;
+      if (!matchingRouteIds.includes(bus.routeId)) return false;
+
+      // Check shift compatibility
+      const busShift = (bus.shift || 'Both').toLowerCase();
+      if (studentShift === 'morning' && busShift !== 'morning' && busShift !== 'both') return false;
+      if (studentShift === 'evening' && busShift !== 'evening' && busShift !== 'both') return false;
+
+      // Check capacity
+      const altTotalCapacity = bus.capacity || bus.totalCapacity || 50;
+      let altShiftLoad = 0;
+      if (studentShift === 'morning') {
+        altShiftLoad = bus.load?.morningCount ?? bus.morningLoad ?? 0;
+      } else if (studentShift === 'evening') {
+        altShiftLoad = bus.load?.eveningCount ?? bus.eveningLoad ?? 0;
+      } else {
+        const morningLoad = bus.load?.morningCount ?? bus.morningLoad ?? 0;
+        const eveningLoad = bus.load?.eveningCount ?? bus.eveningLoad ?? 0;
+        altShiftLoad = Math.max(morningLoad, eveningLoad);
+      }
+      const altAvailableSeats = altTotalCapacity - altShiftLoad;
+      return altAvailableSeats > 0;
+    });
+
+    if (alternativeBuses.length > 0) {
+      return { needsCapacityReview: true, reassignmentReason: 'bus_full_alternatives_exist' as const };
+    } else {
+      return { needsCapacityReview: true, reassignmentReason: 'bus_full_only_option' as const };
+    }
+  }, [application, busData, allBuses, allRoutes, stagedBus]);
+
+  const isReassignmentRequired = capacityStatus.needsCapacityReview;
+
+  const openReassignment = async () => {
+    if (!application || !busData) return;
+    setLoadingReassignmentData(true);
+    try {
+      const studentAssignedBusId = application.formData?.busId || application.formData?.assignedBusId || application.formData?.routeId?.replace('route_', 'bus_') || '';
+
+      const q = query(
+        collection(db, 'students'),
+        where('busId', '==', studentAssignedBusId),
+        where('status', '==', 'active')
+      );
+      const snap = await getDocs(q);
+      const busStudents: RPStudentData[] = snap.docs.map(d => {
+        const s = d.data();
+        return {
+          id: d.id,
+          fullName: s.fullName || s.name || d.id,
+          enrollmentId: s.enrollmentId,
+          stopId: s.stopId || '',
+          stopName: s.stopName || s.stopId || '',
+          assignedBusId: s.busId || studentAssignedBusId,
+          shift: s.shift,
+          semester: s.semester,
+          phone: s.phoneNumber || s.phone,
+          photoURL: s.profilePhotoUrl || s.photoURL,
+        };
+      });
+
+      let rpBuses = allBuses;
+      if (rpBuses.length === 0) {
+        const routesSnap = await getDocs(collection(db, 'routes'));
+        const routesList = routesSnap.docs.map(rd => ({ id: rd.id, ...rd.data() as any }));
+        const busesSnap = await getDocs(collection(db, 'buses'));
+        rpBuses = busesSnap.docs.map(d => {
+          const b = d.data();
+          const matchedRoute = routesList.find(r => r.routeId === b.routeId || r.id === b.routeId);
+          const rawStops = matchedRoute?.stops || b.route?.stops || b.stops || [];
+          const stops = rawStops.map((s: any) => ({
+            id: s.id || s.stopId || s.name || '',
+            name: s.name || s.stopId || s.id || '',
+            sequence: s.sequence ?? 0,
+          }));
+          return {
+            id: d.id,
+            busNumber: b.busNumber || d.id || '',
+            routeId: b.routeId,
+            routeName: b.routeName || matchedRoute?.routeName || (b.route?.routeName) || '',
+            currentMembers: b.currentMembers || 0,
+            capacity: b.capacity || b.totalCapacity || 55,
+            shift: b.shift || 'both',
+            stops,
+            load: b.load || { morningCount: 0, eveningCount: 0 },
+            route: matchedRoute || b.route || null,
+          };
+        });
+        setAllBuses(rpBuses);
+      }
+
+      const currentBusRpb = rpBuses.find(b => b.id === studentAssignedBusId) || {
+        id: studentAssignedBusId,
+        busNumber: busData.busNumber || `Bus-${studentAssignedBusId}`,
+        capacity: busData.capacity || busData.totalCapacity || 55,
+        currentMembers: busData.currentMembers || 0,
+        shift: busData.shift || 'both',
+        stops: [],
+        load: busData.load || { morningCount: 0, eveningCount: 0 },
+      };
+
+      setReassignmentTarget({
+        item: application,
+        busId: studentAssignedBusId,
+        busData: currentBusRpb,
+        busStudents
+      });
+    } catch (err: any) {
+      showToast(err?.message || 'Failed to load reassignment data', 'error');
+    } finally {
+      setLoadingReassignmentData(false);
+    }
+  };
+
+  const handleReassignmentSuccess = async () => {
+    setReassignmentTarget(null);
+    showToast('Reassignment completed successfully.', 'success');
+    invalidateCollectionCache('applications');
+    invalidateCollectionCache('buses');
+    await loadApplication();
+  };
+
+
+  useEffect(() => {
+    const fetchDeadlineConfig = async () => {
+      try {
+        const response = await fetch('/api/settings/deadline-config');
+        if (response.ok) {
+          const data = await response.json();
+          setDeadlineConfig(data.config);
+        }
+      } catch (error) {
+        console.error('Error fetching deadline config:', error);
+      }
+    };
+    fetchDeadlineConfig();
+  }, []);
+
+  const getCurrentAcademicSessionStartYear = () => {
+    if (!deadlineConfig) return new Date().getFullYear();
+    const referenceDate = new Date();
+    const currentYear = referenceDate.getFullYear();
+    const startMonth = deadlineConfig.academicSessionStart?.month ?? 6;
+    const startDay = deadlineConfig.academicSessionStart?.day ?? 1;
+    const anchorDate = new Date(currentYear, startMonth, startDay, 0, 0, 0, 0);
+    if (referenceDate.getTime() >= anchorDate.getTime()) {
+      return currentYear;
+    } else {
+      return currentYear - 1;
+    }
+  };
+
+  const sessionStartYearBase = getCurrentAcademicSessionStartYear();
+  const nextSessionStartYear = sessionStartYearBase + 1;
+
+  const getDerivedValidUntilText = () => {
+    if (!deadlineConfig) return 'Loading...';
+    const startMonth = deadlineConfig.academicSessionStart?.month ?? 6;
+    const startDay = deadlineConfig.academicSessionStart?.day ?? 1;
+    const lifecycle = deriveAcademicLifecycle(startMonth, startDay, sessionEndYear);
+    const date = lifecycle.expiry;
+
+    const day = date.getUTCDate();
+    const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+    const month = monthNames[date.getUTCMonth()];
+    const year = date.getUTCFullYear();
+
+    let hours = date.getUTCHours();
+    const minutes = date.getUTCMinutes();
+    const ampm = hours >= 12 ? 'PM' : 'AM';
+    hours = hours % 12;
+    hours = hours ? hours : 12;
+    const minutesStr = minutes < 10 ? '0' + minutes : minutes;
+
+    return `${day} ${month} ${year} ${hours}:${minutesStr} ${ampm}`;
+  };
 
   const originalStartYear = application?.formData?.sessionInfo?.sessionStartYear || 0;
   const originalEndYear = application?.formData?.sessionInfo?.sessionEndYear || 0;
@@ -207,6 +470,44 @@ export default function AdminApplicationDetailPage() {
           promises.push(fetchVerifierData(verifiedById, token));
         }
 
+        // Prefetch buses and routes for capacity check
+        const loadBusesAndRoutes = async () => {
+          try {
+            const [busesSnap, routesSnap] = await Promise.all([
+              getDocs(collection(db, 'buses')),
+              getDocs(collection(db, 'routes'))
+            ]);
+            const routesList = routesSnap.docs.map(rd => ({ id: rd.id, ...rd.data() as any }));
+            const rpBuses: RPBusData[] = busesSnap.docs.map(d => {
+              const bdata = d.data() as any;
+              const route = routesList.find(r => r.id === bdata.routeId);
+              const rawStops = route?.stops || bdata.route?.stops || bdata.stops || [];
+              const stops = rawStops.map((s: any) => ({
+                id: s.id || s.stopId || s.name || '',
+                name: s.name || s.stopId || s.id || '',
+                sequence: s.sequence ?? 0,
+              }));
+              return {
+                id: d.id,
+                busNumber: bdata.busNumber || d.id || '',
+                routeId: bdata.routeId || '',
+                routeName: bdata.routeName || route?.routeName || route?.name || '',
+                currentMembers: bdata.currentMembers || 0,
+                capacity: bdata.capacity || bdata.totalCapacity || 55,
+                shift: bdata.shift || 'both',
+                stops,
+                load: bdata.load || { morningCount: 0, eveningCount: 0 },
+                route: route || bdata.route || null,
+              };
+            });
+            setAllBuses(rpBuses);
+            setAllRoutes(routesList);
+          } catch (e) {
+            console.error('Error prefetching buses and routes:', e);
+          }
+        };
+        promises.push(loadBusesAndRoutes());
+
         await Promise.all(promises);
 
         // Fetch payment data from Supabase separately
@@ -220,6 +521,35 @@ export default function AdminApplicationDetailPage() {
       showToast('Failed to load application', 'error');
     } finally {
       setLoadingApp(false);
+    }
+  };
+
+  const handleVerifyPayment = async () => {
+    setVerifyingPayment(true);
+    try {
+      const token = await currentUser?.getIdToken();
+      if (!token) return;
+
+      const response = await fetch(`/api/payment/recover?studentUid=${applicationId}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && (data.status === 'success' || data.status === 'already_processed')) {
+          showToast('Payment verified successfully!', 'success');
+          loadApplication();
+        } else {
+          showToast(data.message || 'Payment status could not be verified.', 'info');
+        }
+      } else {
+        showToast('Failed to contact verification gateway.', 'error');
+      }
+    } catch (error) {
+      console.error('Error verifying payment:', error);
+      showToast('An error occurred during verification.', 'error');
+    } finally {
+      setVerifyingPayment(false);
     }
   };
 
@@ -309,6 +639,16 @@ export default function AdminApplicationDetailPage() {
       return;
     }
 
+    // Special handling for offline submission bypass
+    if (verifiedById === 'system_offline_submission_bypass') {
+      setVerifierData({
+        name: 'Offline Submission Bypass',
+        employeeId: 'SYSTEM-BYPASS',
+        role: 'system'
+      });
+      return;
+    }
+
     try {
       console.log('🔍 Fetching verifier with ID:', verifiedById);
       // Look up in moderators collection
@@ -329,12 +669,42 @@ export default function AdminApplicationDetailPage() {
     }
   };
 
+  const [capacityWarningOpen, setCapacityWarningOpen] = useState(false);
+  const [warningType, setWarningType] = useState<'yellow' | 'red' | null>(null);
+  const [pendingUseModified, setPendingUseModified] = useState(false);
+
+  const checkCapacityAndApprove = (useModified: boolean) => {
+    if (stagedBus) {
+      // Staged bus chosen, bypass original capacity check
+      handleApprove(useModified);
+      return;
+    }
+    if (busData) {
+      const capacity = Number(busData.capacity || 0);
+      const current = Number(busData.currentMembers || 0);
+      const freeSeats = capacity - current;
+
+      if (capacity <= current) {
+        setWarningType('red');
+        setPendingUseModified(useModified);
+        setCapacityWarningOpen(true);
+        return;
+      } else if (freeSeats > 0 && freeSeats <= 5) {
+        setWarningType('yellow');
+        setPendingUseModified(useModified);
+        setCapacityWarningOpen(true);
+        return;
+      }
+    }
+    handleApprove(useModified);
+  };
+
   const handleApprove = async (useModified = false) => {
     if (!userData) return;
 
     // If we have bus data but routeError is true, it's a minor inconsistency
     // We only block if BOTH are missing and it's a new assignment
-    if (routeError && !busData) {
+    if (routeError && !busData && !stagedBus) {
       showToast('Cannot approve: The assigned route does not exist. Please reassign the route first.', 'error');
       return;
     }
@@ -346,6 +716,10 @@ export default function AdminApplicationDetailPage() {
       const body: any = {
         studentUid: applicationId
       };
+
+      if (stagedBus) {
+        body.overrideBusId = stagedBus.busId;
+      }
 
       if (useModified) {
         body.sessionStartYear = sessionStartYear;
@@ -363,8 +737,32 @@ export default function AdminApplicationDetailPage() {
       });
 
       if (response.ok) {
-        showToast('Application approved successfully! Student notified via email.', 'success');
+        // Clear staged bus selection if any
+        sessionStorage.removeItem(`staged_bus_${applicationId}`);
+
+        let busLabel = '';
+        let routeLabel = '';
+        if (stagedBus) {
+          const busNum = stagedBus.busId.replace(/[^0-9]/g, '');
+          busLabel = `Bus-${busNum || stagedBus.busId} (${stagedBus.busNumber})`;
+          const routeNum = stagedBus.routeId.replace(/[^0-9]/g, '');
+          routeLabel = `Route-${routeNum || stagedBus.routeId}`;
+        } else if (busData) {
+          const busId = busData.id || busData.busId || '';
+          const busNum = busId.replace(/[^0-9]/g, '');
+          busLabel = `Bus-${busNum || busId} (${busData.busNumber})`;
+          const routeId = application?.formData?.routeId || routeData?.routeId || '';
+          const routeNum = routeId.replace(/[^0-9]/g, '');
+          routeLabel = `Route-${routeNum || routeId}`;
+        }
+
+        const msg = busLabel
+          ? `Application approved successfully with ${busLabel}${routeLabel ? ` on ${routeLabel}` : ''}! Student notified via email.`
+          : 'Application approved successfully! Student notified via email.';
+
+        showToast(msg, 'success');
         invalidateCollectionCache('applications');
+        invalidateCollectionCache('buses');
         router.push('/admin/applications');
       } else {
         const errorData = await response.json();
@@ -404,10 +802,14 @@ export default function AdminApplicationDetailPage() {
       });
 
       if (response.ok) {
+        // Clear staged bus selection if any
+        sessionStorage.removeItem(`staged_bus_${applicationId}`);
+
         showToast('Application rejected and student notified.', 'success');
         setRejectDialogOpen(false);
         setRejectionReason('');
         invalidateCollectionCache('applications');
+        invalidateCollectionCache('buses');
         router.push('/admin/applications');
       } else {
         const errorData = await response.json();
@@ -554,41 +956,33 @@ export default function AdminApplicationDetailPage() {
                   {/* Action Buttons */}
                   {application.state === 'submitted' && (
                     <div className="flex flex-row md:flex-col gap-3 w-full md:w-auto self-center md:self-center mt-4 md:mt-0">
-                      {(application as any).needsCapacityReview ? (
-                        // Application needs capacity review - redirect to smart allocation
-                        <>
-                          <div className="flex flex-col gap-2">
-                            <Badge className="bg-amber-500/10 text-amber-500 border-amber-500/30 gap-1.5 self-start">
-                              <AlertTriangle className="h-3 w-3" />
-                              Needs Seat Assignment
-                            </Badge>
-                            <p className="text-xs text-zinc-400 md:max-w-[200px]">
-                              This student applied for a full bus. Please assign a seat via Smart Allocation.
-                            </p>
-                          </div>
-                          <Button
-                            onClick={() => router.push('/admin/smart-allocation')}
-                            className="bg-amber-600 hover:bg-amber-700 text-white shadow-xl shadow-amber-900/10 gap-2 h-11 px-6 w-full md:min-w-[120px]"
-                          >
-                            <AlertTriangle className="h-4 w-4" />
-                            Assign Seat
-                          </Button>
-                        </>
-                      ) : (
-                        // Normal approval flow
                         <Button
                           onClick={() => {
                             if (hasUnsavedChanges) {
                               setApproveConfirmOpen(true);
                             } else {
-                              handleApprove(false);
+                              checkCapacityAndApprove(false);
                             }
                           }}
-                          disabled={processing}
-                          className="flex-1 md:flex-none bg-emerald-600 hover:bg-emerald-700 text-white shadow-xl shadow-emerald-900/10 gap-2 h-11 px-6 md:min-w-[120px]"
+                          disabled={processing || (capacityStatus.needsCapacityReview && !stagedBus)}
+                          className={cn(
+                            "flex-1 md:flex-none gap-2 h-11 px-6 md:min-w-[120px]",
+                            (capacityStatus.needsCapacityReview && !stagedBus)
+                              ? "bg-emerald-600/50 text-white/50 cursor-not-allowed shadow-lg shadow-emerald-900/20"
+                              : "bg-emerald-600 hover:bg-emerald-700 text-white shadow-xl shadow-emerald-900/10"
+                          )}
                         >
                           {processing ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
                           Approve
+                        </Button>
+                      {application.formData?.paymentInfo?.paymentMode === 'online' && (
+                        <Button
+                          onClick={handleVerifyPayment}
+                          disabled={verifyingPayment || processing}
+                          className="flex-1 md:flex-none bg-indigo-600 hover:bg-indigo-700 text-white shadow-xl shadow-indigo-900/10 gap-2 h-11 px-6 md:min-w-[120px]"
+                        >
+                          {verifyingPayment ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                          Verify Payment Status
                         </Button>
                       )}
                       <Button
@@ -632,8 +1026,8 @@ export default function AdminApplicationDetailPage() {
                   })()} />
                   <InfoRow label="Phone" value={application.formData?.phoneNumber} />
                   <InfoRow label="DOB" value={application.formData?.dob} />
-                  <InfoRow 
-                    label="Age" 
+                  <InfoRow
+                    label="Age"
                     value={(() => {
                       const dob = application.formData?.dob;
                       if (!dob) return '—';
@@ -646,7 +1040,7 @@ export default function AdminApplicationDetailPage() {
                         age--;
                       }
                       return age.toString();
-                    })()} 
+                    })()}
                   />
                   <InfoRow label="Blood Group" value={application.formData?.bloodGroup} />
                   <InfoRow label="Parent/Guardian" value={application.formData?.parentName} />
@@ -678,7 +1072,7 @@ export default function AdminApplicationDetailPage() {
                   <div className="flex flex-col gap-1 min-w-0">
                     <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Route Assignment</span>
                     <div className="flex items-center gap-2">
-                      <span className="text-[14px] font-bold text-white">
+                      <span className="text-[14px] font-semibold text-zinc-300">
                         {application.formData?.routeId ? `Route ${application.formData.routeId.replace('route_', '')}` : 'Not Assigned'}
                       </span>
                       {routeError && !application.formData?.busId && !application.formData?.assignedBusId && (
@@ -698,9 +1092,7 @@ export default function AdminApplicationDetailPage() {
                       onValueChange={(value) => {
                         const start = parseInt(value);
                         setSessionStartYear(start);
-                        if (sessionEndYear <= start) {
-                          setSessionEndYear(start + 1);
-                        }
+                        setSessionEndYear(start + 1);
                       }}
                       disabled={application.state !== 'submitted'}
                     >
@@ -708,41 +1100,28 @@ export default function AdminApplicationDetailPage() {
                         <SelectValue placeholder="Start Year" />
                       </SelectTrigger>
                       <SelectContent className="bg-[#12131A] border-slate-800 text-white">
-                        <SelectItem value={new Date().getFullYear().toString()}>{new Date().getFullYear()}</SelectItem>
-                        <SelectItem value={(new Date().getFullYear() + 1).toString()}>{new Date().getFullYear() + 1}</SelectItem>
+                        <SelectItem value={sessionStartYearBase.toString()}>{sessionStartYearBase}</SelectItem>
+                        <SelectItem value={nextSessionStartYear.toString()}>{nextSessionStartYear}</SelectItem>
+                        {sessionStartYear !== sessionStartYearBase && sessionStartYear !== nextSessionStartYear && sessionStartYear !== 0 && (
+                          <SelectItem value={sessionStartYear.toString()}>{sessionStartYear}</SelectItem>
+                        )}
                       </SelectContent>
                     </Select>
                   </div>
 
-                  <div className="flex flex-col gap-1.5 min-w-0">
-                    <Label className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">End Year</Label>
-                    <Select
-                      value={sessionEndYear.toString()}
-                      onValueChange={(value) => {
-                        setSessionEndYear(parseInt(value));
-                      }}
-                      disabled={application.state !== 'submitted'}
-                    >
-                      <SelectTrigger className="h-9 bg-white/5 border-white/10 hover:bg-white/10 text-white text-xs rounded-lg transition-colors focus:ring-1 focus:ring-indigo-500">
-                        <SelectValue placeholder="End Year" />
-                      </SelectTrigger>
-                      <SelectContent className="bg-[#12131A] border-slate-800 text-white">
-                        <SelectItem value={(sessionStartYear + 1).toString()}>{sessionStartYear + 1}</SelectItem>
-                        <SelectItem value={(sessionStartYear + 2).toString()}>{sessionStartYear + 2}</SelectItem>
-                        <SelectItem value={(sessionStartYear + 3).toString()}>{sessionStartYear + 3}</SelectItem>
-                        <SelectItem value={(sessionStartYear + 4).toString()}>{sessionStartYear + 4}</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <InfoRow 
-                    label="Valid Until" 
-                    value="Set after approval" 
+                  <InfoRow
+                    label="End Year"
+                    value={sessionEndYear ? sessionEndYear.toString() : '—'}
                   />
 
                   <InfoRow
-                    label="Assigned Pilot / Driver"
-                    value={driverData?.name || driverData?.fullName || busData?.driverName || 'Allocating Pilot...'}
+                    label="Valid Until"
+                    value={deadlineConfig ? getDerivedValidUntilText() : 'Loading...'}
+                  />
+
+                  <InfoRow
+                    label="Assigned Pilot"
+                    value={(application as any).assignedDriverName || driverData?.name || driverData?.fullName || busData?.driverName || 'Allocating Pilot...'}
                   />
                   <InfoRow
                     label="Bus Stop"
@@ -757,6 +1136,39 @@ export default function AdminApplicationDetailPage() {
                       return stopName.charAt(0).toUpperCase() + stopName.slice(1);
                     })()}
                   />
+
+                  {stagedBus && (
+                    <div className="col-span-2 mt-4 p-4 rounded-xl border border-purple-500/30 bg-purple-500/5 text-purple-200 shadow-lg shadow-purple-950/20">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-start gap-2.5">
+                          <BusIcon className="h-5 w-5 text-purple-400 shrink-0 mt-0.5" />
+                          <div className="space-y-1">
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-purple-400">Staged Bus Assignment</span>
+                            <p className="text-sm font-semibold text-white">
+                              {stagedBus.busNumber}
+                            </p>
+                            {stagedBus.routeName && (
+                              <p className="text-xs text-zinc-400">
+                                Route: {stagedBus.routeName}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => {
+                            sessionStorage.removeItem(`staged_bus_${applicationId}`);
+                            setStagedBus(null);
+                            showToast('Staged bus assignment cleared.', 'info');
+                          }}
+                          className="h-7 px-2.5 text-[10px] font-semibold text-purple-400 hover:text-purple-300 hover:bg-purple-500/10 border border-purple-500/20 transition-all"
+                        >
+                          Clear Staging
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -805,8 +1217,7 @@ export default function AdminApplicationDetailPage() {
               <div className="flex flex-col gap-1.5 w-full sm:w-auto min-w-[120px] flex-grow">
                 <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">Gateway Status</span>
                 <div className="flex items-center gap-2">
-                  <div className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
-                  <span className="text-sm font-bold text-emerald-400 uppercase tracking-tight">Active / Success</span>
+                  <span className="text-sm font-bold text-emerald-400 uppercase tracking-tight">Active</span>
                 </div>
               </div>
 
@@ -849,25 +1260,27 @@ export default function AdminApplicationDetailPage() {
             </div>
 
             {/* Sub-strip for metadata */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mt-6 px-4">
-              <div className="flex flex-col gap-1">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
+              <div className="flex flex-col gap-1.5 p-4 rounded-xl bg-white/[0.02] border border-white/[0.05] justify-center">
                 <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">Transaction / Reference ID</span>
-                <span className="text-[14px] font-bold text-zinc-200 font-mono truncate tracking-tight" title={application.formData?.paymentInfo?.razorpayPaymentId || application.formData?.paymentInfo?.paymentReference || 'N/A'}>
+                <span className="text-[13px] font-bold text-zinc-200 font-mono truncate tracking-tight" title={application.formData?.paymentInfo?.razorpayPaymentId || application.formData?.paymentInfo?.paymentReference || 'N/A'}>
                   {application.formData?.paymentInfo?.razorpayPaymentId || application.formData?.paymentInfo?.paymentReference || 'N/A'}
                 </span>
               </div>
-              <div className="flex flex-col gap-1">
+              <div className="flex flex-col gap-1.5 p-4 rounded-xl bg-white/[0.02] border border-white/[0.05] justify-center">
                 <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">Payment made on</span>
-                <span className="text-[14px] font-bold text-zinc-200">
-                  {application.formData?.paymentInfo?.paymentTime
-                    ? new Date(application.formData.paymentInfo.paymentTime).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })
+                <span className="text-[13px] font-bold text-zinc-200">
+                  {paymentData?.timestamp || application.formData?.paymentInfo?.paymentTime || application.formData?.paymentInfo?.paidAt
+                    ? new Date(paymentData?.timestamp || application.formData?.paymentInfo?.paymentTime || application.formData?.paymentInfo?.paidAt!).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })
                     : 'N/A'}
                 </span>
               </div>
-              <div className="flex flex-col gap-1">
-                <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">Verified by</span>
-                <span className="text-[14px] font-bold text-zinc-200">
-                  {application.formData?.paymentInfo?.paymentMode === 'online' ? 'Automated System (ONLINE-PAY)' : 'Manual Auditor Queue'}
+              <div className="flex flex-col gap-1.5 p-4 rounded-xl bg-white/[0.02] border border-white/[0.05] justify-center">
+                <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">Verification State</span>
+                <span className="text-[13px] font-bold text-zinc-200 truncate">
+                  {application.formData?.paymentInfo?.paymentMode === 'online'
+                    ? 'System Verified'
+                    : (application.state === 'approved' ? 'Verified' : 'Pending Verification')}
                 </span>
               </div>
             </div>
@@ -875,44 +1288,71 @@ export default function AdminApplicationDetailPage() {
 
           <div className="h-px bg-white/[0.08]" />
 
-          {/* SECTION 4 — VERIFICATION CONTEXT (FULL-WIDTH 3-COLUMN GRID) */}
+          {/* SECTION 4 — FORM CONTEXT (FULL-WIDTH 3-COLUMN GRID) */}
           <div className="p-10 pb-16">
             <div className="flex items-center gap-2 mb-6">
               <div className="h-5 w-1 bg-blue-500 rounded-full"></div>
-              <h3 className="text-[11px] font-bold text-zinc-500 uppercase tracking-[0.2em]">Verification Context</h3>
+              <h3 className="text-[11px] font-bold text-zinc-500 uppercase tracking-[0.2em]">Form Context</h3>
             </div>
 
             {/* Full-width equalized 3-column grid */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-              {/* Status Column - SQUARED BOX DESIGN */}
-              <div className="flex flex-row items-center gap-4 p-4 rounded-xl bg-emerald-500/5 border border-emerald-500/20">
-                <div className="h-10 w-10 rounded-lg bg-emerald-500/10 flex items-center justify-center border border-emerald-500/20 flex-shrink-0">
-                  <ShieldCheck className="h-5 w-5 text-emerald-400" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-1.5 text-emerald-400 font-bold text-sm uppercase tracking-wider">
-                    <CheckCircle className="h-3 w-3" />
-                    Verified
-                  </div>
-                  <p className="text-[10px] text-zinc-500 font-medium uppercase tracking-tight">Security Cleared</p>
-                </div>
-              </div>
-
-              {/* Authenticator Column */}
-              <div className="flex flex-col gap-1 justify-center">
-                <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">Authenticator</span>
-                <p className="text-[14px] font-bold text-zinc-200">
-                  {verifierData?.name && verifierData?.employeeId
-                    ? `${verifierData.name} (${verifierData.employeeId})`
-                    : verifierData?.name || 'Automated System (SECURE)'
-                  }
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* Submission State Column */}
+              <div className="flex flex-col gap-1.5 p-4 rounded-xl bg-white/[0.02] border border-white/[0.05] justify-center">
+                <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">Submission State</span>
+                <p className="text-[13px] font-bold text-zinc-200 capitalize">
+                  {application.state === 'submitted' ? 'Pending Review' : (application.state || 'Submitted')}
                 </p>
               </div>
-
-              {/* Submitted On Column */}
-              <div className="flex flex-col gap-1 justify-center">
+              {/* Reassignment Required Column */}
+              <div className="flex flex-col gap-1.5 p-4 rounded-xl bg-white/[0.02] border border-white/[0.05] justify-center">
+                <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">Reassignment Required</span>
+                <div className="flex items-center justify-between gap-2">
+                  <span className={cn(
+                    "text-[13px] font-bold",
+                    isReassignmentRequired
+                      ? (capacityStatus.reassignmentReason === 'bus_full_only_option' ? "text-red-400" : "text-amber-400")
+                      : "text-emerald-400"
+                  )}>
+                    {isReassignmentRequired
+                      ? (capacityStatus.reassignmentReason === 'bus_full_only_option' ? "Yes (Critical Limit)" : "Yes")
+                      : "No"}
+                  </span>
+                  {isReassignmentRequired && (
+                    capacityStatus.reassignmentReason === 'bus_full_only_option' ? (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => router.push('/admin/smart-allocation')}
+                        className="h-7 px-2.5 text-[10px] font-semibold text-red-400 hover:text-red-300 hover:bg-red-500/10 border border-red-500/20 transition-all gap-1.5"
+                      >
+                        <AlertTriangle className="h-3 w-3" />
+                        Free Capacity
+                      </Button>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={openReassignment}
+                        disabled={loadingReassignmentData}
+                        className="h-7 px-2.5 text-[10px] font-semibold text-amber-400 hover:text-amber-300 hover:bg-amber-500/10 border border-amber-500/20 transition-all gap-1.5"
+                      >
+                        {loadingReassignmentData ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                          <>
+                            <RefreshCw className="h-3 w-3" />
+                            Reassign
+                          </>
+                        )}
+                      </Button>
+                    )
+                  )}
+                </div>
+              </div>
+              <div className="flex flex-col gap-1.5 p-4 rounded-xl bg-white/[0.02] border border-white/[0.05] justify-center">
                 <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">Submitted on</span>
-                <p className="text-[14px] font-bold text-zinc-200 font-mono">
+                <p className="text-[13px] font-bold text-zinc-200 font-mono">
                   {(application as any).submittedAt
                     ? new Date((application as any).submittedAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })
                     : (application.formData?.paymentInfo?.paymentTime
@@ -996,72 +1436,150 @@ export default function AdminApplicationDetailPage() {
           </Dialog>
         )}
 
-      {/* Approval Confirmation Dialog for Session Changes */}
-      <Dialog open={approveConfirmOpen} onOpenChange={setApproveConfirmOpen}>
-        <DialogContent className="max-w-md bg-[#12131A] text-white border-white/10 shadow-2xl sm:rounded-2xl">
-          <DialogHeader className="flex flex-col items-center text-center">
-            <div className="h-12 w-12 rounded-full bg-indigo-500/10 flex items-center justify-center border border-indigo-500/20 mb-3">
-              <CalendarDays className="h-6 w-6 text-indigo-400" />
+        {/* Approval Confirmation Dialog for Session Changes */}
+        <Dialog open={approveConfirmOpen} onOpenChange={setApproveConfirmOpen}>
+          <DialogContent className="max-w-md bg-[#12131A] text-white border-white/10 shadow-2xl sm:rounded-2xl">
+            <DialogHeader className="flex flex-col items-center text-center">
+              <div className="h-12 w-12 rounded-full bg-indigo-500/10 flex items-center justify-center border border-indigo-500/20 mb-3">
+                <CalendarDays className="h-6 w-6 text-indigo-400" />
+              </div>
+              <DialogTitle className="text-xl font-bold tracking-tight text-white">
+                Confirm Academic Year Update
+              </DialogTitle>
+              <DialogDescription className="text-zinc-400 text-sm mt-3 text-justify leading-relaxed">
+                You have updated the academic session details for this application. Please choose whether you want to save these modifications with the approval or proceed with the student's original session details.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="bg-white/5 border border-white/10 rounded-xl p-4 my-3 text-xs space-y-2">
+              <div className="flex justify-between">
+                <span className="text-slate-400">Original Start Year:</span>
+                <span className="font-semibold text-white">{originalStartYear}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-indigo-400">Modified Start Year:</span>
+                <span className="font-bold text-indigo-400">{sessionStartYear}</span>
+              </div>
+              <div className="h-px bg-white/10 my-2" />
+              <div className="flex justify-between">
+                <span className="text-slate-400">Original End Year:</span>
+                <span className="font-semibold text-white">{originalEndYear}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-emerald-400">Modified End Year:</span>
+                <span className="font-bold text-emerald-400">{sessionEndYear}</span>
+              </div>
             </div>
-            <DialogTitle className="text-xl font-bold tracking-tight text-white">
-              Confirm Academic Year Update
-            </DialogTitle>
-            <DialogDescription className="text-zinc-400 text-sm mt-3 text-justify leading-relaxed">
-              You have updated the academic session details for this application. Please choose whether you want to save these modifications with the approval or proceed with the student's original session details.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="bg-white/5 border border-white/10 rounded-xl p-4 my-3 text-xs space-y-2">
-            <div className="flex justify-between">
-              <span className="text-slate-400">Original Start Year:</span>
-              <span className="font-semibold text-white">{originalStartYear}</span>
+            <DialogFooter className="flex flex-col sm:flex-col gap-2 mt-4">
+              <Button
+                onClick={async () => {
+                  setApproveConfirmOpen(false);
+                  checkCapacityAndApprove(true);
+                }}
+                disabled={processing}
+                className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold h-10 rounded-lg shadow-lg shadow-indigo-600/20 transition-all duration-200"
+              >
+                Update & Approve
+              </Button>
+              <Button
+                variant="outline"
+                onClick={async () => {
+                  setApproveConfirmOpen(false);
+                  checkCapacityAndApprove(false);
+                }}
+                disabled={processing}
+                className="w-full border-white/10 text-white hover:bg-white/5 h-10 rounded-lg transition-colors"
+              >
+                Approve Without Changes
+              </Button>
+              <Button
+                variant="ghost"
+                onClick={() => setApproveConfirmOpen(false)}
+                disabled={processing}
+                className="w-full text-zinc-400 hover:text-white hover:bg-white/5 h-10 rounded-lg transition-colors"
+              >
+                Cancel
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Bus Capacity Warning Dialog */}
+        <Dialog open={capacityWarningOpen} onOpenChange={setCapacityWarningOpen}>
+          <DialogContent className="max-w-md bg-[#0B0C10] text-white border-white/10 shadow-2xl sm:rounded-2xl p-6">
+            <DialogHeader className="flex flex-col items-center text-center">
+              <div className={`h-12 w-12 rounded-full flex items-center justify-center border mb-3 ${warningType === 'red' ? "bg-red-500/10 border-red-500/20" : "bg-amber-500/10 border-amber-500/20"
+                }`}>
+                <AlertTriangle className={`h-6 w-6 ${warningType === 'red' ? "text-red-400" : "text-amber-400"}`} />
+              </div>
+              <DialogTitle className="text-xl font-bold tracking-tight text-white">
+                Bus Capacity Alert
+              </DialogTitle>
+              <DialogDescription className="text-zinc-400 text-xs mt-2 text-justify leading-relaxed">
+                Please review the capacity status of the assigned bus before confirming the approval.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="my-4">
+              <div className={`p-4 rounded-xl border flex flex-col gap-2.5 ${warningType === 'red'
+                ? "bg-red-500/5 border-red-500/20 text-red-200"
+                : "bg-amber-500/5 border-amber-500/20 text-amber-200"
+                }`}>
+                <p className="text-sm font-semibold">
+                  {(() => {
+                    const id = busData?.id || '';
+                    const num = busData?.busNumber || '';
+                    if (!id) return 'Bus';
+                    const capId = id.charAt(0).toUpperCase() + id.slice(1);
+                    return `${capId} (${num})`;
+                  })()} is {warningType === 'red' ? 'full' : 'low on capacity'}.
+                </p>
+                <p className="text-xs text-zinc-400 leading-relaxed">
+                  Current members: {busData?.currentMembers || 0} / {busData?.capacity || 0}.
+                  {warningType === 'red'
+                    ? " Approving this student will exceed the bus capacity limit."
+                    : " Approving this student will leave less than 5 free seats remaining."
+                  }
+                </p>
+              </div>
+
+              {/* Redirection to Reassignment Portal */}
+              <div className="mt-4 flex justify-center">
+                <Button
+                  variant="link"
+                  onClick={() => {
+                    setCapacityWarningOpen(false);
+                    router.push('/admin/smart-allocation');
+                  }}
+                  className="text-xs text-indigo-400 hover:text-indigo-300 underline underline-offset-4 p-0 h-auto"
+                >
+                  Go to Student Reassignment Portal
+                </Button>
+              </div>
             </div>
-            <div className="flex justify-between">
-              <span className="text-indigo-400">Modified Start Year:</span>
-              <span className="font-bold text-indigo-400">{sessionStartYear}</span>
-            </div>
-            <div className="h-px bg-white/10 my-2" />
-            <div className="flex justify-between">
-              <span className="text-slate-400">Original End Year:</span>
-              <span className="font-semibold text-white">{originalEndYear}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-emerald-400">Modified End Year:</span>
-              <span className="font-bold text-emerald-400">{sessionEndYear}</span>
-            </div>
-          </div>
-          <DialogFooter className="flex flex-col sm:flex-col gap-2 mt-4">
-            <Button
-              onClick={async () => {
-                setApproveConfirmOpen(false);
-                await handleApprove(true);
-              }}
-              disabled={processing}
-              className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold h-10 rounded-lg shadow-lg shadow-indigo-600/20 transition-all duration-200"
-            >
-              Update & Approve
-            </Button>
-            <Button
-              variant="outline"
-              onClick={async () => {
-                setApproveConfirmOpen(false);
-                await handleApprove(false);
-              }}
-              disabled={processing}
-              className="w-full border-white/10 text-white hover:bg-white/5 h-10 rounded-lg transition-colors"
-            >
-              Approve Without Changes
-            </Button>
-            <Button
-              variant="ghost"
-              onClick={() => setApproveConfirmOpen(false)}
-              disabled={processing}
-              className="w-full text-zinc-400 hover:text-white hover:bg-white/5 h-10 rounded-lg transition-colors"
-            >
-              Cancel
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+
+            <DialogFooter className="flex justify-between items-center sm:justify-between w-full mt-4 gap-4">
+              <Button
+                variant="outline"
+                onClick={() => setCapacityWarningOpen(false)}
+                className="border-white/10 text-white hover:bg-white/5 h-10 rounded-lg px-4 order-first"
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={async () => {
+                  setCapacityWarningOpen(false);
+                  await handleApprove(pendingUseModified);
+                }}
+                className={`text-white font-semibold h-10 rounded-lg px-6 order-last transition-all duration-200 ${warningType === 'red'
+                  ? "bg-red-600 hover:bg-red-500 shadow-lg shadow-red-500/20 hover:shadow-red-500/35 hover:scale-[1.02] active:scale-[0.98]"
+                  : "bg-amber-600 hover:bg-amber-500 shadow-lg shadow-amber-500/20 hover:shadow-amber-500/35 hover:scale-[1.02] active:scale-[0.98]"
+                  }`}
+              >
+                Approve
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {/* Rejection Dialog */}
         <Dialog open={rejectDialogOpen} onOpenChange={(open) => {
@@ -1120,6 +1638,16 @@ export default function AdminApplicationDetailPage() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        {reassignmentTarget && (
+          <ReassignmentPanel
+            selectedStudents={reassignmentTarget.busStudents}
+            allBuses={allBuses}
+            currentBus={reassignmentTarget.busData}
+            onClose={() => setReassignmentTarget(null)}
+            onSuccess={handleReassignmentSuccess}
+          />
+        )}
       </div>
     </div>
   );
@@ -1132,7 +1660,7 @@ function InfoRow({ label, value, isMono = false }: { label: string; value: strin
       <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">{label}</span>
       <span
         className={cn(
-          "text-[14px] font-bold text-white truncate leading-tight",
+          "text-[14px] font-semibold text-zinc-300 truncate leading-tight",
           isMono && "font-mono tracking-tight"
         )}
         title={value || '—'}

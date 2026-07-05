@@ -29,6 +29,7 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { getStudentById as getStudentByUid } from "@/lib/dataService";
 import { safeImageSrc } from "@/lib/security/url-sanitizer";
+import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import { formatDateFlexible } from '@/lib/utils/date-utils';
 
 const StatusBadge = ({ status }: { status: string }) => {
@@ -119,14 +120,7 @@ export default function DriverStudentDetailPage({ params }: { params: Promise<{ 
   }, [userData, router]);
 
   if (loading) {
-    return (
-      <div className="flex-1 min-h-[calc(100dvh-120px)] flex items-center justify-center bg-gradient-to-br from-purple-50 via-pink-50 to-rose-50 dark:from-gray-900 dark:via-purple-900/20 dark:to-pink-900/20">
-        <div className="text-center">
-          <Loader2 className="w-16 h-16 animate-spin text-purple-600 dark:text-purple-400 mx-auto mb-4" />
-          <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Loading student profile...</p>
-        </div>
-      </div>
-    );
+    return <PremiumPageLoader message="Loading student profile..." subMessage="Fetching details..." />;
   }
 
   if (error || !student) {

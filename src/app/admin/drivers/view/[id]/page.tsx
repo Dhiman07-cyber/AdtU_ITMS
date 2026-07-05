@@ -32,6 +32,7 @@ import {
   Award
 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import Link from "next/link";
 import { useToast } from '@/contexts/toast-context';
 import {
@@ -172,14 +173,7 @@ export default function ViewDriverPage({ params }: { params: Promise<{ id: strin
   };
 
   if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 dark:from-gray-900 dark:via-blue-900/20 dark:to-indigo-900/20">
-        <div className="text-center">
-          <Loader2 className="w-16 h-16 animate-spin text-blue-600 dark:text-blue-400 mx-auto mb-4" />
-          <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Loading driver profile...</p>
-        </div>
-      </div>
-    );
+    return <PremiumPageLoader message="Loading driver profile..." subMessage="Fetching details..." />;
   }
 
   if (!driver) {

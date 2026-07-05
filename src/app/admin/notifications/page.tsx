@@ -27,6 +27,7 @@ import {
   Truck
 } from "lucide-react";
 import { useToast } from "@/contexts/toast-context";
+import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import { useAuth } from "@/contexts/auth-context";
 import { useNotifications } from '@/contexts/NotificationContext';
 import NotificationCardV2 from "@/components/NotificationCardV2";
@@ -172,11 +173,7 @@ export default function AdminNotificationsPage() {
 
 
   if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
-      </div>
-    );
+    return <PremiumPageLoader message="Loading Notifications..." subMessage="Fetching recent updates..." />;
   }
 
   if (error) {
@@ -231,7 +228,7 @@ export default function AdminNotificationsPage() {
             </TabsTrigger>
             <TabsTrigger value="moderator" className="flex items-center gap-1.5 text-xs">
               <User className="h-3.5 w-3.5" />
-              Moderators
+              From Moderators
               {modNotifications.length > 0 && (
                 <Badge variant="secondary" className="ml-1 text-[10px] py-0">
                   {modNotifications.length}
@@ -239,7 +236,8 @@ export default function AdminNotificationsPage() {
               )}
             </TabsTrigger>
             <TabsTrigger value="driver" className="flex items-center gap-1.5 text-xs">
-              Drivers
+              <Truck className="h-3.5 w-3.5" />
+              From Drivers
               {driverNotificationsCount.length > 0 && (
                 <Badge variant="secondary" className="ml-1 text-[10px] py-0">
                   {driverNotificationsCount.length}

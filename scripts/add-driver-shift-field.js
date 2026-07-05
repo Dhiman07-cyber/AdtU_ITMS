@@ -3,18 +3,18 @@
  * Migration Script: Add 'shift' field to existing drivers
  * 
  * This script adds a 'shift' field to all existing driver documents in Firestore.
- * Default value: "Morning & Evening" (drivers available for both shifts)
+ * Default value: "Both" (drivers available for both shifts)
  * 
  * The shift field can have three values:
  * - "Morning" - Driver works morning shift only
  * - "Evening" - Driver works evening shift only
- * - "Morning & Evening" - Driver works both shifts (default)
+ * - "Both" - Driver works both shifts (default)
  * 
  * Usage: node scripts/add-driver-shift-field.js
  * 
  * Options:
  *   --dry-run    Preview changes without applying them
- *   --shift=X    Set a specific shift value (Morning, Evening, or "Morning & Evening")
+ *   --shift=X    Set a specific shift value (Morning, Evening, or Both)
  * 
  * Examples:
  *   node scripts/add-driver-shift-field.js
@@ -56,14 +56,14 @@ const shiftArg = args.find(arg => arg.startsWith('--shift='));
 const customShift = shiftArg ? shiftArg.split('=')[1] : null;
 
 // Validate custom shift value
-const VALID_SHIFTS = ['Morning', 'Evening', 'Morning & Evening'];
+const VALID_SHIFTS = ['Morning', 'Evening', 'Both'];
 if (customShift && !VALID_SHIFTS.includes(customShift)) {
     console.error(`❌ Invalid shift value: "${customShift}"`);
     console.error(`   Valid values: ${VALID_SHIFTS.join(', ')}`);
     process.exit(1);
 }
 
-const DEFAULT_SHIFT = customShift || 'Morning & Evening';
+const DEFAULT_SHIFT = customShift || 'Both';
 
 /**
  * Add shift field to all drivers

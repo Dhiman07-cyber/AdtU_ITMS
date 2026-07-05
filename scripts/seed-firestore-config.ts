@@ -77,19 +77,6 @@ async function seedConfig() {
         }, { merge: true });
         console.log('   ✅ config/limits created');
 
-        // 3. Seed systemSignals/admin/latest (initial empty signal)
-        console.log('📝 Creating systemSignals/admin/latest...');
-        await db.collection('systemSignals').doc('admin').collection('signals').doc('latest').set({
-            id: 'latest',
-            type: 'initial',
-            reason: 'System initialized',
-            updatedAt: FieldValue.serverTimestamp(),
-            payload: {
-                message: 'No changes yet',
-            },
-        }, { merge: true });
-        console.log('   ✅ systemSignals/admin/latest created');
-
         console.log('');
         console.log('='.repeat(50));
         console.log('✅ All config documents seeded successfully!');

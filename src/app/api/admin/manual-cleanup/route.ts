@@ -56,7 +56,7 @@ export const GET = withSecurity(
                     total: busesSnapshot.size
                 }
             },
-            message: 'Collection statistics retrieved. Note: busPassTokens and scans collections are no longer used.'
+            message: 'Collection statistics retrieved.'
         });
     },
     {

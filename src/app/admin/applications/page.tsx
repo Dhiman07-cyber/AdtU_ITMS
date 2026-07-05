@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { PageHeader } from "@/components/application/page-header";
 import { StatusBadge } from "@/components/application/status-badge";
-import { isUpcomingApplication } from "@/lib/utils/application-eligibility";
+import { isUpcomingApplication, getUpcomingStatus } from "@/lib/utils/application-eligibility";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -32,6 +32,11 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { PremiumPageLoader } from '@/components/LoadingSpinner';
+import { collection, query, where, getDocs } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
+import { useToast } from '@/contexts/toast-context';
+import AlternativeBusPicker from '@/components/smart-allocation/AlternativeBusPicker';
+import type { AlternativeBusData } from '@/components/smart-allocation/AlternativeBusPicker';
 
 export default function AdminApplicationsPage() {
   const { currentUser, userData } = useAuth();
@@ -58,12 +63,166 @@ export default function AdminApplicationsPage() {
   const [expandedCards, setExpandedCards] = useState<Set<string>>(new Set());
   const [processedIds, setProcessedIds] = useState<Set<string>>(new Set());
 
+  const [alternativePickerTarget, setAlternativePickerTarget] = useState<{
+    item: any;
+    currentBus: AlternativeBusData;
+    alternatives: AlternativeBusData[];
+  } | null>(null);
+  const [stagedBusesTrigger, setStagedBusesTrigger] = useState(0);
+
+  const stagedBuses = useMemo(() => {
+    const map = new Map<string, { busId: string; busNumber: string; routeId: string; routeName: string }>();
+    if (typeof window === 'undefined') return map;
+    for (let i = 0; i < sessionStorage.length; i++) {
+      const key = sessionStorage.key(i);
+      if (key && key.startsWith('staged_bus_')) {
+        const appId = key.replace('staged_bus_', '');
+        try {
+          const data = JSON.parse(sessionStorage.getItem(key) || '{}');
+          if (data.busId) {
+            map.set(appId, data);
+          }
+        } catch (e) {
+          console.error(e);
+        }
+      }
+    }
+    return map;
+  }, [stagedBusesTrigger, pendingApplications]);
+
+  /** Open the alternative-bus picker for a Case 2 application. */
+  const openAlternativePicker = (item: any) => {
+    const studentShift = (item.formData?.shift || 'Morning').toLowerCase();
+    const appBusId = item.formData?.busId || item.formData?.routeId?.replace('route_', 'bus_') || '';
+    const stopId = (item.formData?.stopId || '').toLowerCase().trim();
+    const stopName = item.formData?.stopName || '';
+
+    // Current (full) bus
+    const currentBusDoc = buses.find((b: any) => b.id === appBusId || b.busId === appBusId);
+    const currentBus: AlternativeBusData = currentBusDoc
+      ? {
+          id: currentBusDoc.id || currentBusDoc.busId || appBusId,
+          busNumber: currentBusDoc.busNumber || `Bus-${appBusId}`,
+          capacity: currentBusDoc.capacity || currentBusDoc.totalCapacity || 55,
+          shift: currentBusDoc.shift || 'both',
+          routeId: currentBusDoc.routeId,
+          routeName: currentBusDoc.routeName || currentBusDoc.route?.routeName,
+          load: currentBusDoc.load,
+          currentMembers: currentBusDoc.currentMembers,
+        }
+      : { id: appBusId, busNumber: `Bus-${appBusId}`, capacity: 55, shift: 'both' };
+
+    // Alternative buses (re-use the getCapacityStatus logic to find them)
+    const matchingRouteIds: string[] = [];
+    routes.forEach((route: any) => {
+      const routeStops = route.stops || [];
+      const hasStop = routeStops.some((stop: any) => {
+        const rsId = (stop.stopId || stop.id || stop.name || '').toLowerCase().trim();
+        const rsName = (stop.name || stop.stopName || '').toLowerCase().trim();
+        const normStopId = stopId;
+        const normStopName = stopName.toLowerCase().trim();
+        return rsId === normStopId || rsName === normStopName ||
+          rsName === normStopId || rsId === normStopName;
+      });
+      if (hasStop) matchingRouteIds.push(route.routeId || route.id);
+    });
+
+    const alternatives: AlternativeBusData[] = buses
+      .filter((b: any) => {
+        if ((b.id || b.busId) === appBusId) return false;
+        if (!matchingRouteIds.includes(b.routeId)) return false;
+        // Shift compatibility
+        const bShift = (b.shift || 'Both').toLowerCase();
+        if (studentShift === 'morning' && bShift !== 'morning' && bShift !== 'both') return false;
+        if (studentShift === 'evening' && bShift !== 'both') return false;
+        // Has capacity
+        const busTotalCapacity = b.capacity || b.totalCapacity || 55;
+        let busShiftLoad = 0;
+        if (studentShift === 'morning') busShiftLoad = b.load?.morningCount ?? b.morningLoad ?? 0;
+        else busShiftLoad = b.load?.eveningCount ?? b.eveningLoad ?? 0;
+        return (busTotalCapacity - busShiftLoad) > 0;
+      })
+      .map((b: any) => ({
+        id: b.id || b.busId || '',
+        busNumber: b.busNumber || b.id || '',
+        capacity: b.capacity || b.totalCapacity || 55,
+        shift: b.shift || 'both',
+        routeId: b.routeId,
+        routeName: b.routeName || b.route?.routeName,
+        load: b.load || { morningCount: 0, eveningCount: 0 },
+        currentMembers: b.currentMembers,
+      }));
+
+    setAlternativePickerTarget({
+      item,
+      currentBus,
+      alternatives,
+    });
+  };
+
+  const handleAlternativeSelected = async (busId: string) => {
+    if (!alternativePickerTarget) return;
+    const { item } = alternativePickerTarget;
+    
+    const selectedBus = buses.find((b: any) => (b.id || b.busId) === busId);
+    const busNum = selectedBus?.busNumber || busId;
+    const routeId = selectedBus?.routeId || '';
+    const routeName = selectedBus?.routeName || '';
+
+    const stageData = {
+      busId,
+      busNumber: busNum,
+      routeId,
+      routeName,
+      stagedAt: Date.now()
+    };
+    sessionStorage.setItem(`staged_bus_${item.applicationId}`, JSON.stringify(stageData));
+
+    const busIdNum = busId.replace(/[^0-9]/g, '');
+    const formattedBusLabel = `Bus-${busIdNum || busId} (${busNum})`;
+
+    showToast(`${formattedBusLabel} selected and staged for approval.`, 'success');
+    setAlternativePickerTarget(null);
+    setStagedBusesTrigger(prev => prev + 1);
+  };
+
+  const { showToast } = useToast();
+  const [renewalRequests, setRenewalRequests] = useState<any[]>([]);
+  const [loadingRenewals, setLoadingRenewals] = useState(false);
+  const [activeSection, setActiveSection] = useState<'applications' | 'upcoming' | 'renewals'>('applications');
+  const [currentTime, setCurrentTime] = useState(new Date());
+
+  const fetchRenewalRequests = async () => {
+    try {
+      setLoadingRenewals(true);
+      const renewalRef = collection(db, 'renewal_requests');
+      const q = query(renewalRef, where('status', '==', 'pending'));
+      const snapshot = await getDocs(q);
+
+      const requests: any[] = [];
+      snapshot.forEach((doc) => {
+        requests.push({ id: doc.id, ...doc.data() });
+      });
+      setRenewalRequests(requests);
+    } catch (error) {
+      console.error('Error fetching renewal requests:', error);
+    } finally {
+      setLoadingRenewals(false);
+    }
+  };
+
   // Manual refresh handler for applications page
   const handleRefresh = async () => {
     setIsRefreshing(true);
     try {
       invalidateCollectionCache('applications');
-      await Promise.all([refreshApplications(), refreshRoutes(), refreshBuses()]);
+      invalidateCollectionCache('buses');
+      await Promise.all([
+        refreshApplications(),
+        refreshRoutes(),
+        refreshBuses(),
+        fetchRenewalRequests()
+      ]);
     } catch (error) {
       console.error('Error refreshing applications:', error);
       setError("Failed to refresh data");
@@ -83,17 +242,28 @@ export default function AdminApplicationsPage() {
     }
   }, [userData, router]);
 
+  useEffect(() => {
+    if (currentUser) {
+      fetchRenewalRequests();
+    }
+  }, [currentUser]);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentTime(new Date());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
   // Filter applications relevant to the admin queue:
-  // - 'submitted'                 → awaiting initial review/approval
-  // - 'verified_upcoming'         → admin already approved for the upcoming session, waiting for activation
-  // - 'pending_seat_allocation'   → activation reached this app but capacity was full; needs manual resolution
-  const LIVE_QUEUE_STATES = useMemo(
-    () => new Set<string>(['submitted', 'verified_upcoming', 'pending_seat_allocation']),
-    []
-  );
   const applicationApplications = useMemo(
-    () => pendingApplications.filter((app: any) => LIVE_QUEUE_STATES.has(app.state)),
-    [pendingApplications, LIVE_QUEUE_STATES]
+    () => pendingApplications.filter((app: any) => app.state === 'submitted' && !isUpcomingApplication(app)),
+    [pendingApplications]
+  );
+
+  const upcomingApplications = useMemo(
+    () => pendingApplications.filter((app: any) => (app.state === 'submitted' && isUpcomingApplication(app)) || app.state === 'verified_upcoming' || app.state === 'pending_seat_allocation'),
+    [pendingApplications]
   );
 
   // Trigger the canonical session-activation service. Activates ALL eligible
@@ -301,22 +471,38 @@ export default function AdminApplicationsPage() {
 
   // Filtered and searched data
   const filteredData = useMemo(() => {
-    let data = applicationApplications;
+    const isApplicationSection = activeSection === 'applications' || activeSection === 'upcoming';
+    let data = activeSection === 'applications'
+      ? applicationApplications
+      : activeSection === 'upcoming'
+        ? upcomingApplications
+        : renewalRequests;
 
     // Apply search filter
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase();
       data = data.filter((item: any) => {
-        return (
-          item.formData?.fullName?.toLowerCase().includes(query) ||
-          item.formData?.enrollmentId?.toLowerCase().includes(query) ||
-          item.formData?.phoneNumber?.includes(query)
-        );
+        if (isApplicationSection) {
+          return (
+            item.formData?.fullName?.toLowerCase().includes(query) ||
+            item.formData?.enrollmentId?.toLowerCase().includes(query) ||
+            item.formData?.phoneNumber?.includes(query)
+          );
+        } else {
+          const name = item.studentName || '';
+          const enrollment = item.enrollmentId || '';
+          const bus = item.busNumber || '';
+          return (
+            name.toLowerCase().includes(query) ||
+            enrollment.toLowerCase().includes(query) ||
+            bus.toLowerCase().includes(query)
+          );
+        }
       });
     }
 
-    // Apply shift filter - logic corrected to be more inclusive
-    if (shiftFilter.length > 0) {
+    // Apply shift filter
+    if (shiftFilter.length > 0 && isApplicationSection) {
       data = data.filter((item: any) => {
         const itemShift = (item.formData?.shift || 'both').toLowerCase();
         return shiftFilter.some(f => {
@@ -329,12 +515,12 @@ export default function AdminApplicationsPage() {
     }
 
     // Filter out processed IDs (optimistic update)
-    if (processedIds.size > 0) {
+    if (isApplicationSection && processedIds.size > 0) {
       data = data.filter((item: any) => !processedIds.has(item.applicationId || item.uid));
     }
 
     return data;
-  }, [applicationApplications, searchQuery, shiftFilter, processedIds]);
+  }, [activeSection, applicationApplications, upcomingApplications, renewalRequests, searchQuery, shiftFilter, processedIds]);
 
   // Precompute the expensive per-card capacity check and bus display ONCE per
   // data change. getCapacityStatus scans routes (with nested stop loops) and
@@ -343,6 +529,9 @@ export default function AdminApplicationsPage() {
   // underlying data actually changes.
   const cardMeta = useMemo(() => {
     const map = new Map<string, { capacity: ReturnType<typeof getCapacityStatus>; busDisplay: string }>();
+    const isApplicationSection = activeSection === 'applications' || activeSection === 'upcoming';
+    if (!isApplicationSection) return map;
+
     for (const item of filteredData) {
       map.set(item.applicationId, {
         capacity: getCapacityStatus(item),
@@ -351,26 +540,81 @@ export default function AdminApplicationsPage() {
     }
     return map;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filteredData, buses, routes, routesLoading, busesLoading]);
+  }, [filteredData, buses, routes, routesLoading, busesLoading, activeSection]);
+
+  const handleApproveRenewal = async (requestId: string) => {
+    if (!currentUser) return;
+    setApproving(requestId);
+    try {
+      const token = await currentUser.getIdToken();
+      const response = await fetch('/api/renewal-requests/approve-v2', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ requestId })
+      });
+
+      if (response.ok) {
+        showToast('Renewal request approved successfully', 'success');
+        setRenewalRequests(prev => prev.filter(r => r.id !== requestId));
+      } else {
+        const errorData = await response.json();
+        setError(errorData.error || 'Failed to approve renewal request');
+      }
+    } catch (error) {
+      console.error('Error approving renewal:', error);
+      setError('Failed to approve renewal request');
+    } finally {
+      setApproving(null);
+    }
+  };
 
   // Approve an application
-  const handleApprove = async (applicationId: string) => {
+  const handleApprove = async (applicationId: string, overrideBusId?: string) => {
     if (!currentUser) return;
 
     setApproving(applicationId);
     try {
       const token = await currentUser.getIdToken();
+      const body: Record<string, unknown> = { studentUid: applicationId };
+      if (overrideBusId) body.overrideBusId = overrideBusId;
+
       const response = await fetch('/api/applications/approve-unauth', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify({ studentUid: applicationId }) // applicationId is the same as studentUid
+        body: JSON.stringify(body)
       });
 
       if (response.ok) {
         setError("");
+        // Clear staged bus selection if any
+        sessionStorage.removeItem(`staged_bus_${applicationId}`);
+        setStagedBusesTrigger(prev => prev + 1);
+
+        // Format bus/route for toast
+        const appItem = pendingApplications.find((app: any) => app.applicationId === applicationId);
+        const activeBusId = overrideBusId || appItem?.formData?.busId || appItem?.formData?.routeId?.replace('route_', 'bus_') || '';
+        const selectedBus = buses.find((b: any) => (b.id || b.busId) === activeBusId);
+        let busLabel = '';
+        let routeLabel = '';
+        if (selectedBus) {
+          const busIdNum = activeBusId.replace(/[^0-9]/g, '');
+          busLabel = `Bus-${busIdNum || activeBusId} (${selectedBus.busNumber})`;
+          const routeIdVal = selectedBus.routeId || '';
+          const routeNum = routeIdVal.replace(/[^0-9]/g, '');
+          routeLabel = `Route-${routeNum || routeIdVal}`;
+        }
+
+        const msg = busLabel 
+          ? `Application approved successfully with ${busLabel}${routeLabel ? ` on ${routeLabel}` : ''}! Student notified via email.` 
+          : 'Application approved successfully! Student notified via email.';
+        showToast(msg, 'success');
+
         // Optimistically hide the card
         setProcessedIds(prev => {
           const newSet = new Set(prev);
@@ -409,32 +653,64 @@ export default function AdminApplicationsPage() {
     setRejecting(selectedApplication);
     try {
       const token = await currentUser.getIdToken();
-      const response = await fetch('/api/applications/reject-unauth', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({ studentUid: selectedApplication, reason: rejectionReason })
-      });
+      if (activeSection === 'renewals') {
+        const response = await fetch('/api/renewal-requests/reject', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            requestId: selectedApplication,
+            reason: rejectionReason.trim(),
+            rejectorName: userData?.displayName || userData?.fullName || 'Admin',
+            rejectorId: currentUser.uid
+          })
+        });
 
-      if (response.ok) {
-        setError("");
-        setShowRejectDialog(false);
-        setRejectionReason("");
-        // Optimistically hide the card
-        if (selectedApplication) {
-          setProcessedIds(prev => {
-            const newSet = new Set(prev);
-            newSet.add(selectedApplication);
-            return newSet;
-          });
+        if (!response.ok) {
+          const errorData = await response.json();
+          setError(errorData.error || "Failed to reject renewal request");
+        } else {
+          setError("");
+          setShowRejectDialog(false);
+          setRejectionReason("");
+          setRenewalRequests(prev => prev.filter(r => r.id !== selectedApplication));
+          setSelectedApplication(null);
         }
-        await handleRefresh();
-        setSelectedApplication(null);
       } else {
-        const errorData = await response.json();
-        setError(errorData.error || "Failed to reject application");
+        const response = await fetch('/api/applications/reject-unauth', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ studentUid: selectedApplication, reason: rejectionReason })
+        });
+
+        if (response.ok) {
+          setError("");
+          // Clear staged bus selection if any
+          if (selectedApplication) {
+            sessionStorage.removeItem(`staged_bus_${selectedApplication}`);
+            setStagedBusesTrigger(prev => prev + 1);
+          }
+          setShowRejectDialog(false);
+          setRejectionReason("");
+          // Optimistically hide the card
+          if (selectedApplication) {
+            setProcessedIds(prev => {
+              const newSet = new Set(prev);
+              newSet.add(selectedApplication);
+              return newSet;
+            });
+          }
+          await handleRefresh();
+          setSelectedApplication(null);
+        } else {
+          const errorData = await response.json();
+          setError(errorData.error || "Failed to reject application");
+        }
       }
     } catch (error) {
       console.error("Error rejecting application:", error);
@@ -459,7 +735,6 @@ export default function AdminApplicationsPage() {
       </div>
     );
   }
-
   return (
     <div className="mt-12 space-y-6">
       {/* Page Header */}
@@ -469,25 +744,27 @@ export default function AdminApplicationsPage() {
             <h1 className="text-3xl font-bold tracking-tight text-white leading-none">Student Applications</h1>
             <div className="hidden md:block">
               <Badge className="text-[10px] font-bold px-2 py-0.5 bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 uppercase tracking-tight rounded-md">
-                {filteredData.length} Applications
+                {activeSection === 'applications' ? 'Freshers' : activeSection === 'upcoming' ? 'Upcoming' : 'Renewals'}: {filteredData.length}
               </Badge>
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <Button
-              size="sm"
-              className="group h-8 px-4 bg-indigo-600 hover:bg-indigo-500 text-white border border-indigo-700 shadow-sm font-bold text-[10px] uppercase tracking-widest rounded-lg transition-all duration-300 active:scale-95 cursor-pointer"
-              onClick={handleRunSessionActivation}
-              disabled={activating}
-              title="Activate all verified upcoming-session applications for the current session"
-            >
-              {activating ? (
-                <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Calendar className="mr-2 h-3.5 w-3.5" />
-              )}
-              Run Session Activation
-            </Button>
+            {activeSection === 'upcoming' && (
+              <Button
+                size="sm"
+                className="group h-8 px-4 bg-indigo-600 hover:bg-indigo-500 text-white border border-indigo-700 shadow-sm font-bold text-[10px] uppercase tracking-widest rounded-lg transition-all duration-300 active:scale-95 cursor-pointer"
+                onClick={handleRunSessionActivation}
+                disabled={activating}
+                title="Activate all verified upcoming-session applications for the current session"
+              >
+                {activating ? (
+                  <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Calendar className="mr-2 h-3.5 w-3.5" />
+                )}
+                Run Session Activation
+              </Button>
+            )}
             <Button
               size="sm"
               className="group h-8 px-4 bg-white hover:bg-gray-50 text-black hover:text-purple-600 border border-gray-200 hover:border-purple-200 shadow-sm hover:shadow-lg hover:shadow-purple-500/10 font-bold text-[10px] uppercase tracking-widest rounded-lg transition-all duration-300 active:scale-95 cursor-pointer"
@@ -505,93 +782,144 @@ export default function AdminApplicationsPage() {
       </div>
 
       {/* Filter Toolbar - Full Width Layout */}
-      <div className="flex flex-col sm:flex-row gap-2 w-full">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500" />
-          <Input
-            placeholder="Search by name, enrollment ID, phone..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-10 h-10 w-full bg-[#12131A] border-white/[0.05] focus:border-indigo-500/50 transition-all text-sm"
-          />
+      <div className="flex flex-col sm:flex-row gap-3">
+        <div className="flex gap-2 p-1 bg-[#12131A]/40 border border-white/[0.05] rounded-lg flex-1 sm:flex-initial">
+          <Button
+            variant={activeSection === 'applications' ? 'default' : 'ghost'}
+            onClick={() => setActiveSection('applications')}
+            className={cn(
+              "flex-1 gap-2 h-9",
+              activeSection === 'applications' ? "bg-indigo-600 hover:bg-indigo-700" : "text-zinc-400"
+            )}
+            size="sm"
+          >
+            <FileText className="h-4 w-4" />
+            Freshers
+          </Button>
+          <Button
+            variant={activeSection === 'upcoming' ? 'default' : 'ghost'}
+            onClick={() => setActiveSection('upcoming')}
+            className={cn(
+              "flex-1 gap-2 h-9 relative",
+              activeSection === 'upcoming' ? "bg-indigo-600 hover:bg-indigo-700" : "text-zinc-400"
+            )}
+            size="sm"
+          >
+            <Calendar className="h-4 w-4" />
+            Upcoming
+            {upcomingApplications.length > 0 && (
+              <span className="ml-1 inline-flex items-center justify-center text-[10px] font-bold min-w-[18px] h-[18px] px-1 rounded-full bg-purple-500/30 text-purple-200 border border-purple-400/30">
+                {upcomingApplications.length}
+              </span>
+            )}
+          </Button>
+          <Button
+            variant={activeSection === 'renewals' ? 'default' : 'ghost'}
+            onClick={() => setActiveSection('renewals')}
+            className={cn(
+              "flex-1 gap-2 h-9",
+              activeSection === 'renewals' ? "bg-indigo-600 hover:bg-indigo-700" : "text-zinc-400"
+            )}
+            size="sm"
+          >
+            <ArrowRightLeft className="h-4 w-4" />
+            Renewals
+            {renewalRequests.length > 0 && (
+              <span className="ml-1 inline-flex items-center justify-center text-[10px] font-bold min-w-[18px] h-[18px] px-1 rounded-full bg-purple-500/30 text-purple-200 border border-purple-400/30">
+                {renewalRequests.length}
+              </span>
+            )}
+          </Button>
         </div>
 
-        <div className="flex gap-2">
-          {/* Shift Filter */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="outline"
-                className={cn(
-                  "hidden md:flex h-10 gap-2 border-white/[0.05] bg-[#12131A] hover:bg-zinc-900 transition-all text-sm px-4",
-                  shiftFilter.length > 0 && "border-indigo-500/50 text-indigo-400 font-medium"
-                )}
-              >
-                <SlidersHorizontal className="h-4 w-4" />
-                Filter by Shift
-                {shiftFilter.length > 0 && (
-                  <Badge className="ml-1 bg-indigo-500 text-white border-none h-5 px-1.5 min-w-[1.25rem] justify-center text-[10px]">
-                    {shiftFilter.length}
-                  </Badge>
-                )}
-                <ChevronDown className="h-4 w-4 opacity-50" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56 bg-[#12131A] border-white/[0.1] text-zinc-300">
-              <DropdownMenuLabel className="text-zinc-500 text-[10px] uppercase tracking-wider font-bold">Shift Preferences</DropdownMenuLabel>
-              <DropdownMenuSeparator className="bg-white/[0.05]" />
-              <DropdownMenuCheckboxItem
-                checked={shiftFilter.includes('morning')}
-                onCheckedChange={(checked) => {
-                  setShiftFilter(checked ? [...shiftFilter, 'morning'] : shiftFilter.filter(s => s !== 'morning'));
-                }}
-                className="cursor-pointer focus:bg-white/[0.05]"
-              >
-                Morning Shift
-              </DropdownMenuCheckboxItem>
-              <DropdownMenuCheckboxItem
-                checked={shiftFilter.includes('evening')}
-                onCheckedChange={(checked) => {
-                  setShiftFilter(checked ? [...shiftFilter, 'evening'] : shiftFilter.filter(s => s !== 'evening'));
-                }}
-                className="cursor-pointer focus:bg-white/[0.05]"
-              >
-                Evening Shift
-              </DropdownMenuCheckboxItem>
-              <DropdownMenuCheckboxItem
-                checked={shiftFilter.includes('both')}
-                onCheckedChange={(checked) => {
-                  setShiftFilter(checked ? [...shiftFilter, 'both'] : shiftFilter.filter(s => s !== 'both'));
-                }}
-                className="cursor-pointer focus:bg-white/[0.05]"
-              >
-                Dual Shift (Both)
-              </DropdownMenuCheckboxItem>
-              {shiftFilter.length > 0 && (
-                <>
-                  <DropdownMenuSeparator className="bg-white/[0.05]" />
-                  <DropdownMenuItem onClick={() => setShiftFilter([])} className="cursor-pointer text-red-400 focus:text-red-400 focus:bg-red-400/10">
-                    Clear Shift Filters
-                  </DropdownMenuItem>
-                </>
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
+        <div className="flex flex-col sm:flex-row gap-2 flex-1 w-full font-sans">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500" />
+            <Input
+              placeholder={activeSection === 'renewals' ? "Search renewals..." : "Search by name, enrollment ID, phone..."}
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-10 h-10 w-full bg-[#12131A] border-white/[0.05] focus:border-indigo-500/50 transition-all text-sm"
+            />
+          </div>
 
-          {/* Clear Button */}
-          {(shiftFilter.length > 0 || searchQuery !== "") && (
-            <Button
-              variant="ghost"
-              onClick={() => {
-                setShiftFilter([]);
-                setSearchQuery("");
-              }}
-              className="h-10 px-4 bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white transition-all duration-300 border border-red-500/20"
-            >
-              <X className="h-4 w-4 mr-2" />
-              Clear
-            </Button>
-          )}
+          <div className="flex gap-2">
+            {(activeSection === 'applications' || activeSection === 'upcoming') && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="outline"
+                    className={cn(
+                      "hidden md:flex h-10 gap-2 border-white/[0.05] bg-[#12131A] hover:bg-zinc-900 transition-all text-sm px-4",
+                      shiftFilter.length > 0 && "border-indigo-500/50 text-indigo-400 font-medium"
+                    )}
+                  >
+                    <SlidersHorizontal className="h-4 w-4" />
+                    Filter by Shift
+                    {shiftFilter.length > 0 && (
+                      <Badge className="ml-1 bg-indigo-500 text-white border-none h-5 px-1.5 min-w-[1.25rem] justify-center text-[10px]">
+                        {shiftFilter.length}
+                      </Badge>
+                    )}
+                    <ChevronDown className="h-4 w-4 opacity-50" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56 bg-[#12131A] border-white/[0.1] text-zinc-300">
+                  <DropdownMenuLabel className="text-zinc-500 text-[10px] uppercase tracking-wider font-bold">Shift Preferences</DropdownMenuLabel>
+                  <DropdownMenuSeparator className="bg-white/[0.05]" />
+                  <DropdownMenuCheckboxItem
+                    checked={shiftFilter.includes('morning')}
+                    onCheckedChange={(checked) => {
+                      setShiftFilter(checked ? [...shiftFilter, 'morning'] : shiftFilter.filter(s => s !== 'morning'));
+                    }}
+                    className="cursor-pointer focus:bg-white/[0.05]"
+                  >
+                    Morning Shift
+                  </DropdownMenuCheckboxItem>
+                  <DropdownMenuCheckboxItem
+                    checked={shiftFilter.includes('evening')}
+                    onCheckedChange={(checked) => {
+                      setShiftFilter(checked ? [...shiftFilter, 'evening'] : shiftFilter.filter(s => s !== 'evening'));
+                    }}
+                    className="cursor-pointer focus:bg-white/[0.05]"
+                  >
+                    Evening Shift
+                  </DropdownMenuCheckboxItem>
+                  <DropdownMenuCheckboxItem
+                    checked={shiftFilter.includes('both')}
+                    onCheckedChange={(checked) => {
+                      setShiftFilter(checked ? [...shiftFilter, 'both'] : shiftFilter.filter(s => s !== 'both'));
+                    }}
+                    className="cursor-pointer focus:bg-white/[0.05]"
+                  >
+                    Dual Shift (Both)
+                  </DropdownMenuCheckboxItem>
+                  {shiftFilter.length > 0 && (
+                    <>
+                      <DropdownMenuSeparator className="bg-white/[0.05]" />
+                      <DropdownMenuItem onClick={() => setShiftFilter([])} className="cursor-pointer text-red-400 focus:text-red-400 focus:bg-red-400/10">
+                        Clear Shift Filters
+                      </DropdownMenuItem>
+                    </>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+
+            {(shiftFilter.length > 0 || searchQuery !== "") && (
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  setShiftFilter([]);
+                  setSearchQuery("");
+                }}
+                className="h-10 px-4 bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white transition-all duration-300 border border-red-500/20"
+              >
+                <X className="h-4 w-4 mr-2" />
+                Clear
+              </Button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -602,31 +930,28 @@ export default function AdminApplicationsPage() {
       )}
 
       {/* Content Area */}
-      {(loading || routesLoading || busesLoading) && pendingApplications.length === 0 ? (
+      {(loading || loadingRenewals || routesLoading || busesLoading) && pendingApplications.length === 0 ? (
         <div className="flex justify-center items-center h-96">
-          <PremiumPageLoader message="Fetching Student Applications..." />
+          <PremiumPageLoader message="Fetching data..." />
         </div>
       ) : (
         <>
-          {(loading || routesLoading || busesLoading) && (
+          {(loading || loadingRenewals || routesLoading || busesLoading) && (
             <div className="w-full h-1 bg-indigo-500/10 overflow-hidden mb-4 rounded-full">
               <div className="animate-progress w-full h-full bg-indigo-500 origin-left-right"></div>
             </div>
           )}
           {filteredData.length === 0 ? (
-            <Card>
-              <CardContent className="py-12 text-center">
+            <Card className="bg-[#12131A]/40 border-white/[0.05]">
+              <CardContent className="py-20 text-center">
                 <div className="flex flex-col items-center gap-4">
                   <div className="p-4 bg-muted rounded-full">
                     <FileText className="h-8 w-8 text-muted-foreground" />
                   </div>
                   <div className="space-y-2">
-                    <h3 className="text-lg font-semibold">No Applications Found</h3>
-                    <p className="text-sm text-muted-foreground max-w-sm">
-                      {searchQuery || shiftFilter.length > 0
-                        ? 'Try adjusting your filters or search query'
-                        : `There are no student applications at the moment`
-                      }
+                    <h3 className="text-lg font-semibold text-white">No items found</h3>
+                    <p className="text-sm text-zinc-500 max-w-sm">
+                      There are no pending requests matching your criteria.
                     </p>
                   </div>
                   {(searchQuery || shiftFilter.length > 0) && (
@@ -637,6 +962,7 @@ export default function AdminApplicationsPage() {
                         setSearchQuery("");
                         setShiftFilter([]);
                       }}
+                      className="border-white/10 hover:bg-white/5"
                     >
                       Clear All Filters
                     </Button>
@@ -647,312 +973,456 @@ export default function AdminApplicationsPage() {
           ) : (
             <div className="grid grid-cols-1 gap-4">
               {filteredData.map((item: any) => {
-                // Use precomputed capacity status + bus display (see cardMeta memo)
-                const meta = cardMeta.get(item.applicationId);
-                const { needsCapacityReview, reassignmentReason, busNumber, shift } =
-                  meta?.capacity ?? { needsCapacityReview: false, reassignmentReason: 'no_issue' as const, busNumber: 'Unknown', shift: 'morning' };
-                const busDisplay = meta?.busDisplay ?? '';
-
-                const isExpanded = expandedCards.has(item.applicationId);
-                const toggleExpanded = () => {
-                  setExpandedCards(prev => {
-                    const next = new Set(prev);
-                    if (next.has(item.applicationId)) {
-                      next.delete(item.applicationId);
-                    } else {
-                      next.add(item.applicationId);
-                    }
-                    return next;
-                  });
-                };
+                const isApplication = activeSection === 'applications' || activeSection === 'upcoming';
+                const isUpcoming = activeSection === 'upcoming';
+                const key = isApplication ? item.applicationId : item.id;
 
                 return (
                   <Card
-                    key={item.applicationId}
+                    key={key}
                     className="group transition-all duration-300 border-white/[0.05] bg-[#12131A]/40 hover:bg-indigo-500/[0.03] hover:border-indigo-500/20 overflow-hidden relative"
                   >
-                    {/* Subtle hover accent */}
                     <div className="absolute left-0 top-0 bottom-0 w-1 bg-indigo-500 transform scale-y-0 group-hover:scale-y-100 transition-transform duration-300 origin-top" />
-                    <CardContent className="p-5">
-                      <div className="flex flex-col gap-2">
 
-                        {/* Header Section: Profile & Status */}
-                        <div className="flex justify-between items-start">
-                          <div className="flex items-start gap-4">
-                            <Avatar className="h-12 w-12 ring-2 ring-white/5 bg-zinc-900 shadow-xl">
-                              <AvatarImage src={item.formData?.profilePhotoUrl} />
-                              <AvatarFallback className="bg-indigo-500/10 text-indigo-400 font-bold">
-                                {item.formData?.fullName?.substring(0, 2).toUpperCase()}
-                              </AvatarFallback>
-                            </Avatar>
-                            <div className="space-y-1">
-                              <div className="flex items-center gap-2 mb-2">
-                                <h3 className="font-bold text-base text-white leading-none">{item.formData?.fullName}</h3>
-                                <StatusBadge status={item.state || 'submitted'} />
-                              </div>
-                              <div className="flex flex-col md:flex-row md:items-center gap-2 md:gap-3 mt-1">
-                                <span className="flex items-center gap-1.5 bg-zinc-900/50 px-2.5 py-1.5 md:py-0.5 rounded border border-white/5 font-mono text-[11px] md:text-xs text-zinc-300 w-full md:w-fit break-all">
-                                  <User className="h-3 w-3 text-zinc-500 shrink-0" />
-                                  {item.formData?.enrollmentId}
-                                </span>
-                                <span className="flex items-center gap-1.5 font-mono text-[11px] md:text-xs text-zinc-400 w-full md:w-auto px-1">
-                                  <Phone className="h-3 w-3 text-zinc-500 shrink-0" />
-                                  {item.formData?.phoneNumber}
-                                </span>
-                              </div>
-                            </div>
-                          </div>
+                    {isApplication ? (() => {
+                      const meta = cardMeta.get(item.applicationId);
+                      const { needsCapacityReview, reassignmentReason, busNumber, shift } =
+                        meta?.capacity ?? { needsCapacityReview: false, reassignmentReason: 'no_issue' as const, busNumber: 'Unknown', shift: 'morning' };
+                      const busDisplay = meta?.busDisplay ?? '';
 
-                          {/* Top Right: Payment Info (Desktop Only) */}
-                          <div className="hidden sm:flex flex-col items-end gap-2">
-                            <Badge variant="outline" className={cn(
-                              "gap-1.5 text-[10px] px-2.5 py-1 h-fit font-medium tracking-wide shadow-sm",
-                              item.formData?.paymentInfo?.paymentMode === 'online' ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" : "bg-amber-500/10 text-amber-400 border-amber-500/20"
-                            )}>
-                              <div className={cn("w-1.5 h-1.5 rounded-full", item.formData?.paymentInfo?.paymentMode === 'online' ? "bg-emerald-400" : "bg-amber-400")} />
-                              {item.formData?.paymentInfo?.paymentMode === 'online' ? 'ONLINE' : 'MANUAL'}
-                            </Badge>
-                            {item.formData?.paymentInfo?.amountPaid && (
-                              <span className="text-xs font-mono font-bold text-zinc-500 bg-zinc-900/80 px-2 py-1 rounded border border-white/5">
-                                ₹{Number(item.formData.paymentInfo.amountPaid).toLocaleString('en-IN')}
-                              </span>
-                            )}
-                          </div>
-                        </div>
+                      const isExpanded = expandedCards.has(item.applicationId);
+                      const toggleExpanded = () => {
+                        setExpandedCards(prev => {
+                          const next = new Set(prev);
+                          if (next.has(item.applicationId)) {
+                            next.delete(item.applicationId);
+                          } else {
+                            next.add(item.applicationId);
+                          }
+                          return next;
+                        });
+                      };
 
-                        {/* Middle Section: Bus Info & Tags */}
-                        <div className="space-y-3 mb-3">
-                          {/* Desktop Layout - Unchanged */}
-                          <div className="hidden sm:flex flex-wrap items-center gap-2">
-                            <Badge variant="outline" className="gap-1.5 text-[10px] py-1 px-2.5 bg-zinc-800/40 border-white/5 text-zinc-300 group-hover:bg-zinc-800/60 transition-colors">
-                              <BusIcon className="h-3 w-3 text-indigo-400" />
-                              <span className="font-medium text-white/90">{busDisplay}</span>
-                            </Badge>
+                      return (
+                        <CardContent className="p-5">
+                          <div className="flex flex-col gap-2">
 
-                            <Badge variant="outline" className="gap-1.5 text-[10px] py-1 px-2.5 bg-zinc-800/40 border-white/5 text-zinc-300 capitalize">
-                              <Clock className="h-3 w-3 text-indigo-400" />
-                              {item.formData?.shift || 'Morning'}
-                            </Badge>
-
-                            {item.formData?.sessionInfo?.durationYears && (
-                              <Badge variant="outline" className="gap-1.5 text-[10px] py-1 px-2.5 bg-zinc-800/40 border-white/5 text-zinc-300">
-                                <Calendar className="h-3 w-3 text-indigo-400" />
-                                {item.formData.sessionInfo.durationYears} Year Plan
-                              </Badge>
-                            )}
-
-                            {needsCapacityReview && (
-                              <Badge
-                                variant="outline"
-                                className={cn(
-                                  "gap-1.5 text-[10px] py-1 px-2.5 cursor-pointer transition-all hover:scale-105 active:scale-95 select-none",
-                                  reassignmentReason === 'bus_full_only_option'
-                                    ? "bg-red-500/10 text-red-400 border-red-500/30 hover:bg-red-500/20 shadow-[0_0_10px_-3px_rgba(239,68,68,0.3)] animate-pulse"
-                                    : "bg-amber-500/10 text-amber-400 border-amber-500/30 hover:bg-amber-500/20 shadow-[0_0_10px_-3px_rgba(245,158,11,0.3)]"
-                                )}
-                                onClick={toggleExpanded}
-                              >
-                                <AlertTriangle className="h-3 w-3" />
-                                {reassignmentReason === 'bus_full_only_option' ? "Critical Limit" : "Over Capacity"}
-                                <ChevronDown className={cn("h-3 w-3 ml-1 transition-transform duration-300", isExpanded && "rotate-180")} />
-                              </Badge>
-                            )}
-                          </div>
-
-                          {/* Mobile Layout - New Requirements */}
-                          <div className="flex md:hidden flex-col gap-2.5 mt-4">
-                            {/* Row 1: Amount - Squared Badge */}
-                            {item.formData?.paymentInfo?.amountPaid && (
-                              <div className="w-full bg-zinc-900/80 border border-zinc-800 rounded-none py-2 px-3 flex justify-center items-center shadow-sm">
-                                <span className="text-[13px] font-mono font-bold text-zinc-200 tracking-wide uppercase">
-                                  PAYMENT AMOUNT : ₹{Number(item.formData.paymentInfo.amountPaid).toLocaleString('en-IN')}
-                                </span>
-                              </div>
-                            )}
-
-                            {/* Row 2: Bus & Shift - Rounded Badges */}
-                            <div className="grid grid-cols-2 gap-2">
-                              <Badge variant="outline" className="justify-center h-9 text-[11px] border-white/10 bg-zinc-800/50 text-zinc-200 rounded-full font-medium">
-                                <BusIcon className="h-3.5 w-3.5 mr-1.5 text-indigo-400 shrink-0" />
-                                <span className="truncate">{busDisplay}</span>
-                              </Badge>
-                              <Badge variant="outline" className="justify-center h-9 text-[11px] border-white/10 bg-zinc-800/50 text-zinc-200 rounded-full font-medium capitalize">
-                                <Clock className="h-3.5 w-3.5 mr-1.5 text-indigo-400 shrink-0" />
-                                {item.formData?.shift || 'Morning'}
-                              </Badge>
-                            </div>
-
-                            {/* Row 3: Duration & Payment Mode - Mode Highlighted */}
-                            <div className="grid grid-cols-2 gap-2">
-                              <Badge variant="outline" className="justify-center h-9 text-[11px] border-white/10 bg-zinc-800/50 text-zinc-200 rounded-full font-medium">
-                                <Calendar className="h-3.5 w-3.5 mr-1.5 text-indigo-400 shrink-0" />
-                                {item.formData?.sessionInfo?.durationYears ? `${item.formData.sessionInfo.durationYears} Year Plan` : 'N/A'}
-                              </Badge>
-
-                              <Badge variant="outline" className={cn(
-                                "justify-center h-9 text-[11px] border-none font-bold rounded-full",
-                                item.formData?.paymentInfo?.paymentMode === 'online'
-                                  ? "bg-emerald-500/20 text-emerald-400 shadow-[0_0_10px_rgba(16,185,129,0.1)]"
-                                  : "bg-amber-500/20 text-amber-400 shadow-[0_0_10px_rgba(245,158,11,0.1)]"
-                              )}>
-                                {item.formData?.paymentInfo?.paymentMode === 'online' ? 'ONLINE' : 'MANUAL'}
-                              </Badge>
-                            </div>
-
-                            {/* Mobile Capacity Warning */}
-                            {needsCapacityReview && (
-                              <Badge
-                                variant="outline"
-                                className={cn(
-                                  "w-full justify-center py-2 mt-1 text-[11px] cursor-pointer select-none rounded-lg",
-                                  reassignmentReason === 'bus_full_only_option'
-                                    ? "bg-red-500/10 text-red-400 border-red-500/30 animate-pulse"
-                                    : "bg-amber-500/10 text-amber-400 border-amber-500/30"
-                                )}
-                                onClick={toggleExpanded}
-                              >
-                                <AlertTriangle className="h-4 w-4 mr-2" />
-                                {reassignmentReason === 'bus_full_only_option' ? "Critical Limit - Tap to Review" : "Over Capacity - Tap to Review"}
-                              </Badge>
-                            )}
-                          </div>
-
-                          {/* Capacity Warning Expansion */}
-                          {needsCapacityReview && isExpanded && (
-                            <div className={cn(
-                              "mt-3 rounded-lg p-3 border animate-in slide-in-from-top-2 fade-in duration-200",
-                              reassignmentReason === 'bus_full_only_option'
-                                ? "bg-red-500/5 border-red-500/20"
-                                : "bg-amber-500/5 border-amber-500/20"
-                            )}>
-                              <div className="flex items-start gap-2">
-                                <AlertTriangle className={cn(
-                                  "h-4 w-4 shrink-0 mt-0.5",
-                                  reassignmentReason === 'bus_full_only_option' ? "text-red-400" : "text-amber-400"
-                                )} />
-                                <div className="flex-1 space-y-2">
-                                  <h4 className={cn(
-                                    "font-semibold text-xs",
-                                    reassignmentReason === 'bus_full_only_option' ? "text-red-400" : "text-amber-400"
-                                  )}>
-                                    {reassignmentReason === 'bus_full_only_option'
-                                      ? "Action Required: No Alternative Buses"
-                                      : "Warning: Bus Overloaded"}
-                                  </h4>
-                                  <div className="space-y-2">
-                                    <p className="text-[11px] text-zinc-400 leading-relaxed">
-                                      {reassignmentReason === 'bus_full_only_option'
-                                        ? `Bus ${busNumber} (${shift}) is at full capacity. This is the only bus serving the student's stop. You must reassign other students or add bus capacity before approving.`
-                                        : `Bus ${busNumber} (${shift}) exceeds capacity. Alternative buses are available for this route/stop. Please check reassignment options.`}
-                                    </p>
-                                    <Button
-                                      size="sm"
-                                      variant="outline"
-                                      className={cn(
-                                        "h-7 text-[10px] gap-1.5 w-full sm:w-auto transition-colors",
-                                        reassignmentReason === 'bus_full_only_option'
-                                          ? "border-red-500/30 text-red-400 hover:bg-red-500/10"
-                                          : "border-amber-500/30 text-amber-400 hover:bg-amber-500/10"
-                                      )}
-                                      onClick={() => router.push('/admin/smart-allocation')}
-                                    >
-                                      <ArrowRightLeft className="h-3 w-3" />
-                                      Manage Allocations
-                                    </Button>
+                            {/* Header Section: Profile & Status */}
+                            <div className="flex justify-between items-start">
+                              <div className="flex items-start gap-4">
+                                <Avatar className="h-12 w-12 ring-2 ring-white/5 bg-zinc-900 shadow-xl">
+                                  <AvatarImage src={item.formData?.profilePhotoUrl} />
+                                  <AvatarFallback className="bg-indigo-500/10 text-indigo-400 font-bold">
+                                    {item.formData?.fullName?.substring(0, 2).toUpperCase()}
+                                  </AvatarFallback>
+                                </Avatar>
+                                <div className="space-y-1">
+                                  <div className="flex items-center gap-2 mb-2">
+                                    <h3 className="font-bold text-base text-white leading-none">{item.formData?.fullName}</h3>
+                                    <StatusBadge status={item.state || 'submitted'} />
+                                  </div>
+                                  <div className="flex flex-col md:flex-row md:items-center gap-2 md:gap-3 mt-1">
+                                    <span className="flex items-center gap-1.5 bg-zinc-900/50 px-2.5 py-1.5 md:py-0.5 rounded border border-white/5 font-mono text-[11px] md:text-xs text-zinc-300 w-full md:w-fit break-all">
+                                      <User className="h-3 w-3 text-zinc-500 shrink-0" />
+                                      {item.formData?.enrollmentId}
+                                    </span>
+                                    <span className="flex items-center gap-1.5 font-mono text-[11px] md:text-xs text-zinc-400 w-full md:w-auto px-1">
+                                      <Phone className="h-3 w-3 text-zinc-500 shrink-0" />
+                                      {item.formData?.phoneNumber}
+                                    </span>
                                   </div>
                                 </div>
                               </div>
+
+                              {/* Top Right: Payment Info (Desktop Only) */}
+                              <div className="hidden sm:flex flex-col items-end gap-2">
+                                <Badge variant="outline" className={cn(
+                                  "gap-1.5 text-[10px] px-2.5 py-1 h-fit font-medium tracking-wide shadow-sm",
+                                  item.formData?.paymentInfo?.paymentMode === 'online' ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" : "bg-amber-500/10 text-amber-400 border-amber-500/20"
+                                )}>
+                                  <div className={cn("w-1.5 h-1.5 rounded-full", item.formData?.paymentInfo?.paymentMode === 'online' ? "bg-emerald-400" : "bg-amber-400")} />
+                                  {item.formData?.paymentInfo?.paymentMode === 'online' ? 'ONLINE' : 'MANUAL'}
+                                </Badge>
+                                {item.formData?.paymentInfo?.amountPaid && (
+                                  <span className="text-xs font-mono font-bold text-zinc-500 bg-zinc-900/80 px-2 py-1 rounded border border-white/5">
+                                    ₹{Number(item.formData.paymentInfo.amountPaid).toLocaleString('en-IN')}
+                                  </span>
+                                )}
+                              </div>
                             </div>
-                          )}
-                        </div>
 
-                        {/* Footer: Actions — vary by lifecycle state. */}
-                        {item.state === 'verified_upcoming' ? (
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-3">
-                            <Button
-                              variant="outline"
-                              className="w-full bg-white hover:bg-gray-100 text-black border-transparent shadow-sm font-medium h-10 gap-2 hover:scale-[1.02] active:scale-[0.98] transition-all"
-                              onClick={() => router.push(`/admin/applications/${item.applicationId}`)}
-                            >
-                              <Eye className="h-4 w-4" />
-                              View
-                            </Button>
-                            <Button
-                              disabled
-                              className="w-full h-10 gap-2 font-medium bg-indigo-600/40 text-white/70 cursor-not-allowed"
-                              title={item.eligibleApproval ? `Activates on ${new Date(item.eligibleApproval).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}` : 'Awaiting new academic session'}
-                            >
-                              <Calendar className="h-4 w-4" />
-                              Awaiting Activation
-                            </Button>
-                          </div>
-                        ) : item.state === 'pending_seat_allocation' ? (
-                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-3">
-                            <Button
-                              variant="outline"
-                              className="w-full bg-white hover:bg-gray-100 text-black border-transparent shadow-sm font-medium h-10 gap-2 hover:scale-[1.02] active:scale-[0.98] transition-all"
-                              onClick={() => router.push(`/admin/applications/${item.applicationId}`)}
-                            >
-                              <Eye className="h-4 w-4" />
-                              View
-                            </Button>
-                            <Button
-                              className="w-full h-10 gap-2 font-medium bg-amber-600 hover:bg-amber-500 text-white shadow-lg"
-                              onClick={() => handleRetryActivation(item.applicationId)}
-                              disabled={approving === item.applicationId}
-                              title="Retry activation now — succeeds if a seat has freed up"
-                            >
-                              {approving === item.applicationId ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-                              Retry Allocation
-                            </Button>
-                            <Button
-                              variant="outline"
-                              className="w-full h-10 gap-2 border-red-500/20 text-red-400 bg-red-500/5 hover:bg-red-500/10 hover:text-red-300 hover:border-red-500/30 transition-all hover:scale-[1.02] active:scale-[0.98]"
-                              onClick={() => handleRejectClick(item.applicationId)}
-                              disabled={rejecting === item.applicationId}
-                            >
-                              {rejecting === item.applicationId ? <Loader2 className="h-4 w-4 animate-spin" /> : <X className="h-4 w-4" />}
-                              Reject
-                            </Button>
-                          </div>
-                        ) : (
-                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-3">
-                            <Button
-                              variant="outline"
-                              className="w-full bg-white hover:bg-gray-100 text-black border-transparent shadow-sm font-medium h-10 gap-2 hover:scale-[1.02] active:scale-[0.98] transition-all"
-                              onClick={() => router.push(`/admin/applications/${item.applicationId}`)}
-                            >
-                              <Eye className="h-4 w-4" />
-                              View
-                            </Button>
+                            {/* Upcoming lifecycle banner */}
+                            {isUpcoming && (
+                              <div className="mt-3 rounded-lg p-3 border bg-indigo-500/5 border-indigo-500/20 flex items-start gap-2.5">
+                                <Clock className="h-4 w-4 text-indigo-400 shrink-0 mt-0.5" />
+                                <div className="flex-1">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <h4 className="font-semibold text-xs text-indigo-300">
+                                      Upcoming Session Application
+                                    </h4>
+                                    {item.targetSession && (
+                                      <Badge variant="outline" className="text-[9px] h-4 px-1.5 border-white/10 text-zinc-400">
+                                        Session {item.targetSession.startYear}-{item.targetSession.endYear}
+                                      </Badge>
+                                    )}
+                                  </div>
+                                  <p className="text-[11px] text-zinc-400 mt-1 leading-relaxed">
+                                    This application is for the upcoming session and will transition to verified status upon review. It does not occupy a seat or affect capacity until session activation.
+                                  </p>
+                                </div>
+                              </div>
+                            )}
 
-                            <Button
-                              className={cn(
-                                "w-full h-10 gap-2 font-medium shadow-lg shadow-emerald-900/20 hover:shadow-emerald-900/40 hover:scale-[1.02] active:scale-[0.98] transition-all",
-                                needsCapacityReview
-                                  ? "bg-emerald-600/50 text-white/50 cursor-not-allowed"
-                                  : "bg-emerald-600 hover:bg-emerald-500 text-white"
+                            {/* Middle Section: Bus Info & Tags */}
+                            <div className="space-y-3 mb-3">
+                              {/* Desktop Layout - Unchanged */}
+                              <div className="hidden sm:flex flex-wrap items-center gap-2">
+                                <Badge variant="outline" className="gap-1.5 text-[10px] py-1 px-2.5 bg-zinc-800/40 border-white/5 text-zinc-300 group-hover:bg-zinc-800/60 transition-colors">
+                                  <BusIcon className="h-3 w-3 text-indigo-400" />
+                                  <span className="font-medium text-white/90">{busDisplay}</span>
+                                </Badge>
+
+                                {stagedBuses.has(item.applicationId) && (
+                                  <Badge variant="outline" className="gap-1.5 text-[10px] py-1 px-2.5 bg-purple-500/10 text-purple-400 border-purple-500/30 font-medium">
+                                    <Check className="h-3 w-3 text-purple-400 shrink-0" />
+                                    Staged Bus: {stagedBuses.get(item.applicationId)?.busNumber}
+                                  </Badge>
+                                )}
+
+                                <Badge variant="outline" className="gap-1.5 text-[10px] py-1 px-2.5 bg-zinc-800/40 border-white/5 text-zinc-300 capitalize">
+                                  <Clock className="h-3 w-3 text-indigo-400" />
+                                  {item.formData?.shift || 'Morning'}
+                                </Badge>
+
+                                {item.formData?.sessionInfo?.durationYears && (
+                                  <Badge variant="outline" className="gap-1.5 text-[10px] py-1 px-2.5 bg-zinc-800/40 border-white/5 text-zinc-300">
+                                    <Calendar className="h-3 w-3 text-indigo-400" />
+                                    {item.formData.sessionInfo.durationYears} Year Plan
+                                  </Badge>
+                                )}
+
+                                {needsCapacityReview && (
+                                  <Badge
+                                    variant="outline"
+                                    className={cn(
+                                      "gap-1.5 text-[10px] py-1 px-2.5 cursor-pointer transition-all hover:scale-105 active:scale-95 select-none",
+                                      reassignmentReason === 'bus_full_only_option'
+                                        ? "bg-red-500/10 text-red-400 border-red-500/30 hover:bg-red-500/20 shadow-[0_0_10px_-3px_rgba(239,68,68,0.3)] animate-pulse"
+                                        : "bg-amber-500/10 text-amber-400 border-amber-500/30 hover:bg-amber-500/20 shadow-[0_0_10px_-3px_rgba(245,158,11,0.3)]"
+                                    )}
+                                    onClick={toggleExpanded}
+                                  >
+                                    <AlertTriangle className="h-3 w-3" />
+                                    {reassignmentReason === 'bus_full_only_option' ? "Critical Limit" : "Over Capacity"}
+                                    <ChevronDown className={cn("h-3 w-3 ml-1 transition-transform duration-300", isExpanded && "rotate-180")} />
+                                  </Badge>
+                                )}
+                              </div>
+
+                              {/* Mobile Layout */}
+                              <div className="flex md:hidden flex-col gap-2.5 mt-4">
+                                {item.formData?.paymentInfo?.amountPaid && (
+                                  <div className="w-full bg-zinc-900/80 border border-zinc-800 rounded-none py-2 px-3 flex justify-center items-center shadow-sm">
+                                    <span className="text-[13px] font-mono font-bold text-zinc-200 tracking-wide uppercase">
+                                      PAYMENT AMOUNT : ₹{Number(item.formData.paymentInfo.amountPaid).toLocaleString('en-IN')}
+                                    </span>
+                                  </div>
+                                )}
+
+                                <div className="grid grid-cols-2 gap-2">
+                                  <Badge variant="outline" className="justify-center h-9 text-[11px] border-white/10 bg-zinc-800/50 text-zinc-200 rounded-full font-medium">
+                                    <BusIcon className="h-3.5 w-3.5 mr-1.5 text-indigo-400 shrink-0" />
+                                    <span className="truncate">{busDisplay}</span>
+                                  </Badge>
+                                  <Badge variant="outline" className="justify-center h-9 text-[11px] border-white/10 bg-zinc-800/50 text-zinc-200 rounded-full font-medium capitalize">
+                                    <Clock className="h-3.5 w-3.5 mr-1.5 text-indigo-400 shrink-0" />
+                                    {item.formData?.shift || 'Morning'}
+                                  </Badge>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-2">
+                                  <Badge variant="outline" className="justify-center h-9 text-[11px] border-white/10 bg-zinc-800/50 text-zinc-200 rounded-full font-medium">
+                                    <Calendar className="h-3.5 w-3.5 mr-1.5 text-indigo-400 shrink-0" />
+                                    {item.formData?.sessionInfo?.durationYears ? `${item.formData.sessionInfo.durationYears} Year Plan` : 'N/A'}
+                                  </Badge>
+
+                                  <Badge variant="outline" className={cn(
+                                    "justify-center h-9 text-[11px] border-none font-bold rounded-full",
+                                    item.formData?.paymentInfo?.paymentMode === 'online'
+                                      ? "bg-emerald-500/20 text-emerald-400 shadow-[0_0_10px_rgba(16,185,129,0.1)]"
+                                      : "bg-amber-500/20 text-amber-400 shadow-[0_0_10px_rgba(245,158,11,0.1)]"
+                                  )}>
+                                    {item.formData?.paymentInfo?.paymentMode === 'online' ? 'ONLINE' : 'MANUAL'}
+                                  </Badge>
+                                </div>
+
+                                {needsCapacityReview && (
+                                  <Badge
+                                    variant="outline"
+                                    className={cn(
+                                      "w-full justify-center py-2 mt-1 text-[11px] cursor-pointer select-none rounded-lg",
+                                      reassignmentReason === 'bus_full_only_option'
+                                        ? "bg-red-500/10 text-red-400 border-red-500/30 animate-pulse"
+                                        : "bg-amber-500/10 text-amber-400 border-amber-500/30"
+                                    )}
+                                    onClick={toggleExpanded}
+                                  >
+                                    <AlertTriangle className="h-4 w-4 mr-2" />
+                                    {reassignmentReason === 'bus_full_only_option' ? "Critical Limit - Tap to Review" : "Over Capacity - Tap to Review"}
+                                  </Badge>
+                                )}
+                              </div>
+
+                              {/* Capacity Warning Expansion */}
+                              {needsCapacityReview && isExpanded && (
+                                <div className={cn(
+                                  "mt-3 rounded-lg p-3 border animate-in slide-in-from-top-2 fade-in duration-200",
+                                  reassignmentReason === 'bus_full_only_option'
+                                    ? "bg-red-500/5 border-red-500/20"
+                                    : "bg-amber-500/5 border-amber-500/20"
+                                )}>
+                                  <div className="flex items-start gap-2">
+                                    <AlertTriangle className={cn(
+                                      "h-4 w-4 shrink-0 mt-0.5",
+                                      reassignmentReason === 'bus_full_only_option' ? "text-red-400" : "text-amber-400"
+                                    )} />
+                                    <div className="flex-1 space-y-2">
+                                      <h4 className={cn(
+                                        "font-semibold text-xs",
+                                        reassignmentReason === 'bus_full_only_option' ? "text-red-400" : "text-amber-400"
+                                      )}>
+                                        {reassignmentReason === 'bus_full_only_option'
+                                          ? "Action Required: No Alternative Buses"
+                                          : "Warning: Bus Overloaded"}
+                                      </h4>
+                                      <div className="space-y-2">
+                                        <p className="text-[11px] text-zinc-400 leading-relaxed">
+                                          {reassignmentReason === 'bus_full_only_option'
+                                            ? `Bus ${busNumber} (${shift}) is at full capacity. This is the only bus serving the student's stop. You must reassign other students or add bus capacity before approving.`
+                                            : `Bus ${busNumber} (${shift}) exceeds capacity. Alternative buses are available for this route/stop. Please check reassignment options.`}
+                                        </p>
+                                        <div className="flex flex-col sm:flex-row gap-2">
+                                          {reassignmentReason === 'bus_full_only_option' ? (
+                                            <Button
+                                              size="sm"
+                                              variant="outline"
+                                              className="h-7 text-[10px] gap-1.5 w-full sm:w-auto border-red-500/30 text-red-400 hover:bg-red-500/10 transition-colors"
+                                              onClick={() => router.push('/admin/smart-allocation')}
+                                            >
+                                              <ArrowRightLeft className="h-3 w-3" />
+                                              Manage Allocations
+                                            </Button>
+                                          ) : (
+                                            <>
+                                              <Button
+                                                size="sm"
+                                                className="h-7 text-[10px] gap-1.5 bg-gradient-to-r from-indigo-600 to-blue-500 text-white hover:from-indigo-500 hover:to-blue-400 border-0 shadow-md shadow-indigo-500/20 transition-all w-full sm:w-auto"
+                                                onClick={() => openAlternativePicker(item)}
+                                              >
+                                                <BusIcon className="h-3 w-3" />
+                                                {stagedBuses.has(item.applicationId) ? "Change Alternative Bus" : "Select Alternative Bus"}
+                                              </Button>
+                                              {stagedBuses.has(item.applicationId) && (
+                                                <Button
+                                                  size="sm"
+                                                  variant="outline"
+                                                  className="h-7 text-[10px] border-zinc-700 text-zinc-300 hover:bg-zinc-800 w-full sm:w-auto"
+                                                  onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    sessionStorage.removeItem(`staged_bus_${item.applicationId}`);
+                                                    setStagedBusesTrigger(prev => prev + 1);
+                                                    showToast('Staged bus selection cleared.', 'info');
+                                                  }}
+                                                >
+                                                  Clear Staged Bus
+                                                </Button>
+                                              )}
+                                            </>
+                                          )}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
                               )}
-                              onClick={() => handleApprove(item.applicationId)}
-                              disabled={needsCapacityReview || approving === item.applicationId}
-                            >
-                              {approving === item.applicationId ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-                              {isUpcomingApplication(item) ? "Verify" : "Approve"}
-                            </Button>
+                            </div>
 
+                            {/* Footer: Actions */}
+                            {item.state === 'verified_upcoming' ? (
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-3">
+                                <Button
+                                  variant="outline"
+                                  className="w-full bg-white hover:bg-gray-100 text-black border-transparent shadow-sm font-medium h-10 gap-2 hover:scale-[1.02] active:scale-[0.98] transition-all"
+                                  onClick={() => router.push(`/admin/applications/${item.applicationId}`)}
+                                >
+                                  <Eye className="h-4 w-4" />
+                                  View
+                                </Button>
+                                <Button
+                                  disabled
+                                  className="w-full h-10 gap-2 font-medium bg-indigo-600/40 text-white/70 cursor-not-allowed"
+                                  title={item.eligibleApproval ? `Activates on ${new Date(item.eligibleApproval).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}` : 'Awaiting new academic session'}
+                                >
+                                  <Calendar className="h-4 w-4" />
+                                  Awaiting Activation
+                                </Button>
+                              </div>
+                            ) : item.state === 'pending_seat_allocation' ? (
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-3">
+                                <Button
+                                  variant="outline"
+                                  className="w-full bg-white hover:bg-gray-100 text-black border-transparent shadow-sm font-medium h-10 gap-2 hover:scale-[1.02] active:scale-[0.98] transition-all"
+                                  onClick={() => router.push(`/admin/applications/${item.applicationId}`)}
+                                >
+                                  <Eye className="h-4 w-4" />
+                                  View
+                                </Button>
+                                <Button
+                                  className="w-full h-10 gap-2 font-medium bg-amber-600 hover:bg-amber-500 text-white shadow-lg"
+                                  onClick={() => handleRetryActivation(item.applicationId)}
+                                  disabled={approving === item.applicationId}
+                                  title="Retry activation now — succeeds if a seat has freed up"
+                                >
+                                  {approving === item.applicationId ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                                  Retry Allocation
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  className="w-full h-10 gap-2 border-red-500/20 text-red-400 bg-red-500/5 hover:bg-red-500/10 hover:text-red-300 hover:border-red-500/30 transition-all hover:scale-[1.02] active:scale-[0.98]"
+                                  onClick={() => handleRejectClick(item.applicationId)}
+                                  disabled={rejecting === item.applicationId}
+                                >
+                                  {rejecting === item.applicationId ? <Loader2 className="h-4 w-4 animate-spin" /> : <X className="h-4 w-4" />}
+                                  Reject
+                                </Button>
+                              </div>
+                            ) : (
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-3">
+                                <Button
+                                  variant="outline"
+                                  className="w-full bg-white hover:bg-gray-100 text-black border-transparent shadow-sm font-medium h-10 gap-2 hover:scale-[1.02] active:scale-[0.98] transition-all"
+                                  onClick={() => router.push(`/admin/applications/${item.applicationId}`)}
+                                >
+                                  <Eye className="h-4 w-4" />
+                                  View
+                                </Button>
+
+                                <Button
+                                  className={cn(
+                                    "w-full h-10 gap-2 font-medium shadow-lg shadow-emerald-900/20 hover:shadow-emerald-900/40 hover:scale-[1.02] active:scale-[0.98] transition-all",
+                                    (needsCapacityReview && !stagedBuses.has(item.applicationId))
+                                      ? "bg-emerald-600/50 text-white/50 cursor-not-allowed"
+                                      : "bg-emerald-600 hover:bg-emerald-500 text-white"
+                                  )}
+                                  onClick={() => {
+                                    const staged = stagedBuses.get(item.applicationId);
+                                    handleApprove(item.applicationId, staged?.busId);
+                                  }}
+                                  disabled={((needsCapacityReview && !stagedBuses.has(item.applicationId)) || approving === item.applicationId)}
+                                >
+                                  {approving === item.applicationId ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                                  {isUpcoming ? "Verify" : "Approve"}
+                                </Button>
+
+                                <Button
+                                  variant="outline"
+                                  className="w-full h-10 gap-2 border-red-500/20 text-red-400 bg-red-500/5 hover:bg-red-500/10 hover:text-red-300 hover:border-red-500/30 transition-all hover:scale-[1.02] active:scale-[0.98]"
+                                  onClick={() => handleRejectClick(item.applicationId)}
+                                  disabled={rejecting === item.applicationId}
+                                >
+                                  {rejecting === item.applicationId ? <Loader2 className="h-4 w-4 animate-spin" /> : <X className="h-4 w-4" />}
+                                  Reject
+                                </Button>
+                              </div>
+                            )}
+                          </div>
+                        </CardContent>
+                      );
+                    })() : (
+                      <CardContent className="p-5">
+                        <div className="flex flex-col gap-2">
+                          {/* Profile & Status */}
+                          <div className="flex justify-between items-start">
+                            <div className="flex items-start gap-4">
+                              <Avatar className="h-12 w-12 ring-2 ring-white/5 bg-zinc-900 shadow-xl">
+                                <AvatarFallback className="bg-indigo-500/10 text-indigo-400 font-bold">
+                                  {item.studentName?.substring(0, 2).toUpperCase() || 'RN'}
+                                </AvatarFallback>
+                              </Avatar>
+                              <div className="space-y-1">
+                                <div className="flex items-center gap-2 mb-2">
+                                  <h3 className="font-bold text-base text-white leading-none">{item.studentName || 'Renewal Student'}</h3>
+                                  <Badge className="text-[10px] bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 font-semibold rounded uppercase px-2 py-0.5">
+                                    Renewal
+                                  </Badge>
+                                </div>
+                                <div className="flex flex-col md:flex-row md:items-center gap-2 md:gap-3 mt-1">
+                                  <span className="flex items-center gap-1.5 bg-zinc-900/50 px-2.5 py-0.5 rounded border border-white/5 font-mono text-[11px] md:text-xs text-zinc-300 w-fit">
+                                    <User className="h-3 w-3 text-zinc-500 shrink-0" />
+                                    {item.enrollmentId}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="flex flex-col items-end gap-2">
+                              <Badge variant="outline" className={cn(
+                                "gap-1.5 text-[10px] px-2.5 py-1 h-fit font-medium tracking-wide shadow-sm",
+                                item.paymentMode === 'online' ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" : "bg-amber-500/10 text-amber-400 border-amber-500/20"
+                              )}>
+                                <div className={cn("w-1.5 h-1.5 rounded-full", item.paymentMode === 'online' ? "bg-emerald-400" : "bg-amber-400")} />
+                                {item.paymentMode === 'online' ? 'ONLINE' : 'MANUAL'}
+                              </Badge>
+                              {item.amountPaid && (
+                                <span className="text-xs font-mono font-bold text-zinc-500 bg-zinc-900/80 px-2 py-1 rounded border border-white/5">
+                                  ₹{Number(item.amountPaid).toLocaleString('en-IN')}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Bus & Route info */}
+                          <div className="flex flex-wrap items-center gap-2 mt-3 mb-4">
+                            <Badge variant="outline" className="gap-1.5 text-[10px] py-1 px-2.5 bg-zinc-800/40 border-white/5 text-zinc-300">
+                              <BusIcon className="h-3 w-3 text-indigo-400" />
+                              <span className="font-medium text-white/90">{item.busNumber || item.busId || 'Bus'}</span>
+                            </Badge>
+                            <Badge variant="outline" className="gap-1.5 text-[10px] py-1 px-2.5 bg-zinc-800/40 border-white/5 text-zinc-300 capitalize">
+                              <Clock className="h-3 w-3 text-indigo-400" />
+                              {item.shift || 'Flexible'}
+                            </Badge>
+                            {item.durationYears && (
+                              <Badge variant="outline" className="gap-1.5 text-[10px] py-1 px-2.5 bg-zinc-800/40 border-white/5 text-zinc-300">
+                                <Calendar className="h-3 w-3 text-indigo-400" />
+                                {item.durationYears} Year Plan
+                              </Badge>
+                            )}
+                          </div>
+
+                          {/* Actions */}
+                          <div className="flex justify-end gap-3 pt-3 border-t border-white/[0.05]">
                             <Button
                               variant="outline"
-                              className="w-full h-10 gap-2 border-red-500/20 text-red-400 bg-red-500/5 hover:bg-red-500/10 hover:text-red-300 hover:border-red-500/30 transition-all hover:scale-[1.02] active:scale-[0.98]"
-                              onClick={() => handleRejectClick(item.applicationId)}
-                              disabled={rejecting === item.applicationId}
+                              onClick={() => {
+                                setSelectedApplication(item.id);
+                                setRejectionReason("");
+                                setShowRejectDialog(true);
+                              }}
+                              disabled={rejecting === item.id || approving === item.id}
+                              className="border-red-500/20 text-red-400 bg-red-500/5 hover:bg-red-500/10 hover:text-red-300 hover:border-red-500/30 text-[11px] font-bold uppercase tracking-wider h-9 px-4 transition-all"
                             >
-                              {rejecting === item.applicationId ? <Loader2 className="h-4 w-4 animate-spin" /> : <X className="h-4 w-4" />}
                               Reject
                             </Button>
+                            <Button
+                              onClick={() => handleApproveRenewal(item.id)}
+                              disabled={rejecting === item.id || approving === item.id}
+                              className="bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold uppercase tracking-wider h-9 px-4 transition-all shadow-md shadow-emerald-950/20"
+                            >
+                              {approving === item.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Approve'}
+                            </Button>
                           </div>
-                        )}
-                      </div>
-                    </CardContent>
+                        </div>
+                      </CardContent>
+                    )}
                   </Card>
                 );
               })}
@@ -998,6 +1468,17 @@ export default function AdminApplicationsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {alternativePickerTarget && (
+        <AlternativeBusPicker
+          applicantName={alternativePickerTarget.item.formData?.fullName || 'Applicant'}
+          applicantStopName={alternativePickerTarget.item.formData?.stopName || alternativePickerTarget.item.formData?.stopId || ''}
+          applicantShift={alternativePickerTarget.item.formData?.shift || 'Morning'}
+          currentBus={alternativePickerTarget.currentBus}
+          alternatives={alternativePickerTarget.alternatives}
+          onSelect={handleAlternativeSelected}
+          onClose={() => setAlternativePickerTarget(null)}
+        />
+      )}
     </div>
   );
 }

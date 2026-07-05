@@ -28,7 +28,7 @@ export interface Student {
   busId?: string;
   routeId?: string;
   stopName?: string;
-  shift?: 'morning' | 'evening' | string;
+  shift?: 'Morning' | 'Evening';
   status?: 'active' | 'inactive' | 'suspended' | 'soft_blocked' | 'pending_deletion';
   profilePhotoUrl?: string;
   photoURL?: string;
@@ -83,7 +83,7 @@ export interface Driver {
   busAssigned?: string;
   driverId?: string;
   joiningDate?: string;
-  shift?: 'Morning' | 'Evening' | 'Morning & Evening' | string;
+  shift?: 'Morning' | 'Evening' | 'Both' | string;
   status?: 'active' | 'inactive' | 'suspended';
   profilePhotoUrl?: string;
   tripActive?: boolean;
@@ -153,40 +153,6 @@ export interface Route {
   }>;
   createdAt?: Timestamp | string;
   updatedAt?: Timestamp | string;
-  [key: string]: any;
-}
-
-// Notification Category type
-export type NotificationCategory =
-  | 'student_enrollment'  // Student enrollment notifications
-  | 'verification_code'   // Moderator verification codes
-  | 'notices'            // General notices/announcements
-  | 'pickups_dropoffs'   // Pickup/dropoff notifications
-  | 'general';           // Other notifications
-
-// Notification type
-export interface Notification {
-  id: string;
-  title: string;
-  message: string;
-  type: 'info' | 'alert' | 'emergency' | 'verification_code' | 'trip' | 'notice' | 'pickup' | 'dropoff';
-  category?: NotificationCategory;
-  audience: string[] | {
-    scope: 'all' | 'shift' | 'route';
-    shift?: string | null;
-    routes?: string[];
-  };
-  routesSummary?: any[];
-  meta?: Record<string, unknown>;
-  status: 'draft' | 'sent';
-  read?: boolean;
-  readStatus?: Record<string, boolean>;
-  createdBy: string;
-  author?: any;
-  authorEmpId?: string;
-  createdAt: Timestamp | string;
-  startDate?: Timestamp | string;
-  endDate?: Timestamp | string;
   [key: string]: any;
 }
 
@@ -310,24 +276,6 @@ export interface FCMToken {
   platform?: 'web' | 'android' | 'ios';
   createdAt: Timestamp | string;
   updatedAt?: Timestamp | string;
-  [key: string]: any;
-}
-
-// Verification Code type
-export interface VerificationCode {
-  codeId: string;
-  applicationId: string;
-  applicantUID: string;
-  moderatorUID: string;
-  moderatorName?: string;
-  moderatorEMPID?: string;
-  codeHash: string;
-  status: 'pending' | 'verified' | 'expired' | 'failed';
-  attempts: number;
-  maxAttempts: number;
-  createdAt: Timestamp | string;
-  expiresAt: Timestamp | string;
-  verifiedAt?: Timestamp | string;
   [key: string]: any;
 }
 

@@ -12,7 +12,6 @@ import { supabase } from "@/lib/supabase-client";
 import { getDriverById, getBusById, getRouteById } from "@/lib/dataService";
 import { useToast } from "@/contexts/toast-context";
 import { PremiumPageLoader } from "@/components/LoadingSpinner";
-import { useSystemConfig } from "@/contexts/SystemConfigContext";
 import { formatIdForDisplay } from "@/lib/utils";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import {
@@ -65,7 +64,6 @@ export default function DriverLiveTrackingPage() {
   const { currentUser, userData, loading: authLoading } = useAuth();
   const router = useRouter();
   const { addToast } = useToast();
-  const { refreshConfig } = useSystemConfig();
 
   // Core data
   const [driverData, setDriverData] = useState<any>(null);
@@ -198,16 +196,6 @@ export default function DriverLiveTrackingPage() {
       setSendingResponse(false);
     }
   };
-
-  useEffect(() => {
-    const onVis = () => {
-      if (document.visibilityState === "visible") {
-        void refreshConfig();
-      }
-    };
-    document.addEventListener("visibilitychange", onVis);
-    return () => document.removeEventListener("visibilitychange", onVis);
-  }, [refreshConfig]);
 
   // Subscribe to wait requests
   useEffect(() => {

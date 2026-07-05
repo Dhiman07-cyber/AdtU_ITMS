@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import Link from "next/link";
+import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import { useToast } from '@/contexts/toast-context';
 import {
   Dialog,
@@ -174,11 +175,7 @@ export default function ViewModeratorPage({ params }: { params: Promise<{ id: st
   };
 
   if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background to-muted/20">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
-      </div>
-    );
+    return <PremiumPageLoader message="Loading moderator profile..." subMessage="Fetching details..." />;
   }
 
   if (!moderator) {

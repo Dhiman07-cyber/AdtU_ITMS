@@ -629,7 +629,7 @@ export default function DriverDashboard() {
                   <p className="text-[10px] sm:text-xs font-bold text-orange-600 dark:text-orange-400 uppercase tracking-wider mb-1 sm:mb-2">Shift Timing</p>
                   <div className="flex items-baseline gap-1 sm:gap-2">
                     <p className="text-2xl sm:text-4xl font-black text-gray-900 dark:text-white group-hover:text-orange-600 dark:group-hover:text-orange-400 transition-colors duration-300">
-                      {driverShift === 'Morning & Evening Shift' ? 'M+E' : driverShift?.split(' ')[0] || 'N/A'}
+                      {driverShift === 'Both' ? 'M+E' : driverShift?.split(' ')[0] || 'N/A'}
                     </p>
                   </div>
                 </div>
@@ -1154,7 +1154,7 @@ export default function DriverDashboard() {
                         </div>
                       ) : (
                         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1.5 sm:gap-2 w-full pt-1">
-                          {(busData?.shift === 'Morning' || busData?.shift === 'Both' || busData?.shift === 'Morning & Evening Shift' || !busData?.shift) && (
+                          {(busData?.shift === 'Morning' || busData?.shift === 'Both' || !busData?.shift) && (
                             <div className="flex items-center justify-between sm:justify-start gap-1.5 text-xs sm:text-[11px] lg:text-xs">
                               <span className="text-amber-700 dark:text-amber-300/80 font-medium">Morning:</span>
                               <span className="font-black text-amber-700 dark:text-amber-400 text-sm">
@@ -1165,7 +1165,7 @@ export default function DriverDashboard() {
 
                           {busData?.shift && busData.shift !== 'Morning' && <div className="hidden sm:block w-px h-3 bg-amber-300 dark:bg-amber-600 opacity-30"></div>}
 
-                          {(busData?.shift === 'Evening' || busData?.shift === 'Both' || busData?.shift === 'Morning & Evening Shift') ? (
+                          {(busData?.shift === 'Evening' || busData?.shift === 'Both') ? (
                             <div className="flex items-center justify-between sm:justify-start gap-1.5 text-xs sm:text-[11px] lg:text-xs">
                               <span className="text-amber-700 dark:text-amber-300/80 font-medium">Evening:</span>
                               <span className="font-black text-amber-700 dark:text-amber-400 text-sm">

@@ -314,7 +314,7 @@ export async function POST(request: Request) {
             profilePhotoUrl: profilePhotoUrl || '',
             assignedRouteId: assignedRouteId || routeId || null,
             assignedBusId: assignedBusId || busId || null,
-            shift: shift || 'Morning & Evening', // Default to Both Shifts if not provided
+            shift: shift || 'Both', // Default to Both Shifts if not provided
             approvedBy: approvedBy || 'System (AUTO_MIGRATION)',
             dob: dob || '',
             status: 'active',
@@ -439,7 +439,7 @@ export async function POST(request: Request) {
           profilePhotoUrl: profilePhotoUrl || '',
           assignedRouteId: assignedRouteId || routeId || undefined,
           assignedBusId: assignedBusId || busId || undefined,
-          shift: shift || 'Morning & Evening',
+          shift: shift || 'Both',
           approvedBy: approvedBy || 'System (AUTO_MIGRATION)',
           dob: dob || '',
           status: 'active',

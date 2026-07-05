@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/auth-context';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
+import { PremiumPageLoader } from '@/components/LoadingSpinner';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -151,7 +152,12 @@ export default function StudentRenewalPage() {
 
   // Fetch student data
   useEffect(() => {
-    if (!currentUser || !userData) return;
+    if (loading) return; // Wait until auth state settles
+
+    if (!currentUser || !userData) {
+      setLoadingStudent(false);
+      return;
+    }
 
     // Optimization: Use userData from context instead of re-fetching student doc
     setStudentData(userData);
@@ -162,7 +168,43 @@ export default function StudentRenewalPage() {
       }
     }
     setLoadingStudent(false);
-  }, [currentUser, userData]);
+  }, [currentUser, userData, loading]);
+
+  // Automatic Payment Recovery Trigger (Phase 4)
+  useEffect(() => {
+    if (!currentUser || !studentData || renewalCompleted) return;
+
+    const triggerRecovery = async () => {
+      try {
+        const token = await currentUser.getIdToken();
+        const response = await fetch('/api/payment/recover', {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+        if (response.ok) {
+          const data = await response.json();
+          const { status } = data;
+          if (status === 'success' || status === 'already_processed') {
+            console.log('✅ Renewal recovered successfully!');
+            toast.success('Your online payment was verified successfully!');
+            setRenewalCompleted(true);
+            setActiveTab('history');
+          } else if (status === 'processing' || status === 'verification_pending') {
+            // Silent — PaymentModeSelector is the active recovery surface
+            console.log(`[Renewal Recovery] status=${status} — silent`);
+          } else {
+            // failed / not_found — do nothing
+            console.log(`[Renewal Recovery] status=${status} — no action`);
+          }
+        }
+      } catch (err) {
+        console.error('[Renewal Recovery] failed:', err);
+      }
+    };
+
+    triggerRecovery();
+  }, [currentUser, studentData, renewalCompleted]);
 
   // Fetch transaction history
   useEffect(() => {
@@ -348,14 +390,7 @@ export default function StudentRenewalPage() {
   };
 
   if (loading || loadingStudent || loadingFee) {
-    return (
-      <div className="flex-1 min-h-[calc(100dvh-120px)] flex items-center justify-center bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 dark:from-gray-950 dark:via-slate-900 dark:to-gray-950">
-        <div className="text-center">
-          <Loader2 className="h-10 w-10 animate-spin text-blue-600 mx-auto mb-4" />
-          <p className="text-sm text-gray-600 dark:text-gray-400">Loading renewal service...</p>
-        </div>
-      </div>
-    );
+    return <PremiumPageLoader message="Loading Renewal Service..." subMessage="Checking your service eligibility..." />;
   }
 
   if (!currentUser || userData?.role !== 'student') {
@@ -431,7 +466,7 @@ export default function StudentRenewalPage() {
                       )}
                     </div>
 
-                    <div className={`absolute -bottom-0.5 -right-0.5 w-6 h-6 sm:w-7 sm:h-7 rounded-full border-[2.5px] sm:border-3 border-[#0a0c12] flex items-center justify-center shadow-2xl z-20 ${isExpired ? 'bg-gradient-to-br from-red-500 to-rose-600' : 'bg-gradient-to-br from-emerald-400 to-teal-500'
+                    <div className={`absolute -bottom-0.5 -right-0.5 w-6 h-6 sm:w-7 sm:h-7 rounded-full border-[2.5px] sm:border-[3px] border-[#0a0c12] flex items-center justify-center shadow-2xl z-20 ${isExpired ? 'bg-gradient-to-br from-red-500 to-rose-600' : 'bg-gradient-to-br from-emerald-400 to-teal-500'
                       }`}>
                       {isExpired ? <AlertTriangle className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-white" /> : <ShieldCheck className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-white" />}
                     </div>
@@ -891,9 +926,31 @@ export default function StudentRenewalPage() {
                                   </div>
                                 </div>
                               ) : (
-                                <div className="px-2.5 py-1.5 sm:px-3 sm:py-2 bg-white/5 rounded-lg sm:rounded-xl border border-white/5 flex flex-col">
-                                  <span className="text-[10px] sm:text-[10px] font-black text-gray-500 uppercase tracking-widest">Transaction ID</span>
-                                  <span className="text-[11px] sm:text-[11px] font-mono text-gray-400 truncate">{transaction.offlineTransactionId || transaction.paymentId}</span>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                  <div className="px-2.5 py-1.5 sm:px-3 sm:py-2 bg-white/5 rounded-lg sm:rounded-xl border border-white/5 flex flex-col">
+                                    <span className="text-[10px] sm:text-[10px] font-black text-gray-500 uppercase tracking-widest">Transaction ID</span>
+                                    <span className="text-[11px] sm:text-[11px] font-mono text-gray-400 truncate">{transaction.offlineTransactionId || transaction.paymentId}</span>
+                                  </div>
+                                  {(transaction.paidAt || transaction.timestamp) && (
+                                    <div className="px-2.5 py-1.5 sm:px-3 sm:py-2 bg-white/5 rounded-lg sm:rounded-xl border border-white/5 flex flex-col">
+                                      <span className="text-[10px] sm:text-[10px] font-black text-gray-500 uppercase tracking-widest">Payment Date/Time</span>
+                                      <span className="text-[11px] sm:text-[11px] font-mono text-gray-400 truncate">
+                                        {(() => {
+                                          try {
+                                            return new Date(transaction.paidAt || transaction.timestamp).toLocaleString('en-IN', {
+                                              day: '2-digit',
+                                              month: 'short',
+                                              year: 'numeric',
+                                              hour: '2-digit',
+                                              minute: '2-digit'
+                                            });
+                                          } catch (e) {
+                                            return transaction.paidAt || transaction.timestamp || 'N/A';
+                                          }
+                                        })()}
+                                      </span>
+                                    </div>
+                                  )}
                                 </div>
                               )}
 

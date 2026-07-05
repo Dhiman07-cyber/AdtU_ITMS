@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useAuth } from '@/contexts/auth-context';
-import { useSystemConfig } from '@/contexts/SystemConfigContext'; // Import Context
+import { APP_NAME } from '@/config/runtime'; // Import APP_NAME
 import Image from 'next/image';
 import { Button } from '@/components/ui/button';
 import {
@@ -45,7 +45,7 @@ interface BusPassScannerModalProps {
 
 export default function BusPassScannerModal({ isOpen, onClose, onScanSuccess }: BusPassScannerModalProps) {
     const { currentUser } = useAuth();
-    const { appName } = useSystemConfig(); // Hook
+    const appName = APP_NAME;
     const videoRef = useRef<HTMLVideoElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const animationRef = useRef<number | null>(null);

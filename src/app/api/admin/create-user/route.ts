@@ -18,6 +18,8 @@ import { CreateUserSchema } from '@/lib/security/validation-schemas';
 import { RateLimits } from '@/lib/security/rate-limiter';
 import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
 import { z } from 'zod';
+import { createAuditLog } from '@/lib/services/audit.service';
+import { normalizeShift } from '@/lib/utils/shift-utils';
 
 type CreateUserBody = z.infer<typeof CreateUserSchema>;
 
@@ -63,15 +65,6 @@ async function resolveReferenceNames(routeId?: string, busId?: string, stopId?: 
         })()
     ];
     return Promise.all(tasks);
-}
-
-function normalizeShift(shift?: string): string {
-    if (!shift) return 'Morning';
-    const n = shift.toLowerCase().trim();
-    if (n.includes('even')) return 'Evening';
-    if (n.includes('morn')) return 'Morning';
-    if (n === 'both') return 'Both';
-    return 'Morning';
 }
 
 export const POST = withSecurity<CreateUserBody>(
@@ -240,15 +233,18 @@ export const POST = withSecurity<CreateUserBody>(
             }
             if (capExceeded) {
                 console.warn(`🚨 ADMIN OVER-FILL: bus ${assignedBusId} now ${capNewMembers}/${capLimit} via admin-create of ${uid}`);
-                await adminDb.collection('activity_logs').add({
+                await createAuditLog({
+                    category: 'additions',
                     action: 'capacity_exceeded_admin_create',
+                    summary: `Admin created user with capacity exceeded: ${name}`,
+                    severity: 'medium',
                     performedBy: currentUserUid,
-                    actorName: currentUserName,
-                    actorRole: currentUserRole,
+                    performedByName: currentUserName,
+                    performedByRole: currentUserRole as any,
+                    targetType: 'student',
                     targetId: uid,
                     targetName: name,
-                    details: { busId: assignedBusId, newMembers: capNewMembers, capacity: capLimit, shift: studentDoc.shift },
-                    timestamp: new Date().toISOString(),
+                    metadata: { busId: assignedBusId, newMembers: capNewMembers, capacity: capLimit, shift: studentDoc.shift },
                 }).catch(e => console.error('Over-fill audit log failed:', e));
             }
 
@@ -289,7 +285,7 @@ export const POST = withSecurity<CreateUserBody>(
                 phone: phone || '', altPhone: alternatePhone || '', joiningDate: joiningDate || '',
                 driverId: driverId || employeeId || '', address: address || '', profilePhotoUrl: profilePhotoUrl || '',
                 assignedRouteId: assignedRouteId || routeId || null, assignedBusId: assignedBusId || busId || null,
-                shift: shift || 'Morning & Evening', approvedBy: approvedByDisplay, dob: dob || '',
+                shift: shift || 'Both', approvedBy: approvedByDisplay, dob: dob || '',
                 status: 'active', createdAt: now, updatedAt: now,
             };
 

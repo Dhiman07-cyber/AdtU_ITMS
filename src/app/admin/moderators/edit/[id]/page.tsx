@@ -16,6 +16,7 @@ import EnhancedDatePicker from "@/components/enhanced-date-picker";
 import { getModeratorById, updateModerator } from '@/lib/dataService';
 import { Camera, User } from "lucide-react";
 import { signalCollectionRefresh } from '@/hooks/useEventDrivenRefresh';
+import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import { useDebouncedStorage } from '@/hooks/useDebouncedStorage';
 
 
@@ -320,11 +321,7 @@ export default function EditModeratorPage({ params }: { params: Promise<{ id: st
   };
 
   if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-[#010717]">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
-      </div>
-    );
+    return <PremiumPageLoader message="Loading moderator profile..." subMessage="Preparing editing tools..." />;
   }
 
   if (!moderator) {

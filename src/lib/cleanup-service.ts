@@ -257,12 +257,23 @@ export class CleanupService {
 
         await adminDb.collection('notifications').add({
           title: `Driver Change Complete — ${busNumber}`,
-          message: `${driverName} is back as your regular driver for Bus ${busNumber}.`,
+          content: `${driverName} is back as your regular driver for Bus ${busNumber}.`,
           type: 'info',
-          category: 'general',
-          audience: studentUIDs,
-          status: 'sent',
-          createdBy: 'system',
+          sender: {
+            userId: 'system',
+            userName: 'System',
+            userRole: 'admin'
+          },
+          target: {
+            type: 'all_role',
+            roleFilter: 'student'
+          },
+          recipientIds: studentUIDs,
+          autoInjectedRecipientIds: [],
+          readByUserIds: [],
+          isEdited: false,
+          isDeletedGlobally: false,
+          hiddenForUserIds: [],
           createdAt: FieldValue.serverTimestamp(),
           expiresAt: expiryDate.toISOString()
         });
@@ -286,12 +297,23 @@ export class CleanupService {
 
         await adminDb.collection('notifications').add({
           title: 'Driver Swap Auto-Completed',
-          message: `Bus ${busNumber} swap period ended. ${driverName} resumed duties.`,
+          content: `Bus ${busNumber} swap period ended. ${driverName} resumed duties.`,
           type: 'info',
-          category: 'notices',
-          audience: managementUIDs,
-          status: 'sent',
-          createdBy: 'system',
+          sender: {
+            userId: 'system',
+            userName: 'System',
+            userRole: 'admin'
+          },
+          target: {
+            type: 'specific_users',
+            specificUserIds: managementUIDs
+          },
+          recipientIds: managementUIDs,
+          autoInjectedRecipientIds: [],
+          readByUserIds: [],
+          isEdited: false,
+          isDeletedGlobally: false,
+          hiddenForUserIds: [],
           createdAt: FieldValue.serverTimestamp(),
           expiresAt: mgmtExpiryDate.toISOString()
         });

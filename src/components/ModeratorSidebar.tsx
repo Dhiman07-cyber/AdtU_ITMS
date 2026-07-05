@@ -26,7 +26,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useSidebar } from './AppShell';
-import { useSystemConfig } from '@/contexts/SystemConfigContext';
+
 import { useTheme } from '@/components/theme-provider';
 
 interface SidebarItem {
@@ -90,7 +90,7 @@ const moderatorAllHrefs = moderatorNavGroups.flatMap(group => group.items.map(i 
 export default function ModeratorSidebar() {
   const pathname = usePathname();
   const { collapsed, setCollapsed, mobileOpen } = useSidebar();
-  const { config } = useSystemConfig();
+
   const { theme } = useTheme();
 
   // Auto-collapse on mobile (to keep desktop view compact if resized)
@@ -262,7 +262,7 @@ export default function ModeratorSidebar() {
         ) : (
           <div className="flex justify-center mt-1 opacity-60">
             <span className={cn("text-[8px] font-mono tracking-tighter", theme === 'dark' ? "text-zinc-400" : "text-admin-text-secondary")}>
-              {config?.version || 'v2.4.0'}
+              v2.4.0
             </span>
           </div>
         )}

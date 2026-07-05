@@ -11,6 +11,7 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/auth-context';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import {
     Play,
     RefreshCw,
@@ -236,14 +237,7 @@ export default function AdminCronTestingPage() {
 
     // Show loading state
     if (loading || !userData) {
-        return (
-            <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950">
-                <div className="flex flex-col items-center gap-4">
-                    <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-purple-500"></div>
-                    <p className="text-sm text-gray-400">Loading Cron Dashboard...</p>
-                </div>
-            </div>
-        );
+        return <PremiumPageLoader message="Loading Cron Dashboard..." subMessage="Preparing system automation..." />;
     }
 
     return (

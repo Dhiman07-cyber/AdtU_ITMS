@@ -1,117 +1,82 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { adminAuth, adminDb } from '@/lib/firebase-admin';
+import { withSecurity } from '@/lib/security/api-security';
+import { adminDb } from '@/lib/firebase-admin';
 
 /**
  * Create or update an unauthenticated user entry
  * This is called when a new user signs in with Google but doesn't have a user doc yet
  */
-export async function POST(request: NextRequest) {
-  try {
-
-    const token = request.headers.get('Authorization')?.replace('Bearer ', '');
-
-    if (!token) {
-      console.error('❌ No token provided');
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    let decodedToken;
+export const POST = withSecurity(
+  async (request, { auth, body, requestId }) => {
     try {
-      decodedToken = await adminAuth.verifyIdToken(token);
-    } catch (tokenError: any) {
-      console.error('❌ Token verification failed:', tokenError);
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
-    }
+      if (!adminDb) {
+        return NextResponse.json({ error: 'Database not available' }, { status: 500 });
+      }
 
-    const uid = decodedToken.uid;
-    const email = decodedToken.email;
+      const uid = auth.uid;
+      const email = auth.email;
 
+      if (!email) {
+        return NextResponse.json({ error: 'Email not found in token' }, { status: 400 });
+      }
 
-    if (!email) {
-      console.error('❌ No email in token');
-      return NextResponse.json({ error: 'Email not found in token' }, { status: 400 });
-    }
+      // Check if user already exists in users collection
+      const userDoc = await adminDb.collection('users').doc(uid).get();
 
-    // Check if adminDb is properly initialized
-    if (!adminDb) {
-      console.error('❌ Admin Firestore not initialized!');
-      console.error('❌ Admin Auth available:', !!adminAuth);
-      console.error('❌ Environment check:', {
-        hasProjectId: !!process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-        hasClientEmail: !!process.env.FIREBASE_CLIENT_EMAIL,
-        hasPrivateKey: !!process.env.FIREBASE_PRIVATE_KEY
-      });
-      return NextResponse.json(
-        { error: 'Firestore Admin SDK not initialized. Check environment variables.' },
-        { status: 500 }
-      );
-    }
+      if (userDoc.exists) {
+        return NextResponse.json({
+          success: false,
+          message: 'User already exists in users collection',
+          hasUserDoc: true
+        });
+      }
 
-    // Check if user already exists in users collection
-    const userDoc = await adminDb.collection('users').doc(uid).get();
+      // Check if user already exists in unauthUsers collection
+      const unauthUserDoc = await adminDb.collection('unauthUsers').doc(uid).get();
 
-    if (userDoc.exists) {
-      return NextResponse.json({
-        success: false,
-        message: 'User already exists in users collection',
-        hasUserDoc: true
-      });
-    }
+      const now = new Date().toISOString();
 
-    // Check if user already exists in unauthUsers collection
-    const unauthUserDoc = await adminDb.collection('unauthUsers').doc(uid).get();
+      if (unauthUserDoc.exists) {
+        await adminDb.collection('unauthUsers').doc(uid).update({
+          lastLoginAt: now
+        });
 
-    const now = new Date().toISOString();
+        return NextResponse.json({
+          success: true,
+          message: 'Unauthenticated user record updated',
+          isNewUser: false
+        });
+      }
 
-    if (unauthUserDoc.exists) {
-      // Update lastLoginAt
-      await adminDb.collection('unauthUsers').doc(uid).update({
-        lastLoginAt: now
-      });
+      // Create new unauthUser document
+      const unauthUserData = {
+        uid,
+        email,
+        displayName: auth.name || email.split('@')[0],
+        photoURL: null,
+        createdAt: now,
+        lastLoginAt: now,
+        status: 'pending_application',
+        needsApplication: true
+      };
+
+      await adminDb.collection('unauthUsers').doc(uid).set(unauthUserData);
 
       return NextResponse.json({
         success: true,
-        message: 'Unauthenticated user record updated',
-        isNewUser: false
+        message: 'Unauthenticated user created',
+        isNewUser: true
       });
-    }
-
-    // Create new unauthUser document
-    const unauthUserData = {
-      uid,
-      email,
-      displayName: decodedToken.name || email.split('@')[0],
-      photoURL: decodedToken.picture || null,
-      createdAt: now,
-      lastLoginAt: now,
-      status: 'pending_application', // pending_application, application_submitted, approved, rejected
-      needsApplication: true
-    };
-
-
-    try {
-      await adminDb.collection('unauthUsers').doc(uid).set(unauthUserData);
-    } catch (dbError: any) {
-      console.error('❌ Firestore write error:', dbError);
-      console.error('Error code:', dbError.code);
-      console.error('Error message:', dbError.message);
+    } catch (error: any) {
+      console.error('Error creating unauthenticated user:', error);
       return NextResponse.json(
-        { error: 'Database write failed' },
+        { error: 'Failed to create unauthenticated user' },
         { status: 500 }
       );
     }
-
-    return NextResponse.json({
-      success: true,
-      message: 'Unauthenticated user created',
-      isNewUser: true
-    });
-  } catch (error: any) {
-    console.error('❌ Error creating unauthenticated user:', error);
-    console.error('Error stack:', error.stack);
-    return NextResponse.json(
-      { error: 'Failed to create unauthenticated user' },
-      { status: 500 }
-    );
+  },
+  {
+    requiredRoles: [],
+    rateLimit: { maxRequests: 5, windowMs: 60_000 },
   }
-}
+);

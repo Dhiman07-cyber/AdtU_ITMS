@@ -34,7 +34,8 @@ import ErrorBoundary from '@/components/ErrorBoundary';
 import {
   hasCompletedPayment,
   getCurrentPaymentSession,
-  clearPaymentSession
+  clearPaymentSession,
+  calculateSessionDates
 } from '@/lib/payment/application-payment.service';
 import {
   type CapacityCheckResult
@@ -124,7 +125,7 @@ function ApplicationFormContent() {
         const stored = localStorage.getItem('applicationDraft');
         if (stored) {
           const parsed = JSON.parse(stored);
-          console.log('ðŸ“¬ [Apply Form] Loaded draft from localStorage on init', Object.keys(parsed).length, 'fields');
+          console.log('“¬ [Apply Form] Loaded draft from localStorage on init', Object.keys(parsed).length, 'fields');
           return {
             ...defaultData,
             ...parsed,
@@ -264,7 +265,7 @@ function ApplicationFormContent() {
       const dataString = JSON.stringify(formData);
       // Only save if data actually changed
       if (dataString !== lastSavedData.current) {
-        console.log('ðŸ’¾ [Apply Form] Auto-saving to localStorage...', {
+        console.log('¾ [Apply Form] Auto-saving to localStorage...', {
           fullName: formData.fullName,
           phoneNumber: formData.phoneNumber,
           gender: formData.gender
@@ -500,7 +501,7 @@ function ApplicationFormContent() {
       // Note: Draft data is now loaded synchronously during initialization
       // This function only handles loading existing applications from database
 
-      console.log('ðŸ“‹ Checking for existing application in database...');
+      console.log('“‹ Checking for existing application in database...');
 
       // Check for existing application in database
       const token = await currentUser?.getIdToken();
@@ -511,7 +512,7 @@ function ApplicationFormContent() {
       if (response.ok) {
         const data = await response.json();
         if (data.application) {
-          console.log('ðŸ“‹ Loading existing application from database');
+          console.log('“‹ Loading existing application from database');
           setApplicationId(data.application.applicationId);
           setApplicationState(data.application.state);
 
@@ -623,10 +624,10 @@ function ApplicationFormContent() {
       // Mobile optimization: Compress image if on mobile device
       let processedFile = file;
       if (isMobileDevice() && file.size > 1 * 1024 * 1024) { // 1MB threshold for mobile
-        console.log('ðŸ“± Mobile device detected, compressing image...');
+        console.log('“± Mobile device detected, compressing image...');
         showToast('Optimizing image for mobile...', 'info');
         processedFile = await compressImageForMobile(file, 2);
-        console.log(`ðŸ“± Image compressed: ${(file.size / 1024 / 1024).toFixed(2)}MB â†’ ${(processedFile.size / 1024 / 1024).toFixed(2)}MB`);
+        console.log(`“± Image compressed: ${(file.size / 1024 / 1024).toFixed(2)}MB  ${(processedFile.size / 1024 / 1024).toFixed(2)}MB`);
       }
 
       // Create local preview URL
@@ -687,7 +688,7 @@ function ApplicationFormContent() {
 
       // Only update if changed to avoid loops and excessive re-renders
       if (newFee !== previousFeeRef.current.estimate || newFee !== previousFeeRef.current.paid) {
-        console.log(`ðŸ’° Syncing fee: ${newFee} (was Est: ${previousFeeRef.current.estimate}, Paid: ${previousFeeRef.current.paid})`);
+        console.log(`° Syncing fee: ${newFee} (was Est: ${previousFeeRef.current.estimate}, Paid: ${previousFeeRef.current.paid})`);
 
         previousFeeRef.current = { estimate: newFee, paid: newFee };
 
@@ -706,6 +707,25 @@ function ApplicationFormContent() {
     }
   }, [busFees, formData.sessionInfo.durationYears, formData.shift]);
 
+  // Sync validUntil dynamically from academic calendar system config
+  useEffect(() => {
+    if (deadlineConfig && formData.sessionInfo.sessionStartYear && formData.sessionInfo.durationYears) {
+      const dates = calculateSessionDates(
+        formData.sessionInfo.sessionStartYear,
+        formData.sessionInfo.durationYears,
+        deadlineConfig
+      );
+      if (formData.sessionInfo.validUntil !== dates.validUntil) {
+        setFormData(prev => ({
+          ...prev,
+          sessionInfo: {
+            ...prev.sessionInfo,
+            validUntil: dates.validUntil
+          }
+        }));
+      }
+    }
+  }, [deadlineConfig, formData.sessionInfo.sessionStartYear, formData.sessionInfo.durationYears, formData.sessionInfo.validUntil]);
 
   const validateForm = useCallback(() => {
     // Personal Information validation
@@ -805,9 +825,9 @@ function ApplicationFormContent() {
 
       const hasData = formData.fullName || formData.phoneNumber || formData.enrollmentId || formData.faculty;
       if (hasData) {
-        showToast('âœ… Draft auto-saved successfully!', 'success');
+        showToast('œ… Draft auto-saved successfully!', 'success');
       } else {
-        showToast('ðŸ“  No data to save yet.', 'info');
+        showToast('“  No data to save yet.', 'info');
       }
     } catch (error) {
       console.error('Error in save draft animation:', error);
@@ -1154,8 +1174,8 @@ function ApplicationFormContent() {
 
   const handleSubmitApplication = async () => {
     if (submitting) return;
-    console.log('ðŸš€ Starting application submission...');
-    console.log('ðŸ“‹ Current state:', {
+    console.log('š€ Starting application submission...');
+    console.log('“‹ Current state:', {
       applicationState,
       hasReceiptFile: !!receiptFile,
       receiptFileName: receiptFile?.name,
@@ -1197,7 +1217,7 @@ function ApplicationFormContent() {
           const uploadedUrl = await uploadImage(profilePhotoFile);
           if (uploadedUrl) {
             finalProfilePhotoUrl = uploadedUrl;
-            console.log('âœ… Profile photo uploaded successfully:', finalProfilePhotoUrl);
+            console.log('œ… Profile photo uploaded successfully:', finalProfilePhotoUrl);
           } else {
             throw new Error('Upload returned empty URL');
           }
@@ -1211,7 +1231,7 @@ function ApplicationFormContent() {
 
       // Safety check: Ensure we never submit a blob URL
       if (finalProfilePhotoUrl && finalProfilePhotoUrl.startsWith('blob:')) {
-        console.error('â Œ Attempted to submit blob URL for profile photo');
+        console.error('Attempted to submit blob URL for profile photo');
         showToast('Profile photo upload invalid. Please re-select your photo.', 'error');
         setSubmitting(false);
         return;
@@ -1226,15 +1246,15 @@ function ApplicationFormContent() {
           paymentStatus: formData.paymentInfo.paymentMode === 'online' ? 'completed' : 'pending'
         }
       };
-      console.log('ðŸš€ Starting application submission process...');
+      console.log('š€ Starting application submission process...');
 
       // Force token refresh to ensure authentication is valid (handles case where phone screen was off)
       let token;
       try {
-        console.log('ðŸ”„ Refreshing auth token...');
+        console.log('”„ Refreshing auth token...');
         token = await currentUser?.getIdToken(true);
       } catch (authError) {
-        console.error('â Œ Failed to refresh auth token:', authError);
+        console.error('Failed to refresh auth token:', authError);
         // Fallback to existing token if refresh fails
         token = await currentUser?.getIdToken();
       }
@@ -1250,11 +1270,11 @@ function ApplicationFormContent() {
       let receiptProvided = formData.paymentInfo.paymentEvidenceProvided;
 
       if (receiptFile) {
-        console.log('ðŸ“¤ Uploading receipt during form submission...');
+        console.log('“¤ Uploading receipt during form submission...');
 
         // Mobile optimization: Check file size and compress if needed
         if (receiptFile.size > 2 * 1024 * 1024) { // 2MB threshold for mobile
-          console.log('âš ï¸  Large file detected on mobile, this might cause issues');
+          console.log('š ï¸  Large file detected on mobile, this might cause issues');
           showToast('Large file detected. Upload may take longer on mobile.', 'info');
         }
 
@@ -1268,7 +1288,7 @@ function ApplicationFormContent() {
 
         for (let attempt = 1; attempt <= maxRetries && !uploadSuccess; attempt++) {
           try {
-            console.log(`ðŸ“¤ Upload attempt ${attempt}/${maxRetries}`);
+            console.log(`“¤ Upload attempt ${attempt}/${maxRetries}`);
 
             if (attempt > 1) {
               showToast(`Retrying upload (${attempt}/${maxRetries})...`, 'info');
@@ -1292,15 +1312,23 @@ function ApplicationFormContent() {
               const uploadData = await uploadResponse.json();
               receiptUrl = uploadData.url;
               receiptProvided = true; // Mark as provided when receipt is uploaded
-              console.log('âœ… Receipt uploaded successfully:', receiptUrl);
+              console.log('œ… Receipt uploaded successfully:', receiptUrl);
               uploadSuccess = true;
             } else {
-              const errorText = await uploadResponse.text();
-              console.error(`â Œ Receipt upload failed (attempt ${attempt}):`, errorText);
-              lastError = new Error(`Upload failed with status ${uploadResponse.status}: ${errorText}`);
+              let errorMsg = `Upload failed with status ${uploadResponse.status}`;
+              try {
+                const errorData = await uploadResponse.json();
+                if (errorData?.error) {
+                  errorMsg = errorData.error;
+                }
+              } catch {
+                // Ignore parsing error, fallback to status code
+              }
+              console.error(`Receipt upload failed (attempt ${attempt}):`, errorMsg);
+              lastError = new Error(errorMsg);
             }
           } catch (uploadError: any) {
-            console.error(`â Œ Receipt upload error (attempt ${attempt}):`, uploadError);
+            console.error(`Receipt upload error (attempt ${attempt}):`, uploadError);
             lastError = uploadError;
 
             if (uploadError.message === 'Upload timeout') {
@@ -1317,7 +1345,7 @@ function ApplicationFormContent() {
       }
 
       // Submit application with verification code ID
-      console.log('ðŸ“¤ Sending final application data to /api/applications/submit-final...');
+      console.log('“¤ Sending final application data to /api/applications/submit-final...');
       const response = await fetch('/api/applications/submit-final', {
         method: 'POST',
         headers: {
@@ -1338,7 +1366,7 @@ function ApplicationFormContent() {
         })
       });
 
-      console.log('ðŸ“¥ Response received from submit-final:', {
+      console.log('“¥ Response received from submit-final:', {
         status: response.status,
         ok: response.ok,
         statusText: response.statusText
@@ -1346,7 +1374,7 @@ function ApplicationFormContent() {
 
       if (response.ok) {
         const data = await response.json();
-        console.log('âœ… Application submission confirmed by server');
+        console.log('œ… Application submission confirmed by server');
 
         trackEvent('student_added');
         showToast('Application submitted successfully! Waiting for approval from the Managing Team.', 'success');
@@ -1411,7 +1439,7 @@ function ApplicationFormContent() {
           try {
             errorData = JSON.parse(text);
           } catch (e) {
-            console.error('â Œ Failed to parse error response as JSON:', text);
+            console.error('Failed to parse error response as JSON:', text);
             errorData = { message: `Server error (${response.status}): ${text.substring(0, 100)}...` };
           }
         } catch (readError) {
@@ -1420,7 +1448,7 @@ function ApplicationFormContent() {
         throw new Error(errorData.message || errorData.error || 'Failed to submit application');
       }
     } catch (error: any) {
-      console.error('â Œ CRITICAL: Error submitting application:', error);
+      console.error('CRITICAL: Error submitting application:', error);
       console.error('Diagnostic Info:', {
         name: error.name,
         message: error.message,
@@ -1451,11 +1479,11 @@ function ApplicationFormContent() {
   };
 
   useEffect(() => {
-    console.log('ðŸ”  CHECKING VERIFICATION STATE ON LOAD...');
+    console.log('CHECKING VERIFICATION STATE ON LOAD...');
 
     // Check for completed payment (both online and offline) and verification state
     if (currentUser) {
-      console.log('ðŸ‘¤ Current user found, checking verification state...');
+      console.log('Current user found, checking verification state...');
 
       // Log all relevant localStorage keys
       const verificationCompleted = localStorage.getItem('verificationCompleted');
@@ -1463,7 +1491,7 @@ function ApplicationFormContent() {
       const backupVerificationState = localStorage.getItem('backup_verification_state');
       const verificationCompletedAt = localStorage.getItem('verificationCompletedAt');
 
-      console.log('ðŸ“‹ localStorage verification data:', {
+      console.log('localStorage verification data:', {
         verificationCompleted,
         savedApplicationState,
         backupVerificationState,
@@ -1475,7 +1503,7 @@ function ApplicationFormContent() {
 
       // First check if verification was completed (most reliable)
       if (verificationCompleted === 'true' && savedApplicationState === 'verified') {
-        console.log('âœ… RESTORING VERIFICATION STATE from localStorage flags');
+        console.log('œ… RESTORING VERIFICATION STATE from localStorage flags');
         setApplicationState('verified');
         setPaymentCompleted(true);
         return;
@@ -1486,7 +1514,7 @@ function ApplicationFormContent() {
         try {
           const backupData = JSON.parse(backupVerificationState);
           if (backupData.verified && backupData.userId === currentUser.uid) {
-            console.log('âœ… RESTORING VERIFICATION STATE from backup data');
+            console.log('œ… RESTORING VERIFICATION STATE from backup data');
             setApplicationState('verified');
             setPaymentCompleted(true);
             // Restore primary flags if missing
@@ -1495,19 +1523,19 @@ function ApplicationFormContent() {
             return;
           }
         } catch (e) {
-          console.warn('âš ï¸  Failed to parse backup verification state:', e);
+          console.warn('š ï¸  Failed to parse backup verification state:', e);
         }
       }
 
       // Fallback to payment session check
-      console.log('ðŸ”„ Checking payment session as fallback...');
+      console.log('”„ Checking payment session as fallback...');
       const completedPayment = hasCompletedPayment(currentUser.uid, 'new_registration');
       if (completedPayment) {
-        console.log('ðŸ’³ Found completed payment, checking session...');
+        console.log('³ Found completed payment, checking session...');
         setPaymentCompleted(true);
         const session = getCurrentPaymentSession();
         if (session) {
-          console.log('ðŸ“¦ Payment session found:', session);
+          console.log('“¦ Payment session found:', session);
           // Handle online payment
           if (session.paymentMode === 'online' && session.razorpayPaymentId) {
             setPaymentDetails({
@@ -1517,19 +1545,19 @@ function ApplicationFormContent() {
             });
             setUseOnlinePayment(true);
             setApplicationState('verified');
-            console.log('âœ… Restored online payment verification from localStorage');
+            console.log('œ… Restored online payment verification from localStorage');
           }
           // Handle offline payment
           else if (session.paymentMode === 'offline' && session.offlinePaymentId) {
             setUseOnlinePayment(false);
             setApplicationState('verified');
-            console.log('âœ… Restored offline payment verification from localStorage');
+            console.log('œ… Restored offline payment verification from localStorage');
           }
         } else {
-          console.log('âš ï¸  No payment session found despite completed payment flag');
+          console.log('š ï¸  No payment session found despite completed payment flag');
         }
       } else {
-        console.log('â„¹ï¸  No completed payment found');
+        console.log('„¹ï¸  No completed payment found');
       }
     } else {
       console.log('⚠️ No current user found');
@@ -1547,11 +1575,11 @@ function ApplicationFormContent() {
       <div className="min-h-screen bg-[#05060e] dark:bg-[#05060e] overflow-x-hidden">
         <ApplyFormNavbar />
         <div className="apply-received-container relative z-10 pt-20 sm:pt-28 pb-16 min-h-[calc(100vh-80px)] flex items-center justify-center px-4">
-          
+
           <div className="w-full max-w-[420px] relative z-10">
             {/* Clean Card: larger sizing, solid styling, no heavy shadows or blurs */}
             <div className="apply-received-card bg-[#0c0e1a] border border-slate-900 rounded-[2rem] p-8 sm:p-10 shadow-2xl min-h-[560px] flex flex-col justify-between overflow-hidden">
-              
+
               {/* Header Container */}
               <div className="flex flex-col items-center text-center pt-2">
                 {/* Icon Container */}

@@ -16,6 +16,7 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { getDriverById } from "@/lib/dataService";
 import Image from "next/image";
+import { PremiumPageLoader } from "@/components/LoadingSpinner";
 
 interface ProfileUpdateRequest {
   requestId: string;
@@ -130,14 +131,7 @@ export default function DriverProfileRequestsPage() {
   };
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-          <p className="text-gray-600 dark:text-gray-400">Loading profile requests...</p>
-        </div>
-      </div>
-    );
+    return <PremiumPageLoader message="Loading profile requests..." subMessage="Fetching requests..." />;
   }
 
   if (error) {

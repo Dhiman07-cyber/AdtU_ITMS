@@ -5,6 +5,7 @@
 
 import { adminDb } from './firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
+import { calculateCapacityDelta, getShiftDeltas, getShiftLoad, normalizeShift, areShiftsCompatible } from '@/lib/utils/shift-utils';
 
 export interface BusCapacity {
   busId: string;
@@ -29,12 +30,16 @@ export interface AlternativeBusResult {
 export interface CapacityDelta {
   /** Field-path updates to apply to the bus document (caller writes inside its own transaction). */
   updates: Record<string, unknown>;
-  /** currentMembers before the mutation. */
+  /** currentMembers before the mutation (derived statistic — NOT a capacity gate). */
   oldMembers: number;
-  /** currentMembers after the mutation. */
+  /** currentMembers after the mutation (derived statistic — NOT a capacity gate). */
   newMembers: number;
-  /** The bus capacity ceiling. */
+  /** The bus capacity ceiling (seats in ONE trip). */
   capacity: number;
+  /** Per-shift occupancy of the affected trip BEFORE the mutation. Gate on this. */
+  oldShiftLoad: number;
+  /** Per-shift occupancy of the affected trip AFTER the mutation. */
+  newShiftLoad: number;
 }
 
 /**
@@ -48,47 +53,48 @@ export interface CapacityDelta {
  * Pure & side-effect free: it does NOT read or write Firestore. Callers fetch the
  * bus inside a transaction, pass `busDoc.data()` here, and apply `updates`.
  *
+ * CANONICAL CAPACITY MODEL (per-shift): capacity gates the affected trip only.
+ * Callers MUST gate on `oldShiftLoad >= capacity` (add) — NOT on `oldMembers`.
+ * `currentMembers` remains a derived statistic kept in sync here.
+ *
  * Invariant produced: currentMembers === morningCount + eveningCount, and a single-shift
  * student moves exactly one of morningCount/eveningCount.
+ *
+ * Delegates to the canonical calculateCapacityDelta from shift-utils.ts.
  */
 export function buildCapacityDelta(
   busData: Record<string, any> | undefined,
   shift: string | undefined,
   sign: 1 | -1
 ): CapacityDelta {
+  const result = calculateCapacityDelta(busData, shift, sign);
   const oldMembers = busData?.currentMembers || 0;
-  const capacity = busData?.capacity || 55;
-  const newMembers = sign === 1 ? oldMembers + 1 : Math.max(0, oldMembers - 1);
 
-  const updates: Record<string, unknown> = {
-    currentMembers: newMembers,
-    updatedAt: new Date().toISOString()
+  return {
+    updates: result.updates,
+    oldMembers,
+    newMembers: result.newMembers,
+    capacity: result.capacity,
+    oldShiftLoad: result.oldShiftLoad,
+    newShiftLoad: result.newShiftLoad,
   };
-
-  if (shift) {
-    const normalizedShift = shift.toLowerCase();
-    const currentLoad = busData?.load || { morningCount: 0, eveningCount: 0 };
-
-    // Use includes() to handle variations like "Morning", "morning shift", "Evening Shift"
-    if (normalizedShift.includes('morning') || normalizedShift === 'both') {
-      const morning = currentLoad.morningCount || 0;
-      updates['load.morningCount'] = sign === 1 ? morning + 1 : Math.max(0, morning - 1);
-    }
-    if (normalizedShift.includes('evening') || normalizedShift === 'both') {
-      const evening = currentLoad.eveningCount || 0;
-      updates['load.eveningCount'] = sign === 1 ? evening + 1 : Math.max(0, evening - 1);
-    }
-  }
-
-  return { updates, oldMembers, newMembers, capacity };
 }
 
 /**
- * Check if bus has available seats
+ * Check if a bus has an available seat for the given shift's trip.
+ *
+ * Per-shift capacity model: availability is gated on the affected trip's counter
+ * (morningCount or eveningCount) against capacity — NOT on currentMembers.
+ * `currentMembers` in the return is the derived total statistic (for display).
+ *
+ * @param busId - Bus document id
+ * @param shift - Student's shift; when omitted, falls back to the larger trip load
+ *                so a bus is only "available" if BOTH trips have room.
  */
-export async function checkBusCapacity(busId: string): Promise<{
+export async function checkBusCapacity(busId: string, shift?: string): Promise<{
   available: boolean;
   currentMembers: number;
+  shiftLoad: number;
   capacity: number;
 }> {
   try {
@@ -102,18 +108,23 @@ export async function checkBusCapacity(busId: string): Promise<{
     const currentMembers = busData?.currentMembers || 0;
     const capacity = busData?.capacity || 55;
 
-    const available = currentMembers < capacity;
+    // Gate on the affected trip only (per-shift model).
+    const shiftLoad = getShiftLoad(busData, shift);
+    const available = shiftLoad < capacity;
 
     console.log(`🔍 Bus ${busId} capacity check:`, {
+      shift: shift || 'unspecified',
+      shiftLoad,
       currentMembers,
       capacity,
       available,
-      display: `${currentMembers}/${capacity}`
+      display: `${shiftLoad}/${capacity} (${normalizeShift(shift)} trip)`
     });
 
     return {
       available,
       currentMembers,
+      shiftLoad,
       capacity
     };
   } catch (error) {
@@ -131,6 +142,7 @@ export async function incrementBusCapacity(busId: string, studentUid: string, sh
 
     let oldMembers = 0;
     let newMembers = 0;
+    let newShiftLoad = 0;
     let capacity = 55;
     let busNumber: string | undefined;
     let routeId: string | undefined;
@@ -147,6 +159,7 @@ export async function incrementBusCapacity(busId: string, studentUid: string, sh
       const delta = buildCapacityDelta(busData, shift, 1);
       oldMembers = delta.oldMembers;
       newMembers = delta.newMembers;
+      newShiftLoad = delta.newShiftLoad;
       capacity = delta.capacity;
       busNumber = busData?.busNumber;
       routeId = busData?.routeId;
@@ -161,8 +174,8 @@ export async function incrementBusCapacity(busId: string, studentUid: string, sh
       shift: shift || 'not provided'
     });
 
-    // Check if bus is now full and send admin alert (post-commit; never inside the transaction)
-    if (newMembers >= capacity) {
+    // Send admin alert once the affected shift's trip fills (per-shift model).
+    if (newShiftLoad >= capacity) {
       await sendBusFullAlert(busId, busNumber || '', routeId || '');
     }
   } catch (error) {
@@ -236,10 +249,10 @@ export async function findAlternativeBuses(
       // Skip the originally requested route's bus
       if (bus.routeId === routeId) continue;
 
-      // Check shift compatibility
-      const busShift = bus.shift?.toLowerCase() || 'both';
-      const requestedShift = shift?.toLowerCase() || 'morning';
-      const shiftMatch = busShift === 'both' || busShift === requestedShift;
+      // Check shift compatibility using canonical shift-utils
+      const busShift = bus.shift || 'Both';
+      const requestedShift = shift || 'Morning';
+      const shiftMatch = areShiftsCompatible(requestedShift, busShift);
 
       if (!shiftMatch) continue;
 
@@ -253,17 +266,17 @@ export async function findAlternativeBuses(
 
       if (!passesThrough) continue;
 
-      // Check capacity
-      const currentMembers = bus.currentMembers || 0;
+      // Check capacity for the requested shift's trip only (per-shift model).
+      const shiftLoad = getShiftLoad(bus, requestedShift);
       const capacity = bus.capacity || 55;
-      const available = currentMembers < capacity;
+      const available = shiftLoad < capacity;
 
       if (available) {
         alternativeBuses.push({
           busId: bus.busId,
           busNumber: bus.busNumber,
           capacity: capacity,
-          currentMembers,
+          currentMembers: shiftLoad,
           routeId: bus.routeId,
           shift: bus.shift,
           isFull: false
@@ -273,7 +286,7 @@ export async function findAlternativeBuses(
 
     // If alternative buses found
     if (alternativeBuses.length > 0) {
-      // Sort by most available seats
+      // Sort by most available seats on the requested trip
       alternativeBuses.sort((a, b) =>
         (b.capacity - b.currentMembers) - (a.capacity - a.currentMembers)
       );
@@ -313,45 +326,68 @@ export async function findAlternativeBuses(
  */
 export async function sendBusFullAlert(busId: string, busNumber: string, routeId: string): Promise<void> {
   try {
-    // Get all admins
-    const adminsSnapshot = await adminDb.collection('admins').get();
+    // Get all admins and moderators
+    const [adminsSnapshot, moderatorsSnapshot] = await Promise.all([
+      adminDb.collection('admins').get(),
+      adminDb.collection('moderators').get()
+    ]);
 
-    const notificationData = {
-      type: 'BusFull',
-      title: '🚌 Bus Capacity Full',
-      body: `Bus ${busNumber} (${busId}) on ${routeId} has reached full capacity. Consider increasing capacity or adding another bus.`,
-      priority: 'high',
-      links: {
-        busId,
-        routeId,
-        action: '/admin/buses'
-      },
-      read: false,
-      createdAt: new Date().toISOString()
-    };
+    const adminUIDs = adminsSnapshot.docs.map((doc: any) => doc.id);
+    const moderatorUIDs = moderatorsSnapshot.docs.map((doc: any) => doc.id);
+    const recipientUIDs = Array.from(new Set([...adminUIDs, ...moderatorUIDs]));
 
-    // Send notification to all admins (chunk batches to avoid >500 limit)
-    const allDocs = adminsSnapshot.docs.map((adminDoc: any) => ({
-      doc: adminDoc,
-      role: 'admin'
-    }));
+    if (recipientUIDs.length === 0) return;
 
-    for (let i = 0; i < allDocs.length; i += 490) {
-      const chunk = allDocs.slice(i, i + 490);
+    // Calculate expiry (1 day from now)
+    const expiryDate = new Date();
+    expiryDate.setDate(expiryDate.getDate() + 1);
+    expiryDate.setHours(23, 59, 59, 999);
+
+    // Format bus and route nicely: Bus-X (AS-01-...) on Route-X
+    const busNum = busId.replace(/[^0-9]/g, '');
+    const formattedBus = `Bus-${busNum || busId} (${busNumber})`;
+    const routeNum = routeId.replace(/[^0-9]/g, '');
+    const formattedRoute = `Route-${routeNum || routeId}`;
+
+    // Send notification to all admins and moderators (chunk batches to avoid >500 limit)
+    for (let i = 0; i < recipientUIDs.length; i += 490) {
+      const chunk = recipientUIDs.slice(i, i + 490);
       const batch = adminDb.batch();
-      chunk.forEach(({ doc }) => {
+      chunk.forEach((userId) => {
         const notifRef = adminDb.collection('notifications').doc();
         batch.set(notifRef, {
-          notifId: notifRef.id,
-          toUid: doc.id,
-          toRole: 'admin',
-          ...notificationData
+          title: 'Bus Capacity Full',
+          content: `${formattedBus} on ${formattedRoute} has reached full capacity. Consider increasing capacity or adding another bus.`,
+          type: 'info',
+          sender: {
+            userId: 'system',
+            userName: 'System',
+            userRole: 'admin'
+          },
+          target: {
+            type: 'specific_users',
+            specificUserIds: [userId]
+          },
+          recipientIds: [userId],
+          autoInjectedRecipientIds: [],
+          readByUserIds: [],
+          isEdited: false,
+          isDeletedGlobally: false,
+          hiddenForUserIds: [],
+          createdAt: FieldValue.serverTimestamp(),
+          expiresAt: expiryDate.toISOString(),
+          metadata: {
+            busId,
+            routeId,
+            action: '/admin/buses',
+            priority: 'high'
+          }
         });
       });
       await batch.commit();
     }
 
-    console.log(`📢 Bus full alert sent to ${adminsSnapshot.size} admin(s) for bus ${busId}`);
+    console.log(`📢 Bus full alert sent to ${recipientUIDs.length} user(s) (admins & moderators) for bus ${busId}`);
   } catch (error) {
     console.error('Error sending bus full alert:', error);
   }
@@ -366,42 +402,57 @@ async function sendHighDemandAlert(routeId: string, stopId: string): Promise<voi
     const adminsSnapshot = await adminDb.collection('admins').get();
     const moderatorsSnapshot = await adminDb.collection('moderators').get();
 
-    const notificationData = {
-      type: 'HighDemand',
-      title: '⚠️ High Demand Alert',
-      body: `All buses serving ${stopId} (${routeId}) are at full capacity. Students are unable to register. Action required: Increase capacity or add buses to this route.`,
-      priority: 'critical',
-      links: {
-        routeId,
-        stopId,
-        action: '/admin/buses'
-      },
-      read: false,
-      createdAt: new Date().toISOString()
-    };
-
-    // Send to all admins and moderators (chunk batches to avoid >500 limit)
-    const allStaff = [
-      ...adminsSnapshot.docs.map((doc: any) => ({ doc, role: 'admin' })),
-      ...moderatorsSnapshot.docs.map((doc: any) => ({ doc, role: 'moderator' }))
+    const allStaffUIDs = [
+      ...adminsSnapshot.docs.map((doc: any) => doc.id),
+      ...moderatorsSnapshot.docs.map((doc: any) => doc.id)
     ];
 
-    for (let i = 0; i < allStaff.length; i += 490) {
-      const chunk = allStaff.slice(i, i + 490);
+    if (allStaffUIDs.length === 0) return;
+
+    // Calculate expiry (1 day from now)
+    const expiryDate = new Date();
+    expiryDate.setDate(expiryDate.getDate() + 1);
+    expiryDate.setHours(23, 59, 59, 999);
+
+    // Send to all admins and moderators (chunk batches to avoid >500 limit)
+    for (let i = 0; i < allStaffUIDs.length; i += 490) {
+      const chunk = allStaffUIDs.slice(i, i + 490);
       const batch = adminDb.batch();
-      chunk.forEach(({ doc, role }) => {
+      chunk.forEach((staffId) => {
         const notifRef = adminDb.collection('notifications').doc();
         batch.set(notifRef, {
-          notifId: notifRef.id,
-          toUid: doc.id,
-          toRole: role,
-          ...notificationData
+          title: 'High Demand Alert',
+          content: `All buses serving ${stopId} (${routeId}) are at full capacity. Students are unable to register. Action required: Increase capacity or add buses to this route.`,
+          type: 'emergency',
+          sender: {
+            userId: 'system',
+            userName: 'System',
+            userRole: 'admin'
+          },
+          target: {
+            type: 'specific_users',
+            specificUserIds: [staffId]
+          },
+          recipientIds: [staffId],
+          autoInjectedRecipientIds: [],
+          readByUserIds: [],
+          isEdited: false,
+          isDeletedGlobally: false,
+          hiddenForUserIds: [],
+          createdAt: FieldValue.serverTimestamp(),
+          expiresAt: expiryDate.toISOString(),
+          metadata: {
+            routeId,
+            stopId,
+            action: '/admin/buses',
+            priority: 'critical'
+          }
         });
       });
       await batch.commit();
     }
 
-    console.log(`📢 High-demand alert sent to ${adminsSnapshot.size + moderatorsSnapshot.size} staff member(s)`);
+    console.log(`📢 High-demand alert sent to ${allStaffUIDs.length} staff member(s)`);
   } catch (error) {
     console.error('Error sending high-demand alert:', error);
   }
@@ -428,28 +479,26 @@ export async function validateAndSuggestBus(params: {
     // Derive busId from routeId (route_X → bus_X)
     const busId = routeId.replace('route_', 'bus_');
 
-    // Check if primary bus has capacity
-    const capacityCheck = await checkBusCapacity(busId);
+    // Check if primary bus has capacity on the requested shift's trip
+    const capacityCheck = await checkBusCapacity(busId, shift);
 
     if (capacityCheck.available) {
       return {
         canAssign: true,
         busId,
-        message: `Seat available on Bus ${busId} (${capacityCheck.currentMembers}/${capacityCheck.capacity})`
+        message: `Seat available on Bus ${busId} (${capacityCheck.shiftLoad}/${capacityCheck.capacity} on ${normalizeShift(shift)} trip)`
       };
     }
 
-    // Primary bus full, find alternatives
-    console.log(`🔄 Primary bus ${busId} is full (${capacityCheck.currentMembers}/${capacityCheck.capacity}), searching alternatives...`);
+    // Primary bus full for this shift, find alternatives
+    console.log(`🔄 Primary bus ${busId} is full for ${normalizeShift(shift)} (${capacityCheck.shiftLoad}/${capacityCheck.capacity}), searching alternatives...`);
 
     const alternativeResult = await findAlternativeBuses(stopId, routeId, shift);
 
     if (alternativeResult.success && alternativeResult.alternativeBuses && alternativeResult.alternativeBuses.length > 0) {
-      const bestAlternative = alternativeResult.alternativeBuses[0];
-
       return {
         canAssign: false, // Don't auto-assign, let user choose
-        message: `Bus ${busId} is full (${capacityCheck.currentMembers}/${capacityCheck.capacity}). However, ${alternativeResult.message}`,
+        message: `Bus ${busId} is full for the ${normalizeShift(shift)} trip (${capacityCheck.shiftLoad}/${capacityCheck.capacity}). However, ${alternativeResult.message}`,
         alternatives: alternativeResult.alternativeBuses
       };
     }

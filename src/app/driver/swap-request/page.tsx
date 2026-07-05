@@ -437,7 +437,7 @@ function SwapRequestPageContent() {
   useEffect(() => {
     let filtered = [...drivers];
 
-    // Filter by shift - match same shift OR drivers with "Both" / "Morning & Evening"
+    // Filter by shift - match same shift OR drivers with "Both"
     if (driverFilter === 'same_shift' && myBusData?.shift) {
       const currentShift = myBusData.shift.toLowerCase();
       filtered = filtered.filter(d => {
@@ -447,12 +447,9 @@ function SwapRequestPageContent() {
         // Driver has same shift as current driver
         if (driverShift === currentShift) return true;
 
-        // Driver works both shifts (various formats)
+        // Driver works both shifts
         if (driverShift === 'both') return true;
-        if (driverShift === 'morning & evening') return true;
-        if (driverShift === 'morning and evening') return true;
         if (driverShift.includes('both')) return true;
-        if (driverShift.includes('morning') && driverShift.includes('evening')) return true;
 
         return false;
       });

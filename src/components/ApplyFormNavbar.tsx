@@ -6,7 +6,7 @@ import Link from "next/link";
 import { User, Bus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SignOutButton } from "@/components/signout-button";
-import { useSystemConfig } from '@/contexts/SystemConfigContext';
+import { APP_NAME } from '@/config/runtime';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -18,7 +18,7 @@ import {
 
 export default function ApplyFormNavbar() {
   const { currentUser, userData } = useAuth();
-  const { appName } = useSystemConfig();
+  const appName = APP_NAME;
   const router = useRouter();
 
   // Don't show navbar if user is not authenticated

@@ -11,7 +11,6 @@ import crypto from 'crypto';
  * 
  * Actions:
  * - Deletes all notifications where expiresAt < now
- * - Deletes associated read receipts
  * - Uses batch operations for efficiency
  */
 export async function GET(request: NextRequest) {
@@ -40,13 +39,13 @@ export async function GET(request: NextRequest) {
 
     const duration = Date.now() - startTime;
     console.log(`🎉 [CRON] Cleanup completed in ${duration}ms`);
-    console.log(`   Deleted: ${result.deletedNotifications} notifications, ${result.deletedReceipts} receipts`);
+    console.log(`   Deleted: ${result.deletedNotifications} notifications`);
 
     return NextResponse.json({
       success: true,
       timestamp: new Date().toISOString(),
       duration_ms: duration,
-      message: `Cleaned up ${result.deletedNotifications} expired notifications and ${result.deletedReceipts} receipts`,
+      message: `Cleaned up ${result.deletedNotifications} expired notifications`,
       result
     });
   } catch (error: any) {
