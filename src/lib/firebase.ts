@@ -82,8 +82,21 @@ try {
     messaging = null as any;
   }
 } catch (error: any) {
-  console.error('Firebase initialization error:', error);
-  throw error;
+  // During Next.js static build, env vars like NEXT_PUBLIC_FIREBASE_API_KEY may not be set.
+  // Suppress the throw server-side so the build completes; the error will surface at runtime
+  // in the browser where it matters, or in the server when the route actually runs.
+  if (typeof window !== 'undefined') {
+    // Browser: re-throw so the app fails visibly
+    throw error;
+  } else {
+    // Server/build: warn and export nulls — don't crash the build
+    console.warn('⚠️ Firebase client SDK initialization skipped (missing env vars during build):', error?.code || error?.message);
+    app = null as any;
+    auth = null as any;
+    db = null as any;
+    storage = null as any;
+    messaging = null as any;
+  }
 }
 
 export { app, auth, db, storage, messaging };

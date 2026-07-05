@@ -41,6 +41,30 @@ jobs:
           # Build must not require real secrets; provide harmless placeholders so
           # Next can compile. Real values come from Vercel at deploy/runtime.
           NODE_ENV: production
+          # Firebase Client (public vars — needed for firebase.ts initializeApp)
+          NEXT_PUBLIC_FIREBASE_API_KEY: ci-placeholder
+          NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: ci.firebaseapp.com
           NEXT_PUBLIC_FIREBASE_PROJECT_ID: ci
+          NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: ci.appspot.com
+          NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: "000000000000"
+          NEXT_PUBLIC_FIREBASE_APP_ID: 1:000000000000:web:ci
+          # Firebase Admin (server vars — needed for firebase-admin.ts)
+          FIREBASE_CLIENT_EMAIL: ci@ci.iam.gserviceaccount.com
+          FIREBASE_PRIVATE_KEY: "-----BEGIN RSA PRIVATE KEY-----\nci\n-----END RSA PRIVATE KEY-----"
+          # Supabase
           NEXT_PUBLIC_SUPABASE_URL: https://ci.supabase.co
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ci
+          SUPABASE_SERVICE_ROLE_KEY: ci
+          # Crypto secrets
+          SIGNING_SECRET_KEY: ci-signing-secret-key-placeholder-32ch
+          ENCRYPTION_SECRET_KEY: ci-encryption-secret-placeholder-32ch
+          RECEIPT_SIGNING_SECRET: ci-receipt-signing-secret-placeholder
+          DOCUMENT_PRIVATE_KEY: ci
+          DOCUMENT_PUBLIC_KEY: ci
+          # Other services
+          RAZORPAY_KEY_ID: ci
+          RAZORPAY_KEY_SECRET: ci
+          RAZORPAY_WEBHOOK_SECRET: ci
+          CLOUDINARY_API_KEY: ci
+          CLOUDINARY_API_SECRET: ci
+          CRON_SECRET: ci
