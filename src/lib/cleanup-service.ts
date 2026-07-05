@@ -1,7 +1,4 @@
 import { db as adminDb, FieldValue } from './firebase-admin';
-import { getSupabaseServer } from '@/lib/supabase-server';
-
-const supabase = getSupabaseServer();
 
 /**
  * Event-Driven Cleanup Service

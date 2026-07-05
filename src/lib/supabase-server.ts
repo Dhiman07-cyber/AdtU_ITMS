@@ -16,16 +16,22 @@ let _serverClient: SupabaseClient | null = null;
  * Uses service-role key to bypass RLS for admin operations.
  */
 export function getSupabaseServer(): SupabaseClient {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!url || !key) {
+    // Return a Proxy that throws only when code attempts to access its properties/methods at runtime.
+    // This allows module-level imports and instantiations to succeed during static Next.js compilation.
+    return new Proxy({} as any, {
+      get(target, prop) {
+        throw new Error(
+          `Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY env vars. Cannot access Supabase client property "${String(prop)}".`
+        );
+      }
+    });
+  }
+
   if (!_serverClient) {
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-    if (!url || !key) {
-      throw new Error(
-        'Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY env vars'
-      );
-    }
-
     _serverClient = createClient(url, key, {
       auth: {
         autoRefreshToken: false,
