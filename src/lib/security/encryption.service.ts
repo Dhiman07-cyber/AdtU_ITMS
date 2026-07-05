@@ -21,23 +21,23 @@ import crypto from 'crypto';
 // ============================================================================
 
 // These should be environment variables in production
-let encryptionKeySource = process.env.ENCRYPTION_SECRET_KEY || process.env.NEXTAUTH_SECRET;
-if (!encryptionKeySource) {
-    if (process.env.NODE_ENV === 'production') {
-        throw new Error('ENCRYPTION_SECRET_KEY must be set in production');
-    }
-    encryptionKeySource = crypto.randomBytes(32).toString('hex');
-}
-const ENCRYPTION_KEY = encryptionKeySource;
+const isEncryptionKeySet = !!(process.env.ENCRYPTION_SECRET_KEY || process.env.NEXTAUTH_SECRET);
+const isSigningKeySet = !!(process.env.SIGNING_SECRET_KEY || process.env.NEXTAUTH_SECRET);
 
-let signingKeySource = process.env.SIGNING_SECRET_KEY || process.env.NEXTAUTH_SECRET;
-if (!signingKeySource) {
+// Fallback to random key if not set, but track if we need to throw at runtime
+const ENCRYPTION_KEY = process.env.ENCRYPTION_SECRET_KEY || process.env.NEXTAUTH_SECRET || crypto.randomBytes(32).toString('hex');
+const SIGNING_KEY = process.env.SIGNING_SECRET_KEY || process.env.NEXTAUTH_SECRET || crypto.randomBytes(32).toString('hex');
+
+function checkKeys() {
     if (process.env.NODE_ENV === 'production') {
-        throw new Error('SIGNING_SECRET_KEY must be set in production');
+        if (!isEncryptionKeySet) {
+            throw new Error('ENCRYPTION_SECRET_KEY must be set in production');
+        }
+        if (!isSigningKeySet) {
+            throw new Error('SIGNING_SECRET_KEY must be set in production');
+        }
     }
-    signingKeySource = crypto.randomBytes(32).toString('hex');
 }
-const SIGNING_KEY = signingKeySource;
 
 // Algorithm configurations
 const ALGORITHM = 'aes-256-gcm';
@@ -59,6 +59,7 @@ const PAYMENT_TOKEN_EXPIRY_MS = 60 * 60 * 1000; // 1 hour for payment tokens
  * Derive a cryptographic key from the master secret using PBKDF2
  */
 function deriveKey(salt: Buffer, secret: string = ENCRYPTION_KEY): Buffer {
+    checkKeys();
     return crypto.pbkdf2Sync(secret, salt, ITERATION_COUNT, KEY_LENGTH, 'sha256');
 }
 
@@ -225,6 +226,7 @@ export function decryptQRCodeData(token: string): QRCodePayload | null {
  * Uses HMAC verification only
  */
 export function quickValidateQRToken(token: string): boolean {
+    checkKeys();
     try {
         const buffer = Buffer.from(token, 'base64url');
 
@@ -267,6 +269,7 @@ export function createSecurePaymentReference(
     amount: number,
     method: 'Online' | 'Offline'
 ): string {
+    checkKeys();
     const data = {
         paymentId,
         studentUid,
@@ -296,6 +299,7 @@ export function createSecurePaymentReference(
  * Verify and decode a secure payment reference
  */
 export function verifySecurePaymentReference(reference: string): SecurePaymentData | null {
+    checkKeys();
     try {
         const decoded = JSON.parse(Buffer.from(reference, 'base64url').toString('utf8'));
 
@@ -383,6 +387,7 @@ export function generateTimestampedToken(prefix: string = ''): string {
  * Create HMAC signature for any data
  */
 export function signData(data: object | string): string {
+    checkKeys();
     const dataString = typeof data === 'string' ? data : JSON.stringify(data);
     const hmac = crypto.createHmac('sha256', SIGNING_KEY);
     hmac.update(dataString);
