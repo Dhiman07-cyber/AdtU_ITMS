@@ -18,6 +18,7 @@
 
 import { NextResponse } from 'next/server';
 import { db as adminDb } from '@/lib/firebase-admin';
+import * as routeService from '@/domains/route';
 import { tripLockService } from '@/lib/services/trip-lock-service';
 import { notifyRouteTopic, verifyDriverRouteBinding } from '@/lib/services/fcm-notification-service';
 import { getSupabaseServer } from '@/lib/supabase-server';
@@ -122,10 +123,9 @@ export const POST = withSecurity<StartTripBody>(
                 const notificationTask = (async () => {
                     let routeName = 'your route';
                     try {
-                        const routeDoc = await adminDb.collection('routes').doc(routeId).get();
-                        if (routeDoc.exists) {
-                            const routeData = routeDoc.data();
-                            routeName = routeData?.name || routeData?.routeName || routeId;
+                        const route = await routeService.getById(routeId);
+                        if (route) {
+                            routeName = route.routeName || route.route || routeId;
                             if (routeName.includes('_') || routeName.startsWith('route')) {
                                 routeName = formatIdForDisplay(routeName);
                             }

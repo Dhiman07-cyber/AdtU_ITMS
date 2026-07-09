@@ -1,10 +1,10 @@
-// @ts-nocheck
 import { NextRequest, NextResponse } from 'next/server';
-import { adminAuth, adminDb } from '@/lib/firebase-admin';
+import { adminAuth } from '@/lib/firebase-admin';
+import * as routeService from '@/domains/route';
 
 export async function GET(
   request: NextRequest,
-  { params }: any
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const token = request.headers.get('Authorization')?.replace('Bearer ', '');
@@ -15,29 +15,15 @@ export async function GET(
 
     await adminAuth.verifyIdToken(token);
 
-    const routeId = params.id;
+    const { id: routeId } = await params;
 
-    // Get route document
-    const routeDoc = await adminDb.collection('routes').doc(routeId).get();
+    const route = await routeService.getById(routeId);
 
-    if (!routeDoc.exists) {
-      // Try getting route from buses collection
-      const busesQuery = await adminDb.collection('buses')
-        .where('routeId', '==', routeId)
-        .limit(1)
-        .get();
-
-      if (!busesQuery.empty) {
-        const busData = busesQuery.docs[0].data();
-        const stops = busData.stops || [];
-        return NextResponse.json({ stops });
-      }
-
+    if (!route) {
       return NextResponse.json({ error: 'Route not found' }, { status: 404 });
     }
 
-    const routeData = routeDoc.data();
-    const stops = routeData?.stops || [];
+    const stops = route.stops || [];
 
     return NextResponse.json({
       stops
@@ -50,4 +36,3 @@ export async function GET(
     );
   }
 }
-

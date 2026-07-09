@@ -6,6 +6,7 @@ import { fetchOrderDetails, fetchPaymentDetails } from '@/lib/payment/razorpay.s
 import { processCapturedPayment, isPaymentProcessed } from '@/lib/payment/payment.service';
 import { paymentsSupabaseService } from '@/lib/services/payments-supabase';
 import { z } from 'zod';
+import { getById as getApplicationById } from '@/domains/application';
 
 const UPSTASH_URL = process.env.UPSTASH_REDIS_REST_URL;
 const UPSTASH_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
@@ -90,10 +91,10 @@ export const GET = withSecurity(
         let isApplicationApproved = false;
         let isRenewalCompleted = false;
 
-        // Check student's application document
-        const appSnap = await adminDb.collection('applications').doc(targetUid).get();
-        if (appSnap.exists) {
-            const appData = appSnap.data() || {};
+        // Check student's application via domain API
+        const appDoc = await getApplicationById(targetUid);
+        if (appDoc) {
+            const appData = appDoc as any;
             if (appData.state === 'approved' || appData.state === 'verified_upcoming') {
                 isApplicationApproved = true;
             }

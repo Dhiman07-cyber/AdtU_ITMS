@@ -1,12 +1,11 @@
 import { NextResponse } from 'next/server';
 import { headers } from 'next/headers';
 import { adminDb, adminAuth } from '@/lib/firebase-admin';
-import { FieldValue } from 'firebase-admin/firestore';
-import { getUpdaterInfo } from '@/lib/utils/updatedBy';
+import * as routeService from '@/domains/route';
 
 /**
  * Create Route API
- * Updated to support manual routeId and new fields
+ * Updated to support PG routeService.
  */
 export async function POST(request: Request) {
   try {
@@ -50,14 +49,13 @@ export async function POST(request: Request) {
     // Determine Route ID
     let routeId = providedRouteId;
     if (!routeId) {
-      // Fallback or Error? UI requires it, so let's default to old logic if missing but simpler
       const num = routeName.match(/\d+/)?.[0] || Date.now().toString();
       routeId = `route_${num}`;
     }
 
-    // Check if route already exists
-    const existingRoute = await adminDb.collection('routes').doc(routeId).get();
-    if (existingRoute.exists) {
+    // Check if route already exists in PG
+    const existingRoute = await routeService.getById(routeId);
+    if (existingRoute) {
       return NextResponse.json(
         { success: false, error: `Route ${routeId} already exists` },
         { status: 400 }
@@ -71,8 +69,11 @@ export async function POST(request: Request) {
       stopId: stop.stopId
     }));
 
-    // Get updater info for audit trail
-    const updaterInfo = await getUpdaterInfo(adminDb, decodedToken.uid);
+    // Determine status from active or status field
+    let mappedStatus: 'active' | 'inactive' = 'active';
+    if (status !== undefined) {
+      mappedStatus = String(status).toLowerCase() === 'inactive' ? 'inactive' : 'active';
+    }
 
     // Build complete route document
     const routeDocument: any = {
@@ -80,28 +81,21 @@ export async function POST(request: Request) {
       routeName,
       stops: formattedStops,
       totalStops: formattedStops.length,
-      status: status || 'Active',
-
-      // Defaults
-      assignedBuses: [],
-      currentBusId: null,
-      defaultBusId: null,
-
-      createdAt: FieldValue.serverTimestamp(),
-      updatedAt: FieldValue.serverTimestamp(),
-
-      // Audit trail - who created/updated this document
+      status: mappedStatus,
     };
 
-    // Create route document
-    await adminDb.collection('routes').doc(routeId).set(routeDocument);
-    console.log(`✅ Route ${routeId} created successfully`);
+    // Create route in PG
+    await routeService.create({ id: routeId, ...routeDocument });
+    console.log(`✅ Route ${routeId} created successfully in PG`);
 
     return NextResponse.json({
       success: true,
       message: 'Route created successfully!',
       routeId,
-      routeDocument
+      routeDocument: {
+        ...routeDocument,
+        active: mappedStatus === 'active'
+      }
     });
 
   } catch (error: any) {

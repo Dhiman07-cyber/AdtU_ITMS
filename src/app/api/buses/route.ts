@@ -1,41 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/firebase-admin';
 import { verifyApiAuth } from '@/lib/security/api-auth';
 import { applyRateLimit, createRateLimitId, RateLimits } from '@/lib/security/rate-limiter';
 import { handleApiError } from '@/lib/security/safe-error';
+import { getAllBuses, getBusesByRouteId, createBus } from '@/domains/fleet/services/fleet.service';
+
+// D6 Fleet — Bus list API. Runtime owner: PostgreSQL (fleet.repository.pg → buses table).
 
 export async function GET(request: NextRequest) {
   try {
-    // SECURITY: Require authentication (any logged-in user can view buses)
     const auth = await verifyApiAuth(request, ['admin', 'moderator', 'driver', 'student']);
     if (!auth.authenticated) return auth.response;
 
-    // Rate limit
     const rl = await applyRateLimit(createRateLimitId(auth.uid, 'buses-list'), RateLimits.READ);
     if (!rl.allowed) {
       return NextResponse.json({ error: 'Too many requests' }, { status: 429, headers: rl.headers });
     }
 
-    if (!db) {
-      return NextResponse.json({ error: 'Database unavailable' }, { status: 503 });
-    }
-
-    // Get query parameters
     const { searchParams } = new URL(request.url);
     const routeId = searchParams.get('routeId');
 
-    // Fetch buses from Firestore
-    let busesSnapshot;
-    if (routeId) {
-      busesSnapshot = await db.collection('buses').where('routeId', '==', routeId).get();
-    } else {
-      busesSnapshot = await db.collection('buses').get();
-    }
-
-    const buses = busesSnapshot.docs.map((doc: any) => {
-      const data = doc.data();
-      return { id: doc.id, ...data };
-    });
+    const buses = routeId
+      ? await getBusesByRouteId(routeId)
+      : await getAllBuses();
 
     return NextResponse.json({ buses }, { headers: rl.headers });
   } catch (error: any) {
@@ -46,23 +32,16 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    // SECURITY: Only admin/moderator can create buses
     const auth = await verifyApiAuth(request, ['admin', 'moderator']);
     if (!auth.authenticated) return auth.response;
 
-    // Rate limit
     const rl = await applyRateLimit(createRateLimitId(auth.uid, 'buses-create'), RateLimits.CREATE);
     if (!rl.allowed) {
       return NextResponse.json({ error: 'Too many requests' }, { status: 429, headers: rl.headers });
     }
 
-    if (!db) {
-      return NextResponse.json({ error: 'Database unavailable' }, { status: 503 });
-    }
-
     const busData = await request.json();
 
-    // Input validation
     if (!busData.busNumber || typeof busData.busNumber !== 'string' || busData.busNumber.length > 50) {
       return NextResponse.json({ error: 'Valid bus number is required (max 50 chars)' }, { status: 400 });
     }
@@ -73,8 +52,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Capacity must be 1-200' }, { status: 400 });
     }
 
+    const id = busData.busId || `bus_${Date.now()}`;
     const newBus = {
-      busId: busData.busId || `bus_${Date.now()}`,
+      id,
+      busId: id,
       busNumber: busData.busNumber.trim(),
       model: (busData.model || 'Standard Model').substring(0, 100),
       capacity: busData.capacity || 50,
@@ -84,12 +65,12 @@ export async function POST(request: NextRequest) {
       routeName: (busData.routeName || '').substring(0, 200),
       status: busData.status || 'active',
       createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
+      updatedAt: new Date().toISOString(),
     };
 
-    await db.collection('buses').doc(newBus.busId).set(newBus);
+    await createBus(newBus);
 
-    return NextResponse.json({ id: newBus.busId, ...newBus }, { status: 201, headers: rl.headers });
+    return NextResponse.json({ id: newBus.id, ...newBus }, { status: 201, headers: rl.headers });
   } catch (error: any) {
     console.error('Error creating bus:', error);
     return NextResponse.json(handleApiError(error, 'buses-post', 'Failed to create bus'), { status: 500 });

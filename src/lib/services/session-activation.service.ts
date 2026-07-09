@@ -36,9 +36,8 @@
  *   6. Failure-isolated. One application's failure never stops the rest.
  */
 
-import { adminDb, FieldValue } from '@/lib/firebase-admin';
+import { adminDb } from '@/lib/firebase-admin';
 import { Application } from '@/lib/types/application';
-import { APPLICATIONS_COLLECTION } from '@/config/firestore-collections';
 import { getDeadlineConfig } from '@/lib/deadline-config-service';
 import { DeadlineConfig } from '@/lib/types/deadline-config';
 import { buildCapacityDelta, sendBusFullAlert } from '@/lib/busCapacityService';
@@ -46,6 +45,10 @@ import { computeBlockDatesFromValidUntil } from '@/lib/utils/deadline-computatio
 import { createAuditLogInTransaction, SYSTEM_ACTOR } from '@/lib/services/audit.service';
 import { CapacityFullError } from '@/lib/errors/sentinel-errors';
 import { normalizeShift, areShiftsCompatible, getShiftLoad } from '@/lib/utils/shift-utils';
+import { createUser, createStudent } from '@/domains/identity';
+import { getAllByState } from '@/domains/application';
+import { getSupabaseServer } from '@/lib/supabase-server';
+import * as Notification from '@/domains/notification';
 
 // Page size for paginating verified_upcoming applications.
 const PAGE_SIZE = 200;
@@ -179,12 +182,11 @@ async function findDeterministicAlternativeBuses(
  * Returns the outcome so the caller can aggregate.
  */
 async function activateOne(
-  appSnap: FirebaseFirestore.QueryDocumentSnapshot | FirebaseFirestore.DocumentSnapshot,
+  app: Application,
   config: DeadlineConfig,
   trigger: 'cron' | 'admin'
 ): Promise<'activated' | 'pending' | 'skipped' | { failed: string }> {
-  const appId = appSnap.id;
-  const app = appSnap.data() as Application;
+  const appId = app.applicationId;
   const formData = app.formData || ({} as any);
 
   // Resolve the bus/route/stop/shift from the original application.
@@ -210,11 +212,19 @@ async function activateOne(
   const validUntil = validUntilDate.toISOString();
   const blockDates = computeBlockDatesFromValidUntil(validUntil, config);
 
-  const appRef = adminDb.collection(APPLICATIONS_COLLECTION).doc(appId);
+  const appRef = adminDb.collection('applications').doc(appId);
   const studentRef = adminDb.collection('students').doc(app.applicantUid);
-  const userRef = adminDb.collection('users').doc(app.applicantUid);
 
   const nowIso = new Date().toISOString();
+
+  // Write user to PostgreSQL (canonical source of truth) — before transaction
+  await createUser({
+    uid: app.applicantUid,
+    email: (app as any).email || formData.email,
+    name: formData.fullName,
+    role: 'student',
+    createdAt: nowIso,
+  });
 
   // Reusable transaction builder for activation.
   const attemptActivationWithBus = async (targetBusId: string, targetRouteId: string, isAlternative: boolean) => {
@@ -256,13 +266,13 @@ async function activateOne(
       paid_on: nowIso,
     };
 
-    const userDoc = {
-      createdAt: nowIso,
-      email: (app as any).email || formData.email,
-      name: formData.fullName,
-      role: 'student',
+    // Write student to PostgreSQL (canonical source of truth) — before transaction
+    await createStudent({
+      ...studentDoc,
       uid: app.applicantUid,
-    };
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    });
 
     let postCommitFullAlert: { busNumber: string; routeId: string } | null = null;
 
@@ -289,7 +299,6 @@ async function activateOne(
       }
 
       // 3. Commit
-      transaction.set(userRef, userDoc);
       transaction.set(studentRef, studentDoc);
       transaction.update(busRef, delta.updates);
       transaction.delete(appRef);
@@ -333,6 +342,14 @@ async function activateOne(
         },
       });
     });
+
+    // Delete application from PG after successful transaction
+    try {
+      const db = getSupabaseServer();
+      await db.from('applications').delete().eq('application_id', appId);
+    } catch (pgErr) {
+      console.error('[session-activation] PG application delete failed:', pgErr);
+    }
 
     return { postCommitFullAlert };
   };
@@ -381,41 +398,44 @@ async function activateOne(
 
       // Case C: Selected Bus Full and no compatible alternatives available. Move to pending_seat_allocation.
       try {
-        await adminDb.runTransaction(async (transaction) => {
-          const fresh = await transaction.get(appRef);
-          if (!fresh.exists) throw new StateChangedError();
-          const freshState = (fresh.data() as Application).state;
-          if (freshState !== 'verified_upcoming') {
-            throw new StateChangedError();
-          }
-          // Preserve the original requested details in formData: DO NOT overwrite requestedBusId/requestedRouteId/stopId/shift.
-          transaction.update(appRef, {
-            state: 'pending_seat_allocation',
-            pendingSeatAllocationAt: nowIso,
-            updatedAt: nowIso,
+        // Update application state in PG
+        const db = getSupabaseServer();
+        const { error: pgErr } = await db
+          .from('applications')
+          .update({ state: 'pending_seat_allocation', updated_at: nowIso })
+          .eq('application_id', appId)
+          .eq('state', 'verified_upcoming');
+
+        if (pgErr) throw new StateChangedError();
+
+        // Audit log (best-effort, in Firestore for admin visibility)
+        try {
+          await adminDb.runTransaction(async (transaction) => {
+            createAuditLogInTransaction(transaction, {
+              action: 'application_pending_seat_allocation',
+              performedBy: SYSTEM_ACTOR.id,
+              performedByName: SYSTEM_ACTOR.name,
+              performedByRole: SYSTEM_ACTOR.role,
+              targetId: app.applicantUid,
+              targetType: 'application',
+              targetName: formData.fullName || '',
+              category: 'applications',
+              summary: 'Application pending seat allocation: ' + (formData.fullName || ''),
+              severity: 'high',
+              metadata: {
+                before: { applicationId: appId, state: 'verified_upcoming' },
+                after: { applicationId: appId, state: 'pending_seat_allocation' },
+                busId: requestedBusId,
+                shift,
+                trigger,
+                reason: 'session_activation_capacity_full',
+                correlationId: appId,
+              },
+            });
           });
-          createAuditLogInTransaction(transaction, {
-            action: 'application_pending_seat_allocation',
-            performedBy: SYSTEM_ACTOR.id,
-            performedByName: SYSTEM_ACTOR.name,
-            performedByRole: SYSTEM_ACTOR.role,
-            targetId: app.applicantUid,
-            targetType: 'application',
-            targetName: formData.fullName || '',
-            category: 'applications',
-            summary: 'Application pending seat allocation: ' + (formData.fullName || ''),
-            severity: 'high',
-            metadata: {
-              before: { applicationId: appId, state: 'verified_upcoming' },
-              after: { applicationId: appId, state: 'pending_seat_allocation' },
-              busId: requestedBusId,
-              shift,
-              trigger,
-              reason: 'session_activation_capacity_full',
-              correlationId: appId,
-            },
-          });
-        });
+        } catch {
+          // Audit is best-effort
+        }
 
         await notifyPendingSeatAllocation(appId, app, formData).catch((e) =>
           console.error('[session-activation] pending-seat notify failed:', e?.message || e)
@@ -431,62 +451,24 @@ async function activateOne(
 }
 
 async function notifyStudentActivated(app: Application, formData: any, validUntil: string): Promise<void> {
-  const notifRef = adminDb.collection('notifications').doc();
-  await notifRef.set({
-    title: 'Your transport service is now active',
-    content: `Your bus service for the ${(app as any).targetSession?.startYear}-${(app as any).targetSession?.endYear} session is now active. Valid until ${new Date(validUntil).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}.`,
-    type: 'info',
-    sender: {
-      userId: 'system',
-      userName: 'System',
-      userRole: 'admin'
-    },
-    target: {
-      type: 'specific_users',
-      specificUserIds: [app.applicantUid]
-    },
-    recipientIds: [app.applicantUid],
-    autoInjectedRecipientIds: [],
-    readByUserIds: [],
-    isEdited: false,
-    isDeletedGlobally: false,
-    hiddenForUserIds: [],
-    createdAt: new Date().toISOString(),
-    metadata: {
-      profile: '/student/profile'
-    }
-  });
+  await Notification.createNotification(
+    { userId: 'system', userName: 'System', userRole: 'admin' },
+    { type: 'specific_users', specificUserIds: [app.applicantUid] },
+    `Your bus service for the ${(app as any).targetSession?.startYear}-${(app as any).targetSession?.endYear} session is now active. Valid until ${new Date(validUntil).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}.`,
+    'Your transport service is now active',
+    { profile: '/student/profile' }
+  );
 }
 
 async function notifyPendingSeatAllocation(appId: string, app: Application, formData: any): Promise<void> {
-  const nowIso = new Date().toISOString();
-  
   // Notify student
-  const studentNotifRef = adminDb.collection('notifications').doc();
-  await studentNotifRef.set({
-    title: 'Awaiting seat assignment',
-    content: 'Your application has been approved and payment is verified, but all seats are currently occupied. Your application is in the Seat Allocation Queue and you will be notified as soon as a seat becomes available.',
-    type: 'info',
-    sender: {
-      userId: 'system',
-      userName: 'System',
-      userRole: 'admin'
-    },
-    target: {
-      type: 'specific_users',
-      specificUserIds: [app.applicantUid]
-    },
-    recipientIds: [app.applicantUid],
-    autoInjectedRecipientIds: [],
-    readByUserIds: [],
-    isEdited: false,
-    isDeletedGlobally: false,
-    hiddenForUserIds: [],
-    createdAt: nowIso,
-    metadata: {
-      statusPage: `/apply/status/${appId}`
-    }
-  });
+  await Notification.createNotification(
+    { userId: 'system', userName: 'System', userRole: 'admin' },
+    { type: 'specific_users', specificUserIds: [app.applicantUid] },
+    'Your application has been approved and payment is verified, but all seats are currently occupied. Your application is in the Seat Allocation Queue and you will be notified as soon as a seat becomes available.',
+    'Awaiting seat assignment',
+    { statusPage: `/apply/status/${appId}` }
+  );
 
   // Notify admins and moderators
   const [adminsSnap, modsSnap] = await Promise.all([
@@ -499,38 +481,14 @@ async function notifyPendingSeatAllocation(appId: string, app: Application, form
   ];
   if (recipients.length === 0) return;
 
-  for (let i = 0; i < recipients.length; i += 490) {
-    const chunk = recipients.slice(i, i + 490);
-    const batch = adminDb.batch();
-    for (const staffId of chunk) {
-      const ref = adminDb.collection('notifications').doc();
-      batch.set(ref, {
-        title: 'Verified application needs manual seat allocation',
-        content: `${formData.fullName} (${formData.enrollmentId}) has a verified application and completed payment but no seat is available. Please assign a seat or wait for one to free up.`,
-        type: 'info',
-        sender: {
-          userId: 'system',
-          userName: 'System',
-          userRole: 'admin'
-        },
-        target: {
-          type: 'specific_users',
-          specificUserIds: [staffId]
-        },
-        recipientIds: [staffId],
-        autoInjectedRecipientIds: [],
-        readByUserIds: [],
-        isEdited: false,
-        isDeletedGlobally: false,
-        hiddenForUserIds: [],
-        createdAt: nowIso,
-        metadata: {
-          applicationId: appId,
-          reviewPage: `/admin/applications/${appId}`
-        }
-      });
-    }
-    await batch.commit();
+  for (const staffId of recipients) {
+    await Notification.createNotification(
+      { userId: 'system', userName: 'System', userRole: 'admin' },
+      { type: 'specific_users', specificUserIds: [staffId] },
+      `${formData.fullName} (${formData.enrollmentId}) has a verified application and completed payment but no seat is available. Please assign a seat or wait for one to free up.`,
+      'Verified application needs manual seat allocation',
+      { applicationId: appId, reviewPage: `/admin/applications/${appId}` }
+    ).catch(() => {});
   }
 }
 
@@ -564,14 +522,17 @@ export async function activateSingleApplication(
     errors: [],
     trigger,
   };
-  const snap = await adminDb.collection(APPLICATIONS_COLLECTION).doc(applicationId).get();
-  if (!snap.exists) {
+
+  // Read application from PG
+  const { getById } = await import('@/domains/application');
+  const app = await getById(applicationId);
+  if (!app) {
     summary.failed = 1;
     summary.errors.push({ applicationId, error: 'Application not found' });
     summary.completedAt = new Date().toISOString();
     return summary;
   }
-  const state = (snap.data() as Application).state;
+  const state = app.state;
   if (state !== 'verified_upcoming' && state !== 'pending_seat_allocation') {
     summary.skipped = 1;
     summary.completedAt = new Date().toISOString();
@@ -580,7 +541,7 @@ export async function activateSingleApplication(
   summary.scanned = 1;
   summary.activationReached = true;
   try {
-    const outcome = await activateOne(snap, config, trigger);
+    const outcome = await activateOne(app, config, trigger);
     if (outcome === 'activated') summary.activated++;
     else if (outcome === 'pending') summary.pendingSeatAllocation++;
     else if (outcome === 'skipped') summary.skipped++;
@@ -656,65 +617,37 @@ export async function activateUpcomingSessionApplications(opts: {
 
   summary.activationReached = true;
 
-  // Process ONLY: status = verified_upcoming AND targetSession == current academic session
-  let lastDoc: FirebaseFirestore.QueryDocumentSnapshot | null = null;
-  let hasMore = true;
-
-  while (hasMore) {
-    let q: any = adminDb
-      .collection(APPLICATIONS_COLLECTION)
-      .where('state', '==', 'verified_upcoming')
-      .orderBy('__name__')
-      .limit(PAGE_SIZE);
-    if (lastDoc) q = q.startAfter(lastDoc);
-    const snap = await q.get();
-    if (snap.empty) break;
-    if (snap.size < PAGE_SIZE) hasMore = false;
-    lastDoc = snap.docs[snap.docs.length - 1];
-
-    for (const doc of snap.docs) {
-      const app = doc.data() as Application;
-      const targetStartYear = Number((app as any).targetSession?.startYear);
-      
-      // Process ONLY targetSession == current academic session
-      if (targetStartYear !== currentSessionStartYear) {
-        continue;
-      }
-
-      summary.scanned++;
-
-      try {
-        const outcome = await activateOne(doc, config, opts.trigger);
-        if (outcome === 'activated') summary.activated++;
-        else if (outcome === 'pending') summary.pendingSeatAllocation++;
-        else if (outcome === 'skipped') summary.skipped++;
-        else {
-          summary.failed++;
-          summary.errors.push({ applicationId: doc.id, error: outcome.failed });
-        }
-      } catch (err: any) {
-        summary.failed++;
-        summary.errors.push({ applicationId: doc.id, error: err?.message || String(err) });
-      }
-    }
-  }
-
-  // Re-query remaining verified_upcoming applications for the current session to ensure crash safety
-  const remainingSnap = await adminDb
-    .collection(APPLICATIONS_COLLECTION)
-    .where('state', '==', 'verified_upcoming')
-    .limit(100)
-    .get();
-
-  let hasRemainingForCurrentSession = false;
-  for (const doc of remainingSnap.docs) {
-    const app = doc.data() as Application;
+  // Read verified_upcoming applications from PG and filter by current session
+  const { getAllByState } = await import('@/domains/application');
+  const allUpcoming = await getAllByState('verified_upcoming');
+  const eligibleApps = allUpcoming.filter(app => {
     const targetStartYear = Number((app as any).targetSession?.startYear);
-    if (targetStartYear === currentSessionStartYear) {
-      hasRemainingForCurrentSession = true;
-      break;
+    return targetStartYear === currentSessionStartYear;
+  });
+
+  for (const app of eligibleApps) {
+    summary.scanned++;
+    try {
+      const outcome = await activateOne(app, config, opts.trigger);
+      if (outcome === 'activated') summary.activated++;
+      else if (outcome === 'pending') summary.pendingSeatAllocation++;
+      else if (outcome === 'skipped') summary.skipped++;
+      else {
+        summary.failed++;
+        summary.errors.push({ applicationId: app.applicationId, error: outcome.failed });
+      }
+    } catch (err: any) {
+      summary.failed++;
+      summary.errors.push({ applicationId: app.applicationId, error: err?.message || String(err) });
     }
   }
+
+  // Check remaining verified_upcoming applications for the current session
+  const remainingApps = await getAllByState('verified_upcoming');
+  const hasRemainingForCurrentSession = remainingApps.some(app => {
+    const targetStartYear = Number((app as any).targetSession?.startYear);
+    return targetStartYear === currentSessionStartYear;
+  });
 
   // Write activation marker only if NO eligible verified_upcoming applications remain
   if (!hasRemainingForCurrentSession) {

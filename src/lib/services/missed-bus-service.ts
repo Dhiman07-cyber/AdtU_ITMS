@@ -16,6 +16,7 @@
 import { SupabaseClient } from '@supabase/supabase-js';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import { db as adminDb } from '@/lib/firebase-admin';
+import * as routeService from '@/domains/route';
 
 // Configuration (per spec)
 const CONFIG = {
@@ -516,20 +517,16 @@ export class MissedBusService {
    */
   private async getStopLocation(routeId: string, stopId: string): Promise<{ lat: number; lng: number } | null> {
     try {
-      // Try Firestore first
-      if (adminDb) {
-        const routeDoc = await adminDb.collection('routes').doc(routeId).get();
-        if (routeDoc.exists) {
-          const routeData = routeDoc.data();
-          const stops = routeData?.stops || [];
-          const stop = stops.find((s: any) =>
-            s.stopId === stopId ||
-            s.id === stopId ||
-            s.name?.toLowerCase() === stopId.toLowerCase()
-          );
-          if (stop && stop.lat && stop.lng) {
-            return { lat: stop.lat, lng: stop.lng };
-          }
+      const route = await routeService.getById(routeId);
+      if (route) {
+        const stops = route.stops || [];
+        const stop = stops.find((s: any) =>
+          s.stopId === stopId ||
+          s.id === stopId ||
+          s.name?.toLowerCase() === stopId.toLowerCase()
+        );
+        if (stop && stop.lat && stop.lng) {
+          return { lat: stop.lat, lng: stop.lng };
         }
       }
     } catch (error) {
@@ -543,20 +540,16 @@ export class MissedBusService {
    */
   private async getStudentSequence(routeId: string, stopId: string): Promise<number | null> {
     try {
-      // Try Firestore
-      if (adminDb) {
-        const routeDoc = await adminDb.collection('routes').doc(routeId).get();
-        if (routeDoc.exists) {
-          const routeData = routeDoc.data();
-          const stops = routeData?.stops || [];
-          const stopIndex = stops.findIndex((s: any) =>
-            s.stopId === stopId ||
-            s.id === stopId ||
-            s.name?.toLowerCase() === stopId.toLowerCase()
-          );
-          if (stopIndex >= 0) {
-            return stopIndex + 1; // 1-indexed sequence
-          }
+      const route = await routeService.getById(routeId);
+      if (route) {
+        const stops = route.stops || [];
+        const stopIndex = stops.findIndex((s: any) =>
+          s.stopId === stopId ||
+          s.id === stopId ||
+          s.name?.toLowerCase() === stopId.toLowerCase()
+        );
+        if (stopIndex >= 0) {
+          return stopIndex + 1; // 1-indexed sequence
         }
       }
     } catch (error) {

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import { adminDb } from '@/lib/firebase-admin';
 import { getModeratorPermissions } from '@/lib/security/moderator-permissions';
+import { getDriverById, getUserById } from '@/domains/identity';
 
 type ScannerAuth = {
   uid: string;
@@ -66,14 +66,14 @@ export async function validateStudentScannerContext(
     );
   }
 
-  const [driverDoc, userDoc] = await Promise.all([
-    adminDb.collection('drivers').doc(auth.uid).get(),
-    adminDb.collection('users').doc(auth.uid).get(),
+  const [driverData, userData] = await Promise.all([
+    getDriverById(auth.uid),
+    getUserById(auth.uid),
   ]);
 
   const assignedIds = new Set<string>([
-    ...collectAssignedBusIds(driverDoc.exists ? driverDoc.data() : undefined),
-    ...collectAssignedBusIds(userDoc.exists ? userDoc.data() : undefined),
+    ...collectAssignedBusIds(driverData as Record<string, unknown> | undefined),
+    ...collectAssignedBusIds(userData as Record<string, unknown> | undefined),
   ]);
 
   if (assignedIds.size === 0) {

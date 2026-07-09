@@ -200,6 +200,8 @@ function LoginContent() {
                 src="/image.svg"
                 alt="Assam down town University Logo"
                 className="w-full max-w-[210px] h-auto object-contain opacity-95 mb-5 drop-shadow-sm"
+                loading="eager"
+                fetchPriority="high"
               />
               <h2 className="text-2xl font-bold text-white tracking-tight mb-2">
                 AdtU ITMS Login
@@ -262,6 +264,8 @@ function LoginContent() {
               src="/image.svg"
               alt="Assam down town University Logo"
               className="w-full max-w-[340px] h-auto object-contain opacity-95"
+              loading="eager"
+              fetchPriority="high"
             />
           </motion.div>
 

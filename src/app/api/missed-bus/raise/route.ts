@@ -11,9 +11,10 @@
  */
 
 import { NextResponse } from 'next/server';
-import { auth, db as adminDb } from '@/lib/firebase-admin';
+import { auth } from '@/lib/firebase-admin';
 import { missedBusService, MESSAGES } from '@/lib/services/missed-bus-service';
 import { requireTransportEntitlement } from '@/lib/entitlement/require-transport-entitlement';
+import { getByUid } from '@/domains/student';
 
 export async function POST(request: Request) {
     const startTime = Date.now();
@@ -40,8 +41,8 @@ export async function POST(request: Request) {
 
         // SECURITY: Verify the caller is actually a student. Without this check,
         // any authenticated user (driver, moderator) could raise missed-bus requests.
-        const studentDoc = await adminDb.collection('students').doc(studentId).get();
-        if (!studentDoc.exists) {
+        const studentCheck = await getByUid(studentId).catch(() => null);
+        if (!studentCheck) {
             return NextResponse.json(
                 { success: false, error: 'Only students can raise missed-bus requests' },
                 { status: 403 }

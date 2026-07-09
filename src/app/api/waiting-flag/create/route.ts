@@ -4,6 +4,7 @@ import { getSupabaseServer } from '@/lib/supabase-server';
 import { withSecurity } from '@/lib/security/api-security';
 import { WaitingFlagPostSchema } from '@/lib/security/validation-schemas';
 import { RateLimits } from '@/lib/security/rate-limiter';
+import { getByUid } from '@/domains/student';
 
 // Initialize Supabase client
 const supabase = getSupabaseServer();
@@ -32,17 +33,16 @@ export const POST = withSecurity(
       }
 
       // 2. Resolve student profile and verify role
-      const studentDoc = await adminDb.collection('students').doc(studentUid).get();
-      if (!studentDoc.exists) {
+      const studentData = await getByUid(studentUid) as Record<string, any> | null;
+      if (!studentData) {
         console.warn(`[${requestId}] Student profile not found for ${studentUid}`);
         return NextResponse.json({ success: false, error: 'Student profile not found', requestId }, { status: 404 });
       }
 
-      const studentData = studentDoc.data();
-      const studentName = studentData?.fullName || studentData?.name || 'Student';
+      const studentName = studentData.fullName || studentData.name || 'Student';
 
       // 3. Authorization: Is student assigned to this bus?
-      const isAssigned = studentData?.assignedBusId === busId || studentData?.busId === busId;
+      const isAssigned = studentData.assignedBusId === busId || studentData.busId === busId;
       if (!isAssigned) {
         return NextResponse.json({ success: false, error: 'Authorization failed: Student not assigned to this bus', requestId }, { status: 403 });
       }

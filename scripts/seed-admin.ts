@@ -1,3 +1,8 @@
+// ponytail: D1 Identity still persists to Firestore this phase (no Postgres
+// migration yet, per PHASE 3.2 scope) — this script is intentionally left
+// writing directly to Firestore. When D1 migrates persistence, swap the
+// admin-document write below for src/domains/identity's IdentityService
+// instead of adding a parallel write path here.
 import { initializeApp, cert, getApps } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import { getAuth } from 'firebase-admin/auth';

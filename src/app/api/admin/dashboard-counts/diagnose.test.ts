@@ -65,11 +65,11 @@ describe('Diagnose Dashboard Counts API Queries', () => {
       await runQuery("renewal_requests.where('status', '==', 'pending').count()", () => adminDb.collection('renewal_requests').where('status', '==', 'pending').count().get());
       await runQuery("feedbacks.where('createdAt', '>=', sevenDaysAgo).count()", () => adminDb.collection('feedbacks').where('createdAt', '>=', sevenDaysAgo).count().get());
       await runQuery("settings.doc('config').get()", () => adminDb.collection('settings').doc('config').get());
-      await runQuery("settings.doc('deadline').get()", () => adminDb.collection('settings').doc('deadline').get());
     }
 
     // 2. Supabase
     if (supabase) {
+      await runQuery("supabase.academic_calendar_config", () => supabase.from('academic_calendar_config').select('*').eq('is_active', true).maybeSingle());
       await runQuery("supabase.driver_status", () => supabase.from('driver_status').select('*').in('status', ['enroute', 'on_trip']));
       await runQuery("supabase.payments", () => supabase.from('payments').select('amount, method').or('status.eq.Completed,status.eq.completed'));
     }

@@ -12,6 +12,7 @@ import {
     validateStudentScannerContext,
 } from '@/lib/security/scanner-auth';
 import { getTransportEntitlement } from '@/lib/entitlement/transport-entitlement';
+import { getByUid } from '@/domains/student';
 
 function getValidUntilDate(validUntil: unknown): Date | null {
     if (!validUntil) return null;
@@ -68,15 +69,7 @@ export async function POST(request: NextRequest) {
 
         let studentData: any = null;
         try {
-            const studentDoc = await adminDb.collection('students').doc(studentUid.trim()).get();
-            if (studentDoc.exists) {
-                studentData = studentDoc.data();
-            } else {
-                const userDoc = await adminDb.collection('users').doc(studentUid.trim()).get();
-                if (userDoc.exists && userDoc.data()?.role === 'student') {
-                    studentData = userDoc.data();
-                }
-            }
+            studentData = await getByUid(studentUid.trim()) as Record<string, any> | null;
         } catch {
             return NextResponse.json({
                 status: 'invalid',

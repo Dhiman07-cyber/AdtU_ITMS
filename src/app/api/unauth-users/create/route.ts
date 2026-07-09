@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withSecurity } from '@/lib/security/api-security';
-import { adminDb } from '@/lib/firebase-admin';
+import { createUnauthUser, getUnauthUserById, getUserById } from '@/domains/identity';
 
 /**
  * Create or update an unauthenticated user entry
@@ -9,10 +9,6 @@ import { adminDb } from '@/lib/firebase-admin';
 export const POST = withSecurity(
   async (request, { auth, body, requestId }) => {
     try {
-      if (!adminDb) {
-        return NextResponse.json({ error: 'Database not available' }, { status: 500 });
-      }
-
       const uid = auth.uid;
       const email = auth.email;
 
@@ -20,25 +16,20 @@ export const POST = withSecurity(
         return NextResponse.json({ error: 'Email not found in token' }, { status: 400 });
       }
 
-      // Check if user already exists in users collection
-      const userDoc = await adminDb.collection('users').doc(uid).get();
-
-      if (userDoc.exists) {
+      const existingUser = await getUserById(uid);
+      if (existingUser) {
         return NextResponse.json({
           success: false,
-          message: 'User already exists in users collection',
+          message: 'User already exists in users table',
           hasUserDoc: true
         });
       }
 
-      // Check if user already exists in unauthUsers collection
-      const unauthUserDoc = await adminDb.collection('unauthUsers').doc(uid).get();
-
-      const now = new Date().toISOString();
-
-      if (unauthUserDoc.exists) {
-        await adminDb.collection('unauthUsers').doc(uid).update({
-          lastLoginAt: now
+      const existingPgUser = await getUnauthUserById(uid);
+      if (existingPgUser) {
+        await createUnauthUser({
+          uid,
+          lastLoginAt: new Date().toISOString(),
         });
 
         return NextResponse.json({
@@ -48,7 +39,7 @@ export const POST = withSecurity(
         });
       }
 
-      // Create new unauthUser document
+      const now = new Date().toISOString();
       const unauthUserData = {
         uid,
         email,
@@ -60,7 +51,7 @@ export const POST = withSecurity(
         needsApplication: true
       };
 
-      await adminDb.collection('unauthUsers').doc(uid).set(unauthUserData);
+      await createUnauthUser(unauthUserData);
 
       return NextResponse.json({
         success: true,

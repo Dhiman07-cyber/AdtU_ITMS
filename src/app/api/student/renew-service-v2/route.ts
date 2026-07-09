@@ -5,6 +5,7 @@ import { getCurrentBusFee } from '@/lib/bus-fee-service';
 import { withSecurity } from '@/lib/security/api-security';
 import { RenewServiceV2Schema } from '@/lib/security/validation-schemas';
 import { RateLimits } from '@/lib/security/rate-limiter';
+import { getById } from '@/domains/student';
 
 type RenewServiceBody = {
   durationYears: number;
@@ -19,14 +20,13 @@ export const POST = withSecurity<RenewServiceBody>(
     const userId = auth.uid;
     const { durationYears, paymentMode, transactionId, receiptImageUrl, paidAt } = body;
 
-    const studentDoc = await adminDb.collection('students').doc(userId).get();
-    if (!studentDoc.exists) {
+    const student = await getById(userId);
+    if (!student) {
       return NextResponse.json({ error: 'Student not found' }, { status: 404 });
     }
 
-    const studentData = studentDoc.data()!;
-    const enrollmentId = studentData.enrollmentId || '';
-    const studentName = studentData.fullName || studentData.name || auth.name || 'Student';
+    const enrollmentId = student.enrollmentId || '';
+    const studentName = student.fullName || student.name || auth.name || 'Student';
 
     const busFeeData = await getCurrentBusFee();
     const currentBusFee = Number(busFeeData.amount || 0);

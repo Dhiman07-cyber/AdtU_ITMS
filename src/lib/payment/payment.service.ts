@@ -23,6 +23,11 @@ import { createAuditLog } from '@/lib/services/audit.service';
 import { getDeadlineConfig } from '@/lib/deadline-config-service';
 import { calculateValidUntilDate } from '@/lib/utils/date-utils';
 import { fetchOrderDetails } from '@/lib/payment/razorpay.service';
+import { acquireMarker, releaseMarker } from '@/domains/payment/repositories/processed-payments.repository';
+import { getByUid as getStudentByUid, getByEnrollmentId as getStudentByEnrollmentId, applyPaymentValidity } from '@/domains/student';
+import { getById as getApplicationById } from '@/domains/application';
+import * as Notification from '@/domains/notification';
+import { getUsersByRole } from '@/domains/identity';
 import {
     PaymentDocument,
     OnlinePaymentDocument,
@@ -39,12 +44,6 @@ import {
     isOnlinePayment,
     isOfflinePayment,
 } from '@/lib/types/payment';
-
-// ============================================================================
-// CONSTANTS
-// ============================================================================
-
-const STUDENTS_COLLECTION = 'students';
 
 // ============================================================================
 // PAYMENT CREATION - NOW WRITES TO SUPABASE
@@ -157,35 +156,23 @@ export async function processCapturedPayment(paymentDetails: {
         const deadlineConfig = await getDeadlineConfig();
 
         if (isNewRegistration) {
-            let alreadyMarked = false;
-            console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] PROCESS_CAPTURED[1] marker acquired (attempt: new registration)`);
-            await adminDb.runTransaction(async (transaction: any) => {
-                const processedPaymentRef = adminDb.collection('processed_payments').doc(paymentId);
-                const processedPaymentDoc = await transaction.get(processedPaymentRef);
-                if (processedPaymentDoc.exists) {
-                    alreadyMarked = true;
-                    return;
-                }
-                transaction.set(processedPaymentRef, {
-                    paymentId,
-                    orderId,
-                    processedAt: FieldValue.serverTimestamp(),
-                    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(), // Expire in 7 days
-                    amount,
-                    enrollmentId: enrollmentId || '',
-                    userId: userId || '',
-                    source
-                });
+            // Atomic idempotency check via PG marker
+            const acquired = await acquireMarker(paymentId, {
+                orderId,
+                amount,
+                enrollmentId: enrollmentId || undefined,
+                userId: userId || undefined,
+                source,
             });
 
-            if (alreadyMarked) {
+            if (!acquired) {
                 const supabaseExists = await isPaymentProcessed(paymentId);
                 if (!supabaseExists) {
-                    await adminDb.collection('processed_payments').doc(paymentId).delete().catch(() => {});
-                    console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] processCapturedPayment (new registration): alreadyMarked true but Supabase ledger missing. Stale marker cleaned.`);
+                    await releaseMarker(paymentId).catch(() => {});
+                    console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] processCapturedPayment (new registration): marker existed but Supabase ledger missing. Stale marker cleaned.`);
                     return { status: 'error', error: 'Stale marker cleaned' };
                 }
-                console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] processCapturedPayment (new registration): alreadyMarked true, returning already_processed.`);
+                console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] processCapturedPayment (new registration): marker existed, returning already_processed.`);
                 return { status: 'already_processed' };
             }
 
@@ -196,10 +183,9 @@ export async function processCapturedPayment(paymentDetails: {
             let sessionEndYear: number | undefined;
             let targetValidUntil: Date;
             if (userId) {
-                const appSnap = await adminDb.collection('applications').doc(userId).get();
-                if (appSnap.exists) {
-                    const appDoc: any = appSnap.data() || {};
-                    const ts = appDoc.targetSession;
+                const app = await getApplicationById(userId);
+                if (app) {
+                    const ts = (app as any).targetSession;
                     if (ts && Number(ts.startYear) > 0 && Number(ts.endYear) > 0) {
                         sessionStartYear = Number(ts.startYear);
                         sessionEndYear = Number(ts.endYear);
@@ -255,132 +241,89 @@ export async function processCapturedPayment(paymentDetails: {
             return { status: 'success' };
         } else {
             // Renewal Flow
-            let studentRef: any;
-            let studentDocId: string;
-
-            if (userId) {
-                studentRef = adminDb.collection('students').doc(userId);
-                studentDocId = userId;
-            } else {
-                const studentsQuery = await adminDb.collection('students')
-                    .where('enrollmentId', '==', enrollmentId)
-                    .limit(1)
-                    .get();
-
-                if (studentsQuery.empty) {
-                    return { status: 'error', error: 'Student profile not found' };
-                }
-
-                const studentDoc = studentsQuery.docs[0];
-                studentRef = studentDoc.ref;
-                studentDocId = studentDoc.id;
-            }
-
-            let newValidUntil: Date = new Date();
-            let newSessionStartYear: number = new Date().getFullYear();
-            let newSessionEndYear: number = new Date().getFullYear();
-            let totalDurationYears: number = 0;
-            let actualStudentName: string = studentName;
-            let studentEmail: string = '';
-            let studentPhone: string = '';
+            let studentUid = userId || '';
+            let actualStudentName = studentName;
+            let studentEmail = '';
+            let studentPhone = '';
             let transactionRecord: any = null;
 
-            console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] PROCESS_CAPTURED[1] marker acquired (attempt: renewal)`);
-            await adminDb.runTransaction(async (transaction: any) => {
-                const processedPaymentRef = adminDb.collection('processed_payments').doc(paymentId);
-                const processedPaymentDoc = await transaction.get(processedPaymentRef);
+            // Resolve student from domain API (needed for renewal validity calc)
+            let studentData: any = null;
+            if (studentUid) {
+                const student = await getStudentByUid(studentUid);
+                if (student) studentData = student as any;
+            }
 
-                if (processedPaymentDoc.exists) {
-                    throw new Error('ALREADY_PROCESSED');
+            if (studentData) {
+                actualStudentName = studentData.fullName || studentName;
+                studentEmail = studentData.email || '';
+                studentPhone = studentData.phone || studentData.phoneNumber || '';
+            }
+
+            const existingSessionStartYear = studentData?.sessionStartYear || new Date().getFullYear();
+            const existingSessionEndYear = studentData?.sessionEndYear || new Date().getFullYear();
+            const existingDurationYears = studentData?.durationYears || 0;
+            const existingValidUntil = studentData?.validUntil;
+            const previousValidUntilISO = existingValidUntil
+                ? (typeof existingValidUntil === 'string' ? existingValidUntil : new Date(existingValidUntil).toISOString())
+                : null;
+
+            let baseYear = new Date().getUTCFullYear();
+            const now = new Date();
+
+            if (existingValidUntil) {
+                const existingDate = new Date(existingValidUntil);
+                if (existingDate > now) {
+                    baseYear = existingSessionEndYear;
                 }
+            }
 
-                // Mark as processed
-                transaction.set(processedPaymentRef, {
-                    paymentId,
-                    orderId,
-                    processedAt: FieldValue.serverTimestamp(),
-                    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(), // Expire in 7 days
-                    amount,
-                    enrollmentId: enrollmentId || '',
-                    userId: studentDocId,
-                    source
-                });
+            let newValidUntil = calculateValidUntilDate(baseYear, durationYears, deadlineConfig);
+            let newSessionStartYear = existingSessionStartYear;
+            let newSessionEndYear = baseYear + durationYears;
+            let totalDurationYears = existingDurationYears + durationYears;
 
-                const studentDoc = await transaction.get(studentRef);
-                if (!studentDoc.exists) {
-                    throw new Error('Student document not found');
-                }
+            transactionRecord = {
+                studentId: enrollmentId || studentData?.enrollmentId || '',
+                studentName: actualStudentName,
+                amount,
+                paymentMethod: 'online' as const,
+                paymentId,
+                timestamp: new Date().toISOString(),
+                durationYears,
+                validUntil: newValidUntil.toISOString(),
+                previousValidUntil: previousValidUntilISO,
+                newValidUntil: newValidUntil.toISOString(),
+                previousSessionEndYear: existingSessionEndYear,
+                newSessionEndYear,
+                previousDurationYears: existingDurationYears,
+                newDurationYears: totalDurationYears,
+                userId: studentUid,
+                status: 'completed' as const
+            };
 
-                const studentData = studentDoc.data();
-                actualStudentName = studentData?.fullName || studentName;
-                studentEmail = studentData?.email || '';
-                studentPhone = studentData?.phone || studentData?.phoneNumber || '';
-
-                const existingSessionStartYear = studentData?.sessionStartYear || new Date().getFullYear();
-                const existingSessionEndYear = studentData?.sessionEndYear || new Date().getFullYear();
-                const existingDurationYears = studentData?.durationYears || 0;
-                const existingValidUntil = studentData?.validUntil;
-                const previousValidUntilISO = existingValidUntil
-                    ? (existingValidUntil.toDate ? existingValidUntil.toDate().toISOString() : new Date(existingValidUntil).toISOString())
-                    : null;
-
-                let baseYear = new Date().getUTCFullYear();
-                const now = new Date();
-
-                if (existingValidUntil) {
-                    const existingDate = existingValidUntil.toDate ? existingValidUntil.toDate() : new Date(existingValidUntil);
-                    if (existingDate > now) {
-                        baseYear = existingSessionEndYear;
-                    }
-                }
-
-                newValidUntil = calculateValidUntilDate(baseYear, durationYears, deadlineConfig);
-                newSessionStartYear = existingSessionStartYear;
-                newSessionEndYear = baseYear + durationYears;
-                totalDurationYears = existingDurationYears + durationYears;
-
-                transactionRecord = {
-                    studentId: enrollmentId || studentData?.enrollmentId || '',
-                    studentName: actualStudentName,
-                    amount,
-                    paymentMethod: 'online' as const,
-                    paymentId,
-                    timestamp: new Date().toISOString(),
-                    durationYears,
-                    validUntil: newValidUntil.toISOString(),
-                    previousValidUntil: previousValidUntilISO,
-                    newValidUntil: newValidUntil.toISOString(),
-                    previousSessionEndYear: existingSessionEndYear,
-                    newSessionEndYear,
-                    previousDurationYears: existingDurationYears,
-                    newDurationYears: totalDurationYears,
-                    userId: studentDocId,
-                    status: 'completed' as const
-                };
-            }).catch((err: any) => {
-                if (err.message === 'ALREADY_PROCESSED') {
-                    transactionRecord = 'ALREADY_PROCESSED';
-                } else {
-                    throw err;
-                }
+            // Atomic idempotency check via PG marker
+            const acquired = await acquireMarker(paymentId, {
+                orderId,
+                amount,
+                enrollmentId: enrollmentId || undefined,
+                userId: studentUid || undefined,
+                source,
             });
-            console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] processCapturedPayment (renewal): transaction finished. transactionRecord status:`, typeof transactionRecord === 'string' ? transactionRecord : 'success');
 
-            if (transactionRecord === 'ALREADY_PROCESSED') {
+            if (!acquired) {
                 const supabaseExists = await isPaymentProcessed(paymentId);
                 if (!supabaseExists) {
-                    await adminDb.collection('processed_payments').doc(paymentId).delete().catch(() => {});
-                    console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] processCapturedPayment (renewal): transactionRecord ALREADY_PROCESSED but Supabase ledger missing. Stale marker cleaned.`);
+                    await releaseMarker(paymentId).catch(() => {});
+                    console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] processCapturedPayment (renewal): marker existed but Supabase ledger missing. Stale marker cleaned.`);
                     return { status: 'error', error: 'Stale marker cleaned' };
                 }
                 console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] processCapturedPayment (renewal): already processed, returning already_processed.`);
                 return { status: 'already_processed' };
             }
 
-            if (transactionRecord) {
-                markerAcquired = true;
-                console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] PROCESS_CAPTURED[1] marker acquired`);
-            }
+            markerAcquired = true;
+            console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] PROCESS_CAPTURED[1] marker acquired`);
 
             // Save Completed online payment record to Supabase (Immutable Ledger)
             console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] PROCESS_CAPTURED[2] Supabase insert`);
@@ -423,7 +366,7 @@ export async function processCapturedPayment(paymentDetails: {
             const existingRequest = await renewalRequestRef.get();
             if (!existingRequest.exists) {
                 await renewalRequestRef.set({
-                    studentId: studentDocId,
+                    studentId: studentUid,
                     enrollmentId: enrollmentId || transactionRecord?.studentId || '',
                     studentName: actualStudentName,
                     studentEmail,
@@ -442,38 +385,30 @@ export async function processCapturedPayment(paymentDetails: {
 
                 // Send notification to staff
                 try {
-                    const [adminsSnapshot, moderatorsSnapshot] = await Promise.all([
-                        adminDb.collection('admins').get(),
-                        adminDb.collection('moderators').get(),
+                    const [admins, moderators] = await Promise.all([
+                        getUsersByRole('admin'),
+                        getUsersByRole('moderator'),
                     ]);
                     const allStaffIds = [
-                        ...adminsSnapshot.docs.map((d: any) => d.id),
-                        ...moderatorsSnapshot.docs.map((d: any) => d.id),
-                    ];
+                        ...admins.map((u: any) => u.id || u.uid),
+                        ...moderators.map((u: any) => u.id || u.uid),
+                    ].filter(Boolean);
                     if (allStaffIds.length > 0) {
-                        const existingNotif = await adminDb.collection('notifications')
-                            .where('sender.userId', '==', studentDocId)
-                            .where('title', '==', 'Online Renewal Awaiting Approval')
-                            .limit(1)
-                            .get();
-                        if (existingNotif.empty) {
-                            const expiryDate = new Date();
-                            expiryDate.setHours(23, 59, 59, 999);
-                            await adminDb.collection('notifications').add({
-                                title: 'Online Renewal Awaiting Approval',
-                                content: `${actualStudentName} (${enrollmentId || ''}) paid online for a ${durationYears} year(s) renewal and is awaiting approval.`,
-                                sender: { userId: studentDocId, userName: actualStudentName, userRole: 'student', enrollmentId: enrollmentId || '' },
-                                target: { type: 'specific_users', specificUserIds: allStaffIds },
-                                recipientIds: allStaffIds,
-                                autoInjectedRecipientIds: [],
-                                readByUserIds: [],
-                                isEdited: false,
-                                isDeletedGlobally: false,
-                                createdAt: FieldValue.serverTimestamp(),
-                                expiresAt: expiryDate.toISOString(),
-                                metadata: { paymentId },
-                            });
-                        }
+                        await Notification.createNotification(
+                            {
+                                userId: studentUid || enrollmentId || '',
+                                userName: actualStudentName,
+                                userRole: 'student',
+                                employeeId: enrollmentId || '',
+                            },
+                            {
+                                type: 'specific_users',
+                                specificUserIds: allStaffIds,
+                            },
+                            `${actualStudentName} (${enrollmentId || ''}) paid online for a ${durationYears} year(s) renewal and is awaiting approval.`,
+                            'Online Renewal Awaiting Approval',
+                            { paymentId },
+                        );
                     }
                 } catch (notifyErr) {
                     console.error('[processCapturedPayment] Failed to notify staff of online renewal request:', notifyErr);
@@ -487,7 +422,7 @@ export async function processCapturedPayment(paymentDetails: {
         if (markerAcquired) {
             console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] PROCESS_CAPTURED[2] Supabase insert FAILED`);
             console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] Exception caught in processCapturedPayment:`, err.message || err);
-            await adminDb.collection('processed_payments').doc(paymentId).delete().catch(() => {});
+            await releaseMarker(paymentId).catch(() => {});
             console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] marker cleaned`);
         }
         if (err.message === 'ALREADY_PROCESSED') {
@@ -605,37 +540,10 @@ export async function createOfflinePaymentAtApproval(
 async function applyPaymentValidityToStudent(payment: PaymentRecord): Promise<void> {
     if (!payment.student_uid) return;
 
-    const studentRef = adminDb.collection(STUDENTS_COLLECTION).doc(payment.student_uid);
-    const newValidUntil = payment.valid_until ? new Date(payment.valid_until) : null;
-
-    // Atomic read-modify-write: the read + max-merge + update are inside a single
-    // Firestore transaction. Without this, a concurrent renewal or payment approval
-    // that writes validUntil between our read and our write would be silently lost
-    // (lost update / write skew).
-    await adminDb.runTransaction(async (transaction) => {
-        const studentSnap = await transaction.get(studentRef);
-        if (!studentSnap.exists) return;
-        const studentData = studentSnap.data() || {};
-        const existingValidUntil = studentData.validUntil
-            ? (studentData.validUntil.toDate ? studentData.validUntil.toDate() : new Date(studentData.validUntil))
-            : null;
-
-        // Invariant 1: older payment cannot overwrite newer validity; no workflow shortens entitlement
-        const finalValidUntil = (existingValidUntil && newValidUntil && existingValidUntil > newValidUntil)
-            ? existingValidUntil
-            : newValidUntil;
-        const finalSessionEndYear = (studentData.sessionEndYear && payment.session_end_year && studentData.sessionEndYear > payment.session_end_year)
-            ? studentData.sessionEndYear
-            : payment.session_end_year;
-
-        transaction.update(studentRef, {
-            validUntil: finalValidUntil,
-            sessionStartYear: payment.session_start_year || studentData.sessionStartYear,
-            sessionEndYear: finalSessionEndYear,
-            status: 'active',
-            lastRenewalDate: FieldValue.serverTimestamp(),
-            updatedAt: FieldValue.serverTimestamp(),
-        });
+    await applyPaymentValidity(payment.student_uid, {
+        valid_until: payment.valid_until,
+        session_start_year: payment.session_start_year,
+        session_end_year: payment.session_end_year,
     });
 }
 
@@ -915,16 +823,13 @@ export async function getPaymentsByStudent(studentUid: string, studentId?: strin
         }
     }
 
-    // 2. Fetch by Enrollment ID if available (resolved via Firestore UID)
+    // 2. Fetch by Enrollment ID if available (resolved via Student domain API)
     if (studentId) {
         let resolvedUid: string | null = null;
         try {
-            const studentQuery = await adminDb.collection('students')
-                .where('enrollmentId', '==', studentId)
-                .limit(1)
-                .get();
-            if (!studentQuery.empty) {
-                resolvedUid = studentQuery.docs[0].id;
+            const student = await getStudentByEnrollmentId(studentId);
+            if (student) {
+                resolvedUid = (student as any).uid || (student as any).id;
             }
         } catch (e) {
             console.error('Error resolving studentId in getPaymentsByStudent:', e);
@@ -981,16 +886,13 @@ export async function getAllPayments(
             }
         }
 
-        // 2. Fetch by Enrollment ID if available (resolved via Firestore UID)
+        // 2. Fetch by Enrollment ID if available (resolved via Student domain API)
         if (filters.studentId) {
             let resolvedUid: string | null = null;
             try {
-                const studentQuery = await adminDb.collection('students')
-                    .where('enrollmentId', '==', filters.studentId)
-                    .limit(1)
-                    .get();
-                if (!studentQuery.empty) {
-                    resolvedUid = studentQuery.docs[0].id;
+                const student = await getStudentByEnrollmentId(filters.studentId);
+                if (student) {
+                    resolvedUid = (student as any).uid || (student as any).id;
                 }
             } catch (e) {
                 console.error('Error resolving studentId in getAllPayments:', e);

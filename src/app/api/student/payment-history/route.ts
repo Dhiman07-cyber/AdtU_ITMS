@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server';
-import { db as adminDb } from '@/lib/firebase-admin';
 import { paymentsSupabaseService, PaymentRecord } from '@/lib/services/payments-supabase';
 import { withSecurity } from '@/lib/security/api-security';
 import { PaymentHistoryQuerySchema } from '@/lib/security/validation-schemas';
 import { RateLimits } from '@/lib/security/rate-limiter';
+import { getByUid } from '@/domains/student';
 
 /**
  * GET /api/student/payment-history
@@ -67,15 +67,14 @@ export const GET = withSecurity(
             currentValidity = sorted[0].valid_until || null;
         }
 
-        // 6. Get student basic info from Firestore
+        // 6. Get student basic info from PostgreSQL
         let studentName = 'Unknown';
         let studentId = null;
         try {
-            const studentDoc = await adminDb.collection('students').doc(targetStudentUid).get();
-            if (studentDoc.exists) {
-                const studentData = studentDoc.data();
-                studentName = studentData?.name || studentData?.fullName || 'Unknown';
-                studentId = studentData?.enrollmentId || studentData?.id || null;
+            const studentData = await getByUid(targetStudentUid) as Record<string, any> | null;
+            if (studentData) {
+                studentName = studentData.name || studentData.fullName || 'Unknown';
+                studentId = studentData.enrollmentId || studentData.id || null;
             }
         } catch (err) {
             console.warn('Could not fetch student info:', err);

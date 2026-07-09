@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { verifyToken } from '@/lib/firebase-admin';
-import { adminDb } from '@/lib/firebase-admin';
+import { verifyToken, adminDb } from '@/lib/firebase-admin';
 import { getAllPayments, getPaymentsByStudent } from '@/lib/payment/payment.service';
-import { Timestamp } from 'firebase-admin/firestore';
+import { getByUid as getStudentByUid } from '@/domains/student';
+import { getUserById, getUserByEmail } from '@/domains/identity';
 
 export async function GET(request: NextRequest) {
   try {
@@ -14,13 +14,13 @@ export async function GET(request: NextRequest) {
     const decodedToken = await verifyToken(token);
     const userId = decodedToken.uid;
 
-    // Get user data to determine role
-    const userDoc = await adminDb.collection('users').doc(userId).get();
-    const userData = userDoc.data();
-
-    if (!userData) {
+    // Get user data via Identity domain API
+    const user = await getUserById(userId);
+    if (!user) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
+
+    const userData = user as any;
 
     const { searchParams } = new URL(request.url);
     const studentId = searchParams.get('studentId');
@@ -46,20 +46,17 @@ export async function GET(request: NextRequest) {
         if (userCache.has(cacheKey)) return userCache.get(cacheKey)!;
 
         try {
-          let userDoc;
+          let resolvedUser = null;
           if (userId) {
-            const docSnap = await adminDb.collection('users').doc(userId).get();
-            if (docSnap.exists) userDoc = docSnap;
+            resolvedUser = await getUserById(userId);
           }
 
-          if (!userDoc) {
-            const q = await adminDb.collection('users').where('email', '==', emailOrName).limit(1).get();
-            if (!q.empty) userDoc = q.docs[0];
+          if (!resolvedUser && emailOrName.includes('@')) {
+            resolvedUser = await getUserByEmail(emailOrName);
           }
 
-          if (userDoc?.exists) {
-            const data = userDoc.data();
-            const resolvedName = data?.fullName || data?.name || emailOrName;
+          if (resolvedUser) {
+            const resolvedName = (resolvedUser as any).fullName || (resolvedUser as any).name || emailOrName;
             userCache.set(cacheKey, resolvedName);
             return resolvedName;
           }
@@ -123,15 +120,14 @@ export async function GET(request: NextRequest) {
 
     // For students, they can only view their own transactions
     if (userData.role === 'student') {
-      // Try to get enrollment ID for better payment lookup
+      // Get enrollment ID via Student domain API
       let enrollmentId = userData.enrollmentId;
 
-      // If not in users doc, check students doc
       if (!enrollmentId) {
         try {
-          const studentDoc = await adminDb.collection('students').doc(userId).get();
-          if (studentDoc.exists) {
-            enrollmentId = studentDoc.data()?.enrollmentId;
+          const student = await getStudentByUid(userId);
+          if (student) {
+            enrollmentId = (student as any).enrollmentId;
           }
         } catch (e) {
           console.warn('Failed to fetch student profile for enrollment ID', e);
@@ -140,7 +136,7 @@ export async function GET(request: NextRequest) {
 
       const payments = await getPaymentsByStudent(userId, enrollmentId);
 
-      // Also fetch pending renewal requests to show in history
+      // Also fetch pending renewal requests to show in history (EXCLUDED: renewal_requests is a separate domain)
       const renewalRequestsSnapshot = await adminDb.collection('renewal_requests')
         .where('studentId', '==', userId)
         .where('status', '==', 'pending')

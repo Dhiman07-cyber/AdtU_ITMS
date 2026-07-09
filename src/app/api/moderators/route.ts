@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/firebase-admin';
 import { verifyApiAuth } from '@/lib/security/api-auth';
 import { applyRateLimit, createRateLimitId, RateLimits } from '@/lib/security/rate-limiter';
 import { handleApiError } from '@/lib/security/safe-error';
+import { getModeratorsByStatus } from '@/domains/identity';
 
-// Define types for our data
 interface Moderator {
   id: string;
   name: string;
@@ -24,42 +23,31 @@ interface Moderator {
 
 export async function GET(request: NextRequest) {
   try {
-    // SECURITY: Only admin can list all moderators
     const auth = await verifyApiAuth(request, ['admin']);
     if (!auth.authenticated) return auth.response;
 
-    // Rate limit
     const rl = await applyRateLimit(createRateLimitId(auth.uid, 'moderators-list'), RateLimits.ADMIN);
     if (!rl.allowed) {
       return NextResponse.json({ error: 'Too many requests' }, { status: 429, headers: rl.headers });
     }
 
-    if (!db) {
-      return NextResponse.json({ error: 'Database unavailable' }, { status: 503 });
-    }
+    const moderatorRows = await getModeratorsByStatus('active');
 
-    const moderatorsRef = db.collection('moderators');
-    const querySnapshot = await moderatorsRef.get();
-
-    const moderators: Moderator[] = [];
-    querySnapshot.forEach((doc: any) => {
-      const data = doc.data();
-      moderators.push({
-        id: doc.id,
-        name: data.fullName || data.name || '',
-        email: data.email || '',
-        phone: data.phone || '',
-        alternatePhone: data.alternatePhone || '',
-        faculty: data.faculty || '',
-        assignedFaculty: data.assignedFaculty || data.faculty || '',
-        joinDate: data.joinDate || data.joiningDate || '',
-        joiningDate: data.joiningDate || data.joinDate || '',
-        profilePhotoUrl: data.profilePhotoUrl || '',
-        dob: data.dob || '',
-        aadharNumber: data.aadharNumber || '',
-        employeeId: data.employeeId || '',
-      });
-    });
+    const moderators: Moderator[] = moderatorRows.map((row: any) => ({
+      id: row.uid,
+      name: row.fullName || row.name || '',
+      email: row.email || '',
+      phone: row.phone || '',
+      alternatePhone: row.alternatePhone || '',
+      faculty: row.faculty || '',
+      assignedFaculty: row.assignedFaculty || row.faculty || '',
+      joinDate: row.joinDate || row.joiningDate || '',
+      joiningDate: row.joiningDate || row.joinDate || '',
+      profilePhotoUrl: row.profilePhotoUrl || '',
+      dob: row.dob || '',
+      aadharNumber: row.aadharNumber || '',
+      employeeId: row.employeeId || '',
+    }));
 
     return NextResponse.json(moderators, { headers: rl.headers });
   } catch (error) {

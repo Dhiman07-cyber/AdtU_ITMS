@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import QRCode from 'qrcode';
-import { adminDb } from '@/lib/firebase-admin';
 import { verifyApiAuth } from '@/lib/security/api-auth';
 import { getModeratorPermissions } from '@/lib/security/moderator-permissions';
 import { generateSecureQRData, buildDocumentPayloadFromPayment } from '@/lib/security/document-crypto.service';
@@ -8,6 +7,8 @@ import { paymentsSupabaseService, type PaymentRecord } from '@/lib/services/paym
 import { getOrCreateReceiptSignature } from '@/lib/services/receipt.service';
 import { renderReceiptPdf } from '@/lib/services/receipt-pdf';
 import { checkRateLimit, createRateLimitId } from '@/lib/security/rate-limiter';
+import { getByUid as getStudentByUid } from '@/domains/student';
+import { getUserById } from '@/domains/identity';
 
 export const runtime = 'nodejs';
 export const maxDuration = 30;
@@ -58,14 +59,14 @@ async function canModeratorDownloadReceipt(uid: string): Promise<boolean> {
 }
 
 async function getStudentEnrollment(uid: string): Promise<string> {
-  const [studentDoc, userDoc] = await Promise.all([
-    adminDb.collection('students').doc(uid).get(),
-    adminDb.collection('users').doc(uid).get(),
+  const [student, user] = await Promise.all([
+    getStudentByUid(uid),
+    getUserById(uid),
   ]);
 
   return (
-    studentDoc.data()?.enrollmentId
-    || userDoc.data()?.enrollmentId
+    (student as any)?.enrollmentId
+    || (user as any)?.enrollmentId
     || ''
   );
 }

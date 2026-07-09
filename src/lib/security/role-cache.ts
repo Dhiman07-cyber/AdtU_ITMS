@@ -1,11 +1,15 @@
 /**
  * Canonical Role Cache for ADTU Bus Services
- * 
+ *
  * Single source of truth for caching user role lookups.
  * Used by both verifyApiAuth and withSecurity to avoid duplicate caches.
+ *
+ * Migration status: SLICE 1 (users) — PostgreSQL.
+ * Role resolution reads from PostgreSQL users table only.
+ * No Firestore fallback. No dual-read. One runtime owner.
  */
 
-import { adminDb } from '@/lib/firebase-admin';
+import { getUserById } from '@/domains/identity';
 
 // ============================================================================
 // CONFIGURATION
@@ -59,8 +63,9 @@ export function getCachedRole(uid: string): { role: string; name: string; employ
 }
 
 /**
- * Resolve user role from Firestore (with cache).
- * Checks users collection first, then parallel fallback across role-specific collections.
+ * Resolve user role from PostgreSQL (with cache).
+ * Single source of truth: PostgreSQL users table.
+ * No Firestore fallback. No dual-read.
  */
 export async function resolveUserRole(uid: string): Promise<{ role: string; name: string; employeeId: string }> {
     // Check cache first
@@ -69,62 +74,25 @@ export async function resolveUserRole(uid: string): Promise<{ role: string; name
         return cached;
     }
 
-    if (!adminDb) {
-        return { role: '', name: '', employeeId: '' };
+    // Read from PostgreSQL users table
+    try {
+        const pgUser = await getUserById(uid);
+
+        if (pgUser) {
+            const result = {
+                role: pgUser.role || 'student',
+                name: pgUser.name || '',
+                employeeId: '',  // users table has no employeeId; role-specific profiles own this
+            };
+            setCachedRole(uid, result);
+            return result;
+        }
+    } catch (err: any) {
+        console.error(`[role-cache] PostgreSQL read failed for uid ${uid}:`, err.message);
     }
 
-    // PERF: Check users collection first (fastest, most common case)
-    const userDoc = await adminDb.collection('users').doc(uid).get();
-    if (userDoc.exists) {
-        const data = userDoc.data();
-        const result = {
-            role: data?.role || 'student',
-            name: data?.name || data?.fullName || '',
-            employeeId: '',
-        };
-        setCachedRole(uid, result);
-        return result;
-    }
-
-    // PERF: Parallel lookup across all role-specific collections
-    const [adminDoc, modDoc, driverDoc, studentDoc] = await Promise.all([
-        adminDb.collection('admins').doc(uid).get(),
-        adminDb.collection('moderators').doc(uid).get(),
-        adminDb.collection('drivers').doc(uid).get(),
-        adminDb.collection('students').doc(uid).get(),
-    ]);
-
-    let result = { role: '', name: '', employeeId: '' };
-    if (adminDoc.exists) {
-        result = {
-            role: 'admin',
-            name: adminDoc.data()?.name || adminDoc.data()?.fullName || '',
-            employeeId: adminDoc.data()?.employeeId || '',
-        };
-    } else if (modDoc.exists) {
-        result = {
-            role: 'moderator',
-            name: modDoc.data()?.fullName || modDoc.data()?.name || '',
-            employeeId: modDoc.data()?.employeeId || modDoc.data()?.staffId || '',
-        };
-    } else if (driverDoc.exists) {
-        result = {
-            role: 'driver',
-            name: driverDoc.data()?.fullName || driverDoc.data()?.name || '',
-            employeeId: driverDoc.data()?.driverId || '',
-        };
-    } else if (studentDoc.exists) {
-        result = {
-            role: 'student',
-            name: studentDoc.data()?.fullName || studentDoc.data()?.name || '',
-            employeeId: '',
-        };
-    }
-
-    if (result.role) {
-        setCachedRole(uid, result);
-    }
-    return result;
+    // User not found in PostgreSQL — return empty (will result in 403 for protected routes)
+    return { role: '', name: '', employeeId: '' };
 }
 
 /**

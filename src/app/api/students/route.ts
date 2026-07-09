@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { adminDb } from '@/lib/firebase-admin';
 import { verifyApiAuth } from '@/lib/security/api-auth';
+import { getStudentsByStatus } from '@/domains/identity';
 
-// Define types for our data
 interface Student {
   id: string;
   name: string;
@@ -24,38 +23,28 @@ interface Student {
 
 export async function GET(request: NextRequest) {
   try {
-    // SECURITY: Require admin or moderator authentication
     const auth = await verifyApiAuth(request, ['admin', 'moderator']);
     if (!auth.authenticated) return auth.response;
 
-    if (!adminDb) {
-      return NextResponse.json({ error: 'Database unavailable' }, { status: 503 });
-    }
+    const studentRows = await getStudentsByStatus('active');
 
-    const studentsRef = adminDb.collection('students');
-    const querySnapshot = await studentsRef.get();
-
-    const students: Student[] = [];
-    querySnapshot.forEach((doc: any) => {
-      const data = doc.data();
-      students.push({
-        id: doc.id,
-        name: data.fullName || '',
-        email: data.email || '',
-        phone: data.phone || '',
-        altPhone: data.altPhone || '',
-        enrollmentId: data.enrollmentId || '',
-        gender: data.gender || '',
-        dob: data.dob || '',
-        faculty: data.faculty || '',
-        department: data.department || '',
-        parentName: data.parentName || '',
-        parentPhone: data.parentPhone || '',
-        busId: data.busId || '',
-        routeId: data.routeId || '',
-        profilePhotoUrl: data.profilePhotoUrl || '',
-      });
-    });
+    const students: Student[] = studentRows.map((row: any) => ({
+      id: row.uid,
+      name: row.fullName || '',
+      email: row.email || '',
+      phone: row.phone || '',
+      altPhone: row.altPhone || '',
+      enrollmentId: row.enrollmentId || '',
+      gender: row.gender || '',
+      dob: row.dob || '',
+      faculty: row.faculty || '',
+      department: row.department || '',
+      parentName: row.parentName || '',
+      parentPhone: row.parentPhone || '',
+      busId: row.busId || '',
+      routeId: row.routeId || '',
+      profilePhotoUrl: row.profilePhotoUrl || '',
+    }));
 
     return NextResponse.json(students);
   } catch (error) {

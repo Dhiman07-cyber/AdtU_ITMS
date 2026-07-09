@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cert, getApps, initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
-import { FieldValue, getFirestore } from 'firebase-admin/firestore';
+import { createAdmin, getAdminById, getUserById } from '@/domains/identity';
 
 function requireEnv(name: string): string {
   const value = process.env[name]?.trim();
@@ -22,7 +22,6 @@ function getAdminServices() {
 
   return {
     auth: getAuth(app),
-    db: getFirestore(app),
   };
 }
 
@@ -45,57 +44,49 @@ async function getAuthenticatedUserId(request: NextRequest) {
   }
 }
 
-/**
- * POST /api/setup-admin-document
- *
- * Creates an admin document in Firestore for the currently authenticated user.
- */
 export async function POST(request: NextRequest) {
   try {
     const authResult = await getAuthenticatedUserId(request);
     if (authResult.response) return authResult.response;
 
-    const { db } = getAdminServices();
     const userId = authResult.userId;
 
-    const adminDoc = await db.collection('admins').doc(userId).get();
-    if (adminDoc.exists) {
+    const existingPgAdmin = await getAdminById(userId);
+    if (existingPgAdmin) {
       return NextResponse.json({
         success: true,
         message: 'Admin document already exists',
         adminId: userId,
-        data: adminDoc.data(),
+        data: existingPgAdmin,
       });
     }
 
-    const userDoc = await db.collection('users').doc(userId).get();
-    if (!userDoc.exists) {
+    const userData = await getUserById(userId);
+    if (!userData) {
       return NextResponse.json({
-        error: 'User document not found in users collection. Please ensure the user is registered.',
+        error: 'User not found in users table. Please ensure the user is registered.',
         userId,
       }, { status: 404 });
     }
 
-    const userData = userDoc.data();
-    if (userData?.role !== 'admin') {
+    if (userData.role !== 'admin') {
       return NextResponse.json({
-        error: `User role is "${userData?.role}", not "admin". Only admin users can have admin documents.`,
+        error: `User role is "${userData.role}", not "admin". Only admin users can have admin documents.`,
         userId,
       }, { status: 403 });
     }
 
-    const adminData = {
+    const now = new Date().toISOString();
+    await createAdmin({
+      uid: userId,
       email: userData.email,
       name: userData.name,
       fullName: userData.name,
       role: userData.role,
-      uid: userId,
       employeeId: 'ADM001',
-      createdAt: userData.createdAt || FieldValue.serverTimestamp(),
-      updatedAt: FieldValue.serverTimestamp(),
-    };
-
-    await db.collection('admins').doc(userId).set(adminData);
+      createdAt: userData.createdAt || now,
+      updatedAt: now,
+    });
 
     try {
       const { initializeBusFee } = await import('@/lib/bus-fee-service');
@@ -106,40 +97,30 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      message: 'Admin document created successfully from users collection data',
+      message: 'Admin document created successfully',
       adminId: userId,
-      data: adminData,
     });
   } catch {
     return NextResponse.json(
-      {
-        error: 'Failed to create admin document',
-        details: 'Internal error',
-      },
+      { error: 'Failed to create admin document', details: 'Internal error' },
       { status: 500 }
     );
   }
 }
 
-/**
- * GET /api/setup-admin-document
- *
- * Checks if the current user has an admin document.
- */
 export async function GET(request: NextRequest) {
   try {
     const authResult = await getAuthenticatedUserId(request);
     if (authResult.response) return authResult.response;
 
-    const { db } = getAdminServices();
     const userId = authResult.userId;
-    const adminDoc = await db.collection('admins').doc(userId).get();
 
-    if (adminDoc.exists) {
+    const pgAdmin = await getAdminById(userId);
+    if (pgAdmin) {
       return NextResponse.json({
         exists: true,
         adminId: userId,
-        data: adminDoc.data(),
+        data: pgAdmin,
       });
     }
 
@@ -150,10 +131,7 @@ export async function GET(request: NextRequest) {
     });
   } catch {
     return NextResponse.json(
-      {
-        error: 'Failed to check admin document',
-        details: 'Internal error',
-      },
+      { error: 'Failed to check admin document', details: 'Internal error' },
       { status: 500 }
     );
   }

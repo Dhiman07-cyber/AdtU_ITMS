@@ -53,8 +53,8 @@ export async function POST(request: NextRequest) {
 
     const userId = decodedToken.uid;
 
-    // Get user data from Firestore
     const { db } = await import('@/lib/firebase-admin');
+    const { getByUid } = await import('@/domains/student');
     let userData: any = null;
     let userRole: string = '';
 
@@ -64,12 +64,9 @@ export async function POST(request: NextRequest) {
       const userDocData = userDoc.data();
       userRole = userDocData?.role || '';
 
-      // If user has student or driver role, get detailed data from respective collection
+      // If user has student role, get data from PostgreSQL
       if (userRole === 'student') {
-        const studentDoc = await db.collection('students').doc(userId).get();
-        if (studentDoc.exists) {
-          userData = studentDoc.data();
-        }
+        userData = await getByUid(userId) as Record<string, any> | null;
       } else if (userRole === 'driver') {
         const driverDoc = await db.collection('drivers').doc(userId).get();
         if (driverDoc.exists) {

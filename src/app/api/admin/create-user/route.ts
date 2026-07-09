@@ -20,6 +20,7 @@ import { requireModeratorPermission } from '@/lib/security/moderator-permissions
 import { z } from 'zod';
 import { createAuditLog } from '@/lib/services/audit.service';
 import { normalizeShift } from '@/lib/utils/shift-utils';
+import { createUser, createStudent, createDriver } from '@/domains/identity';
 
 type CreateUserBody = z.infer<typeof CreateUserSchema>;
 
@@ -182,8 +183,24 @@ export const POST = withSecurity<CreateUserBody>(
             //   gate). Capacity is incremented only when the student did not already
             //   exist, so a double-submit (same uid) can never double-allocate a seat.
             const studentRef = adminDb.collection('students').doc(uid);
-            const userRef = adminDb.collection('users').doc(uid);
             const assignedBusId = studentDoc.busId;
+
+            // Write user to PostgreSQL (canonical source of truth)
+            await createUser({
+                uid,
+                email,
+                name,
+                role: 'student',
+                createdAt: now,
+            });
+
+            // Write student to PostgreSQL (canonical source of truth) — before transaction
+            await createStudent({
+                ...studentDoc,
+                uid,
+                createdAt: now,
+                updatedAt: now,
+            });
 
             let capNewMembers = 0;
             let capLimit = 0;
@@ -202,9 +219,8 @@ export const POST = withSecurity<CreateUserBody>(
                     busSnap = await transaction.get(adminDb.collection('buses').doc(assignedBusId));
                 }
 
-                // Writes
+                // Writes (role-specific data only — users is now in PostgreSQL)
                 transaction.set(studentRef, studentDoc);
-                transaction.set(userRef, { createdAt: now, email, name, role: 'student', uid });
 
                 if (assignedBusId && !alreadyExisted) {
                     if (busSnap && busSnap.exists) {
@@ -290,12 +306,27 @@ export const POST = withSecurity<CreateUserBody>(
             };
 
             const driverRef = adminDb.collection('drivers').doc(uid);
-            const driverUserRef = adminDb.collection('users').doc(uid);
+
+            // Write user to PostgreSQL (canonical source of truth)
+            await createUser({
+                uid,
+                email,
+                name,
+                role: 'driver',
+                createdAt: now,
+            });
+
+            // Write driver to PostgreSQL (canonical source of truth) — before transaction
+            await createDriver({
+                ...driverDocData,
+                uid,
+                createdAt: now,
+                updatedAt: now,
+            });
 
             try {
                 await adminDb.runTransaction(async (transaction) => {
                     transaction.set(driverRef, driverDocData);
-                    transaction.set(driverUserRef, { createdAt: now, email, name, role: 'driver', uid });
 
                     if (busId) {
                         const busRef = adminDb.collection('buses').doc(busId);
@@ -324,12 +355,19 @@ export const POST = withSecurity<CreateUserBody>(
             };
 
             const profileRef = adminDb.collection(col).doc(uid);
-            const profileUserRef = adminDb.collection('users').doc(uid);
+
+            // Write user to PostgreSQL (canonical source of truth)
+            await createUser({
+                uid,
+                email,
+                name,
+                role: role as any,
+                createdAt: now,
+            });
 
             try {
                 await adminDb.runTransaction(async (transaction) => {
                     transaction.set(profileRef, docData);
-                    transaction.set(profileUserRef, { createdAt: now, email, name, role, uid });
                 });
             } catch (firestoreError) {
                 if (authUserCreated) {

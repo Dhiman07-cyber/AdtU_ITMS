@@ -5,6 +5,8 @@ const mockBuildCapacityDelta = vi.fn();
 const mockSendBusFullAlert = vi.fn();
 const mockComputeBlockDates = vi.fn();
 const mockWriteAudit = vi.fn();
+const mockPgUpsertUser = vi.fn();
+const mockPgUpsertStudent = vi.fn();
 
 vi.mock('@/lib/deadline-config-service', () => ({
   getDeadlineConfig: () => mockGetDeadlineConfig(),
@@ -22,6 +24,11 @@ vi.mock('@/lib/utils/deadline-computation', () => ({
 vi.mock('@/lib/audit/audit-service', () => ({
   writeAuditInTransaction: (...args: any[]) => mockWriteAudit(...args),
   SYSTEM_ACTOR: 'system',
+}));
+
+vi.mock('@/domains/identity', () => ({
+  createUser: (...args: any[]) => mockPgUpsertUser(...args),
+  createStudent: (...args: any[]) => mockPgUpsertStudent(...args),
 }));
 
 // Mock adminDb
@@ -83,6 +90,8 @@ describe('Session Activation Service', () => {
       softBlock: '2026-07-15T00:00:00.000Z',
       hardBlock: '2026-08-15T00:00:00.000Z',
     });
+    mockPgUpsertUser.mockResolvedValue(undefined);
+    mockPgUpsertStudent.mockResolvedValue(undefined);
 
     mockGetDoc.mockResolvedValue({ exists: false, data: () => ({}) });
     mockQueryGet.mockResolvedValue({ docs: [], empty: true, size: 0 });

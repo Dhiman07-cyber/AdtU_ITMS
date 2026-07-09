@@ -5,6 +5,7 @@
 
 import { doc, getDoc, collection, getDocs, query, where, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { getRouteById } from '@/lib/dataService';
 
 export type UserRole = 'student' | 'driver' | 'moderator' | 'admin';
 
@@ -232,21 +233,19 @@ async function resolveRoute(routeId: string): Promise<any | null> {
       cleanRouteId = `Route-${number}`;
     }
     
-    // Try to fetch the route document
-    const routeDoc = await getDoc(doc(db, 'routes', cleanRouteId));
-    if (routeDoc.exists()) {
-      const result = { id: routeDoc.id, ...routeDoc.data() };
-      routeCache.set(routeId, { data: result, timestamp: now });
-      return result;
+    // Try to fetch the route document via dataService (Postgres)
+    const routeData = await getRouteById(cleanRouteId);
+    if (routeData) {
+      routeCache.set(routeId, { data: routeData, timestamp: now });
+      return routeData;
     }
     
     // If not found, try with the original routeId
     if (cleanRouteId !== routeId) {
-      const originalDoc = await getDoc(doc(db, 'routes', routeId));
-      if (originalDoc.exists()) {
-        const result = { id: originalDoc.id, ...originalDoc.data() };
-        routeCache.set(routeId, { data: result, timestamp: now });
-        return result;
+      const originalData = await getRouteById(routeId);
+      if (originalData) {
+        routeCache.set(routeId, { data: originalData, timestamp: now });
+        return originalData;
       }
     }
     
@@ -279,19 +278,33 @@ async function getRecentActions(uid: string, limit: number = 10): Promise<Action
 
 /**
  * Fetch Student Profile with all references resolved
+ *
+ * Migration status: COMPLETED — reads student data from PostgreSQL
+ * (student_profiles table via D3 Student domain).
+ * Bus/route references still resolved from Firestore (separate domains).
  */
 async function fetchStudentProfile(uid: string): Promise<StudentProfile | null> {
   try {
-    const userDoc = await getDoc(doc(db, 'students', uid));
-    if (!userDoc.exists()) return null;
+    let student: any = null;
 
-    const data = userDoc.data();
-    
-    // Resolve bus reference
+    if (typeof window !== 'undefined') {
+      const res = await fetch(`/api/students/${uid}`);
+      if (!res.ok) return null;
+      student = await res.json();
+      student.fullName = student.name;
+    } else {
+      const { getByUid } = await import('@/domains/student');
+      student = await getByUid(uid);
+    }
+
+    if (!student) return null;
+
+    // Resolve bus reference (bus domain still in Firestore)
     let busNumber: string | undefined;
     let busCapacity: string | undefined;
-    if (data.busId || data.assignedBusId) {
-      const bus = await resolveBus(data.busId || data.assignedBusId);
+    const targetBusId = student.busId || student.assignedBusId;
+    if (targetBusId) {
+      const bus = await resolveBus(targetBusId);
       if (bus) {
         busNumber = bus.busNumber || bus.id;
         if (bus.capacity) {
@@ -300,11 +313,12 @@ async function fetchStudentProfile(uid: string): Promise<StudentProfile | null> 
       }
     }
 
-    // Resolve route reference
+    // Resolve route reference (route domain still in Firestore)
     let routeName: string | undefined;
     let routeStops: string[] | undefined;
-    if (data.routeId || data.assignedRouteId) {
-      const route = await resolveRoute(data.routeId || data.assignedRouteId);
+    const targetRouteId = student.routeId || student.assignedRouteId;
+    if (targetRouteId) {
+      const route = await resolveRoute(targetRouteId);
       if (route) {
         routeName = route.routeName || route.routeNumber || route.id;
         routeStops = route.stops || [];
@@ -314,45 +328,45 @@ async function fetchStudentProfile(uid: string): Promise<StudentProfile | null> 
     // Get session history
     const sessionHistory = await getSessionHistory(uid);
 
-    const dob = toDate(data.dob);
+    const dob = toDate(student.dob);
 
     return {
       uid,
       role: 'student',
-      fullName: data.fullName || data.name || 'Unknown',
-      email: data.email || '',
-      phone: data.phoneNumber || data.phone || '',
-      profilePhotoUrl: data.profilePhotoUrl || data.profilePicture,
-      createdAt: toDate(data.createdAt),
-      updatedAt: toDate(data.updatedAt),
-      enrollmentId: data.enrollmentId,
-      faculty: data.faculty,
-      department: data.department,
-      semester: data.semester,
+      fullName: student.fullName || student.name || 'Unknown',
+      email: student.email || '',
+      phone: student.phone || '',
+      profilePhotoUrl: student.profilePhotoUrl,
+      createdAt: toDate(student.createdAt),
+      updatedAt: toDate(student.updatedAt),
+      enrollmentId: student.enrollmentId,
+      faculty: student.faculty,
+      department: student.department,
+      semester: student.semester,
       dob,
-      gender: data.gender,
-      bloodGroup: data.bloodGroup,
-      parentName: data.parentName,
-      parentPhone: data.parentPhone,
-      address: data.address,
-      routeId: data.routeId || data.assignedRouteId,
+      gender: student.gender,
+      bloodGroup: student.bloodGroup,
+      parentName: student.parentName,
+      parentPhone: student.parentPhone,
+      address: student.address,
+      routeId: student.routeId || student.assignedRouteId,
       routeName,
       routeStops,
-      stopId: data.stopId,
-      busId: data.busId || data.assignedBusId,
+      stopId: student.stopId,
+      busId: student.busId || student.assignedBusId,
       busNumber,
       busCapacity,
-      assignedShift: data.shift || data.assignedShift,
-      sessionStartYear: data.sessionStartYear,
-      sessionEndYear: data.sessionEndYear,
-      validUntil: toDate(data.validUntil),
-      durationYears: data.durationYears,
-      paymentAmount: data.paymentInfo?.amountPaid || data.amountPaid,
-      paymentVerified: data.paymentInfo?.paymentVerified || false,
-      paymentCurrency: data.paymentInfo?.currency || 'INR',
-      status: data.status,
-      approvedBy: data.approvedBy,
-      approvedAt: toDate(data.approvedAt),
+      assignedShift: student.shift,
+      sessionStartYear: student.sessionStartYear,
+      sessionEndYear: student.sessionEndYear,
+      validUntil: toDate(student.validUntil),
+      durationYears: typeof student.sessionDuration === 'string' ? Number(student.sessionDuration) || undefined : student.sessionDuration,
+      paymentAmount: student.paymentAmount,
+      paymentVerified: student.paymentVerified || false,
+      paymentCurrency: student.paymentCurrency || 'INR',
+      status: student.status,
+      approvedBy: student.approvedBy,
+      approvedAt: toDate(student.approvedAt),
       sessionHistory,
     };
   } catch (error) {

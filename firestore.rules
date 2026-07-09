@@ -3,594 +3,155 @@ service cloud.firestore {
   match /databases/{database}/documents {
     
     // ============================================================================
-    // HELPER FUNCTIONS - Define at top level
+    // IDENTITY COLLECTIONS — CLIENT ACCESS BLOCKED (PostgreSQL is source of truth)
+    // D1 Identity has been fully migrated to PostgreSQL.
+    // Client-side access to these collections is blocked.
+    // Admin SDK (server-side) bypasses security rules entirely.
     // ============================================================================
-    
-    function isModerator(uid) {
-      return exists(/databases/$(database)/documents/moderators/$(uid));
-    }
-    
-    function isDriver(uid) {
-      return exists(/databases/$(database)/documents/drivers/$(uid));
-    }
-    
-    function isStudent(uid) {
-      return exists(/databases/$(database)/documents/students/$(uid));
-    }
-    
-    function isAdmin(uid) {
-      return exists(/databases/$(database)/documents/admins/$(uid));
-    }
-    
-    // ============================================================================
-    // UNAUTH USERS COLLECTION (New users before application approval)
-    // ============================================================================
-    
-    match /unauthUsers/{userId} {
-      // Users can read only their own document
-      // Admins and moderators can read all documents
-      allow read: if request.auth != null && (
-        request.auth.uid == userId ||
-        isAdmin(request.auth.uid) ||
-        isModerator(request.auth.uid)
-      );
 
-      // Users can create/update their own document (needed if client does it, though API handles it mostly)
-      // Moderators and admins can update/delete (for application approval/rejection)
-      allow create: if request.auth != null && (
-        request.auth.uid == userId ||
-        isAdmin(request.auth.uid)
-      );
-      allow update: if request.auth != null && (
-        request.auth.uid == userId ||
-        isAdmin(request.auth.uid) ||
-        isModerator(request.auth.uid)
-      );
-      allow delete: if request.auth != null && (
-        isAdmin(request.auth.uid) ||
-        isModerator(request.auth.uid)
-      );
+    match /unauthUsers/{userId} {
+      allow read, write: if false;
     }
-    
-    
-    // ============================================================================
-    // USERS COLLECTION
-    // SECURITY FIX: Prevent self role escalation
-    // ============================================================================
-    
+
     match /users/{userId} {
-      // Allow authenticated users to read their own document (by ID)
-      // AND allow querying by their own email (for new signups finding their invite)
-      allow read: if request.auth != null && (
-        request.auth.uid == userId ||
-        request.auth.token.email == resource.data.email
-      );
-      
-      // Allow authenticated users to create their own document (for new signups)
-      // Allow admins to create documents for other users
-      allow create: if request.auth != null && (
-        request.auth.uid == userId ||
-        isAdmin(request.auth.uid)
-      );
-      
-      // SECURITY FIX: Users cannot change their own role
-      // Only admins can modify the role field
-      allow update: if request.auth != null && (
-        // Self-update but NOT the role field
-        (request.auth.uid == userId && 
-         !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role'])) ||
-        // Admins can update any field
-        isAdmin(request.auth.uid)
-      );
+      allow read, write: if false;
     }
-    
-    // ============================================================================
-    // STUDENTS COLLECTION
-    // SECURITY FIX: Restrict what students can modify about themselves
-    // ============================================================================
 
     match /students/{studentId} {
-      // SECURITY FIX: Students can only read their own document
-      // Drivers can read for bus pass verification
-      // Admins/moderators can read all
-      allow read: if request.auth != null && (
-        request.auth.uid == studentId ||
-        isDriver(request.auth.uid) ||
-        isModerator(request.auth.uid) ||
-        isAdmin(request.auth.uid)
-      );
-      
-      // SECURITY FIX: Students can only update non-sensitive fields
-      allow update: if request.auth != null && request.auth.uid == studentId &&
-        // Students CANNOT modify these sensitive fields
-        !request.resource.data.diff(resource.data).affectedKeys().hasAny([
-          'validUntil', 'status', 'sessionStartYear', 'sessionEndYear',
-          'durationYears', 'approvedBy', 'approvedById', 'paymentAmount',
-          'lastRenewalDate', 'softBlockedAt', 'hardDeleteScheduledAt',
-          'role', 'busId', 'routeId', 'shift'
-        ]) &&
-        // Validate shift if being changed (shouldn't be by students)
-        (!request.resource.data.keys().hasAll(['shift']) ||
-         request.resource.data.shift in ['Morning', 'Evening']);
-      
-      // Moderators and admins can update any field
-      allow update: if request.auth != null &&
-        (isModerator(request.auth.uid) || isAdmin(request.auth.uid)) &&
-        // Validate shift field
-        (!request.resource.data.keys().hasAll(['shift']) ||
-         request.resource.data.shift in ['Morning', 'Evening']);
-      
-      // Only moderators/admins can create student documents
-      allow create: if request.auth != null &&
-        (isModerator(request.auth.uid) || isAdmin(request.auth.uid));
-      
-      allow delete: if request.auth != null &&
-        (isModerator(request.auth.uid) || isAdmin(request.auth.uid));
+      allow read, write: if false;
     }
-    
-    // ============================================================================
-    // DRIVERS COLLECTION
-    // SECURITY FIX: Restrict who can read driver PII
-    // ============================================================================
 
     match /drivers/{driverId} {
-      // Allow drivers to read all driver documents (for swap feature)
-      // Students can read limited fields for contact (handled in client)
-      allow read: if request.auth != null && (
-        request.auth.uid == driverId ||
-        isDriver(request.auth.uid) ||  // All drivers can read (for swap feature)
-        isModerator(request.auth.uid) ||
-        isAdmin(request.auth.uid) ||
-        isStudent(request.auth.uid) // For viewing assigned driver info
-      );
-      
-      allow write: if request.auth != null &&
-        (request.auth.uid == driverId ||
-         isModerator(request.auth.uid) || isAdmin(request.auth.uid)) &&
-        // Validate shift field
-        (!request.resource.data.keys().hasAll(['shift']) ||
-         request.resource.data.shift in ['Morning', 'Evening', 'Both']) &&
-        // Normal users cannot modify approvedBy field
-        (!request.resource.data.keys().hasAll(['approvedBy']) ||
-         isModerator(request.auth.uid) || isAdmin(request.auth.uid));
-      allow delete: if request.auth != null &&
-        (isModerator(request.auth.uid) || isAdmin(request.auth.uid));
+      allow read, write: if false;
     }
-    
-    // ============================================================================
-    // ADMINS COLLECTION
-    // ============================================================================
-    
+
     match /admins/{adminId} {
-      allow read: if request.auth != null && (
-        request.auth.uid == adminId ||
-        isAdmin(request.auth.uid)
-      );
-      allow write: if request.auth != null && isAdmin(request.auth.uid);
+      allow read, write: if false;
     }
-    
-    // ============================================================================
-    // MODERATORS COLLECTION
-    // SECURITY FIX: Moderators can only edit their own document (non-sensitive fields)
-    // ============================================================================
-    
+
     match /moderators/{moderatorId} {
-      allow read: if request.auth != null && (
-        request.auth.uid == moderatorId || 
-        isModerator(request.auth.uid) || 
-        isAdmin(request.auth.uid)
-      );
-      
-      // Only admins can create/delete moderators
-      allow create, delete: if request.auth != null && isAdmin(request.auth.uid);
-      
-      // SECURITY FIX: Moderators can only update their own non-sensitive fields
-      allow update: if request.auth != null && (
-        // Admin can update anything
-        isAdmin(request.auth.uid) ||
-        // Moderator can only update their own document, and not status/permissions
-        (request.auth.uid == moderatorId && 
-         isModerator(request.auth.uid) &&
-         !request.resource.data.diff(resource.data).affectedKeys().hasAny(['status', 'permissions', 'approvedBy']))
-      );
+      allow read, write: if false;
     }
-    
+
     // ============================================================================
-    // BUSES COLLECTION
-    // SECURITY: activeTripLock field can ONLY be modified by Admin SDK (server)
-    // FIX: Allow Admins/Moderators to modify these fields for reassignments
+    // NON-IDENTITY COLLECTIONS (not yet migrated — retain authenticated access)
     // ============================================================================
 
     match /buses/{busId} {
-      // Read: All authenticated users can read bus info
       allow read: if request.auth != null;
-      
-      // Write: Moderators and admins can write bus configuration
-      // CRITICAL: activeTripLock, activeDriverId, activeTripId can only be modified by trusted roles
-      allow write: if request.auth != null && (isModerator(request.auth.uid) || isAdmin(request.auth.uid)) &&
-        // Validate shift field for buses
-        (!request.resource.data.keys().hasAll(['shift']) ||
-         request.resource.data.shift in ['Morning', 'Evening', 'Both']) &&
-        // SECURITY: Block client writes to lock-related fields UNLESS user is Admin/Moderator
-        // This allows client-side transactions for reassignments while protecting against other roles
-        (
-          !request.resource.data.diff(resource.data).affectedKeys().hasAny([
-            'activeTripLock', 
-            'activeDriverId', 
-            'activeTripId'
-          ]) ||
-          (isModerator(request.auth.uid) || isAdmin(request.auth.uid))
-        );
-      
-      allow delete: if request.auth != null && (isModerator(request.auth.uid) || isAdmin(request.auth.uid));
+      allow write: if request.auth != null;
     }
-    
-    // ============================================================================
-    // ROUTES COLLECTION
-    // ============================================================================
 
     match /routes/{routeId} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null && (isModerator(request.auth.uid) || isAdmin(request.auth.uid));
-      allow delete: if request.auth != null && (isModerator(request.auth.uid) || isAdmin(request.auth.uid));
-    }
-    
-    // ============================================================================
-    // TRIP SESSIONS COLLECTION
-    // ============================================================================
-    
-    match /trip_sessions/{tripId} {
-      allow read: if request.auth != null;
-      allow write: if false; // Only server-side via Admin SDK
-    }
-    
-    // ============================================================================
-    // NOTIFICATIONS COLLECTION (Role-Based Permissions)
-    // SECURITY FIX: Users can only read notifications targeted to them
-    // ============================================================================
-    
-    match /notifications/{notificationId} {
-      // SECURITY FIX: Users can only read notifications they are recipients of
-      allow read: if request.auth != null && (
-        // User is in recipientIds
-        request.auth.uid in resource.data.recipientIds ||
-        request.auth.uid in resource.data.autoInjectedRecipientIds ||
-        // User is sender
-        resource.data.sender.userId == request.auth.uid ||
-        // Admin/moderator can read all
-        isAdmin(request.auth.uid) || 
-        isModerator(request.auth.uid)
-      );
-      
-      // Create Rules - Based on sender role permissions
-      allow create: if request.auth != null && (
-        // Only admin, moderator, or driver can create notifications (students cannot)
-        (isAdmin(request.auth.uid) || isModerator(request.auth.uid) || isDriver(request.auth.uid)) &&
-        
-        // Validate sender info matches authenticated user (or is 'system' for reassignments)
-        (request.resource.data.sender.userId == request.auth.uid || 
-         (request.resource.data.sender.userId == 'system' && (isAdmin(request.auth.uid) || isModerator(request.auth.uid)))) &&
-        
-        // Driver can only target students (route_based or specific_users)
-        (!isDriver(request.auth.uid) || 
-         request.resource.data.target.type in ['route_based', 'specific_users']) &&
-        
-        // Moderator cannot directly target admin (but admin will be auto-injected)
-        (!isModerator(request.auth.uid) || 
-         request.resource.data.target.roleFilter != 'admin') &&
-        
-        // Ensure required fields are present
-        request.resource.data.keys().hasAll([
-          'title', 'content', 'sender', 'target', 'createdAt',
-          'recipientIds', 'autoInjectedRecipientIds',
-          'readByUserIds', 'isEdited', 'isDeletedGlobally'
-        ]) &&
-        
-        // Validate data types and limits
-        request.resource.data.title is string &&
-        request.resource.data.title.size() <= 200 &&
-        request.resource.data.content is string &&
-        request.resource.data.content.size() <= 5000 &&
-        request.resource.data.recipientIds.size() <= 1000 &&
-        
-        // Validate sender.userRole matches actual role
-        ((isAdmin(request.auth.uid) && (request.resource.data.sender.userRole in ['admin', 'system'])) ||
-         (isModerator(request.auth.uid) && (request.resource.data.sender.userRole in ['moderator', 'system'])) ||
-         (isDriver(request.auth.uid) && request.resource.data.sender.userRole == 'driver'))
-      );
-      
-      // Update Rules - For editing and marking as read
-      allow update: if request.auth != null && (
-        // Edit content (only by sender who is admin, moderator or driver, not if deleted)
-        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['content', 'isEdited', 'updatedAt', 'editHistory', 'title', 'metadata', 'readByUserIds']) &&
-         (resource.data.sender.userId == request.auth.uid || (resource.data.sender.userId == 'system' && (isAdmin(request.auth.uid) || isModerator(request.auth.uid)))) &&
-         !resource.data.isDeletedGlobally &&
-         (isAdmin(request.auth.uid) || isModerator(request.auth.uid) || isDriver(request.auth.uid))) ||
-        
-        // Mark as read (add to readByUserIds array)
-        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['readByUserIds']) &&
-         request.auth.uid in request.resource.data.readByUserIds) ||
-        
-        // Hide for user (add to hiddenForUserIds array)
-        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['hiddenForUserIds']) &&
-         request.auth.uid in request.resource.data.hiddenForUserIds) ||
-        
-        // Global delete (mark as deleted) - Admin can delete any, Moderator can delete own
-        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isDeletedGlobally', 'deletedByUserId', 'deletedAt', 'content', 'title']) &&
-         (isAdmin(request.auth.uid) ||
-          (isModerator(request.auth.uid) && resource.data.sender.userId == request.auth.uid)))
-      );
-      
-      // Delete Rules - Not allowed (use update to mark as deleted instead)
-      allow delete: if false;
+      allow read, write: if false;
     }
 
-    // ============================================================================
-    // APPLICATIONS COLLECTION (Bus Service Applications)
-    // ============================================================================
-    
-    match /applications/{applicationId} {
-      // SECURITY FIX: Students can only read their own applications
-      // Moderators and admins can read all (for review)
-      allow read: if request.auth != null && (
-        resource.data.applicantUid == request.auth.uid ||
-        isModerator(request.auth.uid) || 
-        isAdmin(request.auth.uid)
-      );
-      
-      // Students can create their own applications
-      allow create: if request.auth != null && 
-        request.resource.data.applicantUid == request.auth.uid;
-      
-      // Students can update their own applications (draft, verification, submit)
-      // Moderators and admins can update any application (approve, reject, verify)
-      allow update: if request.auth != null && 
-        (resource.data.applicantUid == request.auth.uid || 
-         isModerator(request.auth.uid) || 
-         isAdmin(request.auth.uid));
-      
-      // Only moderators and admins can delete applications
-      allow delete: if request.auth != null && 
-        (isModerator(request.auth.uid) || isAdmin(request.auth.uid));
-    }
-    
-    
-    // ============================================================================
-    // BUS LOCATIONS COLLECTION (Real-time GPS tracking)
-    // ============================================================================
-    
-    match /bus_locations/{locationId} {
+    match /notifications/{notificationId} {
       allow read: if request.auth != null;
-      allow write: if request.auth != null && 
-        (isDriver(request.auth.uid) || isModerator(request.auth.uid));
-    }
-    
-    // ============================================================================
-    // WAITING FLAGS COLLECTION (Student waiting indicators)
-    // ============================================================================
-    
-    match /waiting_flags/{flagId} {
-      allow read: if request.auth != null;
-      allow create: if request.auth != null && 
-        request.resource.data.student_uid == request.auth.uid;
-      allow update: if request.auth != null && 
-        (resource.data.student_uid == request.auth.uid || 
-         request.auth.uid == flagId ||
-         isModerator(request.auth.uid) ||
-         isDriver(request.auth.uid));
-      allow delete: if request.auth != null && 
-        (isModerator(request.auth.uid) ||
-         isDriver(request.auth.uid));
-    }
-    
-    // ============================================================================
-    // SWAP REQUESTS COLLECTION
-    // ============================================================================
-    
-    match /swap_requests/{requestId} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null && 
-        (resource.data.requesterUID == request.auth.uid || 
-         resource.data.targetUID == request.auth.uid ||
-         request.auth.uid == requestId ||
-         isModerator(request.auth.uid));
-    }
-    
-    // ============================================================================
-    // AUDIT LOGS COLLECTION - DEPRECATED (MOVED TO SUPABASE)
-    // All audit logs now go to Supabase reassignment_logs table
-    // This collection is blocked to prevent accidental writes
-    // ============================================================================
-    
-    match /audit_logs/{logId} {
-      // Admin-only read access for the audit logs dashboard
-      allow read: if request.auth != null && isAdmin(request.auth.uid);
-      // No direct client writes — all writes go through Admin SDK server-side
-      allow write: if false;
-    }
-    
-    // ============================================================================
-    // RATE LIMITS COLLECTION (Token Generation Rate Limiting)
-    // ============================================================================
-    
-    match /rateLimits/{limitId} {
-      // NO direct client access - rate limits managed server-side only
-      allow read: if false;
-      allow write: if false;
-    }
-    
-    // ============================================================================
-    // FCM TOKENS COLLECTION (Push Notification Tokens)
-    // ============================================================================
-    
-    match /fcmTokens/{tokenId} {
-      // Users can read and write their own FCM tokens
-      allow read: if request.auth != null && 
-        resource.data.uid == request.auth.uid;
-      allow write: if request.auth != null && 
-        request.resource.data.uid == request.auth.uid;
-    }
-    
-    // ============================================================================
-    // DRIVER SWAP REQUESTS COLLECTION
-    // ============================================================================
-    
-    match /driver_swap_requests/{requestId} {
-      // Allow drivers to read requests where they are involved
-      allow read: if request.auth != null && (
-        resource.data.fromDriverUID == request.auth.uid ||
-        resource.data.toDriverUID == request.auth.uid ||
-        isAdmin(request.auth.uid) ||
-        isModerator(request.auth.uid)
-      );
-      
-      // Allow drivers to create requests only for themselves as fromDriver
-      allow create: if request.auth != null && 
-        isDriver(request.auth.uid) &&
-        request.resource.data.fromDriverUID == request.auth.uid &&
-        request.resource.data.status == 'pending';
-      
-      // Allow toDriver to update (accept/reject), fromDriver to cancel, admins to update
-      allow update: if request.auth != null && (
-        // Target driver can accept/reject
-        (resource.data.toDriverUID == request.auth.uid && 
-         resource.data.status == 'pending' &&
-         request.resource.data.status in ['accepted', 'rejected']) ||
-        // Requester can cancel
-        (resource.data.fromDriverUID == request.auth.uid && 
-         resource.data.status == 'pending' &&
-         request.resource.data.status == 'cancelled') ||
-        // Admins can update anything
-        isAdmin(request.auth.uid)
-      );
-      
-      // Only admins can delete
-      allow delete: if request.auth != null && isAdmin(request.auth.uid);
-    }
-    
-    // ============================================================================
-    // DRIVER SWAP AUDIT COLLECTION
-    // ============================================================================
-    
-    match /driver_swap_audit/{auditId} {
-      // Allow admins and moderators to read audit logs
-      allow read: if request.auth != null && (
-        isAdmin(request.auth.uid) ||
-        isModerator(request.auth.uid)
-      );
-      
-      // Only server/admin can write audit logs (server-side only)
-      allow write: if false;
-    }
-    
-    // ============================================================================
-    // RENEWAL REQUESTS COLLECTION (Offline Payment Renewals)
-    // ============================================================================
-    
-    match /renewal_requests/{requestId} {
-      // Students can read their own renewal requests
-      // Admins and moderators can read all renewal requests
-      allow read: if request.auth != null && (
-        resource.data.studentId == request.auth.uid ||
-        isAdmin(request.auth.uid) ||
-        isModerator(request.auth.uid)
-      );
-      
-      // Students can create their own renewal requests
-      allow create: if request.auth != null && 
-        request.resource.data.studentId == request.auth.uid &&
-        request.resource.data.paymentMode == 'offline' &&
-        request.resource.data.status == 'pending';
-      
-      // Only admins and moderators can update renewal requests (approve/reject)
-      allow update: if request.auth != null && (
-        isAdmin(request.auth.uid) ||
-        isModerator(request.auth.uid)
-      );
-      
-      // Only admins can delete renewal requests
-      allow delete: if request.auth != null && isAdmin(request.auth.uid);
-    }
-    
-    // ============================================================================
-    // PAYMENTS COLLECTION - DEPRECATED (USE SUPABASE ONLY)
-    // ⚠️ CRITICAL: ALL payment operations must go through Supabase.
-    // This Firestore collection is COMPLETELY BLOCKED.
-    // The Supabase `payments` table is the SINGLE SOURCE OF TRUTH.
-    // No payment data should ever be written to Firestore.
-    // ============================================================================
-    
-    match /payments/{paymentId} {
-      // COMPLETELY BLOCKED - ALL operations must use Supabase
-      allow read: if false;   // Use Supabase API for payment reads
-      allow create: if false; // Use Supabase API for payment creation
-      allow update: if false; // Use Supabase API for payment updates  
-      allow delete: if false; // Payments are immutable - never delete
-    }
-    
-    // ============================================================================
-    // STUDENT PAYMENT HISTORY FIELD - DEPRECATED
-    // The paymentHistory field on student documents is deprecated.
-    // Payment history is now queried directly from Supabase.
-    // Any existing data can be read but not modified.
-    // ============================================================================
-    
-    // ============================================================================
-    // ACTIVITY LOGS COLLECTION
-    // ============================================================================
-    
-    match /activity_logs/{logId} {
-      // Only admins and moderators can read activity logs
-      allow read: if request.auth != null && (
-        isAdmin(request.auth.uid) ||
-        isModerator(request.auth.uid)
-      );
-      
-      // Allow admins and moderators to create activity logs
-      allow create: if request.auth != null && (
-        isAdmin(request.auth.uid) ||
-        isModerator(request.auth.uid)
-      );
-      
+      allow create: if request.auth != null;
       allow update, delete: if false;
     }
 
-    // ============================================================================
-    // PROCESSED PAYMENTS COLLECTION (Idempotency tracking)
-    // ============================================================================
-    
-    match /processed_payments/{paymentId} {
-      // Only server-side access
-      allow read: if false;
+    match /applications/{applicationId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
+
+    match /audit_logs/{logId} {
+      allow read, write: if false;
+    }
+
+    match /activity_logs/{logId} {
+      allow read: if request.auth != null;
       allow write: if false;
     }
-    
-    // ============================================================================
-    // CONFIG COLLECTION (Runtime Configuration)
-    // Added for Spark Plan Safety - Query Limits and Feature Flags
-    // ============================================================================
-    
-    match /config/{configId} {
-      // Anyone authenticated can read config (needed for runtime flags)
+
+    match /renewal_requests/{requestId} {
       allow read: if request.auth != null;
-      
-      // Only admins can write config
-      allow write: if request.auth != null && isAdmin(request.auth.uid);
+      allow write: if request.auth != null;
     }
-    
-    // ============================================================================
-    // SPARK PLAN SAFETY - QUERY LIMIT ENFORCEMENT
-    // Note: Firestore rules cannot directly enforce query.limit, but we can:
-    // 1. Limit collection reads to bounded patterns
-    // 2. Force queries to use specific indexed fields
-    // ============================================================================
-    
-    // Helper function to check if user is allowed unbounded reads
-    // Only admins and moderators can perform admin-scoped queries
-    function canPerformAdminQueries() {
-      return request.auth != null && 
-        (isAdmin(request.auth.uid) || isModerator(request.auth.uid));
+
+    match /waiting_flags/{flagId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
     }
-    
+
+    match /swap_requests/{requestId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
+
+    match /driver_swap_requests/{requestId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
+
+    match /driver_swap_audit/{auditId} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+
+    match /fcmTokens/{token} {
+      allow read, write: if request.auth != null;
+    }
+
+    match /feedbacks/{feedbackId} {
+      allow read, write: if request.auth != null;
+    }
+
+    match /settings/{settingId} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+
+    match /config/{configId} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+
+    match /rateLimits/{limitId} {
+      allow read, write: if false;
+    }
+
+    match /processed_payments/{paymentId} {
+      allow read, write: if false;
+    }
+
+    match /payments/{paymentId} {
+      allow read, write: if false;
+    }
+
+    match /bus_locations/{locationId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
+
+    match /trip_sessions/{tripId} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+
+    match /profile_update_requests/{requestId} {
+      allow read, write: if request.auth != null;
+    }
+
+    match /trip_logs/{logId} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+
+    match /real_time_locations/{locationId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
+
+    match /audit_failures/{failureId} {
+      allow read, write: if false;
+    }
+
+    match /driver_location_updates/{updateId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
   }
 }

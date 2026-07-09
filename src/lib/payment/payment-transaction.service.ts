@@ -200,7 +200,7 @@ export class PaymentTransactionService {
 
   /**
    * Check if a payment has already been processed
-   * Checks Supabase first, then Firestore for legacy data
+   * Checks Supabase (single source of truth)
    */
   static async isPaymentProcessed(paymentId: string): Promise<boolean> {
     try {
@@ -211,11 +211,7 @@ export class PaymentTransactionService {
         return supabasePayment.status === 'Completed';
       }
 
-      // Fall back to Firestore for legacy data
-      const doc = await adminDb.collection('payments').doc(paymentId).get();
-      if (!doc.exists) return false;
-      const data = doc.data();
-      return data?.status?.toLowerCase() === 'completed';
+      return false;
     } catch {
       return false;
     }

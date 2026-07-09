@@ -3,9 +3,9 @@ import { createRazorpayOrder, generateReceiptId } from '@/lib/payment/razorpay.s
 import { withSecurity } from '@/lib/security/api-security';
 import { CreateOrderSchema } from '@/lib/security/validation-schemas';
 import { RateLimits } from '@/lib/security/rate-limiter';
-import { adminDb } from '@/lib/firebase-admin';
 import { getSystemConfig } from '@/lib/system-config-service';
 import { z } from 'zod';
+import { getByUid as getStudentByUid } from '@/domains/student';
 
 type CreateOrderBody = z.infer<typeof CreateOrderSchema>;
 
@@ -29,8 +29,8 @@ export const POST = withSecurity<CreateOrderBody>(
             );
         }
 
-        const studentDoc = await adminDb.collection('students').doc(trustedUserId).get().catch(() => null);
-        const studentData = studentDoc?.exists ? studentDoc.data() : null;
+        const student = await getStudentByUid(trustedUserId).catch(() => null);
+        const studentData = student as any;
         const trustedEnrollmentId = studentData?.enrollmentId || enrollmentId || notes?.enrollmentId || '';
         const trustedStudentName = studentData?.fullName || studentData?.name || userName || auth.name || 'Unknown';
 

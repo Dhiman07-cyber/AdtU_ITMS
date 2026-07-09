@@ -2,8 +2,7 @@
 
 import { createContext, useContext, useEffect, useState, ReactNode, useRef, useMemo, useCallback } from 'react';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
-import { doc, onSnapshot, getDoc, Unsubscribe } from 'firebase/firestore';
-import { auth, db } from '@/lib/firebase';
+import { auth } from '@/lib/firebase';
 import { setSigningOut, getSigningOutState } from '@/lib/firestore-error-handler';
 import { User, signInWithGoogle } from '@/lib/user-service';
 
@@ -128,15 +127,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
 
   const [isExpired, setIsExpired] = useState(false);
-  const listenerUnsubscribe = useRef<Unsubscribe | null>(null);
   const signOutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Cleanup listener and timers on unmount
+  // Cleanup timers on unmount
   useEffect(() => {
     return () => {
-      if (listenerUnsubscribe.current) {
-        listenerUnsubscribe.current();
-      }
       if (signOutTimerRef.current) {
         clearTimeout(signOutTimerRef.current);
       }
@@ -169,138 +164,61 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setLoading(false); // Show UI immediately with cached data
         }
 
-        // Step 2: Set up realtime listener for this user
+        // Step 2: Fetch user data from PostgreSQL via API
         try {
-          // Clean up previous listener if exists
-          if (listenerUnsubscribe.current) {
-            listenerUnsubscribe.current();
-          }
+          const response = await fetch('/api/auth/user', {
+            headers: { 'Authorization': `Bearer ${await user.getIdToken()}` },
+          });
 
-          // First, check which collection to use based on role from the authoritative 'users' collection
-          const userDocRef = doc(db, 'users', user.uid);
-          const userDocSnap = await getDoc(userDocRef);
+          if (!isMounted) return;
 
-          let targetCollection = 'users';
-          let userDocData = null;
+          if (response.ok) {
+            const result = await response.json();
 
-          if (userDocSnap.exists()) {
-            userDocData = userDocSnap.data();
+            if (result.exists && result.user) {
+              const data = result.user as User;
 
-            // Immediately set needsApplication to false since user exists
-            setNeedsApplication(false);
+              // Update state and cache
+              setUserData(data);
+              setCachedUserData(data);
+              setNeedsApplication(false);
 
-            if (userDocData?.role === 'student') {
-              targetCollection = 'students';
-            } else if (userDocData?.role === 'driver') {
-              targetCollection = 'drivers';
-            } else if (userDocData?.role === 'moderator') {
-              targetCollection = 'moderators';
-            } else if (userDocData?.role === 'admin') {
-              targetCollection = 'admins';
+              // Only check expiration for students (they have validUntil field)
+              if (data.role === 'student') {
+                setIsExpired(checkIfExpired(data.validUntil));
+              } else {
+                // Non-student users (admin, moderator, driver) are never expired
+                setIsExpired(false);
+              }
+              setLoading(false);
+            } else {
+              // User not found in PostgreSQL — needs to apply
+              setUserData(null);
+              setCachedUserData(null);
+              setNeedsApplication(true);
+              setIsExpired(false);
+              setLoading(false);
             }
           } else {
-            // users collection is the authoritative source. If not there, they need to apply.
-            setNeedsApplication(true);
+            // API error — treat as "needs to apply" for new users
             setUserData(null);
-            setCachedUserData(null);
+            setNeedsApplication(true);
+            setIsExpired(false);
             setLoading(false);
-            return;
           }
-
-          // Set up listener on the correct collection
-
-          const docRef = doc(db, targetCollection, user.uid);
-
-          listenerUnsubscribe.current = onSnapshot(
-            docRef,
-            (docSnapshot) => {
-              if (!isMounted) return;
-
-              if (docSnapshot.exists()) {
-                const data = {
-                  uid: docSnapshot.id,
-                  role: userDocData?.role || (targetCollection.slice(0, -1) as any),
-                  ...docSnapshot.data()
-                } as User;
-
-
-                // Update state and cache
-                setUserData(data);
-                setCachedUserData(data);
-                setNeedsApplication(false);
-
-                // Only check expiration for students (they have validUntil field)
-                if (data.role === 'student') {
-                  setIsExpired(checkIfExpired(data.validUntil));
-                } else {
-                  // Non-student users (admin, moderator, driver) are never expired
-                  setIsExpired(false);
-                }
-                setLoading(false);
-              } else {
-                // Document doesn't exist in target collection
-                // For students, this means they need to apply
-
-                // Only set needsApplication if we're SURE they need to apply
-                // Don't redirect if we found them in users but not students (they might be applying)
-                if (targetCollection === 'students' && userDocData?.role === 'student') {
-                  // They have a user doc with student role but no student doc = need to apply
-
-                  setUserData(null);
-                  setCachedUserData(null);
-                  setNeedsApplication(true);
-                  setIsExpired(false);
-                } else if (!userDocData) {
-                  // No user document at all = definitely need to apply
-
-                  setUserData(null);
-                  setCachedUserData(null);
-                  setNeedsApplication(true);
-                  setIsExpired(false);
-                }
-                setLoading(false);
-              }
-            },
-            (error) => {
-              if (!isMounted) return;
-
-              // Check if this error should be suppressed (signout, network issues, etc.)
-              if (getSigningOutState()) {
-                // Suppress errors during sign-out
-                return;
-              }
-
-              // Check for permission denied specifically
-              const isPermissionError = error.code === 'permission-denied' ||
-                error.message?.includes('Missing or insufficient permissions');
-
-              if (isPermissionError) {
-                // During active session, permission denied usually means user needs to apply
-                // But only if we're not in signout process
-
-                setUserData(null);
-                setCachedUserData(null);
-                setNeedsApplication(true);
-                setIsExpired(false);
-                setLoading(false);
-              } else {
-                // Other errors - log but don't immediately assume they need to apply
-                // Could be network issues, Firestore service issues, etc.
-
-                setLoading(false);
-              }
-            }
-          );
         } catch (error: any) {
           if (!isMounted) return;
 
-
-          // All errors here are treated as "user needs to apply"
-          // Permission errors are EXPECTED for new users
-          setUserData(null);
-          setNeedsApplication(true);
-          setIsExpired(false);
-          setLoading(false); // CRITICAL: Must set loading to false to prevent infinite redirect!
+          // Network error — use cached data if available
+          if (cachedData && cachedData.uid === user.uid) {
+            // Already set from cache above
+            setLoading(false);
+          } else {
+            setUserData(null);
+            setNeedsApplication(true);
+            setIsExpired(false);
+            setLoading(false);
+          }
         }
       } else {
         // No user logged in
@@ -311,10 +229,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             setSigningOut(false);
             signOutTimerRef.current = null;
           }, 3000);
-        }
-        if (listenerUnsubscribe.current) {
-          listenerUnsubscribe.current();
-          listenerUnsubscribe.current = null;
         }
         setUserData(null);
         setCachedUserData(null);
@@ -362,17 +276,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Set flag to suppress permission errors during sign-out
       setSigningOut(true);
 
-      // Clean up listener FIRST before any state changes
-      if (listenerUnsubscribe.current) {
-        try {
-          listenerUnsubscribe.current();
-        } catch (e) {
-          // Ignore listener cleanup errors
-        }
-        listenerUnsubscribe.current = null;
-      }
-
-      // Clear state immediately to prevent any more Firestore operations
+      // Clear state immediately to prevent any more operations
       setUserData(null);
       setNeedsApplication(false);
       setIsExpired(false);
@@ -387,7 +291,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await signOutUser();
       } catch (signOutError) {
         // Even if Firebase signout fails, we've already cleared local state
-
       }
 
       // Reset the flag after a longer delay to allow any pending errors to be suppressed

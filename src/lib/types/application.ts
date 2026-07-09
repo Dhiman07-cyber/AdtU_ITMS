@@ -183,9 +183,6 @@ export interface Application {
   updatedAt: string;
   createdBy: string;
 
-  // Audit
-  auditLogs: AuditLogEntry[];
-
   // Version
   applicationVersion?: number;
 
@@ -282,7 +279,6 @@ export interface StudentUser {
   // Metadata
   createdAt: string;
   updatedAt: string;
-  auditLogs: AuditLogEntry[];
 }
 
 // Notification Types for Application Flow

@@ -9,6 +9,7 @@ import { computeBlockDatesFromValidUntil } from '@/lib/utils/deadline-computatio
 import { calculateValidUntilDate } from '@/lib/utils/date-utils';
 import { getDeadlineConfig } from '@/lib/deadline-config-service';
 import { buildCapacityDelta } from '@/lib/busCapacityService';
+import { createUser, createStudent, createDriver } from '@/domains/identity';
 
 let adminApp: any;
 let auth: any;
@@ -229,7 +230,14 @@ export async function POST(request: Request) {
           createdAt: new Date().toISOString()
         };
 
-        await db.collection('users').doc(uid).set(userDocData);
+        // Write user to PostgreSQL (canonical source of truth) — before transaction
+        await createUser({
+          uid,
+          email,
+          name,
+          role,
+          createdAt: userDocData.createdAt,
+        });
 
         // Create role-specific document
         if (role === 'student') {
@@ -272,13 +280,20 @@ export async function POST(request: Request) {
             updatedAt: new Date().toISOString(),
           };
 
-          // Atomic student + user creation with bus capacity increment.
+          // Atomic student creation with bus capacity increment.
           // Without a transaction, a concurrent create-user on the same bus
           // could overfill beyond capacity, or a failure after user creation
-          // leaves an orphan user doc with no student.
+          // leaves an orphan student doc.
           const studentRef = db.collection('students').doc(uid);
-          const userRef = db.collection('users').doc(uid);
           const assignedBusId = studentDocData.busId;
+
+          // Write student to PostgreSQL (canonical source of truth) — before transaction
+          await createStudent({
+            ...studentDocData,
+            uid,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          });
 
           await db.runTransaction(async (transaction) => {
             const studentSnap = await transaction.get(studentRef);
@@ -289,7 +304,6 @@ export async function POST(request: Request) {
               busSnap = await transaction.get(db.collection('buses').doc(assignedBusId));
             }
 
-            transaction.set(userRef, userDocData);
             transaction.set(studentRef, studentDocData);
 
             // Increment bus capacity only if student is new and bus exists
@@ -322,6 +336,14 @@ export async function POST(request: Request) {
             updatedAt: new Date().toISOString(),
             // Audit trail - who created/updated this document
           };
+
+          // Write driver to PostgreSQL (canonical source of truth) — before Firestore write
+          await createDriver({
+            ...driverDocData,
+            uid,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          });
 
           await db.collection('drivers').doc(uid).set(driverDocData);
 
@@ -382,6 +404,15 @@ export async function POST(request: Request) {
         role,
         createdAt: Timestamp.now()
       };
+
+      // Write user to PostgreSQL (canonical source of truth)
+      await createUser({
+        uid: userDocId,
+        email,
+        name,
+        role,
+        createdAt: new Date().toISOString(),
+      });
 
       const userDocRef = doc(db, 'users', userDocId);
       await setDoc(userDocRef, userDocData);

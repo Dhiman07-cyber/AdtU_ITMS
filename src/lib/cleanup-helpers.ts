@@ -7,6 +7,11 @@ import { adminAuth, adminDb } from './firebase-admin';
 import { decrementBusCapacity } from './busCapacityService';
 import { extractPublicId, deleteAsset } from './cloudinary-server';
 import { wasSeatReleased } from './config/capacity-flags';
+import { deleteUser, deleteStudent, deleteDriver, deleteModerator } from '@/domains/identity';
+import * as fleetService from '@/domains/fleet';
+import * as studentService from '@/domains/student';
+import * as routeService from '@/domains/route';
+import { getSupabaseServer } from '@/lib/supabase-server';
 
 /**
  * Delete profile image from Cloudinary
@@ -77,19 +82,13 @@ export async function deleteUserAndData(
       // Get the student's busId before deleting to decrement capacity
       const busId = userData?.busId || userData?.currentBusId || userData?.assignedBusId || null;
 
-      // Delete student's applications (batch limit: 400 to stay under Firestore's 500 cap)
-      const applicationsQuery = await adminDb.collection('applications')
-        .where('applicantUid', '==', userId)
-        .limit(400)
-        .get();
-
-      if (applicationsQuery.size > 0) {
-        const batch = adminDb.batch();
-        applicationsQuery.docs.forEach(doc => {
-          batch.delete(doc.ref);
-        });
-        await batch.commit();
-        console.log(`Deleted ${applicationsQuery.size} applications for student:`, userId.substring(0,8)+'...');
+      // Delete student's applications from PG
+      try {
+        const db = getSupabaseServer();
+        await db.from('applications').delete().eq('applicant_uid', userId);
+        console.log(`Deleted applications from PG for student:`, userId.substring(0,8)+'...');
+      } catch (pgErr) {
+        console.error('Error deleting applications from PG:', pgErr);
       }
 
       // Delete profile update requests for this student
@@ -199,6 +198,44 @@ export async function deleteUserAndData(
       console.log(`Deleted user document from users collection:`, userId.substring(0,8)+'...');
     } catch (userDeleteError) {
       console.log(`User with ID ${userId.substring(0,8)}... not found in users collection or already deleted`);
+    }
+
+    // Delete from PostgreSQL (canonical source of truth)
+    try {
+      await deleteUser(userId);
+      console.log(`Deleted user from PostgreSQL:`, userId.substring(0,8)+'...');
+    } catch (pgDeleteError) {
+      console.log(`User with ID ${userId.substring(0,8)}... not found in PostgreSQL or already deleted`);
+    }
+
+    // Delete student profile from PostgreSQL if applicable
+    if (userType === 'student') {
+      try {
+        await deleteStudent(userId);
+        console.log(`Deleted student profile from PostgreSQL:`, userId.substring(0,8)+'...');
+      } catch (pgDeleteError) {
+        console.log(`Student profile with ID ${userId.substring(0,8)}... not found in PostgreSQL or already deleted`);
+      }
+    }
+
+    // Delete driver profile from PostgreSQL if applicable
+    if (userType === 'driver') {
+      try {
+        await deleteDriver(userId);
+        console.log(`Deleted driver profile from PostgreSQL:`, userId.substring(0,8)+'...');
+      } catch (pgDeleteError) {
+        console.log(`Driver profile with ID ${userId.substring(0,8)}... not found in PostgreSQL or already deleted`);
+      }
+    }
+
+    // Delete moderator profile from PostgreSQL if applicable
+    if (userType === 'moderator') {
+      try {
+        await deleteModerator(userId);
+        console.log(`Deleted moderator profile from PostgreSQL:`, userId.substring(0,8)+'...');
+      } catch (pgDeleteError) {
+        console.log(`Moderator profile with ID ${userId.substring(0,8)}... not found in PostgreSQL or already deleted`);
+      }
     }
 
     // Step 4: Delete from Firebase Authentication with enhanced Google account handling
@@ -385,40 +422,17 @@ export async function deleteRouteAndData(
   try {
     console.log('Deleting route with ID:', routeId);
 
-    // Delete route document (if it exists)
-    const routeDoc = await adminDb.collection('routes').doc(routeId).get();
-    if (routeDoc.exists) {
-      await adminDb.collection('routes').doc(routeId).delete();
-      console.log('Deleted route document:', routeId);
-    } else {
-      console.warn('Route document not found in routes collection, skipping document deletion but proceeding with cleanup.');
-    }
+    // 1. Bulk unassign route on buses in PG
+    await fleetService.unassignRoute(routeId);
+    console.log(`Unassigned route ${routeId} from buses in PG`);
 
-    // Unassign route from buses
-    const busesQuery = await adminDb.collection('buses')
-      .where('routeId', '==', routeId)
-      .limit(400)
-      .get();
+    // 2. Bulk unassign route on students in PG
+    await studentService.unassignRoute(routeId);
+    console.log(`Unassigned route ${routeId} from students in PG`);
 
-    const batch1 = adminDb.batch();
-    busesQuery.docs.forEach(doc => {
-      batch1.update(doc.ref, { routeId: null, updatedAt: new Date().toISOString() });
-    });
-    await batch1.commit();
-    console.log(`Unassigned route from ${busesQuery.size} buses`);
-
-    // Unassign route from students
-    const studentsQuery = await adminDb.collection('students')
-      .where('routeId', '==', routeId)
-      .limit(400)
-      .get();
-
-    const batch2 = adminDb.batch();
-    studentsQuery.docs.forEach(doc => {
-      batch2.update(doc.ref, { routeId: null, stopId: null, updatedAt: new Date().toISOString() });
-    });
-    await batch2.commit();
-    console.log(`Unassigned route from ${studentsQuery.size} students`);
+    // 3. Delete the route from PG
+    await routeService.remove(routeId);
+    console.log(`Deleted route ${routeId} from PG`);
 
     return { success: true };
   } catch (error: any) {
@@ -426,6 +440,7 @@ export async function deleteRouteAndData(
     return { success: false, error: error.message };
   }
 }
+
 
 /**
  * Clean up trip data when driver ends trip

@@ -4,35 +4,48 @@ import { getSupabaseServer } from '@/lib/supabase-server';
 import { withSecurity } from '@/lib/security/api-security';
 import { RateLimits } from '@/lib/security/rate-limiter';
 import { getTransportEntitlement } from '@/lib/entitlement/transport-entitlement';
+import { getByUid } from '@/domains/student';
+import * as routeService from '@/domains/route';
 
 /**
  * GET /api/student/dashboard-data
  * 
  * COMPREHENSIVE DASHBOARD DATA FETCH
  * Fetches student profile, bus, route, driver, and live trip status in PARALLEL.
+ *
+ * Migration status: COMPLETED — student profile reads from PostgreSQL.
+ * Bus/route/driver reads still use Firestore (separate domains).
  */
 export const GET = withSecurity(
     async (request, { auth }) => {
         const uid = auth.uid;
         const supabase = getSupabaseServer();
 
-        // 1. Fetch Student Profile
-        const studentDoc = await adminDb.collection('students').doc(uid).get().then(doc => {
-            if (doc.exists) return doc;
-            return adminDb.collection('students').where('uid', '==', uid).limit(1).get().then(q => q.empty ? null : q.docs[0]);
-        });
-
-        if (!studentDoc) {
-            return NextResponse.json({ error: 'Student profile not found' }, { status: 404 });
+        // 1. Fetch Student Profile from PostgreSQL
+        let studentData: Record<string, any> | null = null;
+        try {
+            studentData = await getByUid(uid) as Record<string, any> | null;
+        } catch {
+            studentData = null;
         }
 
-        const studentData = studentDoc.data()!;
+        if (!studentData) {
+            return NextResponse.json({
+                student: null,
+                bus: null,
+                route: null,
+                driver: null,
+                tripActive: false,
+                tripData: null,
+                entitled: false,
+                entitlementReason: 'no_account',
+            });
+        }
 
         // CANONICAL entitlement gate (Phase 3): never serve live transport data
         // (bus / route / driver / trip) to a student who does not currently own
         // transport access. The profile is still returned so the dashboard can
-        // render the lifecycle/renewal panel. This also avoids the Firestore +
-        // Supabase fan-out below for ineligible students.
+        // render the lifecycle/renewal panel.
         const entitlement = getTransportEntitlement(studentData);
         if (!entitlement.entitled) {
             return NextResponse.json({
@@ -50,17 +63,17 @@ export const GET = withSecurity(
         const busId = studentData.busId || studentData.assignedBusId;
         const routeId = studentData.routeId || studentData.assignedRouteId;
 
-        // 2. Parallelize everything else
-        const [busSnap, routeSnap, driverSnaps, tripStatus] = await Promise.all([
+        // 2. Parallelize everything else (bus/driver in Firestore, route in PG via Route Service)
+        const [busSnap, dbRoute, driverSnaps, tripStatus] = await Promise.all([
             busId ? adminDb.collection('buses').doc(busId).get() : Promise.resolve(null),
-            routeId ? adminDb.collection('routes').doc(routeId).get() : Promise.resolve(null),
+            routeId ? routeService.getById(routeId) : Promise.resolve(null),
             busId ? adminDb.collection('drivers').where('assignedBusId', '==', busId).get() : Promise.resolve(null),
             busId ? supabase.from('driver_status').select('status, started_at, last_updated_at').eq('bus_id', busId).maybeSingle() : Promise.resolve(null)
         ]);
 
         // Process Bus & Route
         const bus = busSnap?.exists ? { id: busSnap.id, ...busSnap.data() } : null;
-        const route = routeSnap?.exists ? { id: routeSnap.id, ...routeSnap.data() } : null;
+        const route = dbRoute ? { ...dbRoute, active: dbRoute.status === 'active' } : null;
 
         // Process Driver (Match shift)
         let driver = null;

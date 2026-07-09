@@ -61,6 +61,8 @@ export default function MobileInitialSplash() {
             src="/adtu-new-logo.svg"
             alt="AdtU Logo"
             className="w-36 h-auto object-contain"
+            loading="eager"
+            fetchPriority="high"
           />
         </div>
 

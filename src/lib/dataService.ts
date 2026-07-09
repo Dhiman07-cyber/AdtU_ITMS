@@ -402,19 +402,11 @@ export const updateStudent = async (id: string, data: Partial<Student>): Promise
   }
 };
 
-// Drivers collection functions
+// Drivers — compatibility façade. Runtime owner: D6 Fleet → PostgreSQL.
 export const getAllDrivers = async (): Promise<Driver[]> => {
-  const cacheKey = 'all_drivers';
-  const cached = getCachedData(cacheKey);
-  if (cached) return cached;
-
   try {
-    const db = await getDatabase();
-    const driversCol = collection(db as Firestore, 'drivers');
-    const driverSnapshot = await getDocs(driversCol);
-    const data = driverSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Driver));
-    setCachedData(cacheKey, data);
-    return data;
+    const { getAllDrivers: svcGetAll } = await import('@/domains/fleet/services/fleet.service');
+    return svcGetAll();
   } catch (error) {
     console.error('Error fetching drivers:', error);
     return [];
@@ -422,41 +414,9 @@ export const getAllDrivers = async (): Promise<Driver[]> => {
 };
 
 export const getDriverById = async (id: string): Promise<any | null> => {
-  const cacheKey = `driver_${id}`;
-  const cached = getCachedData(cacheKey);
-  if (cached) return cached;
-
   try {
-    const db = await getDatabase();
-    const driverDoc = await getDoc(doc(db as Firestore, 'drivers', id));
-
-    if (driverDoc.exists()) {
-      const data = driverDoc.data();
-      const result = {
-        id: driverDoc.id,
-        uid: driverDoc.id,
-        ...data,
-        // Robust field mapping
-        fullName: data.fullName || data.name || '',
-        name: data.name || data.fullName || '',
-        phone: data.phone || data.phoneNumber || '',
-        email: data.email || data.emailAddress || '',
-        routeId: data.routeId || data.assignedRouteId || '',
-        assignedRouteId: data.assignedRouteId || data.routeId || '',
-        busId: data.busId || data.assignedBusId || '',
-        assignedBusId: data.assignedBusId || data.busId || '',
-        shift: (() => {
-          const { normalizeShift } = require('@/lib/utils/shift-utils');
-          const raw = data.shift || data.assignedShift || '';
-          if (!raw) return '';
-          return normalizeShift(raw);
-        })(),
-        employeeId: data.employeeId || data.driverId || ''
-      };
-      setCachedData(cacheKey, result);
-      return result;
-    }
-    return null;
+    const { getDriverById: svcGetById } = await import('@/domains/fleet/services/fleet.service');
+    return svcGetById(id);
   } catch (error) {
     console.error('Error fetching driver:', error);
     return null;
@@ -465,44 +425,8 @@ export const getDriverById = async (id: string): Promise<any | null> => {
 
 export const deleteDriver = async (id: string): Promise<boolean> => {
   try {
-    // Get current user for authentication
-    const auth = getAuth();
-    const currentUser = auth.currentUser;
-
-    if (!currentUser) {
-      console.error('No authenticated user found');
-      return false;
-    }
-
-    // Get ID token for authentication
-    const idToken = await currentUser.getIdToken();
-
-    // Call the comprehensive delete API
-    const response = await fetch('/api/delete-user', {
-      method: 'DELETE',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${idToken}`
-      },
-      body: JSON.stringify({
-        uid: id,
-        idToken: idToken
-      })
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json();
-      console.error('Delete driver API error:', errorData);
-      return false;
-    }
-
-    const result = await response.json();
-    console.log('Driver deleted successfully:', result);
-    if (result.success) {
-      invalidateCache(`driver_${id}`);
-      invalidateCache('all_drivers');
-    }
-    return result.success;
+    const { removeDriver } = await import('@/domains/fleet/services/fleet.service');
+    return removeDriver(id);
   } catch (error) {
     console.error('Error deleting driver:', error);
     return false;
@@ -511,16 +435,8 @@ export const deleteDriver = async (id: string): Promise<boolean> => {
 
 export const updateDriver = async (id: string, data: Partial<Driver>): Promise<boolean> => {
   try {
-    const db = await getDatabase();
-    const updatedByEntry = createUpdatedByEntryClient();
-    await updateDoc(doc(db as Firestore, 'drivers', id), {
-      ...data,
-      updatedAt: new Date().toISOString(),
-      updatedBy: arrayUnion(updatedByEntry)
-    } as any);
-    invalidateCache(`driver_${id}`);
-    invalidateCache('all_drivers');
-    return true;
+    const { updateDriver: svcUpdate } = await import('@/domains/fleet/services/fleet.service');
+    return svcUpdate(id, data);
   } catch (error) {
     console.error('Error updating driver:', error);
     return false;
@@ -644,21 +560,11 @@ export const updateModerator = async (id: string, data: Partial<Moderator>): Pro
   }
 };
 
-// Buses collection functions
+// Buses — compatibility façade. Runtime owner: D6 Fleet → PostgreSQL.
 export const getAllBuses = async (): Promise<Bus[]> => {
-  const cacheKey = 'all_buses';
-  const cached = getCachedData(cacheKey);
-  if (cached) return cached;
-
   try {
-    if (!checkClientAuth()) return [];
-
-    const db = await getDatabase();
-    const busesCol = collection(db as Firestore, 'buses');
-    const busSnapshot = await getDocs(busesCol);
-    const data = busSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Bus));
-    setCachedData(cacheKey, data);
-    return data;
+    const { getAllBuses: svcGetAll } = await import('@/domains/fleet/services/fleet.service');
+    return svcGetAll();
   } catch (error) {
     console.error('Error fetching buses:', error);
     return [];
@@ -666,36 +572,20 @@ export const getAllBuses = async (): Promise<Bus[]> => {
 };
 
 export const getBusById = async (id: string): Promise<Bus | null> => {
-  const cacheKey = `bus_${id}`;
-  const cached = getCachedData(cacheKey);
-  if (cached) return cached;
-
   try {
-    const db = await getDatabase();
-    const busDoc = await getDoc(doc(db as Firestore, 'buses', id));
-    const data = busDoc.exists() ? { id: busDoc.id, ...busDoc.data() } as Bus : null;
-    if (data) setCachedData(cacheKey, data);
-    return data;
+    const { getBusById: svcGetById } = await import('@/domains/fleet/services/fleet.service');
+    return svcGetById(id);
   } catch (error) {
     console.error('Error fetching bus:', error);
     return null;
   }
 };
 
-// Get buses by route ID
+// Get buses by route ID — compatibility façade delegating to D6 Fleet
 export const getBusesByRouteId = async (routeId: string): Promise<Bus[]> => {
-  const cacheKey = `buses_route_${routeId}`;
-  const cached = getCachedData(cacheKey);
-  if (cached) return cached;
-
   try {
-    const db = await getDatabase();
-    const busesCol = collection(db as Firestore, 'buses');
-    const q = query(busesCol, where('routeId', '==', routeId));
-    const busSnapshot = await getDocs(q);
-    const data = busSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Bus));
-    setCachedData(cacheKey, data);
-    return data;
+    const { getBusesByRouteId: svcGetByRoute } = await import('@/domains/fleet/services/fleet.service');
+    return svcGetByRoute(routeId);
   } catch (error) {
     console.error('Error fetching buses by route ID:', error);
     return [];
@@ -704,11 +594,8 @@ export const getBusesByRouteId = async (routeId: string): Promise<Bus[]> => {
 
 export const deleteBus = async (id: string): Promise<boolean> => {
   try {
-    const db = await getDatabase();
-    await deleteDoc(doc(db as Firestore, 'buses', id));
-    invalidateCache(`bus_${id}`);
-    invalidateCache('all_buses');
-    return true;
+    const { removeBus } = await import('@/domains/fleet/services/fleet.service');
+    return removeBus(id);
   } catch (error) {
     console.error('Error deleting bus:', error);
     return false;
@@ -717,16 +604,8 @@ export const deleteBus = async (id: string): Promise<boolean> => {
 
 export const updateBus = async (id: string, data: Partial<Bus>): Promise<boolean> => {
   try {
-    const db = await getDatabase();
-    const updatedByEntry = await createUpdatedByEntryClient();
-    await updateDoc(doc(db as Firestore, 'buses', id), {
-      ...data,
-      updatedAt: new Date().toISOString(),
-      updatedBy: arrayUnion(updatedByEntry)
-    } as any);
-    invalidateCache(`bus_${id}`);
-    invalidateCache('all_buses');
-    return true;
+    const { updateBus: svcUpdate } = await import('@/domains/fleet/services/fleet.service');
+    return svcUpdate(id, data);
   } catch (error) {
     console.error('Error updating bus:', error);
     return false;
@@ -740,20 +619,16 @@ export const getAllRoutes = async (): Promise<Route[]> => {
   if (cached) return cached;
 
   try {
-    if (!checkClientAuth()) return [];
-
-    const db = await getDatabase();
-
-    // Fetch from routes collection
-    const routesCol = collection(db as Firestore, 'routes');
-    // Optional: Sort by routeId or createdAt
-    const routeSnapshot = await getDocs(routesCol);
-
-    const data = routeSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Route));
-    setCachedData(cacheKey, data);
-    return data;
+    const routeService = await import('@/domains/route');
+    const data = await routeService.getAll();
+    const mappedData = data.map(r => ({
+      ...r,
+      active: r.status === 'active'
+    }));
+    setCachedData(cacheKey, mappedData);
+    return mappedData;
   } catch (error) {
-    console.error('Error fetching routes:', error);
+    console.error('Error fetching routes from Route Service:', error);
     return [];
   }
 };
@@ -764,222 +639,68 @@ export const getRouteById = async (id: string): Promise<Route | null> => {
   if (cached) return cached;
 
   try {
-    const db = await getDatabase();
-
-    // First, try fetching from routes collection
-    const routeDoc = await getDoc(doc(db as Firestore, 'routes', id));
-    if (routeDoc.exists()) {
-      const data = { id: routeDoc.id, ...routeDoc.data() } as Route;
-      setCachedData(cacheKey, data);
-      return data;
-    }
-
-    // If not found, return null (Routes should be in routes collection)
-    return null;
+    const routeService = await import('@/domains/route');
+    const route = await routeService.getById(id);
+    if (!route) return null;
+    const mappedRoute = {
+      ...route,
+      active: route.status === 'active'
+    };
+    setCachedData(cacheKey, mappedRoute);
+    return mappedRoute;
   } catch (error) {
-    console.error('Error fetching route:', error);
+    console.error('Error fetching route from Route Service:', error);
     return null;
   }
 };
 
 export const deleteRoute = async (id: string): Promise<boolean> => {
   try {
-    const db = await getDatabase();
-    await deleteDoc(doc(db as Firestore, 'routes', id));
+    const routeService = await import('@/domains/route');
+    const success = await routeService.remove(id);
     invalidateCache(`route_${id}`);
     invalidateCache('all_routes');
-    return true;
+    return success;
   } catch (error) {
-    console.error('Error deleting route:', error);
+    console.error('Error deleting route from Route Service:', error);
     return false;
   }
 };
 
 export const updateRoute = async (id: string, data: Partial<Route>): Promise<boolean> => {
   try {
-    const db = await getDatabase();
-    const updatedByEntry = await createUpdatedByEntryClient();
-    await updateDoc(doc(db as Firestore, 'routes', id), {
-      ...data,
-      updatedAt: new Date().toISOString(),
-      updatedBy: arrayUnion(updatedByEntry)
-    } as any);
+    const routeService = await import('@/domains/route');
+    const cleanData = { ...data };
+    delete cleanData.updatedBy;
+    delete cleanData.active;
+    if (data.active !== undefined) {
+      cleanData.status = data.active ? 'active' : 'inactive';
+    }
+    const success = await routeService.update(id, cleanData);
     invalidateCache(`route_${id}`);
     invalidateCache('all_routes');
-    return true;
+    return success;
   } catch (error) {
-    console.error('Error updating route:', error);
+    console.error('Error updating route from Route Service:', error);
     return false;
   }
 };
 
-// Applications collection functions  
-export const getAllApplications = async (): Promise<Application[]> => {
-  try {
-    const db = await getDatabase();
-    const applicationsCol = collection(db as Firestore, 'applications');
-    const applicationSnapshot = await getDocs(applicationsCol);
-    return applicationSnapshot.docs.map(doc => ({ applicationId: doc.id, ...doc.data() } as Application));
-  } catch (error) {
-    console.error('Error fetching applications:', error);
-    return [];
-  }
-};
+// Applications collection functions moved to D4 Application domain (PostgreSQL)
 
-export const getApplicationById = async (id: string): Promise<Application | null> => {
-  try {
-    const db = await getDatabase();
-    const applicationDoc = await getDoc(doc(db as Firestore, 'applications', id));
-    return applicationDoc.exists() ? { applicationId: applicationDoc.id, ...applicationDoc.data() } as Application : null;
-  } catch (error) {
-    console.error('Error fetching application:', error);
-    return null;
-  }
-};
-
-export const updateApplication = async (id: string, data: Partial<Application>): Promise<boolean> => {
-  try {
-    const db = await getDatabase();
-    await updateDoc(doc(db as Firestore, 'applications', id), data as any);
-    return true;
-  } catch (error) {
-    console.error('Error updating application:', error);
-    return false;
-  }
-};
-
-export const approveStudentApplication = async (applicationId: string, approvedBy: string): Promise<boolean> => {
-  try {
-    // Get current user for authentication
-    const { auth } = await import('@/lib/firebase');
-    const currentUser = auth.currentUser;
-    if (!currentUser) {
-      console.error('No authenticated user');
-      return false;
-    }
-
-    const token = await currentUser.getIdToken();
-
-    // Call the API endpoint which handles image deletion
-    const response = await fetch('/api/applications/approve', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-      },
-      body: JSON.stringify({
-        applicationId,
-        approverName: currentUser.displayName || currentUser.email || 'Admin',
-        approverId: approvedBy,
-        notes: 'Application approved via admin panel'
-      })
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json();
-      console.error('Error approving application:', errorData.error);
-      return false;
-    }
-
-    const result = await response.json();
-    console.log('Application approved successfully:', result);
-    return true;
-  } catch (error: any) {
-    console.error('Error approving application:', error.message || error);
-    return false;
-  }
-};
-
-export const rejectStudentApplication = async (applicationId: string, rejectedBy: string, reason: string): Promise<boolean> => {
-  try {
-    // Get current user for authentication
-    const { auth } = await import('@/lib/firebase');
-    const currentUser = auth.currentUser;
-    if (!currentUser) {
-      console.error('No authenticated user');
-      return false;
-    }
-
-    const token = await currentUser.getIdToken();
-
-    // Call the API endpoint
-    const response = await fetch('/api/applications/reject', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-      },
-      body: JSON.stringify({
-        applicationId,
-        rejectorName: currentUser.displayName || currentUser.email || 'Admin',
-        rejectorId: rejectedBy,
-        reason
-      })
-    });
-
-    if (!response.ok) {
-      const errorData = await response.json();
-      console.error('Error rejecting application:', errorData.error);
-      return false;
-    }
-
-    const result = await response.json();
-    console.log('Application rejected successfully:', result);
-    return true;
-  } catch (error: any) {
-    console.error('Error rejecting application:', error.message || error);
-    return false;
-  }
-};
-
-export const createApplication = async (applicationData: Omit<Application, 'applicationId'>): Promise<string | null> => {
-  try {
-    const db = await getDatabase();
-    const applicationId = createRandomId();
-    await setDoc(doc(db as Firestore, 'applications', applicationId), {
-      ...applicationData,
-      applicationId,
-      createdAt: getCurrentTimestamp()
-    });
-    return applicationId;
-  } catch (error) {
-    console.error('Error creating application:', error);
-    return null;
-  }
-};
-
-export const getApplicationsByApplicantUID = async (applicantUID: string): Promise<Application[]> => {
-  const cacheKey = `apps_uid_${applicantUID}`;
-  const cached = getCachedData(cacheKey);
-  if (cached) return cached;
-
-  try {
-    const db = await getDatabase();
-    const applicationsCol = collection(db as Firestore, 'applications');
-    const q = query(applicationsCol, where('applicantUID', '==', applicantUID));
-    const applicationSnapshot = await getDocs(q);
-    const data = applicationSnapshot.docs.map(doc => ({ applicationId: doc.id, ...doc.data() } as Application));
-    setCachedData(cacheKey, data);
-    return data;
-  } catch (error) {
-    console.error('Error fetching applications by applicant UID:', error);
-    return [];
-  }
-};
-
-// Add missing functions
 export const addRoute = async (routeData: Omit<Route, 'id'>): Promise<string | null> => {
   try {
-    const db = await getDatabase();
-    const routeId = routeData.routeId || createRandomId();
-    await setDoc(doc(db as Firestore, 'routes', routeId), {
-      ...routeData,
-      routeId,
-      createdAt: getCurrentTimestamp()
-    });
-    return routeId;
+    const routeService = await import('@/domains/route');
+    const cleanData = { ...routeData };
+    delete cleanData.active;
+    if (routeData.active !== undefined) {
+      cleanData.status = routeData.active ? 'active' : 'inactive';
+    }
+    const id = await routeService.create(cleanData);
+    invalidateCache('all_routes');
+    return id;
   } catch (error) {
-    console.error('Error creating route:', error);
+    console.error('Error creating route from Route Service:', error);
     return null;
   }
 };

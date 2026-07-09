@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { verifyApiAuth } from '@/lib/security/api-auth';
 import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
-import { adminDb } from '@/lib/firebase-admin';
+import { getById, update } from '@/domains/student';
 
 export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -11,10 +11,6 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     const permissionDenied = await requireModeratorPermission(auth, 'students', 'canEdit');
     if (permissionDenied) return permissionDenied;
 
-    if (!adminDb) {
-      return NextResponse.json({ error: 'Database not available' }, { status: 500 });
-    }
-
     const { id } = await params;
     const requestBody = await request.json();
 
@@ -23,7 +19,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       'fullName', 'name', 'email', 'phone', 'enrollmentId', 'photoURL',
       'faculty', 'department', 'yearOfStudy',
       'stopId', 'stopName', 'stopLat', 'stopLng',
-      'shift'
+      'shift', 'profilePhotoUrl', 'address', 'bloodGroup', 'dob', 'parentName', 'parentPhone'
     ]);
     const BLOCKED_FIELDS = new Set([
       'status', 'validUntil', 'busId', 'routeId', 'role', 'paymentAmount',
@@ -52,9 +48,8 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       }
     }
 
-    const studentDocRef = adminDb.collection('students').doc(id);
-    const studentDoc = await studentDocRef.get();
-    if (!studentDoc.exists) {
+    const student = await getById(id);
+    if (!student) {
       return NextResponse.json({ error: 'Student not found' }, { status: 404 });
     }
 
@@ -73,31 +68,37 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       updatedAt: new Date().toISOString(),
     };
 
-    await studentDocRef.update(unifiedUpdateData);
+    const success = await update(id, unifiedUpdateData);
+    if (!success) {
+      return NextResponse.json({ error: 'Failed to update student profile' }, { status: 500 });
+    }
 
-    const freshDoc = await studentDocRef.get();
-    const data = freshDoc.data();
-    const updatedStudent = {
-      id: freshDoc.id,
-      name: data?.fullName || data?.name || '',
-      email: data?.email || '',
-      phone: data?.phone || '',
-      alternatePhone: data?.alternatePhone || '',
-      enrollmentId: data?.enrollmentId || '',
-      gender: data?.gender || '',
-      dob: data?.dob || '',
-      faculty: data?.faculty || '',
-      department: data?.department || '',
-      parentName: data?.parentName || '',
-      parentPhone: data?.parentPhone || '',
-      busAssigned: data?.busAssigned || data?.busId || '',
-      routeId: data?.routeId || '',
-      profilePhotoUrl: data?.profilePhotoUrl || '',
-      address: data?.address || '',
-      bloodGroup: data?.bloodGroup || '',
+    const freshStudent = await getById(id);
+    if (!freshStudent) {
+      return NextResponse.json({ error: 'Student not found after update' }, { status: 404 });
+    }
+
+    const responseStudent = {
+      id: freshStudent.id || freshStudent.uid,
+      name: freshStudent.fullName || freshStudent.name || '',
+      email: freshStudent.email || '',
+      phone: freshStudent.phone || '',
+      alternatePhone: freshStudent.altPhone || '',
+      enrollmentId: freshStudent.enrollmentId || '',
+      gender: freshStudent.gender || '',
+      dob: freshStudent.dob || '',
+      faculty: freshStudent.faculty || '',
+      department: freshStudent.department || '',
+      parentName: freshStudent.parentName || '',
+      parentPhone: freshStudent.parentPhone || '',
+      busAssigned: freshStudent.busId || freshStudent.assignedBusId || '',
+      routeId: freshStudent.routeId || freshStudent.assignedRouteId || '',
+      profilePhotoUrl: freshStudent.profilePhotoUrl || '',
+      address: freshStudent.address || '',
+      bloodGroup: freshStudent.bloodGroup || '',
     };
 
-    return NextResponse.json(updatedStudent);
+    return NextResponse.json(responseStudent);
   } catch (error: any) {
     console.error('Error updating student:', error);
     return NextResponse.json({ error: 'Failed to update student' }, { status: 500 });

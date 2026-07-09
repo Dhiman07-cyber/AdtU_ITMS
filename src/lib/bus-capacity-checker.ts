@@ -84,10 +84,10 @@ export async function checkBusCapacity(busId: string, shift?: string): Promise<B
         const q = query(studentsRef, where('busId', '==', busId));
         const countSnapshot = await getDocs(q);
 
-          if (shift) {
-            const normalizedShiftForQuery = normalizeShift(shift);
-            const shiftStudents = countSnapshot.docs.filter(doc => normalizeShift(doc.data().shift) === normalizedShiftForQuery);
-            shiftLoad = shiftStudents.length;
+        if (shift) {
+          const normalizedShiftForQuery = normalizeShift(shift);
+          const shiftStudents = countSnapshot.docs.filter(doc => normalizeShift(doc.data().shift) === normalizedShiftForQuery);
+          shiftLoad = shiftStudents.length;
         } else {
           shiftLoad = countSnapshot.size;
         }
@@ -168,16 +168,14 @@ export async function findBusesByStop(stopId: string, stopName: string, shift?: 
     const normalizedStopId = stopId.toLowerCase().trim();
     const normalizedStopName = stopName.toLowerCase().trim();
 
-    const db = await getDb();
-    // Step 1: Find all routes that have this stop
-    const routesRef = collection(db, 'routes');
-    const routesSnap = await getDocs(routesRef);
+    // Step 1: Find all routes that have this stop via Route Service
+    const routeService = await import('@/domains/route');
+    const routes = await routeService.getAll();
 
     const matchingRouteIds: string[] = [];
 
-    for (const routeDoc of routesSnap.docs) {
-      const routeData = routeDoc.data();
-      const stops = routeData.stops || [];
+    for (const route of routes) {
+      const stops = route.stops || [];
 
       const hasStop = stops.some((stop: any) => {
         const routeStopId = extractStopId(stop);
@@ -186,10 +184,11 @@ export async function findBusesByStop(stopId: string, stopName: string, shift?: 
       });
 
       if (hasStop) {
-        // Use routeId field if available, otherwise use document ID
-        const routeId = routeData.routeId || routeDoc.id;
-        matchingRouteIds.push(routeId);
-        console.log('✅ Found route with stop:', routeId);
+        const routeId = route.routeId || route.id;
+        if (routeId) {
+          matchingRouteIds.push(routeId);
+          console.log('✅ Found route with stop:', routeId);
+        }
       }
     }
 
@@ -200,6 +199,7 @@ export async function findBusesByStop(stopId: string, stopName: string, shift?: 
       return [];
     }
 
+    const db = await getDb();
     // Step 2: Find all buses assigned to these routes
     const busesRef = collection(db, 'buses');
     const busesSnap = await getDocs(busesRef);

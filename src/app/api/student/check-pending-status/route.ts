@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server';
 import { db as adminDb } from '@/lib/firebase-admin';
-import { FieldValue } from 'firebase-admin/firestore';
 import { withSecurity } from '@/lib/security/api-security';
 import { CheckPendingStatusSchema } from '@/lib/security/validation-schemas';
 import { RateLimits } from '@/lib/security/rate-limiter';
+import { update } from '@/domains/student';
 
 /**
  * POST /api/student/check-pending-status
@@ -16,15 +16,12 @@ export const POST = withSecurity(
         const { requestId } = body as any;
         const studentUid = auth.uid;
 
-        // Check the request document
+        // Check the request document in Firestore (profile_update_requests belongs to Driver review domain)
         const requestDoc = await adminDb.collection('profile_update_requests').doc(requestId).get();
 
         if (!requestDoc.exists) {
-            // Request doesn't exist - clean up stale reference from student
-            await adminDb.collection('students').doc(studentUid).update({
-                pendingProfileUpdate: FieldValue.delete(),
-                updatedAt: FieldValue.serverTimestamp()
-            });
+            // Request doesn't exist - clean up stale reference from student in PostgreSQL
+            await update(studentUid, { pendingProfileUpdate: null });
 
             return NextResponse.json({
                 success: true,
@@ -36,12 +33,9 @@ export const POST = withSecurity(
 
         const requestData = requestDoc.data();
 
-        // If request exists but is not pending (approved/rejected), clean up
+        // If request exists but is not pending (approved/rejected), clean up in PostgreSQL
         if (requestData.status !== 'pending') {
-            await adminDb.collection('students').doc(studentUid).update({
-                pendingProfileUpdate: FieldValue.delete(),
-                updatedAt: FieldValue.serverTimestamp()
-            });
+            await update(studentUid, { pendingProfileUpdate: null });
 
             return NextResponse.json({
                 success: true,

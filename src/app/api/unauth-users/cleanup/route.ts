@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { adminAuth, adminDb } from '@/lib/firebase-admin';
 import { verifyApiAuth, verifyCronSecret } from '@/lib/security/api-auth';
+import { createUser, getUserById, createStudent, deleteUnauthUser } from '@/domains/identity';
 
 /**
  * Cleanup old unauth users and handle application states
@@ -53,6 +54,8 @@ export async function POST(request: NextRequest) {
           }
 
           await adminDb.collection('unauthUsers').doc(userId).delete();
+          // Also delete from PostgreSQL
+          try { await deleteUnauthUser(userId); } catch (pgErr: any) { console.error(`PG delete failed for ${userId}:`, pgErr.message); }
           deletedCount++;
           cleanupResults.push({ userId, action: 'deleted', reason: '45+ days inactive' });
           continue;
@@ -61,17 +64,18 @@ export async function POST(request: NextRequest) {
         // Check if user should be moved to users collection (approved applications)
         if (userData.status === 'approved') {
           try {
-            const existingUserDoc = await adminDb.collection('users').doc(userId).get();
-            if (existingUserDoc.exists) continue;
+            const existingUser = await getUserById(userId);
+            if (existingUser) continue;
 
-            await adminDb.collection('users').doc(userId).set({
+            // Write user to PostgreSQL (canonical source of truth)
+            await createUser({
               uid: userId,
               email: userData.email,
               name: userData.displayName,
               role: 'student',
-              createdAt: userData.createdAt,
-              lastLoginAt: userData.lastLoginAt,
-              profilePhotoUrl: userData.profilePhotoUrl || null
+              createdAt: userData.createdAt || new Date().toISOString(),
+              lastLoginAt: userData.lastLoginAt || null,
+              profilePhotoUrl: userData.profilePhotoUrl || null,
             });
 
             await adminDb.collection('students').doc(userId).set({
@@ -83,7 +87,19 @@ export async function POST(request: NextRequest) {
               updatedAt: new Date().toISOString()
             });
 
+            // Write student to PostgreSQL (canonical source of truth)
+            await createStudent({
+              uid: userId,
+              email: userData.email,
+              fullName: userData.displayName,
+              profilePhotoUrl: userData.profilePhotoUrl || null,
+              createdAt: userData.createdAt,
+              updatedAt: new Date().toISOString(),
+            });
+
             await adminDb.collection('unauthUsers').doc(userId).delete();
+            // Also delete from PostgreSQL
+            try { await deleteUnauthUser(userId); } catch (pgErr: any) { console.error(`PG delete failed for ${userId}:`, pgErr.message); }
             movedCount++;
             cleanupResults.push({ userId, action: 'moved', reason: 'approved application' });
           } catch (moveError: any) {
@@ -101,6 +117,8 @@ export async function POST(request: NextRequest) {
           }
 
           await adminDb.collection('unauthUsers').doc(userId).delete();
+          // Also delete from PostgreSQL
+          try { await deleteUnauthUser(userId); } catch (pgErr: any) { console.error(`PG delete failed for ${userId}:`, pgErr.message); }
           deletedCount++;
           cleanupResults.push({ userId, action: 'deleted', reason: 'rejected application' });
           continue;

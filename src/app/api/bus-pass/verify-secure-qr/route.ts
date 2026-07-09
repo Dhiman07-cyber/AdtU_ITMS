@@ -13,6 +13,7 @@ import {
     validateStudentScannerContext,
 } from '@/lib/security/scanner-auth';
 import { getTransportEntitlement } from '@/lib/entitlement/transport-entitlement';
+import { getByUid } from '@/domains/student';
 
 function getValidUntilDate(validUntil: unknown): Date | null {
     if (!validUntil) return null;
@@ -119,8 +120,8 @@ export async function POST(request: NextRequest) {
             });
         }
 
-        const studentDoc = await adminDb.collection('students').doc(qrPayload.uid).get();
-        if (!studentDoc.exists) {
+        const studentData = await getByUid(qrPayload.uid) as Record<string, any> | null;
+        if (!studentData) {
             return NextResponse.json({
                 status: 'invalid',
                 message: 'Student not found. This QR code is not registered.',
@@ -130,8 +131,6 @@ export async function POST(request: NextRequest) {
                 isTripStale
             });
         }
-
-        const studentData = studentDoc.data();
         const validUntilDate = getValidUntilDate(studentData?.validUntil);
         const assignedBusId = studentData?.assignedBus || studentData?.busId || studentData?.currentBusId;
         const busMatchesScanner = scannerBusMatchesStudent(scannerBusId, assignedBusId);

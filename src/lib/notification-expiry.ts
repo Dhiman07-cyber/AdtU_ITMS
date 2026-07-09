@@ -3,6 +3,7 @@
  * Automatically delete expired notifications at midnight
  */
 
+import { cleanupExpired } from '@/domains/payment/repositories/processed-payments.repository';
 import { adminDb } from './firebase-admin';
 
 export function calculateNotificationExpiry(startDate: Date, daysToLive: number = 0): string {
@@ -13,8 +14,8 @@ export function calculateNotificationExpiry(startDate: Date, daysToLive: number 
 }
 
 /**
- * Clean up expired processed_payments documents in Firestore.
- * Documents are kept for 7 days for idempotency/retry safety, then deleted.
+ * Clean up expired processed_payments rows in PostgreSQL.
+ * Markers are kept for 7 days for idempotency/retry safety, then deleted.
  */
 export async function deleteExpiredProcessedPayments(): Promise<{
   deletedPayments: number;
@@ -26,74 +27,8 @@ export async function deleteExpiredProcessedPayments(): Promise<{
   };
 
   try {
-    const nowMs = Date.now();
-    const PAGE_SIZE = 500;
-    let lastDoc: any = null;
-    let hasMore = true;
-
-    while (hasMore) {
-      let query = adminDb.collection('processed_payments')
-        .orderBy('__name__')
-        .limit(PAGE_SIZE);
-
-      if (lastDoc) {
-        query = query.startAfter(lastDoc);
-      }
-
-      const snapshot = await query.get();
-
-      if (snapshot.empty || snapshot.size < PAGE_SIZE) {
-        hasMore = false;
-      }
-
-      if (snapshot.docs.length > 0) {
-        lastDoc = snapshot.docs[snapshot.docs.length - 1];
-      }
-
-      const idsToDelete: string[] = [];
-
-      for (const doc of snapshot.docs) {
-        const data = doc.data();
-        let expiryMillis = 0;
-
-        if (data.expiresAt) {
-          expiryMillis = new Date(data.expiresAt).getTime();
-        } else if (data.processedAt) {
-          // Fallback: if no expiresAt exists, expire 7 days after processedAt
-          let processedDate: Date;
-          if (typeof data.processedAt.toDate === 'function') {
-            processedDate = data.processedAt.toDate();
-          } else {
-            processedDate = new Date(data.processedAt);
-          }
-          expiryMillis = processedDate.getTime() + 7 * 24 * 60 * 60 * 1000;
-        }
-
-        if (expiryMillis > 0 && expiryMillis <= nowMs) {
-          idsToDelete.push(doc.id);
-        }
-      }
-
-      if (idsToDelete.length > 0) {
-        console.log(`   Found ${idsToDelete.length} expired processed payments in this page.`);
-
-        const chunkSize = 400;
-        for (let i = 0; i < idsToDelete.length; i += chunkSize) {
-          const batch = adminDb.batch();
-          const chunk = idsToDelete.slice(i, i + chunkSize);
-
-          chunk.forEach(id => {
-            const ref = adminDb.collection('processed_payments').doc(id);
-            batch.delete(ref);
-          });
-
-          await batch.commit();
-        }
-
-        result.deletedPayments += idsToDelete.length;
-      }
-    }
-
+    const deleted = await cleanupExpired();
+    result.deletedPayments = deleted;
     console.log(`   Deleted ${result.deletedPayments} expired processed payments.`);
     return result;
   } catch (error: any) {

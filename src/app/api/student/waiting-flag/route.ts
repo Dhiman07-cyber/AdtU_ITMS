@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server';
-import { adminDb } from '@/lib/firebase-admin';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import { withSecurity } from '@/lib/security/api-security';
 import { 
@@ -9,6 +8,7 @@ import {
 } from '@/lib/security/validation-schemas';
 import { RateLimits } from '@/lib/security/rate-limiter';
 import { getTransportEntitlement } from '@/lib/entitlement/transport-entitlement';
+import { getByUid } from '@/domains/student';
 
 /**
  * POST /api/student/waiting-flag
@@ -22,11 +22,8 @@ export const POST = withSecurity(
         const supabase = getSupabaseServer();
 
         // 1. Parallelize student profile fetch, duplicate flag check, and active trip lookup
-        const [studentDoc, existingFlagRes, activeTripRes] = await Promise.all([
-            adminDb.collection('students').doc(studentUid).get().then(doc => {
-                if (doc.exists) return doc;
-                return adminDb.collection('students').where('uid', '==', studentUid).limit(1).get().then(q => q.empty ? null : q.docs[0]);
-            }),
+        const [studentData, existingFlagRes, activeTripRes] = await Promise.all([
+            getByUid(studentUid).catch(() => null),
             supabase.from('waiting_flags')
                 .select('id')
                 .eq('student_uid', studentUid)
@@ -40,9 +37,7 @@ export const POST = withSecurity(
                 .maybeSingle()
         ]);
 
-        if (!studentDoc) return NextResponse.json({ error: 'Student record not found' }, { status: 404 });
-
-        const studentData = studentDoc.data()!;
+        if (!studentData) return NextResponse.json({ error: 'Student record not found' }, { status: 404 });
 
         // Phase 3 — raising a waiting flag is transport functionality; deny unless
         // the student currently owns transport access (canonical source of truth).

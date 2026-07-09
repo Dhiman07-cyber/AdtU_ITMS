@@ -11,6 +11,8 @@ import { isSeatReleaseAtSoftBlockEnabled, wasSeatReleased } from '@/lib/config/c
 import { adminReconcileBusLoads } from '@/lib/services/admin-reconcile-bus-loads';
 import { createAuditLogInTransaction, createAuditLog, SYSTEM_ACTOR } from '@/lib/services/audit.service';
 import { getCurrentSessionStartYear } from '@/lib/services/session-activation.service';
+import { getSupabaseServer } from '@/lib/supabase-server';
+import * as Notification from '@/domains/notification';
 
 // Configure Cloudinary
 if (process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME) {
@@ -408,7 +410,7 @@ export async function GET(request: NextRequest) {
         //         than the grace window past their eligibility date, so stale
         //         upcoming applications do not linger forever.
         //   These applications are NOT students and never touch bus capacity, so
-        //   this pass only reads/writes the `applications` collection.
+        //   this pass only reads/writes the `applications` table in PG.
         const upcomingResults = { reminded: 0, expired: 0, errors: [] as string[] };
         // Grace window after eligibility before an unapproved upcoming application
         // is auto-expired. No dedicated config field exists; this constant is the
@@ -416,81 +418,63 @@ export async function GET(request: NextRequest) {
         const UPCOMING_GRACE_DAYS = 60;
         try {
             const nowMs = Date.now();
-            const UPCOMING_PAGE_SIZE = 400;
-            let upcomingLastDoc: FirebaseFirestore.QueryDocumentSnapshot | null = null;
-            let upcomingHasMore = true;
+            const db = getSupabaseServer();
 
-            while (upcomingHasMore) {
-            let upcomingQuery = adminDb.collection('applications')
-                .where('applicationType', '==', 'future')
-                .where('state', '==', 'submitted')
-                .limit(UPCOMING_PAGE_SIZE) as any;
-            if (upcomingLastDoc) upcomingQuery = upcomingQuery.startAfter(upcomingLastDoc);
-            const upcomingSnap = await upcomingQuery.get();
+            // Read future/submitted applications from PG
+            const { data: upcomingApps, error: pgErr } = await db
+                .from('applications')
+                .select('*')
+                .eq('application_type', 'future')
+                .eq('state', 'submitted');
 
-            if (upcomingSnap.empty || upcomingSnap.docs.length < UPCOMING_PAGE_SIZE) upcomingHasMore = false;
-            if (upcomingSnap.docs.length > 0) upcomingLastDoc = upcomingSnap.docs[upcomingSnap.docs.length - 1];
+            if (pgErr) {
+                console.error('⚠️ Failed to read upcoming applications from PG:', pgErr);
+                upcomingResults.errors.push('PG read failed: ' + pgErr.message);
+            } else if (upcomingApps) {
+                for (const appData of upcomingApps) {
+                    const appId = appData.application_id;
+                    try {
+                        const eligibleIso = appData.eligible_approval;
+                        if (!eligibleIso) continue; // no frozen date → leave untouched
+                        const eligibleMs = new Date(eligibleIso).getTime();
+                        if (Number.isNaN(eligibleMs)) continue;
 
-            for (const appDoc of upcomingSnap.docs) {
-                const appData = appDoc.data();
-                const appId = appDoc.id;
-                try {
-                    const eligibleIso = appData.eligibleApproval;
-                    if (!eligibleIso) continue; // no frozen date → leave untouched
-                    const eligibleMs = new Date(eligibleIso).getTime();
-                    if (Number.isNaN(eligibleMs)) continue;
+                        // Not yet eligible → nothing to do this run.
+                        if (nowMs < eligibleMs) continue;
 
-                    // Not yet eligible → nothing to do this run.
-                    if (nowMs < eligibleMs) continue;
+                        const graceCutoffMs = eligibleMs + UPCOMING_GRACE_DAYS * 24 * 60 * 60 * 1000;
 
-                    const graceCutoffMs = eligibleMs + UPCOMING_GRACE_DAYS * 24 * 60 * 60 * 1000;
-
-                    if (nowMs >= graceCutoffMs) {
-                        // (2) Past grace window → expire the stale application.
-                        await appDoc.ref.update({
-                            state: 'expired',
-                            updatedAt: new Date().toISOString(),
-                            expiredAt: new Date().toISOString(),
-                            expiryReason: 'upcoming_eligibility_grace_elapsed',
-                        });
-                        upcomingResults.expired++;
-                    } else if (!appData.eligibleReminderSentAt) {
-                        // (1) Eligible now, within grace, not yet reminded → notify once.
-                        const notifRef = adminDb.collection('notifications').doc();
-                        await notifRef.set({
-                            title: 'Your application is now eligible',
-                            content: `Seats for your upcoming session (${appData.targetSession?.startYear || ''}-${appData.targetSession?.endYear || ''}) are now available. Visit the Bus Office to complete your approval.`,
-                            type: 'info',
-                            sender: {
-                                userId: 'system',
-                                userName: 'System',
-                                userRole: 'admin'
-                            },
-                            target: {
-                                type: 'specific_users',
-                                specificUserIds: [appData.applicantUid || appId]
-                            },
-                            recipientIds: [appData.applicantUid || appId],
-                            autoInjectedRecipientIds: [],
-                            readByUserIds: [],
-                            isEdited: false,
-                            isDeletedGlobally: false,
-                            hiddenForUserIds: [],
-                            createdAt: new Date().toISOString(),
-                            metadata: {
-                                applicationId: appId,
-                                statusPage: `/apply/status/${appId}`
-                            }
-                        });
-                        await appDoc.ref.update({ eligibleReminderSentAt: new Date().toISOString() });
-                        upcomingResults.reminded++;
+                        if (nowMs >= graceCutoffMs) {
+                            // (2) Past grace window → expire the stale application.
+                            await db
+                                .from('applications')
+                                .update({
+                                    state: 'expired',
+                                    updated_at: new Date().toISOString(),
+                                })
+                                .eq('application_id', appId);
+                            upcomingResults.expired++;
+                        } else if (!appData.eligible_reminder_sent_at) {
+                            // (1) Eligible now, within grace, not yet reminded → notify once.
+                            await Notification.createNotification(
+                                { userId: 'system', userName: 'System', userRole: 'admin' },
+                                { type: 'specific_users', specificUserIds: [appData.applicant_uid || appId] },
+                                `Seats for your upcoming session (${appData.target_session?.startYear || ''}-${appData.target_session?.endYear || ''}) are now available. Visit the Bus Office to complete your approval.`,
+                                'Your application is now eligible',
+                                { applicationId: appId, statusPage: `/apply/status/${appId}` }
+                            );
+                            await db
+                                .from('applications')
+                                .update({ eligible_reminder_sent_at: new Date().toISOString() })
+                                .eq('application_id', appId);
+                            upcomingResults.reminded++;
+                        }
+                    } catch (appErr: any) {
+                        console.error(`❌ Error processing upcoming application ${appId}:`, appErr);
+                        upcomingResults.errors.push(`Error processing application ${appId}`);
                     }
-                } catch (appErr: any) {
-                    console.error(`❌ Error processing upcoming application ${appId}:`, appErr);
-                    upcomingResults.errors.push(`Error processing application ${appId}`);
                 }
             }
-            } // end while (upcomingHasMore)
             console.log(`📅 Upcoming applications pass:`, upcomingResults);
         } catch (upcomingErr: any) {
             console.error('⚠️ Upcoming applications pass failed:', upcomingErr);

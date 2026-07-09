@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { verifyToken, adminDb } from '@/lib/firebase-admin';
+import { verifyToken } from '@/lib/firebase-admin';
 import { paymentsSupabaseService } from '@/lib/services/payments-supabase';
 import { decryptData } from '@/lib/security/encryption.service';
 import { getDeadlineConfig } from '@/lib/deadline-config-service';
+import { getUserById } from '@/domains/identity';
 
 export async function GET(request: NextRequest) {
   try {
@@ -14,9 +15,9 @@ export async function GET(request: NextRequest) {
     const decodedToken = await verifyToken(token);
     const userId = decodedToken.uid;
 
-    // Get user data to determine role
-    const userDoc = await adminDb.collection('users').doc(userId).get();
-    const userData = userDoc.data();
+    // Get user data via Identity domain API
+    const user = await getUserById(userId);
+    const userData = user as any;
 
     if (!userData || !['admin', 'moderator'].includes(userData.role)) {
       return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 });
