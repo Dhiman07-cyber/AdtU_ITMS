@@ -34,6 +34,7 @@ import { cn } from "@/lib/utils";
 import { PremiumPageLoader } from '@/components/LoadingSpinner';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { supabase } from '@/lib/supabase-client';
 import { useToast } from '@/contexts/toast-context';
 import AlternativeBusPicker from '@/components/smart-allocation/AlternativeBusPicker';
 import type { AlternativeBusData } from '@/components/smart-allocation/AlternativeBusPicker';
@@ -195,14 +196,29 @@ export default function AdminApplicationsPage() {
   const fetchRenewalRequests = async () => {
     try {
       setLoadingRenewals(true);
-      const renewalRef = collection(db, 'renewal_requests');
-      const q = query(renewalRef, where('status', '==', 'pending'));
-      const snapshot = await getDocs(q);
+      // D8: Query PostgreSQL applications table instead of Firestore renewal_requests
+      const { data, error } = await supabase
+        .from('applications')
+        .select('*')
+        .eq('state', 'submitted')
+        .in('application_type', ['renewal', 'renewal_after_soft_block']);
 
-      const requests: any[] = [];
-      snapshot.forEach((doc) => {
-        requests.push({ id: doc.id, ...doc.data() });
-      });
+      if (error) throw error;
+      const requests = (data || []).map((row: any) => ({
+        id: row.application_id,
+        studentId: row.applicant_uid,
+        enrollmentId: row.formData?.enrollmentId || row.form_data?.enrollmentId || '',
+        studentName: row.formData?.studentName || row.form_data?.studentName || '',
+        totalFee: row.formData?.totalFee || row.form_data?.totalFee || 0,
+        durationYears: row.formData?.durationYears || row.form_data?.durationYears || 0,
+        paymentMode: row.formData?.paymentMode || row.form_data?.paymentMode || '',
+        paymentId: row.formData?.paymentId || row.form_data?.paymentId || '',
+        receiptImageUrl: row.formData?.receiptImageUrl || row.form_data?.receiptImageUrl || '',
+        studentEmail: row.formData?.studentEmail || row.form_data?.studentEmail || '',
+        paidAt: row.formData?.paidAt || row.form_data?.paidAt || '',
+        status: 'pending',
+        createdAt: row.created_at,
+      }));
       setRenewalRequests(requests);
     } catch (error) {
       console.error('Error fetching renewal requests:', error);

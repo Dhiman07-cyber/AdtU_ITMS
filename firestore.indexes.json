@@ -366,14 +366,6 @@
       ]
     },
     {
-      "collectionGroup": "renewal_requests",
-      "queryScope": "COLLECTION_GROUP",
-      "fields": [
-        { "fieldPath": "status", "order": "ASCENDING" },
-        { "fieldPath": "createdAt", "order": "DESCENDING" }
-      ]
-    },
-    {
       "collectionGroup": "payments",
       "queryScope": "COLLECTION_GROUP",
       "fields": [

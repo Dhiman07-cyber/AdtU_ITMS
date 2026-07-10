@@ -7,7 +7,7 @@
 //   - processed_payments (PostgreSQL) — idempotency markers (7-day TTL)
 //
 // D5 Payment does NOT own:
-//   - renewal_requests — owned by Renewal domain (future D6+)
+//   - renewal applications — owned by Application domain (D4), application_type='renewal'
 //   - student validity — owned by Student domain (D3)
 //     Payment calls Student.applyPaymentValidity(), never update() directly
 //   - student profiles — owned by Student domain (D3)
@@ -27,7 +27,6 @@
 //
 // FIRESTORE FROZEN COLLECTIONS:
 //   - processed_payments — DO NOT write to Firestore, use PostgreSQL
-//   - renewal_requests — still in Firestore (excluded from D5, future domain)
 //
 // ponytail: Razorpay gateway helpers (order creation, signature verification)
 // and the raw Postgres repository are implementation details, not exposed

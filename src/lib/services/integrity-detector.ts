@@ -1,4 +1,5 @@
 import { adminDb } from '@/lib/firebase-admin';
+import { getSupabaseServer } from '@/lib/supabase-server';
 import { wasSeatReleased } from '@/lib/config/capacity-flags';
 
 /**
@@ -60,10 +61,11 @@ function sessionKey(targetSession: any): string {
  * scale target (≈1000 students) — a handful of full-collection reads.
  */
 export async function runIntegrityScan(): Promise<IntegrityReport> {
-  const [studentsSnap, busesSnap, renewalsSnap, applicationsSnap] = await Promise.all([
+  const supabase = getSupabaseServer();
+  const [studentsSnap, busesSnap, renewalsResult, applicationsSnap] = await Promise.all([
     adminDb.collection('students').get(),
     adminDb.collection('buses').get(),
-    adminDb.collection('renewal_requests').get(),
+    supabase.from('applications').select('*').in('application_type', ['renewal', 'renewal_after_soft_block']),
     adminDb.collection('applications').get(),
   ]);
 
@@ -109,23 +111,24 @@ export async function runIntegrityScan(): Promise<IntegrityReport> {
     }
   }
 
-  // 4–5. Renewal-request invariants.
+  // 4–5. Renewal-request invariants (D8: now from PostgreSQL applications table).
+  const renewalsRows = (renewalsResult.data || []) as any[];
   const pendingByStudent = new Map<string, string[]>();
-  for (const doc of renewalsSnap.docs) {
-    const r = doc.data();
-    const studentId = r.studentId;
+  for (const r of renewalsRows) {
+    const studentId = r.applicant_uid;
+    const status = r.state;
     if (studentId && !studentIds.has(studentId)) {
       findings.push({
         type: 'orphan_renewal_request',
         severity: 'medium',
-        entity: `renewal_requests/${doc.id}`,
-        detail: `Renewal request references student '${studentId}' which does not exist`,
-        data: { requestId: doc.id, studentId, status: r.status },
+        entity: `applications/${r.application_id}`,
+        detail: `Renewal application references student '${studentId}' which does not exist`,
+        data: { requestId: r.application_id, studentId, status },
       });
     }
-    if (studentId && r.status === 'pending') {
+    if (studentId && status === 'submitted') {
       const arr = pendingByStudent.get(studentId) || [];
-      arr.push(doc.id);
+      arr.push(r.application_id);
       pendingByStudent.set(studentId, arr);
     }
   }
@@ -177,7 +180,7 @@ export async function runIntegrityScan(): Promise<IntegrityReport> {
     counts: {
       students: studentsSnap.size,
       buses: busesSnap.size,
-      renewalRequests: renewalsSnap.size,
+      renewalRequests: renewalsRows.length,
       applications: applicationsSnap.size,
     },
     totalFindings: findings.length,

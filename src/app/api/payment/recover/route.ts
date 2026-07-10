@@ -102,22 +102,17 @@ export const GET = withSecurity(
             appOrderId = appData.formData?.paymentInfo?.razorpayOrderId || '';
         }
 
-        // Check student's renewal requests
+        // D8: Check student's renewal applications from PostgreSQL instead of Firestore
         let renewalPaymentId = '';
         let renewalOrderId = '';
-        const renewalQuery = await adminDb.collection('renewal_requests')
-            .where('studentId', '==', targetUid)
-            .get();
+        const renewalApp = await import('@/domains/application').then(m => m.getByApplicantUid(targetUid));
 
-        if (!renewalQuery.empty) {
-            for (const doc of renewalQuery.docs) {
-                const renewalData = doc.data();
-                if (renewalData.status === 'approved' || renewalData.status === 'completed') {
-                    isRenewalCompleted = true;
-                }
-                renewalPaymentId = renewalData.paymentId || '';
-                renewalOrderId = renewalData.razorpayOrderId || '';
+        if (renewalApp && (renewalApp.applicationType === 'renewal' || renewalApp.applicationType === 'renewal_after_soft_block')) {
+            if (renewalApp.state === 'approved' || renewalApp.state === 'submitted') {
+                isRenewalCompleted = renewalApp.state === 'approved';
             }
+            renewalPaymentId = renewalApp.paymentId || (renewalApp.formData as any)?.paymentId || '';
+            renewalOrderId = (renewalApp.formData as any)?.razorpayOrderId || '';
         }
 
         console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] recover: appPaymentId=${appPaymentId} appOrderId=${appOrderId} isApplicationApproved=${isApplicationApproved} isRenewalCompleted=${isRenewalCompleted}`);

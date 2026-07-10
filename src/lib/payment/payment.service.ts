@@ -361,27 +361,34 @@ export async function processCapturedPayment(paymentDetails: {
                 }
             }
 
-            // Create the PENDING renewal request for admin approval
-            const renewalRequestRef = adminDb.collection('renewal_requests').doc(`online_${paymentId}`);
-            const existingRequest = await renewalRequestRef.get();
-            if (!existingRequest.exists) {
-                await renewalRequestRef.set({
-                    studentId: studentUid,
-                    enrollmentId: enrollmentId || transactionRecord?.studentId || '',
-                    studentName: actualStudentName,
-                    studentEmail,
-                    studentPhone,
-                    durationYears,
-                    totalFee: amount,
-                    paymentMode: 'online',
-                    paymentId,
-                    razorpayOrderId: orderId,
-                    paymentStatus: 'paid',
-                    requestedValidUntil: newValidUntil.toISOString(),
-                    status: 'pending',
-                    createdAt: FieldValue.serverTimestamp(),
-                    updatedAt: FieldValue.serverTimestamp(),
-                });
+            // D8: Create the PENDING renewal application in PostgreSQL instead of Firestore
+            const applicationId = `online_${paymentId}`;
+            const existingRequest = await getApplicationById(applicationId);
+            if (!existingRequest) {
+                const { submitFinal } = await import('@/domains/application');
+                await submitFinal(
+                    studentUid,
+                    studentEmail || '',
+                    {
+                        studentId: studentUid,
+                        enrollmentId: enrollmentId || transactionRecord?.studentId || '',
+                        studentName: actualStudentName,
+                        studentEmail,
+                        studentPhone,
+                        durationYears,
+                        totalFee: amount,
+                        paymentMode: 'online',
+                        paymentId,
+                        razorpayOrderId: orderId,
+                        paymentStatus: 'paid',
+                        requestedValidUntil: newValidUntil.toISOString(),
+                        phoneNumber: studentPhone,
+                    },
+                    {
+                        applicationId,
+                        applicationType: 'renewal',
+                    }
+                );
 
                 // Send notification to staff
                 try {

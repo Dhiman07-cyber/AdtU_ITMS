@@ -136,37 +136,25 @@ export async function GET(request: NextRequest) {
 
       const payments = await getPaymentsByStudent(userId, enrollmentId);
 
-      // Also fetch pending renewal requests to show in history (EXCLUDED: renewal_requests is a separate domain)
-      const renewalRequestsSnapshot = await adminDb.collection('renewal_requests')
-        .where('studentId', '==', userId)
-        .where('status', '==', 'pending')
-        .get();
+      // D8: Fetch pending renewal application from PostgreSQL instead of Firestore
+      const pendingRenewalApp = await import('@/domains/application').then(m => m.getByApplicantUid(userId));
 
-      // Robust timestamp extraction (same as mapToFrontend)
-      const getTimestamp = (val: any) => {
-        if (!val) return new Date().toISOString();
-        if (typeof val.toDate === 'function') return val.toDate().toISOString();
-        if (val instanceof Date) return val.toISOString();
-        if (typeof val === 'string') return val;
-        return new Date().toISOString();
-      };
-
-      const pendingRequests = renewalRequestsSnapshot.docs.map((doc: any) => {
-        const data = doc.data();
-        return {
-          paymentId: doc.id,
-          studentId: data.enrollmentId,
-          studentName: data.studentName,
-          amount: data.totalFee,
+      const pendingRequests = (pendingRenewalApp &&
+        pendingRenewalApp.state === 'submitted' &&
+        (pendingRenewalApp.applicationType === 'renewal' || pendingRenewalApp.applicationType === 'renewal_after_soft_block')
+      ) ? [{
+          paymentId: pendingRenewalApp.applicationId,
+          studentId: (pendingRenewalApp.formData as any)?.enrollmentId || '',
+          studentName: (pendingRenewalApp.formData as any)?.studentName || '',
+          amount: (pendingRenewalApp.formData as any)?.totalFee || 0,
           paymentMethod: 'offline',
           method: 'Offline',
           status: 'pending',
-          durationYears: data.durationYears,
-          timestamp: getTimestamp(data.createdAt),
+          durationYears: (pendingRenewalApp.formData as any)?.durationYears || 0,
+          timestamp: pendingRenewalApp.createdAt || new Date().toISOString(),
           validUntil: 'Pending Approval',
           isRequest: true
-        };
-      });
+        }] : [];
 
       const processedPayments = await Promise.all(payments.map(mapToFrontend));
 

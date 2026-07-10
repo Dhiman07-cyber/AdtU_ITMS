@@ -1,5 +1,5 @@
 /**
- * D4 ApplicationService — public service contract per PHASE2.2/2.4.
+ * D4/D8 ApplicationService — public service contract per PHASE2.2/2.4.
  *
  * Responsibilities: application workflow orchestration, CRUD, approval,
  * rejection, submission, review.
@@ -10,16 +10,26 @@
  *
  * Cross-domain writes happen via PostgreSQL RPCs (called from TypeScript):
  *   - approve_application()     → Application table only
- *   - identity_activate_student() → Identity tables only
+ *   - identity_activate_student() → Identity tables only (fresh applications)
  *   - finalize_application_approval() → Application table only
  *
  * All side effects are idempotent. Retrying a completed operation
  * never produces duplicate state.
+ *
+ * D8 RENEWAL PATH — renewal applications follow a different approval flow:
+ *   - Fresh: identity_activate_student → finalize (delete)
+ *   - Renewal: Student.update() → Seat.assignSeat() if seat released → finalize (preserve as approved)
+ *   - Renewal applications are PRESERVED in approved state (audit trail).
  */
 import * as repository from '../repositories/application.repository';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import { createAuditLog } from '@/domains/audit';
 import * as Notification from '@/domains/notification';
+import * as Student from '@/domains/student';
+import * as Seat from '@/domains/seat';
+import { calculateValidUntilDate } from '@/lib/utils/date-utils';
+import { computeBlockDatesFromValidUntil } from '@/lib/utils/deadline-computation';
+import { getDeadlineConfig } from '@/lib/deadline-config-service';
 import type { Application, ApplicationState, ApplicationType } from '@/lib/types/application';
 import type { CreateAuditLogInput } from '@/lib/services/audit.service';
 
@@ -143,19 +153,22 @@ export async function submitFinal(
   body: Record<string, any>
 ): Promise<{ success: boolean; applicationId?: string; error?: string }> {
   const now = new Date().toISOString();
+  const isRenewal = body.applicationType === 'renewal' || body.applicationType === 'renewal_after_soft_block';
 
-  // Check for existing live application
-  const existing = await repository.findByApplicantUid(uid);
-  const LIVE_STATES: ApplicationState[] = [
-    'submitted', 'approved', 'verified', 'awaiting_verification',
-    'verified_upcoming', 'pending_seat_allocation',
-  ];
-  if (existing && LIVE_STATES.includes(existing.state)) {
-    return { success: false, error: 'An application is already in progress' };
+  // Check for existing live application — skip for renewals (they may coexist)
+  if (!isRenewal) {
+    const existing = await repository.findByApplicantUid(uid);
+    const LIVE_STATES: ApplicationState[] = [
+      'submitted', 'approved', 'verified', 'awaiting_verification',
+      'verified_upcoming', 'pending_seat_allocation',
+    ];
+    if (existing && LIVE_STATES.includes(existing.state)) {
+      return { success: false, error: 'An application is already in progress' };
+    }
   }
 
   const applicationData: Partial<Application> = {
-    applicationId: uid,
+    applicationId: body.applicationId || uid,
     applicantUid: uid,
     email,
     state: 'submitted',
@@ -175,17 +188,18 @@ export async function submitFinal(
 
   await repository.upsert(applicationData);
 
-  return { success: true, applicationId: uid };
+  return { success: true, applicationId: applicationData.applicationId };
 }
 
 /**
  * Approve an application. Orchestrates:
  * 1. Application RPC (validate + lock + return payload)
- * 2. Identity RPC (activate student)
- * 3. Payment (idempotent)
- * 4. Audit (idempotent)
- * 5. Notification (idempotent)
- * 6. Finalize RPC (delete application)
+ * 2. Student activation (identity for fresh, update for renewal)
+ * 3. Seat reclamation (renewal_after_soft_block only)
+ * 4. Payment (idempotent)
+ * 5. Audit (idempotent)
+ * 6. Notification (idempotent)
+ * 7. Finalize RPC (delete for fresh, preserve for renewal)
  */
 export async function approve(
   applicationId: string,
@@ -210,26 +224,33 @@ export async function approve(
   }
 
   const app = rpcResult.application;
+  const isRenewal = app.application_type === 'renewal' || app.application_type === 'renewal_after_soft_block';
 
   try {
-    // ── Step 2a: Identity — ONE atomic business capability ──────────
-    const studentData = buildStudentData(app, approverData, overrides);
+    if (isRenewal) {
+      // ── RENEWAL PATH ──────────────────────────────────────────────
+      await approveRenewal(app, approverData, overrides);
+    } else {
+      // ── FRESH APPLICATION PATH ────────────────────────────────────
+      const studentData = buildStudentData(app, approverData, overrides);
 
-    const { data: identityResult } = await db.rpc('identity_activate_student', {
-      p_uid: app.applicant_uid,
-      p_email: app.email || app.applicant_email,
-      p_full_name: app.full_name,
-      p_student_data: studentData,
-    });
+      const { data: identityResult } = await db.rpc('identity_activate_student', {
+        p_uid: app.applicant_uid,
+        p_email: app.email || app.applicant_email,
+        p_full_name: app.full_name,
+        p_student_data: studentData,
+      });
 
-    if (!identityResult?.success) {
-      throw new Error('Identity activation failed');
+      if (!identityResult?.success) {
+        throw new Error('Identity activation failed');
+      }
+
+      // ── Side effects ──────────────────────────────────────────────
+      await postCommitApprovalSideEffects(app, studentData, approverData);
     }
 
-    // ── Step 2b-2d: Idempotent side effects ────────────────────────
-    await postCommitApprovalSideEffects(app, studentData, approverData);
-
-    // ── Step 3: Application RPC — finalize (delete) ────────────────
+    // ── Step 3: Application RPC — finalize ──────────────────────────
+    // For fresh: deletes application. For renewal: preserves as approved.
     const { data: finalizeResult } = await db.rpc('finalize_application_approval', {
       p_application_id: applicationId,
       p_approver_uid: approverData.uid,
@@ -246,6 +267,83 @@ export async function approve(
     await db.rpc('release_application_lock', { p_application_id: applicationId });
     return { success: false, error: error.message, status: 500 };
   }
+}
+
+/**
+ * D8: Approve a renewal application.
+ * Updates existing student profile instead of creating new identity.
+ * Preserves application as approved record (audit trail).
+ */
+async function approveRenewal(
+  app: any,
+  approverData: { uid: string; name: string; role: string },
+  overrides?: { busId?: string; startYear?: number; endYear?: number }
+): Promise<void> {
+  const fd = app.form_data || {};
+  const studentId = fd.studentId || app.applicant_uid;
+  const durationYears = Number(fd.durationYears || fd.targetSession?.durationYears || 1);
+  const totalFee = Number(fd.totalFee || fd.paymentInfo?.amountPaid || 0);
+
+  // ── Read current student profile ──────────────────────────────────
+  const student = await Student.getByUid(studentId);
+  if (!student) throw new Error('Student not found for renewal');
+
+  const now = new Date();
+  const deadlineConfig = await getDeadlineConfig();
+
+  // ── Compute renewal validity (max-of-old-and-new invariant) ──────
+  const existingValidUntil = (student as any).validUntil
+    ? new Date((student as any).validUntil)
+    : null;
+  let baseYear = now.getUTCFullYear();
+
+  if (existingValidUntil && existingValidUntil > now) {
+    baseYear = (student as any).sessionEndYear || existingValidUntil.getUTCFullYear();
+  }
+
+  const newValidUntil = calculateValidUntilDate(baseYear, durationYears, deadlineConfig);
+  const finalValidUntil = (existingValidUntil && existingValidUntil > newValidUntil)
+    ? existingValidUntil
+    : newValidUntil;
+
+  const newSessionEndYear = baseYear + durationYears;
+  const finalSessionEndYear = ((student as any).sessionEndYear && (student as any).sessionEndYear > newSessionEndYear)
+    ? (student as any).sessionEndYear
+    : newSessionEndYear;
+
+  const totalDuration = ((student as any).durationYears || 0) + durationYears;
+  const blockDates = computeBlockDatesFromValidUntil(finalValidUntil, deadlineConfig);
+
+  const seatWasReleased = !!(student as any).seatReleasedAt;
+  const renewalBusId = overrides?.busId || (student as any).busId || (student as any).currentBusId || (student as any).assignedBusId || null;
+
+  // ── Seat reclamation (renewal_after_soft_block) ───────────────────
+  if (app.application_type === 'renewal_after_soft_block' && seatWasReleased && renewalBusId) {
+    await Seat.assignSeat(renewalBusId, studentId, (student as any).shift);
+  }
+
+  // ── Update student profile ────────────────────────────────────────
+  // Uses existing Student.update() — no new API needed.
+  await Student.update(studentId, {
+    validUntil: finalValidUntil.toISOString(),
+    status: 'active',
+    sessionEndYear: finalSessionEndYear,
+    durationYears: totalDuration,
+    paymentAmount: totalFee,
+    softBlock: blockDates.softBlock,
+    hardBlock: blockDates.hardBlock,
+    lastRenewalDate: now.toISOString(),
+    ...(seatWasReleased ? { seatReleasedAt: null } : {}),
+  } as any);
+
+  // ── Side effects (payment, audit, notification) ───────────────────
+  const studentData = {
+    validUntil: finalValidUntil.toISOString(),
+    sessionStartYear: (student as any).sessionStartYear || baseYear,
+    sessionEndYear: finalSessionEndYear,
+    durationYears: totalDuration,
+  };
+  await postCommitApprovalSideEffects(app, studentData, approverData, 'renewal');
 }
 
 /**
@@ -475,11 +573,12 @@ function buildStudentData(
 async function postCommitApprovalSideEffects(
   app: any,
   studentData: Record<string, any>,
-  approverData: { uid: string; name: string; role: string }
+  approverData: { uid: string; name: string; role: string },
+  purpose: 'new_registration' | 'renewal' = 'new_registration'
 ): Promise<void> {
   const tasks: Array<Promise<unknown>> = [];
 
-  // Payment (idempotent via ensureApplicationPayment pattern)
+  // Payment (online: idempotent via upsertPayment; offline: session-level duplicate check via createPayment)
   const amount = Number(app.amount_paid || app.form_data?.paymentInfo?.amountPaid || 0);
   if (amount > 0) {
     const paymentMode = app.payment_mode || app.form_data?.paymentInfo?.paymentMode;
@@ -524,7 +623,7 @@ async function postCommitApprovalSideEffects(
             approverName: approverData.name,
             approverEmpId: '',
             approverRole: approverData.role,
-            purpose: 'new_registration',
+            purpose,
           })
         ).catch(err => { console.error('Payment creation failed:', err); })
       );

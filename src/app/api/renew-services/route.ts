@@ -209,15 +209,14 @@ export async function POST(request: NextRequest) {
           continue;
         }
 
-        // Check for existing pending renewal request for this student
-        const pendingRenewalQuery = await adminDb
-          .collection('renewal_requests')
-          .where('studentId', '==', studentUid)
-          .where('status', '==', 'pending')
-          .limit(1)
-          .get();
+        // D8: Check for existing pending renewal application from PostgreSQL
+        const { getByApplicantUid } = await import('@/domains/application');
+        const pendingRenewalApp = await getByApplicantUid(studentUid);
 
-        if (!pendingRenewalQuery.empty) {
+        if (pendingRenewalApp &&
+          pendingRenewalApp.state === 'submitted' &&
+          (pendingRenewalApp.applicationType === 'renewal' || pendingRenewalApp.applicationType === 'renewal_after_soft_block')
+        ) {
           results.push({
             studentUid,
             success: false,

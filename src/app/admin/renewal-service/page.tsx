@@ -50,6 +50,7 @@ import {
 import { toast } from 'sonner';
 import { collection, query, where, getDocs, orderBy, limit } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { supabase } from '@/lib/supabase-client';
 import Image from 'next/image';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
@@ -358,14 +359,33 @@ export default function AdminRenewalServicePage() {
 
       try {
         setLoadingRequests(true);
-        const renewalRef = collection(db, 'renewal_requests');
-        const q = query(renewalRef, where('status', '==', 'pending'), orderBy('createdAt', 'desc'));
-        const snapshot = await getDocs(q);
+        // D8: Query PostgreSQL applications table instead of Firestore renewal_requests
+        const { data, error } = await supabase
+          .from('applications')
+          .select('*')
+          .eq('state', 'submitted')
+          .in('application_type', ['renewal', 'renewal_after_soft_block'])
+          .order('created_at', { ascending: false });
 
-        const requests: RenewalRequest[] = [];
-        snapshot.forEach((doc) => {
-          requests.push({ id: doc.id, ...doc.data() } as RenewalRequest);
-        });
+        if (error) throw error;
+
+        const requests: RenewalRequest[] = (data || []).map((row: any) => ({
+          id: row.application_id,
+          studentId: row.applicant_uid,
+          enrollmentId: row.formData?.enrollmentId || row.form_data?.enrollmentId || '',
+          studentName: row.formData?.studentName || row.form_data?.studentName || '',
+          totalFee: row.formData?.totalFee || row.form_data?.totalFee || 0,
+          durationYears: row.formData?.durationYears || row.form_data?.durationYears || 0,
+          paymentMode: row.formData?.paymentMode || row.form_data?.paymentMode || '',
+          paymentId: row.formData?.paymentId || row.form_data?.paymentId || '',
+          receiptImageUrl: row.formData?.receiptImageUrl || row.form_data?.receiptImageUrl || '',
+          studentEmail: row.formData?.studentEmail || row.form_data?.studentEmail || '',
+          studentPhone: row.formData?.studentPhone || row.form_data?.studentPhone || '',
+          paidAt: row.formData?.paidAt || row.form_data?.paidAt || '',
+          status: 'pending',
+          createdAt: row.created_at,
+          updatedAt: row.updated_at,
+        }));
 
         // Fetch student data for each request
         const requestsWithStudentData = await Promise.all(
