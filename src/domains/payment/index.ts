@@ -37,6 +37,8 @@ export {
   createOfflinePaymentAtApproval,
   approveOfflinePayment,
   rejectOfflinePayment,
+  upsertApprovalPayment,
+  rejectApplicationPayment,
   getByStudent,
   getAll,
   getPending,

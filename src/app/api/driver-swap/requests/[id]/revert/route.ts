@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
-import { auth, db } from '@/lib/firebase-admin';
+import { auth } from '@/lib/firebase-admin';
 import { DriverSwapSupabaseService } from '@/lib/driver-swap-supabase';
+import { getSupabaseServer } from '@/lib/supabase-server';
 
 export async function POST(
   request: Request,
@@ -24,18 +25,22 @@ export async function POST(
     const decodedToken = await auth.verifyIdToken(token);
     const adminUID = decodedToken.uid;
 
-    // Verify user is an admin or moderator
-    const adminDoc = await db.collection('admins').doc(adminUID).get();
-    const modDoc = await db.collection('moderators').doc(adminUID).get();
+    // Verify user is an admin or moderator via Supabase users table
+    const supabase = getSupabaseServer();
+    const { data: userProfile } = await supabase
+      .from('users')
+      .select('role')
+      .eq('uid', adminUID)
+      .maybeSingle();
 
-    if (!adminDoc.exists && !modDoc.exists) {
+    if (!userProfile || !['admin', 'moderator'].includes(userProfile.role)) {
       return NextResponse.json(
         { error: 'Admin or moderator privileges required' },
         { status: 403 }
       );
     }
 
-    const userRole = adminDoc.exists ? 'admin' : 'moderator';
+    const userRole = userProfile.role;
     console.log('📥 Revert swap request: %s by %s %s', requestId, userRole, adminUID.substring(0, 8));
 
     // Revert the swap using 'system' to allow trip check bypass for admin actions

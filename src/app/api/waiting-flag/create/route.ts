@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { adminDb } from '@/lib/firebase-admin';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import { withSecurity } from '@/lib/security/api-security';
 import { WaitingFlagPostSchema } from '@/lib/security/validation-schemas';
@@ -126,17 +125,6 @@ export const POST = withSecurity(
         });
       } catch (broadcastError) {
         console.warn(`[${requestId}] Real-time broadcast failed (non-critical):`, broadcastError);
-      }
-
-      // 8. Legacy Backup (Firestore) - opportunistic
-      try {
-        await adminDb.collection('waiting_flags').doc(flag.id).set({
-          ...flagData,
-          supabaseId: flag.id,
-          syncedAt: now.toISOString()
-        });
-      } catch (backupErr) {
-        console.warn(`[${requestId}] Firestore backup write failed (non-critical, Supabase is source of truth):`, backupErr);
       }
 
       const elapsed = Date.now() - startTime;

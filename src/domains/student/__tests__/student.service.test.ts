@@ -32,7 +32,6 @@ describe('StudentService', () => {
   });
 
   it('delegates update to the repository unchanged', async () => {
-    const result = await update('s1', { status: 'active' });
-    expect(result).toBe(true);
+    await expect(update('s1', { status: 'active' })).resolves.toBeUndefined();
   });
 });

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
-import { auth, db as adminDb } from '@/lib/firebase-admin';
+import { auth } from '@/lib/firebase-admin';
 import { DriverSwapSupabaseService } from '@/lib/driver-swap-supabase';
+import { getSupabaseServer } from '@/lib/supabase-server';
 
 export async function POST(
   request: Request,
@@ -33,9 +34,14 @@ export async function POST(
     const decodedToken = await auth.verifyIdToken(token);
     const acceptorUID = decodedToken.uid;
 
-    // SECURITY: Verify the caller is actually a driver.
-    const driverDoc = await adminDb.collection('drivers').doc(acceptorUID).get();
-    if (!driverDoc.exists) {
+    // SECURITY: Verify the caller is actually a driver via Supabase.
+    const supabase = getSupabaseServer();
+    const { data: driverProfile } = await supabase
+      .from('driver_profiles')
+      .select('uid')
+      .eq('uid', acceptorUID)
+      .maybeSingle();
+    if (!driverProfile) {
       return NextResponse.json(
         { error: 'Only drivers can accept swap requests' },
         { status: 403 }

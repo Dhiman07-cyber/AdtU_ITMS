@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { auth, db as adminDb } from '@/lib/firebase-admin';
+import { auth } from '@/lib/firebase-admin';
 import { DriverSwapSupabaseService } from '@/lib/driver-swap-supabase';
 import { getSupabaseServer } from '@/lib/supabase-server';
 
@@ -43,10 +43,13 @@ export async function POST(request: Request) {
       );
     }
 
-    // SECURITY: Verify the requester is actually a driver in the authoritative collection.
-    // The ownership check above prevents impersonation, but doesn't verify the caller's role.
-    const requesterDriverDoc = await adminDb.collection('drivers').doc(requesterUID).get();
-    if (!requesterDriverDoc.exists) {
+    // SECURITY: Verify the requester is actually a driver via Supabase.
+    const { data: requesterProfile } = await supabase
+      .from('driver_profiles')
+      .select('uid')
+      .eq('uid', requesterUID)
+      .maybeSingle();
+    if (!requesterProfile) {
       return NextResponse.json(
         { error: 'Only drivers can create swap requests' },
         { status: 403 }
@@ -121,26 +124,26 @@ export async function POST(request: Request) {
       }
     }
 
-    // Get driver and bus details from Firestore for names
-    const [fromDriverDoc, toDriverDoc, busDoc] = await Promise.all([
-      adminDb.collection('drivers').doc(fromDriverUID).get(),
-      adminDb.collection('drivers').doc(toDriverUID).get(),
-      adminDb.collection('buses').doc(busId).get()
+    // Get driver and bus details from Supabase for names
+    const [fromDriverResult, toDriverResult, busResult] = await Promise.all([
+      supabase.from('driver_profiles').select('full_name').eq('uid', fromDriverUID).maybeSingle(),
+      supabase.from('driver_profiles').select('full_name').eq('uid', toDriverUID).maybeSingle(),
+      supabase.from('buses').select('bus_number').eq('id', busId).maybeSingle()
     ]);
 
-    const fromDriverData = fromDriverDoc.data();
-    const toDriverData = toDriverDoc.data();
-    const busData = busDoc.data();
-
-    const fromDriverName = fromDriverData?.fullName || fromDriverData?.name || 'Driver';
-    const toDriverName = toDriverData?.fullName || toDriverData?.name || 'Driver';
-    const busNumber = busData?.busNumber || busId;
+    const fromDriverName = fromDriverResult.data?.full_name || 'Driver';
+    const toDriverName = toDriverResult.data?.full_name || 'Driver';
+    const busNumber = busResult.data?.bus_number || busId;
 
     // Get route name if available
     let routeName = '';
     if (routeId) {
-      const routeDoc = await adminDb.collection('routes').doc(routeId).get();
-      routeName = routeDoc.data()?.routeName || routeDoc.data()?.name || '';
+      const { data: routeData } = await supabase
+        .from('routes')
+        .select('route_name')
+        .eq('id', routeId)
+        .maybeSingle();
+      routeName = routeData?.route_name || '';
     }
 
     // Check if candidate driver has a bus (for TRUE SWAP)
@@ -150,7 +153,13 @@ export async function POST(request: Request) {
     let secondaryRouteId = undefined;
     let secondaryRouteName = undefined;
 
-    const candidateBusId = toDriverData?.assignedBusId || toDriverData?.busId;
+    // Get candidate driver's assigned bus from driver_profiles
+    const { data: candidateProfile } = await supabase
+      .from('driver_profiles')
+      .select('assigned_bus_id, bus_id')
+      .eq('uid', toDriverUID)
+      .maybeSingle();
+    const candidateBusId = candidateProfile?.assigned_bus_id || candidateProfile?.bus_id;
 
     // Check if candidate bus is valid (not reserved/unassigned)
     const isCandidateReserved = !candidateBusId ||
@@ -162,15 +171,22 @@ export async function POST(request: Request) {
       secondaryBusId = candidateBusId;
 
       // Get secondary bus details
-      const secondaryBusDoc = await adminDb.collection('buses').doc(candidateBusId).get();
-      const secondaryBusData = secondaryBusDoc.data();
+      const { data: secondaryBusData } = await supabase
+        .from('buses')
+        .select('bus_number, route_id')
+        .eq('id', candidateBusId)
+        .maybeSingle();
 
-      secondaryBusNumber = secondaryBusData?.busNumber || candidateBusId;
-      secondaryRouteId = secondaryBusData?.routeId || secondaryBusData?.assignedRouteId;
+      secondaryBusNumber = secondaryBusData?.bus_number || candidateBusId;
+      secondaryRouteId = secondaryBusData?.route_id;
 
       if (secondaryRouteId) {
-        const secRouteDoc = await adminDb.collection('routes').doc(secondaryRouteId).get();
-        secondaryRouteName = secRouteDoc.data()?.routeName || secRouteDoc.data()?.name;
+        const { data: secRouteData } = await supabase
+          .from('routes')
+          .select('route_name')
+          .eq('id', secondaryRouteId)
+          .maybeSingle();
+        secondaryRouteName = secRouteData?.route_name;
       }
     }
 

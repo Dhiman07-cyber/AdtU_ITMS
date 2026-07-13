@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server';
-import { adminDb } from '@/lib/firebase-admin';
 import { notifyRoute } from '@/lib/services/fcm-notification-service';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import { tripLockService } from '@/lib/services/trip-lock-service';
@@ -24,23 +23,22 @@ export const POST = withSecurity(
     const { busId, routeId } = body as any;
     const driverUid = auth.uid;
 
-    // 1. Parallelize document fetching (Driver and Bus)
-    const [driverSnap, busSnap] = await adminDb.getAll(
-      adminDb.collection('drivers').doc(driverUid),
-      adminDb.collection('buses').doc(busId)
-    ) as any[];
+    const supabase = getSupabaseServer();
 
-    if (!driverSnap.exists) return NextResponse.json({ error: 'Driver profile not found' }, { status: 404 });
-    if (!busSnap.exists) return NextResponse.json({ error: 'Bus not found' }, { status: 404 });
+    // 1. D9: Parallelize Supabase fetching (Driver and Bus) instead of Firestore
+    const [driverStatusResult, busResult] = await Promise.all([
+      supabase.from('driver_status').select('driver_uid, bus_id').eq('driver_uid', driverUid).maybeSingle(),
+      supabase.from('buses').select('id, bus_number, route_id, route_name, driver_uid').eq('id', busId).maybeSingle(),
+    ]);
 
-    const driverData = driverSnap.data();
-    const busData = busSnap.data();
+    const busData = busResult.data;
+    if (!busData) return NextResponse.json({ error: 'Bus not found' }, { status: 404 });
 
-    // Validate driver assignment
-    const isAssigned = (driverData?.assignedBusId === busId || driverData?.busId === busId) ||
-                       (busData?.assignedDriverId === driverUid || busData?.activeDriverId === driverUid || busData?.driverUID === driverUid);
+    // D9: Check if driver profile exists (via driver_status or buses table)
+    const driverClaimsBus = driverStatusResult.data?.bus_id === busId;
+    const busClaimsDriver = busData.driver_uid === driverUid;
 
-    if (!isAssigned) {
+    if (!driverClaimsBus && !busClaimsDriver) {
       return NextResponse.json({ error: 'Driver is not assigned to this bus' }, { status: 403 });
     }
 
@@ -57,11 +55,10 @@ export const POST = withSecurity(
     const isExistingTrip = tripId !== requestedTripId;
 
     // 2. Parallelize State Initialization
-    const supabase = getSupabaseServer();
-    const stops = busData?.route?.stops || busData?.stops || [];
-    const rawRouteName = busData?.route?.routeName || busData?.routeName || routeId;
+    const stops = (busData as any)?.route?.stops || (busData as any)?.stops || [];
+    const rawRouteName = (busData as any)?.route_name || routeId;
     const routeName = formatIdForDisplay(rawRouteName);
-    const busNumber = formatIdForDisplay(busData?.busNumber || busId);
+    const busNumber = formatIdForDisplay(busData?.bus_number || busId);
     const nowIso = new Date().toISOString();
 
     const initializationTasks: any[] = [

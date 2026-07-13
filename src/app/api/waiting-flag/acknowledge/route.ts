@@ -9,11 +9,9 @@
  */
 
 import { NextResponse } from 'next/server';
-import { auth, db as adminDb } from '@/lib/firebase-admin';
+import { auth } from '@/lib/firebase-admin';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import { checkRateLimit, createRateLimitId } from '@/lib/security/rate-limiter';
-
-const supabase = getSupabaseServer();
 
 export async function POST(request: Request) {
   const startTime = Date.now();
@@ -60,11 +58,15 @@ export async function POST(request: Request) {
       );
     }
 
-    // SECURITY: Verify user exists in the authoritative `drivers` collection.
-    // The `users` collection role field could be stale; a deprovisioned driver
-    // whose `users` doc hasn't been cleaned up could still pass a `users`-only check.
-    const driverDoc = await adminDb.collection('drivers').doc(driverUid).get();
-    if (!driverDoc.exists) {
+    // SECURITY: Verify driver profile exists in Supabase (authoritative source).
+    const supabase = getSupabaseServer();
+    const { data: driverProfile } = await supabase
+      .from('driver_profiles')
+      .select('uid, assigned_bus_id, bus_id, full_name')
+      .eq('uid', driverUid)
+      .maybeSingle();
+
+    if (!driverProfile) {
       return NextResponse.json(
         { error: 'User is not authorized as a driver' },
         { status: 403 }
@@ -85,11 +87,9 @@ export async function POST(request: Request) {
       );
     }
 
-    // Verify driver is assigned to this bus (reuse driverDoc from auth check above)
-    const driverData = driverDoc.data();
-
-    if (driverData?.assignedBusId !== flag.bus_id &&
-      driverData?.busId !== flag.bus_id) {
+    // Verify driver is assigned to this bus
+    if (driverProfile.assigned_bus_id !== flag.bus_id &&
+      driverProfile.bus_id !== flag.bus_id) {
       return NextResponse.json(
         { error: 'Driver is not assigned to this bus' },
         { status: 403 }
@@ -179,7 +179,7 @@ export async function POST(request: Request) {
         payload: {
           flagId,
           driverUid,
-          driverName: driverData?.name || 'Driver',
+          driverName: driverProfile.full_name || 'Driver',
           timestamp: new Date().toISOString()
         }
       });
@@ -198,17 +198,6 @@ export async function POST(request: Request) {
         timestamp: new Date().toISOString()
       }
     });
-
-    // Update in Firestore backup
-    const firestoreDoc = await adminDb
-      .collection('waiting_flags')
-      .where('supabaseId', '==', flagId)
-      .limit(1)
-      .get();
-
-    if (!firestoreDoc.empty) {
-      await firestoreDoc.docs[0].ref.update(updateData);
-    }
 
     // Log operation (audit_logs moved to Supabase)
 

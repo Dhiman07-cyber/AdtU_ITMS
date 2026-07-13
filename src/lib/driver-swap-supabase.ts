@@ -7,8 +7,9 @@
 
 import { RealtimeChannel } from '@supabase/supabase-js';
 import { getSupabaseServer } from '@/lib/supabase-server';
-import { db as adminDb, FieldValue } from './firebase-admin';
 import { calculateNotificationExpiry } from './notification-expiry';
+// D10: adminDb retained temporarily for notifications (no Supabase notifications table yet)
+import { db as adminDb, FieldValue } from './firebase-admin';
 
 // Default notification TTL: 1 day (24 hours)
 const NOTIFICATION_TTL_DAYS = 1;
@@ -505,32 +506,20 @@ export class DriverSwapSupabaseService {
             let hasSecondaryTrip = false;
 
             // Helper function to check if bus has active trip
-            const checkBusActiveTrip = async (busId: string): Promise<boolean> => {
-                // Method 1: Check Supabase bus_locations
-                const { data: busTrip } = await supabase
-                    .from('bus_locations')
-                    .select('bus_id, driver_uid')
+                const checkBusActiveTrip = async (busId: string): Promise<boolean> => {
+                // D9: Check Supabase active_trips (authoritative source)
+                const { data: activeTrip } = await supabase
+                    .from('active_trips')
+                    .select('trip_id, status, created_at')
                     .eq('bus_id', busId)
-                    .eq('is_active', true)
-                    .limit(1);
+                    .eq('status', 'active')
+                    .maybeSingle();
 
-                if (busTrip && busTrip.length > 0) {
-                    console.log('   📍 Active trip found in bus_locations for bus %s', busId);
-                    return true;
-                }
-
-                // Method 2: Check Firestore activeTripId
-                const busDoc = await adminDb.collection('buses').doc(busId).get();
-                const busData = busDoc.data();
-                const tripId = busData?.activeTripId;
-
-                if (tripId) {
-                    // Verify the trip is actually still active (not ended)
-                    const tripDoc = await adminDb.collection('trip_sessions').doc(tripId).get();
-                    const tripData = tripDoc.data();
-
-                    if (tripDoc.exists && tripData && !tripData.endedAt) {
-                        console.log('   📍 Active trip %s found in Firestore for bus %s', tripId, busId);
+                if (activeTrip) {
+                    const createdAt = new Date(activeTrip.created_at).getTime();
+                    const isExpired = (Date.now() - createdAt) > 12 * 60 * 60 * 1000;
+                    if (!isExpired) {
+                        console.log('   📍 Active trip %s found in Supabase for bus %s', activeTrip.trip_id, busId);
                         return true;
                     }
                 }
@@ -579,47 +568,27 @@ export class DriverSwapSupabaseService {
                 console.log('✅ No active trips - reverting ASSIGNMENT swap %s', requestId);
                 console.log('   📋 Reverting ASSIGNMENT...');
 
-                // ATOMIC: Wrap bus + driver updates in a single Firestore transaction
-                // so a partial failure cannot leave bus assigned to one driver while
-                // the driver doc points to a different bus.
-                await adminDb.runTransaction(async (transaction) => {
-                    const busRef = adminDb.collection('buses').doc(request.bus_id);
-                    const fromDriverRef = adminDb.collection('drivers').doc(request.requester_driver_uid);
-                    const toDriverRef = adminDb.collection('drivers').doc(request.candidate_driver_uid);
-
-                    // All reads before writes
-                    await Promise.all([
-                        transaction.get(busRef),
-                        transaction.get(fromDriverRef),
-                        transaction.get(toDriverRef),
-                    ]);
-
-                    // Restore bus to original driver (requester) AND clear activeTripId
-                    transaction.update(busRef, {
-                        activeDriverId: request.requester_driver_uid,
-                        assignedDriverId: request.requester_driver_uid,
-                        activeTripId: null,
-                        updatedAt: FieldValue.serverTimestamp()
-                    });
-
+                // D9: ATOMIC Supabase updates for bus + driver ownership
+                await Promise.all([
+                    // Restore bus to original driver (requester) AND clear active trip
+                    supabase.from('buses').update({
+                        driver_uid: request.requester_driver_uid,
+                    }).eq('id', request.bus_id),
                     // Restore requester (fromDriver) - reassign to their original bus
-                    transaction.update(fromDriverRef, {
-                        assignedBusId: request.bus_id,
-                        busId: request.bus_id,
-                        assignedRouteId: request.route_id || null,
-                        routeId: request.route_id || null,
-                        updatedAt: FieldValue.serverTimestamp()
-                    });
-
+                    supabase.from('driver_profiles').update({
+                        assigned_bus_id: request.bus_id,
+                        bus_id: request.bus_id,
+                        assigned_route_id: request.route_id || null,
+                        route_id: request.route_id || null,
+                    }).eq('uid', request.requester_driver_uid),
                     // Make candidate (toDriver) reserved again
-                    transaction.update(toDriverRef, {
-                        assignedBusId: null,
-                        busId: null,
-                        assignedRouteId: null,
-                        routeId: null,
-                        updatedAt: FieldValue.serverTimestamp()
-                    });
-                });
+                    supabase.from('driver_profiles').update({
+                        assigned_bus_id: null,
+                        bus_id: null,
+                        assigned_route_id: null,
+                        route_id: null,
+                    }).eq('uid', request.candidate_driver_uid),
+                ]);
 
                 console.log('   ✅ Bus %s restored to requester (swap %s)', request.bus_id, requestId);
                 console.log('   ✅ From driver reassigned to bus (swap %s)', requestId);
@@ -668,24 +637,18 @@ export class DriverSwapSupabaseService {
                     console.log('   → Requester has finished trip - becomes RESERVED temporarily (swap %s)', requestId);
 
                     // Make requester reserved (they finished their trip on secondary bus)
-                    const requesterRef = adminDb.collection('drivers').doc(request.requester_driver_uid);
-                    await requesterRef.update({
-                        assignedBusId: null,
-                        busId: null,
-                        assignedRouteId: null,
-                        routeId: null,
-                        updatedAt: FieldValue.serverTimestamp()
-                    });
-                    console.log('   ✅ Requester set to reserved (waiting for candidate trip to end, swap %s)', requestId);
-
-                    // Clear the secondary bus assignment (no driver now)
-                    const secondaryBusRef = adminDb.collection('buses').doc(request.secondary_bus_id!);
-                    await secondaryBusRef.update({
-                        activeDriverId: null,
-                        assignedDriverId: null,
-                        activeTripId: null,
-                        updatedAt: FieldValue.serverTimestamp()
-                    });
+                    await Promise.all([
+                        supabase.from('driver_profiles').update({
+                            assigned_bus_id: null,
+                            bus_id: null,
+                            assigned_route_id: null,
+                            route_id: null,
+                        }).eq('uid', request.requester_driver_uid),
+                        // Clear the secondary bus assignment (no driver now)
+                        supabase.from('buses').update({
+                            driver_uid: null,
+                        }).eq('id', request.secondary_bus_id!),
+                    ]);
                     console.log('   ✅ Secondary bus temporarily unassigned (swap %s)', requestId);
 
                     await supabase
@@ -718,24 +681,18 @@ export class DriverSwapSupabaseService {
                     console.log('   → Candidate has finished trip - becomes RESERVED temporarily (swap %s)', requestId);
 
                     // Make candidate reserved (they finished their trip on primary bus)
-                    const candidateRef = adminDb.collection('drivers').doc(request.candidate_driver_uid);
-                    await candidateRef.update({
-                        assignedBusId: null,
-                        busId: null,
-                        assignedRouteId: null,
-                        routeId: null,
-                        updatedAt: FieldValue.serverTimestamp()
-                    });
-                    console.log('   ✅ Candidate set to reserved (waiting for requester trip to end, swap %s)', requestId);
-
-                    // Clear the primary bus assignment (no driver now)
-                    const primaryBusRef = adminDb.collection('buses').doc(request.bus_id);
-                    await primaryBusRef.update({
-                        activeDriverId: null,
-                        assignedDriverId: null,
-                        activeTripId: null,
-                        updatedAt: FieldValue.serverTimestamp()
-                    });
+                    await Promise.all([
+                        supabase.from('driver_profiles').update({
+                            assigned_bus_id: null,
+                            bus_id: null,
+                            assigned_route_id: null,
+                            route_id: null,
+                        }).eq('uid', request.candidate_driver_uid),
+                        // Clear the primary bus assignment (no driver now)
+                        supabase.from('buses').update({
+                            driver_uid: null,
+                        }).eq('id', request.bus_id),
+                    ]);
                     console.log('   ✅ Primary bus temporarily unassigned (swap %s)', requestId);
 
                     await supabase
@@ -775,58 +732,31 @@ export class DriverSwapSupabaseService {
                         console.log('   ↔️ Restoring buses to original drivers (swap %s)', requestId);
                     }
 
-                    // ATOMIC: Wrap ALL bus + driver updates in a single Firestore
-                    // transaction so a partial failure cannot leave one bus assigned
-                    // while the other is orphaned, or a driver doc inconsistent with
-                    // its bus.
-                    await adminDb.runTransaction(async (transaction) => {
-                        const primaryBusRef = adminDb.collection('buses').doc(request.bus_id);
-                        const secondaryBusRef = adminDb.collection('buses').doc(request.secondary_bus_id!);
-                        const fromDriverRef = adminDb.collection('drivers').doc(request.requester_driver_uid);
-                        const toDriverRef = adminDb.collection('drivers').doc(request.candidate_driver_uid);
-
-                        // All reads before writes
-                        await Promise.all([
-                            transaction.get(primaryBusRef),
-                            transaction.get(secondaryBusRef),
-                            transaction.get(fromDriverRef),
-                            transaction.get(toDriverRef),
-                        ]);
-
+                    // D9: ATOMIC Supabase updates for both buses and drivers
+                    await Promise.all([
                         // Restore PRIMARY bus to requester
-                        transaction.update(primaryBusRef, {
-                            activeDriverId: request.requester_driver_uid,
-                            assignedDriverId: request.requester_driver_uid,
-                            activeTripId: null,
-                            updatedAt: FieldValue.serverTimestamp()
-                        });
-
+                        supabase.from('buses').update({
+                            driver_uid: request.requester_driver_uid,
+                        }).eq('id', request.bus_id),
                         // Restore SECONDARY bus to candidate
-                        transaction.update(secondaryBusRef, {
-                            activeDriverId: request.candidate_driver_uid,
-                            assignedDriverId: request.candidate_driver_uid,
-                            activeTripId: null,
-                            updatedAt: FieldValue.serverTimestamp()
-                        });
-
+                        supabase.from('buses').update({
+                            driver_uid: request.candidate_driver_uid,
+                        }).eq('id', request.secondary_bus_id!),
                         // Restore requester to primary bus
-                        transaction.update(fromDriverRef, {
-                            assignedBusId: request.bus_id,
-                            busId: request.bus_id,
-                            assignedRouteId: request.route_id || null,
-                            routeId: request.route_id || null,
-                            updatedAt: FieldValue.serverTimestamp()
-                        });
-
+                        supabase.from('driver_profiles').update({
+                            assigned_bus_id: request.bus_id,
+                            bus_id: request.bus_id,
+                            assigned_route_id: request.route_id || null,
+                            route_id: request.route_id || null,
+                        }).eq('uid', request.requester_driver_uid),
                         // Restore candidate to secondary bus
-                        transaction.update(toDriverRef, {
-                            assignedBusId: request.secondary_bus_id,
-                            busId: request.secondary_bus_id,
-                            assignedRouteId: request.secondary_route_id || null,
-                            routeId: request.secondary_route_id || null,
-                            updatedAt: FieldValue.serverTimestamp()
-                        });
-                    });
+                        supabase.from('driver_profiles').update({
+                            assigned_bus_id: request.secondary_bus_id,
+                            bus_id: request.secondary_bus_id,
+                            assigned_route_id: request.secondary_route_id || null,
+                            route_id: request.secondary_route_id || null,
+                        }).eq('uid', request.candidate_driver_uid),
+                    ]);
 
                     console.log('   ✅ Primary bus restored to requester (swap %s)', requestId);
                     console.log('   ✅ Secondary bus restored to candidate (swap %s)', requestId);
@@ -1117,41 +1047,24 @@ export class DriverSwapSupabaseService {
                 // fromDriver (requester) becomes reserved, toDriver (candidate) takes over the bus
                 console.log('   📋 Processing as ASSIGNMENT (to reserved driver)');
 
-                // Atomic: all Firestore writes in a single transaction so bus + both
-                // driver docs are consistent even if a concurrent swap or assignment runs.
-                const busRef = adminDb.collection('buses').doc(request.bus_id);
-                const fromDriverRef = adminDb.collection('drivers').doc(request.requester_driver_uid);
-                const toDriverRef = adminDb.collection('drivers').doc(request.candidate_driver_uid);
-
-                await adminDb.runTransaction(async (transaction) => {
-                    const [busSnap, fromSnap, toSnap] = await Promise.all([
-                        transaction.get(busRef),
-                        transaction.get(fromDriverRef),
-                        transaction.get(toDriverRef),
-                    ]);
-                    if (!busSnap.exists || !fromSnap.exists || !toSnap.exists) {
-                        throw new Error('Document not found during swap transaction');
-                    }
-                    transaction.update(busRef, {
-                        activeDriverId: request.candidate_driver_uid,
-                        assignedDriverId: request.candidate_driver_uid,
-                        updatedAt: FieldValue.serverTimestamp()
-                    });
-                    transaction.update(fromDriverRef, {
-                        assignedBusId: null,
-                        busId: null,
-                        assignedRouteId: null,
-                        routeId: null,
-                        updatedAt: FieldValue.serverTimestamp()
-                    });
-                    transaction.update(toDriverRef, {
-                        assignedBusId: request.bus_id,
-                        busId: request.bus_id,
-                        assignedRouteId: request.route_id || null,
-                        routeId: request.route_id || null,
-                        updatedAt: FieldValue.serverTimestamp()
-                    });
-                });
+                // D9: Supabase updates for bus + driver ownership transfer
+                await Promise.all([
+                    supabase.from('buses').update({
+                        driver_uid: request.candidate_driver_uid,
+                    }).eq('id', request.bus_id),
+                    supabase.from('driver_profiles').update({
+                        assigned_bus_id: null,
+                        bus_id: null,
+                        assigned_route_id: null,
+                        route_id: null,
+                    }).eq('uid', request.requester_driver_uid),
+                    supabase.from('driver_profiles').update({
+                        assigned_bus_id: request.bus_id,
+                        bus_id: request.bus_id,
+                        assigned_route_id: request.route_id || null,
+                        route_id: request.route_id || null,
+                    }).eq('uid', request.candidate_driver_uid),
+                ]);
                 console.log('   ✅ Bus %s assigned to %s (atomic)', request.bus_id, request.id);
                 console.log('   ✅ From driver (%s) set to reserved', request.id);
                 console.log('   ✅ To driver (%s) assigned to bus %s', request.id, request.bus_id);
@@ -1162,48 +1075,27 @@ export class DriverSwapSupabaseService {
                 console.log('   📋 Processing as TRUE SWAP (both drivers have buses)');
                 console.log('   ↔️ Exchanging buses (swap %s)', request.id);
 
-                // Atomic: all Firestore writes in a single transaction so both buses
-                // and both drivers swap consistently.
-                const primaryBusRef = adminDb.collection('buses').doc(request.bus_id);
-                const secondaryBusRef = adminDb.collection('buses').doc(request.secondary_bus_id!);
-                const fromDriverRef = adminDb.collection('drivers').doc(request.requester_driver_uid);
-                const toDriverRef = adminDb.collection('drivers').doc(request.candidate_driver_uid);
-
-                await adminDb.runTransaction(async (transaction) => {
-                    const [pBusSnap, sBusSnap, fromSnap, toSnap] = await Promise.all([
-                        transaction.get(primaryBusRef),
-                        transaction.get(secondaryBusRef),
-                        transaction.get(fromDriverRef),
-                        transaction.get(toDriverRef),
-                    ]);
-                    if (!pBusSnap.exists || !sBusSnap.exists || !fromSnap.exists || !toSnap.exists) {
-                        throw new Error('Document not found during swap transaction');
-                    }
-                    transaction.update(primaryBusRef, {
-                        activeDriverId: request.candidate_driver_uid,
-                        assignedDriverId: request.candidate_driver_uid,
-                        updatedAt: FieldValue.serverTimestamp()
-                    });
-                    transaction.update(secondaryBusRef, {
-                        activeDriverId: request.requester_driver_uid,
-                        assignedDriverId: request.requester_driver_uid,
-                        updatedAt: FieldValue.serverTimestamp()
-                    });
-                    transaction.update(fromDriverRef, {
-                        assignedBusId: request.secondary_bus_id,
-                        busId: request.secondary_bus_id,
-                        assignedRouteId: request.secondary_route_id || null,
-                        routeId: request.secondary_route_id || null,
-                        updatedAt: FieldValue.serverTimestamp()
-                    });
-                    transaction.update(toDriverRef, {
-                        assignedBusId: request.bus_id,
-                        busId: request.bus_id,
-                        assignedRouteId: request.route_id || null,
-                        routeId: request.route_id || null,
-                        updatedAt: FieldValue.serverTimestamp()
-                    });
-                });
+                // D9: Supabase updates for both buses and drivers
+                await Promise.all([
+                    supabase.from('buses').update({
+                        driver_uid: request.candidate_driver_uid,
+                    }).eq('id', request.bus_id),
+                    supabase.from('buses').update({
+                        driver_uid: request.requester_driver_uid,
+                    }).eq('id', request.secondary_bus_id!),
+                    supabase.from('driver_profiles').update({
+                        assigned_bus_id: request.secondary_bus_id,
+                        bus_id: request.secondary_bus_id,
+                        assigned_route_id: request.secondary_route_id || null,
+                        route_id: request.secondary_route_id || null,
+                    }).eq('uid', request.requester_driver_uid),
+                    supabase.from('driver_profiles').update({
+                        assigned_bus_id: request.bus_id,
+                        bus_id: request.bus_id,
+                        assigned_route_id: request.route_id || null,
+                        route_id: request.route_id || null,
+                    }).eq('uid', request.candidate_driver_uid),
+                ]);
                 console.log('   ✅ Primary bus assigned to candidate (atomic, swap %s)', request.id);
                 console.log('   ✅ Secondary bus assigned to requester (swap %s)', request.id);
                 console.log('   ✅ From driver assigned to secondary bus (swap %s)', request.id);
@@ -1322,21 +1214,22 @@ export class DriverSwapSupabaseService {
     private static async updateActiveTripSession(request: SwapRequest, newDriverUid: string): Promise<void> {
         try {
             console.log('🔄 Checking for active trip session to update...');
-            const activeTripsSnapshot = await adminDb
-                .collection('trip_sessions')
-                .where('busId', '==', request.bus_id)
-                .where('endedAt', '==', null)
-                .limit(1)
-                .get();
+            // D9: Check Supabase active_trips (authoritative source)
+            const { data: activeTrip } = await supabase
+                .from('active_trips')
+                .select('trip_id')
+                .eq('bus_id', request.bus_id)
+                .eq('status', 'active')
+                .maybeSingle();
 
-            if (!activeTripsSnapshot.empty) {
-                const tripDoc = activeTripsSnapshot.docs[0];
-                await tripDoc.ref.update({
-                    driverUid: newDriverUid,
-                    previousDriverUid: request.requester_driver_uid,
-                    swappedAt: FieldValue.serverTimestamp()
-                });
-                console.log('✅ Updated active trip session %s with new driver %s', tripDoc.id, newDriverUid);
+            if (activeTrip) {
+                // Update the driver on the active trip
+                await supabase
+                    .from('active_trips')
+                    .update({ driver_id: newDriverUid })
+                    .eq('trip_id', activeTrip.trip_id)
+                    .eq('status', 'active');
+                console.log('✅ Updated active trip %s with new driver %s', activeTrip.trip_id, newDriverUid);
             } else {
                 console.log('ℹ️ No active trip session found to update');
             }
@@ -1350,24 +1243,36 @@ export class DriverSwapSupabaseService {
         try {
             console.log('📢 Notifying students of driver change for swap %s', request.id);
 
-            // Get students on this bus
-            const studentsSnapshot = await adminDb
-                .collection('students')
-                .where('busId', '==', request.bus_id)
-                .get();
+            // D9: Get students on this bus from Supabase
+            const { data: students } = await supabase
+                .from('student_profiles')
+                .select('uid')
+                .eq('bus_id', request.bus_id)
+                .eq('status', 'active');
 
-            if (studentsSnapshot.empty) {
+            if (!students || students.length === 0) {
                 console.log('ℹ️ No students found for this bus');
                 return;
             }
 
+            // D10: FCM tokens are still in Firestore subcollections (students/{id}/tokens)
+            // This will be migrated in D10 when FCM token storage moves to Supabase
             const tokens: string[] = [];
-            studentsSnapshot.docs.forEach((doc: any) => {
-                const data = doc.data();
-                if (data.fcmToken) {
-                    tokens.push(data.fcmToken);
+            for (const student of students) {
+                try {
+                    const tokensSnap = await adminDb
+                        .collection('students')
+                        .doc(student.uid)
+                        .collection('tokens')
+                        .get();
+                    tokensSnap.docs.forEach((doc: any) => {
+                        const data = doc.data();
+                        if (data?.token) tokens.push(data.token);
+                    });
+                } catch {
+                    // Skip student if token fetch fails
                 }
-            });
+            }
 
             if (tokens.length === 0) {
                 console.log('ℹ️ No FCM tokens found for students');
@@ -1376,7 +1281,6 @@ export class DriverSwapSupabaseService {
 
             const messaging = (await import('firebase-admin/messaging')).getMessaging();
 
-            // Send multicast message
             const response = await messaging.sendEachForMulticast({
                 tokens: tokens,
                 notification: {

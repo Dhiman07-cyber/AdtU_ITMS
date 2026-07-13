@@ -227,74 +227,43 @@ export async function approve(
   const isRenewal = app.application_type === 'renewal' || app.application_type === 'renewal_after_soft_block';
 
   try {
-    let studentData: Record<string, any> | null = null;
-    let studentDataForRpc: Record<string, any> | null = null;
-
     if (isRenewal) {
       // ── RENEWAL PATH ──────────────────────────────────────────────
-      // C3: approveRenewal computes values and handles seats, but does NOT
-      // write to student_profiles. The RPC handles the atomic commit.
-      const renewalResult = await approveRenewal(app, approverData, overrides);
-      studentData = renewalResult.studentData;
-      studentDataForRpc = renewalResult.studentDataForRpc;
+      await approveRenewal(app, approverData, overrides);
     } else {
       // ── FRESH APPLICATION PATH ────────────────────────────────────
-      studentData = buildStudentData(app, approverData, overrides);
+      const studentData = buildStudentData(app, approverData, overrides);
 
-      const { data: identityResult, error: identityError } = await db.rpc('identity_activate_student', {
+      const { data: identityResult } = await db.rpc('identity_activate_student', {
         p_uid: app.applicant_uid,
         p_email: app.email || app.applicant_email,
         p_full_name: app.full_name,
         p_student_data: studentData,
       });
 
-      if (identityError) {
-        console.error('identity_activate_student RPC error:', identityError);
-        throw new Error(`Identity activation failed: ${identityError.message || identityError.code}`);
-      }
-
       if (!identityResult?.success) {
         throw new Error('Identity activation failed');
       }
+
+      // ── Side effects ──────────────────────────────────────────────
+      await postCommitApprovalSideEffects(app, studentData, approverData);
     }
 
-    // ── Step 2: Finalize application — atomic commit ────────────────
-    // C3: For renewals, student update + idempotency marker + application
-    // finalization happen in a single RPC (single DB transaction).
-    // For fresh: deletes application. Identity already activated above.
-    const { data: finalizeResult, error: finalizeError } = await db.rpc('finalize_application_approval', {
+    // ── Step 3: Application RPC — finalize ──────────────────────────
+    // For fresh: deletes application. For renewal: preserves as approved.
+    const { data: finalizeResult } = await db.rpc('finalize_application_approval', {
       p_application_id: applicationId,
       p_approver_uid: approverData.uid,
-      ...(studentDataForRpc ? { p_student_data: studentDataForRpc } : {}),
     });
-
-    if (finalizeError) {
-      console.error('finalize_application_approval RPC error:', finalizeError);
-      throw new Error(`Application finalization failed: ${finalizeError.message || finalizeError.code}`);
-    }
 
     if (!finalizeResult?.success) {
       throw new Error('Application finalization failed');
     }
 
-    // ── Step 3: Side effects — AFTER finalize (non-critical) ───────
-    // H4: Payment, audit, notification run last. Each is idempotent.
-    if (studentData) {
-      await postCommitApprovalSideEffects(app, studentData, approverData, isRenewal ? 'renewal' : 'new');
-    }
-
     return { success: true, studentUid: app.applicant_uid };
 
   } catch (error: any) {
-    // C4: Compensating rollback — release seat if it was assigned before the failure
-    const seatComp = (app as any).__seatCompensation;
-    if (seatComp) {
-      await Seat.releaseSeat(seatComp.busId, seatComp.studentId, seatComp.shift)
-        .catch(releaseErr => {
-          console.error(`CRITICAL: Seat compensation failed for ${seatComp.busId}/${seatComp.studentId}:`, releaseErr);
-        });
-    }
-    // Release lock — application still exists
+    // ── Failure path: release lock, application still exists ────────
     await db.rpc('release_application_lock', { p_application_id: applicationId });
     return { success: false, error: error.message, status: 500 };
   }
@@ -302,16 +271,14 @@ export async function approve(
 
 /**
  * D8: Approve a renewal application.
- * Computes renewal values and handles seat reclamation.
- * Does NOT write to student_profiles directly — returns pre-computed data
- * for the caller to pass to finalize_application_approval RPC, which commits
- * student update + idempotency marker + application finalization atomically.
+ * Updates existing student profile instead of creating new identity.
+ * Preserves application as approved record (audit trail).
  */
 async function approveRenewal(
   app: any,
   approverData: { uid: string; name: string; role: string },
   overrides?: { busId?: string; startYear?: number; endYear?: number }
-): Promise<{ studentDataForRpc: Record<string, any>; studentData: Record<string, any> }> {
+): Promise<void> {
   const fd = app.form_data || {};
   const studentId = fd.studentId || app.applicant_uid;
   const durationYears = Number(fd.durationYears || fd.targetSession?.durationYears || 1);
@@ -344,59 +311,39 @@ async function approveRenewal(
     ? (student as any).sessionEndYear
     : newSessionEndYear;
 
-  // Idempotent duration — derived from final session dates, never incremented.
-  const originalStartYear = (student as any).sessionStartYear || baseYear;
-  const totalDuration = Math.max(
-    finalSessionEndYear - originalStartYear,
-    (student as any).durationYears || 0
-  );
+  const totalDuration = ((student as any).durationYears || 0) + durationYears;
   const blockDates = computeBlockDatesFromValidUntil(finalValidUntil, deadlineConfig);
 
   const seatWasReleased = !!(student as any).seatReleasedAt;
   const renewalBusId = overrides?.busId || (student as any).busId || (student as any).currentBusId || (student as any).assignedBusId || null;
 
   // ── Seat reclamation (renewal_after_soft_block) ───────────────────
-  // H3: Validate capacity BEFORE assignment. C4: Compensate on failure.
-  let seatAssigned = false;
   if (app.application_type === 'renewal_after_soft_block' && seatWasReleased && renewalBusId) {
-    const capacity = await Seat.getCapacity(renewalBusId, (student as any).shift);
-    if (!capacity.available) {
-      throw new Error(`Bus ${renewalBusId} is at full capacity for shift ${(student as any).shift}. Cannot reassign seat.`);
-    }
     await Seat.assignSeat(renewalBusId, studentId, (student as any).shift);
-    seatAssigned = true;
   }
 
-  // C3: If seat was assigned but finalize later fails, compensate.
-  // The caller's catch block handles lock release; we handle seat release here
-  // by attaching a compensator that fires if the RPC call fails.
-  if (seatAssigned && renewalBusId) {
-    const shift = (student as any).shift;
-    // Attach compensation info for the caller to use on failure
-    (app as any).__seatCompensation = { busId: renewalBusId, studentId, shift };
-  }
+  // ── Update student profile ────────────────────────────────────────
+  // Uses existing Student.update() — no new API needed.
+  await Student.update(studentId, {
+    validUntil: finalValidUntil.toISOString(),
+    status: 'active',
+    sessionEndYear: finalSessionEndYear,
+    durationYears: totalDuration,
+    paymentAmount: totalFee,
+    softBlock: blockDates.softBlock,
+    hardBlock: blockDates.hardBlock,
+    lastRenewalDate: now.toISOString(),
+    ...(seatWasReleased ? { seatReleasedAt: null } : {}),
+  } as any);
 
-  // ── Return pre-computed data ──────────────────────────────────────
-  // C3: Student update happens inside finalize_application_approval RPC,
-  // atomically with application state change and idempotency marker.
-  return {
-    // For the finalize RPC (snake_case — matches DB columns)
-    studentDataForRpc: {
-      valid_until: finalValidUntil.toISOString(),
-      status: 'active',
-      session_end_year: finalSessionEndYear,
-      session_duration: String(totalDuration),
-      soft_block: blockDates.softBlock || null,
-      hard_block: blockDates.hardBlock || null,
-    },
-    // For side effects (camelCase — matches domain model)
-    studentData: {
-      validUntil: finalValidUntil.toISOString(),
-      sessionStartYear: (student as any).sessionStartYear || baseYear,
-      sessionEndYear: finalSessionEndYear,
-      durationYears: totalDuration,
-    },
+  // ── Side effects (payment, audit, notification) ───────────────────
+  const studentData = {
+    validUntil: finalValidUntil.toISOString(),
+    sessionStartYear: (student as any).sessionStartYear || baseYear,
+    sessionEndYear: finalSessionEndYear,
+    durationYears: totalDuration,
   };
+  await postCommitApprovalSideEffects(app, studentData, approverData, 'renewal');
 }
 
 /**
@@ -441,11 +388,10 @@ export async function reject(
 
   try {
     // Step 2a: Payment cleanup
-    // H2: Payment operations go through Payment domain public API.
     if (app.payment_id) {
       try {
-        const { rejectApplicationPayment } = await import('@/domains/payment');
-        await rejectApplicationPayment(app.payment_id, {
+        const { paymentsSupabaseService } = await import('@/lib/services/payments-supabase');
+        await paymentsSupabaseService.updatePaymentStatus(app.payment_id, 'Rejected', {
           userId: rejectorData.uid,
           name: rejectorData.name,
           empId: '',
@@ -628,20 +574,18 @@ async function postCommitApprovalSideEffects(
   app: any,
   studentData: Record<string, any>,
   approverData: { uid: string; name: string; role: string },
-  applicationType?: 'new' | 'renewal'
+  purpose: 'new_registration' | 'renewal' = 'new_registration'
 ): Promise<void> {
   const tasks: Array<Promise<unknown>> = [];
-  const purpose: 'new_registration' | 'renewal' = applicationType === 'renewal' ? 'renewal' : 'new_registration';
 
   // Payment (online: idempotent via upsertPayment; offline: session-level duplicate check via createPayment)
-  // H2: All payment operations go through Payment domain public API — no internal implementation leakage.
   const amount = Number(app.amount_paid || app.form_data?.paymentInfo?.amountPaid || 0);
   if (amount > 0) {
     const paymentMode = app.payment_mode || app.form_data?.paymentInfo?.paymentMode;
     if (paymentMode === 'online') {
       tasks.push(
-        import('@/domains/payment').then(({ upsertApprovalPayment }) =>
-          upsertApprovalPayment({
+        import('@/lib/services/payments-supabase').then(({ paymentsSupabaseService }) =>
+          paymentsSupabaseService.upsertPayment({
             paymentId: app.form_data?.paymentInfo?.razorpayPaymentId || '',
             studentId: app.enrollment_id,
             studentUid: app.applicant_uid,
@@ -660,7 +604,7 @@ async function postCommitApprovalSideEffects(
       );
     } else {
       tasks.push(
-        import('@/domains/payment').then(({ createOfflinePaymentAtApproval }) =>
+        import('@/lib/payment/payment.service').then(({ createOfflinePaymentAtApproval }) =>
           createOfflinePaymentAtApproval({
             studentId: app.enrollment_id,
             studentUid: app.applicant_uid,

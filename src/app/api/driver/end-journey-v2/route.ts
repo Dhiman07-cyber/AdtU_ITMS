@@ -10,7 +10,6 @@
  */
 
 import { NextResponse } from 'next/server';
-import { db as adminDb } from '@/lib/firebase-admin';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import { tripLockService } from '@/lib/services/trip-lock-service';
 import { withSecurity } from '@/lib/security/api-security';
@@ -230,12 +229,16 @@ export const POST = withSecurity(
 
     console.log(`🏁 Ending journey for bus ${busId}, trip ${tripId || 'current'}...`);
 
-    // 1. Single Firestore read for bus metadata and lock verification
-    const busDoc = await adminDb.collection('buses').doc(busId).get();
-    if (!busDoc.exists) return NextResponse.json({ error: 'Bus not found' }, { status: 404 });
-    
-    const busData = busDoc.data();
-    let activeTripId = tripId || busData?.activeTripId;
+    // 1. D9: Read bus metadata from Supabase instead of Firestore
+    const { data: busData } = await supabase
+      .from('buses')
+      .select('id, bus_number, route_id, route_name, driver_uid')
+      .eq('id', busId)
+      .maybeSingle();
+
+    if (!busData) return NextResponse.json({ error: 'Bus not found' }, { status: 404 });
+
+    let activeTripId = tripId;
 
     if (!activeTripId) {
       const { data: activeTrip } = await supabase
@@ -249,16 +252,29 @@ export const POST = withSecurity(
       activeTripId = activeTrip?.trip_id || null;
     }
 
-    const rawBusNumber = busData?.busNumber || busId;
+    const rawBusNumber = busData.bus_number || busId;
     const busNumber = formatIdForDisplay(rawBusNumber);
-    const routeId = busData?.routeId || busData?.route_id || busId;
-    const rawRouteName = busData?.routeName || `Route for Bus ${busNumber}`;
+    const routeId = busData.route_id || busId;
+    const rawRouteName = busData.route_name || `Route for Bus ${busNumber}`;
     const routeName = formatIdForDisplay(rawRouteName);
 
-    // Lock verification
-    const lock = busData?.activeTripLock;
-    if (lock?.active && lock.driverId && lock.driverId !== driverUid) {
-      return NextResponse.json({ error: 'Not the lock holder', errorCode: 'NOT_LOCK_HOLDER' }, { status: 403 });
+    // D9: Lock verification via active_trips instead of Firestore activeTripLock
+    if (activeTripId) {
+      const { data: lockTrip } = await supabase
+        .from('active_trips')
+        .select('driver_id, status, expires_at')
+        .eq('trip_id', activeTripId)
+        .eq('bus_id', busId)
+        .eq('status', 'active')
+        .maybeSingle();
+
+      if (lockTrip && lockTrip.driver_id && lockTrip.driver_id !== driverUid) {
+        // Check if lock has expired
+        const isExpired = lockTrip.expires_at && Date.now() > new Date(lockTrip.expires_at).getTime();
+        if (!isExpired) {
+          return NextResponse.json({ error: 'Not the lock holder', errorCode: 'NOT_LOCK_HOLDER' }, { status: 403 });
+        }
+      }
     }
 
     if (activeTripId) {

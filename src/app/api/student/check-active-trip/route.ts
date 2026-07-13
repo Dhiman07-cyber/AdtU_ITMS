@@ -1,18 +1,14 @@
 import { NextResponse } from 'next/server';
-import { adminDb } from '@/lib/firebase-admin';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import { withSecurity } from '@/lib/security/api-security';
 import { BusIdSchema } from '@/lib/security/validation-schemas';
 import { RateLimits } from '@/lib/security/rate-limiter';
 
-// Initialize Supabase client
-const supabase = getSupabaseServer();
-
 /**
  * POST /api/student/check-active-trip
  * 
  * Checks if there's an active trip for the student's assigned bus.
- * Parallelizes Supabase (live trip) and Firestore (bus metadata) checks.
+ * D9: All reads from Supabase (PostgreSQL) — no Firestore.
  */
 export const POST = withSecurity(
   async (request, { body, requestId }) => {
@@ -21,10 +17,12 @@ export const POST = withSecurity(
     try {
       console.log(`🔍 [${requestId}] Querying for active trip and bus status for bus: ${busId}`);
 
-      // 1. Parallelize Supabase active trip check and Firestore bus metadata fetch
-      const [tripRes, busDoc] = await Promise.all([
+      const supabase = getSupabaseServer();
+
+      // D9: Parallelize Supabase active trip check and bus metadata fetch
+      const [tripRes, busRes] = await Promise.all([
         supabase.from('active_trips').select('*').eq('bus_id', busId).eq('status', 'active').maybeSingle(),
-        adminDb.collection('buses').doc(busId).get()
+        supabase.from('buses').select('status').eq('id', busId).maybeSingle()
       ]);
 
       if (tripRes.error) {
@@ -33,7 +31,7 @@ export const POST = withSecurity(
       }
 
       const activeTrip = tripRes.data;
-      const busStatus = busDoc.exists ? busDoc.data()?.status : null;
+      const busStatus = busRes.data?.status || null;
 
       if (activeTrip) {
         return NextResponse.json({

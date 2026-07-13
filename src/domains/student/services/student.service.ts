@@ -64,30 +64,21 @@ export async function applyPaymentValidity(
     ? (student as any).sessionEndYear
     : payment.session_end_year;
 
-  return update(studentUid, {
+  await update(studentUid, {
     validUntil: finalValidUntil?.toISOString() || undefined,
     sessionStartYear: payment.session_start_year || (student as any).sessionStartYear,
     sessionEndYear: finalSessionEndYear,
     status: 'active',
   } as any);
+  return true;
 }
 
-export async function update(id: string, data: Partial<Student>): Promise<boolean> {
-  try {
-    await studentRepository.update(id, data);
-    return true;
-  } catch {
-    return false;
-  }
+export async function update(id: string, data: Partial<Student>): Promise<void> {
+  await studentRepository.update(id, data);
 }
 
-export async function remove(id: string): Promise<boolean> {
-  try {
-    await studentRepository.remove(id);
-    return true;
-  } catch {
-    return false;
-  }
+export async function remove(id: string): Promise<void> {
+  await studentRepository.remove(id);
 }
 
 export async function unassignRoute(routeId: string): Promise<boolean> {

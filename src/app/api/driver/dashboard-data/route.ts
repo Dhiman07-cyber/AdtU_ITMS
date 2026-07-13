@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server';
-import { adminDb } from '@/lib/firebase-admin';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import { withSecurity } from '@/lib/security/api-security';
 import { RateLimits } from '@/lib/security/rate-limiter';
@@ -9,38 +8,49 @@ import { RateLimits } from '@/lib/security/rate-limiter';
  * 
  * COMPREHENSIVE DRIVER DASHBOARD DATA FETCH
  * Parallelizes: Driver Profile, Assigned Bus, Route, Student Count, and Trip Status.
+ * D9: All reads from Supabase (PostgreSQL) — no Firestore.
  */
 export const GET = withSecurity(
     async (request, { auth }) => {
         const uid = auth.uid;
         const supabase = getSupabaseServer();
 
-        // 1. Fetch Driver Profile
-        const driverSnap = await adminDb.collection('drivers').doc(uid).get();
-        if (!driverSnap.exists) {
+        // 1. D6: Fetch Driver Profile from driver_profiles
+        const { data: driverProfile, error: driverError } = await supabase
+            .from('driver_profiles')
+            .select('*')
+            .eq('uid', uid)
+            .maybeSingle();
+
+        if (driverError || !driverProfile) {
             return NextResponse.json({ error: 'Driver profile not found' }, { status: 404 });
         }
 
-        const driverData = driverSnap.data()!;
-        const busId = driverData.assignedBusId || driverData.busId;
-        const routeId = driverData.assignedRouteId || driverData.routeId;
+        const busId = driverProfile.assigned_bus_id || driverProfile.bus_id;
+        const routeId = driverProfile.assigned_route_id || driverProfile.route_id;
 
         // 2. Parallelize everything else
-        const [busSnap, routeSnap, studentCountSnap, tripStatus] = await Promise.all([
-            busId ? adminDb.collection('buses').doc(busId).get() : Promise.resolve(null),
-            routeId ? adminDb.collection('routes').doc(routeId).get() : Promise.resolve(null),
-            busId ? adminDb.collection('students').where('busId', '==', busId).where('status', '==', 'active').count().get() : Promise.resolve(null),
+        const [busResult, routeResult, studentCountResult, tripStatus] = await Promise.all([
+            busId
+                ? supabase.from('buses').select('*').eq('id', busId).maybeSingle()
+                : Promise.resolve({ data: null, error: null }),
+            routeId
+                ? supabase.from('routes').select('*').eq('id', routeId).maybeSingle()
+                : Promise.resolve({ data: null, error: null }),
+            busId
+                ? supabase.from('student_profiles').select('uid', { count: 'exact', head: true }).eq('bus_id', busId).eq('status', 'active')
+                : Promise.resolve({ count: 0, error: null }),
             supabase.from('driver_status').select('*').eq('driver_uid', uid).maybeSingle()
         ]);
 
-        const bus = busSnap?.exists ? { id: busSnap.id, ...busSnap.data() } : null;
-        const route = routeSnap?.exists ? { id: routeSnap.id, ...routeSnap.data() } : null;
-        const studentCount = studentCountSnap?.data().count || 0;
+        const bus = busResult.data || null;
+        const route = routeResult.data || null;
+        const studentCount = studentCountResult.count || 0;
         const tripData = tripStatus?.data || null;
         const isTripActive = tripData ? (tripData.status === 'on_trip' || tripData.status === 'enroute') : false;
 
         return NextResponse.json({
-            driver: driverData,
+            driver: driverProfile,
             bus,
             route,
             studentCount,

@@ -4,7 +4,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { adminDb } from '@/lib/firebase-admin';
+import { getSupabaseServer } from '@/lib/supabase-server';
 import { checkRateLimit, RateLimits, createRateLimitId } from '@/lib/security/rate-limiter';
 import { verifyApiAuth } from '@/lib/security/api-auth';
 import {
@@ -80,28 +80,25 @@ export async function POST(request: NextRequest) {
             }, { status: 400 });
         }
 
-        // 1. Fetch activeTripId from buses collection and verify consistency
+        // 1. D9: Fetch active trip from Supabase (authoritative source)
         let activeTripId: string | null = null;
         let isTripStale = false;
         try {
-            const busDoc = await adminDb.collection('buses').doc(scannerBusId).get();
-            if (busDoc.exists) {
-                const busData = busDoc.data();
-                const possibleTripId = busData?.activeTripId;
-                if (possibleTripId) {
-                    const tripDoc = await adminDb.collection('trip_sessions').doc(possibleTripId).get();
-                    if (tripDoc.exists) {
-                        const tripData = tripDoc.data();
-                        const isExpired = tripData?.status !== 'active' ||
-                            (tripData?.createdAt && (Date.now() - tripData.createdAt.toDate().getTime() > 12 * 60 * 60 * 1000));
-                        if (isExpired) {
-                            isTripStale = true;
-                        } else {
-                            activeTripId = possibleTripId;
-                        }
-                    } else {
-                        isTripStale = true;
-                    }
+            const supabase = getSupabaseServer();
+            const { data: activeTrip } = await supabase
+                .from('active_trips')
+                .select('trip_id, status, created_at')
+                .eq('bus_id', scannerBusId)
+                .eq('status', 'active')
+                .maybeSingle();
+
+            if (activeTrip) {
+                const createdAt = new Date(activeTrip.created_at).getTime();
+                const isExpired = (Date.now() - createdAt) > 12 * 60 * 60 * 1000;
+                if (isExpired) {
+                    isTripStale = true;
+                } else {
+                    activeTripId = activeTrip.trip_id;
                 }
             }
         } catch (e) {

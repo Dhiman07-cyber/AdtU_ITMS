@@ -68,10 +68,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       updatedAt: new Date().toISOString(),
     };
 
-    const success = await update(id, unifiedUpdateData);
-    if (!success) {
-      return NextResponse.json({ error: 'Failed to update student profile' }, { status: 500 });
-    }
+    await update(id, unifiedUpdateData);
 
     const freshStudent = await getById(id);
     if (!freshStudent) {

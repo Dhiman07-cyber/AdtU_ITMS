@@ -87,6 +87,7 @@ const STUDENT_FIELD_MAP: Record<string, string> = {
   hardBlock: 'hard_block',
   approvedBy: 'approved_by',
   approvedAt: 'approved_at',
+  lastProcessedApplicationId: 'last_processed_application_id',
   createdAt: 'created_at',
   updatedAt: 'updated_at',
 };

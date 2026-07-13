@@ -3,9 +3,14 @@
  *
  * Route trip notifications use FCM topics so starting/ending a bus journey does
  * not require fetching and batching every student token during the trip request.
+ *
+ * D9: FCM notification lock moved from Firestore buses.activeTripLock to
+ * PostgreSQL active_trips via acquire_fcm_lock RPC. Driver/bus verification
+ * moved to Supabase. Student queries moved to Supabase.
  */
 
 import { db as adminDb, messaging, FieldValue } from '@/lib/firebase-admin';
+import { getSupabaseServer } from '@/lib/supabase-server';
 
 export type TripEventType = 'TRIP_STARTED' | 'TRIP_ENDED';
 export type RouteTopicEventType = TripEventType | 'BUS_CHANGED';
@@ -48,29 +53,26 @@ async function updateStudentNotifications(
 }
 
 async function acquireNotificationLock(busId: string, tripId: string, eventType: TripEventType): Promise<void> {
-  if (!adminDb) throw new Error('Firebase Admin not initialized');
+  // D9: Use PostgreSQL RPC instead of Firestore transaction
+  const supabase = getSupabaseServer();
+  const lockType = eventType === 'TRIP_ENDED' ? 'end' : 'start';
 
-  const lockFlag = eventType === 'TRIP_ENDED' ? 'endFcmSent' : 'startFcmSent';
-  const busRef = adminDb.collection('buses').doc(busId);
-
-  await adminDb.runTransaction(async tx => {
-    const busDoc = await tx.get(busRef);
-    if (!busDoc.exists) throw new Error('BUS_NOT_FOUND');
-
-    const lock = busDoc.data()?.activeTripLock;
-    if (lock?.tripId !== tripId && lock?.trip_id !== tripId) {
-      console.warn(`Lock tripId mismatch: doc=${lock?.tripId || lock?.trip_id}, current=${tripId}`);
-    }
-
-    if (lock?.[lockFlag]) {
-      throw new Error('NOTIFICATION_ALREADY_SENT');
-    }
-
-    tx.update(busRef, {
-      [`activeTripLock.${lockFlag}`]: true,
-      [`activeTripLock.${lockFlag}At`]: FieldValue.serverTimestamp(),
+  const { data: result, error } = await supabase
+    .rpc('acquire_fcm_lock', {
+      p_trip_id: tripId,
+      p_bus_id: busId,
+      p_lock_type: lockType,
     });
-  });
+
+  if (error) {
+    console.error('FCM lock RPC error:', error);
+    throw new Error('FCM_LOCK_ERROR');
+  }
+
+  // acquired=false means already sent (idempotent)
+  if (result && !result.acquired) {
+    throw new Error('NOTIFICATION_ALREADY_SENT');
+  }
 }
 
 export async function verifyDriverRouteBinding(
@@ -78,28 +80,30 @@ export async function verifyDriverRouteBinding(
   _routeId: string,
   busId: string
 ): Promise<{ authorized: boolean; reason?: string }> {
-  if (!adminDb) return { authorized: false, reason: 'Firebase Admin not initialized' };
-
   try {
-    const driverDoc = await adminDb.collection('drivers').doc(driverId).get();
-    if (!driverDoc.exists) return { authorized: false, reason: 'Driver not found' };
+    // D9: Check driver-bus assignment via Supabase instead of Firestore
+    const supabase = getSupabaseServer();
 
-    const driverData = driverDoc.data();
-    const driverClaimsBus = driverData?.assignedBusId === busId || driverData?.busId === busId;
-    if (driverClaimsBus) return { authorized: true };
+    // Check driver_status for active assignment
+    const { data: driverStatus } = await supabase
+      .from('driver_status')
+      .select('bus_id, driver_uid')
+      .eq('driver_uid', driverId)
+      .in('status', ['enroute', 'on_trip'])
+      .maybeSingle();
 
-    const busDoc = await adminDb.collection('buses').doc(busId).get();
-    if (!busDoc.exists) return { authorized: false, reason: 'Bus not found' };
+    if (driverStatus?.bus_id === busId) return { authorized: true };
 
-    const busData = busDoc.data();
-    const busClaimsDriver =
-      busData?.assignedDriverId === driverId ||
-      busData?.activeDriverId === driverId ||
-      busData?.driverUID === driverId;
+    // Check buses table for driver assignment
+    const { data: bus } = await supabase
+      .from('buses')
+      .select('driver_uid')
+      .eq('id', busId)
+      .maybeSingle();
 
-    return busClaimsDriver
-      ? { authorized: true }
-      : { authorized: false, reason: 'Driver is not assigned to this bus' };
+    if (bus?.driver_uid === driverId) return { authorized: true };
+
+    return { authorized: false, reason: 'Driver is not assigned to this bus' };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Driver authorization failed';
     console.error('Error verifying driver-route binding:', message);
@@ -140,17 +144,20 @@ export async function notifyRoute(params: {
 
   void (async () => {
     try {
-      const studentsSnap = await adminDb.collection('students')
-        .where('routeId', '==', routeId)
-        .where('status', '==', 'active')
-        .limit(100)
-        .get();
+      // D9: Query Supabase student_profiles instead of Firestore students
+      const supabase = getSupabaseServer();
+      const { data: students } = await supabase
+        .from('student_profiles')
+        .select('uid')
+        .eq('route_id', routeId)
+        .eq('status', 'active')
+        .limit(100);
 
-      if (studentsSnap.empty) return;
+      if (!students || students.length === 0) return;
 
       const isStart = eventType === 'TRIP_STARTED';
       await updateStudentNotifications(
-        new Set<string>(studentsSnap.docs.map(doc => doc.id)),
+        new Set<string>(students.map(s => s.uid)),
         {
           body: isStart
             ? `Bus for ${routeName} has started.`
