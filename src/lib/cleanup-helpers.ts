@@ -4,6 +4,7 @@
  */
 
 import { adminAuth, adminDb } from './firebase-admin';
+import { pgDeleteNotificationsByUser } from '@/domains/notification/repositories/notification.repository.pg';
 import { decrementBusCapacity } from './busCapacityService';
 import { extractPublicId, deleteAsset } from './cloudinary-server';
 import { wasSeatReleased } from './config/capacity-flags';
@@ -289,35 +290,8 @@ export async function deleteUserAndData(
  */
 async function deleteUserNotifications(userId: string): Promise<void> {
   try {
-    // Delete notifications where user is in recipientIds (canonical schema)
-    const recipientQuery = await adminDb.collection('notifications')
-      .where('recipientIds', 'array-contains', userId)
-      .limit(400)
-      .get();
-
-    if (recipientQuery.size > 0) {
-      const batch1 = adminDb.batch();
-      recipientQuery.docs.forEach(doc => {
-        batch1.delete(doc.ref);
-      });
-      await batch1.commit();
-      console.log(`Deleted ${recipientQuery.size} notifications for user (recipientIds):`, userId.substring(0,8)+'...');
-    }
-
-    // Also delete notifications where user is sender
-    const senderQuery = await adminDb.collection('notifications')
-      .where('sender.userId', '==', userId)
-      .limit(400)
-      .get();
-
-    if (senderQuery.size > 0) {
-      const batch2 = adminDb.batch();
-      senderQuery.docs.forEach(doc => {
-        batch2.delete(doc.ref);
-      });
-      await batch2.commit();
-      console.log(`Deleted ${senderQuery.size} notifications for user (sender):`, userId.substring(0,8)+'...');
-    }
+    const count = await pgDeleteNotificationsByUser(userId);
+    console.log(`Deleted ${count} notifications for user:`, userId.substring(0,8)+'...');
   } catch (error) {
     console.error('Error deleting user notifications:', error);
   }

@@ -32,6 +32,7 @@
  */
 
 import { adminDb } from '../firebase-admin';
+import { pgInsertNotification } from '@/domains/notification/repositories/notification.repository.pg';
 import { getShiftDeltas } from '@/lib/utils/shift-utils';
 
 export interface BusCounterSnapshot {
@@ -206,11 +207,9 @@ export async function adminReconcileBusLoads(options: ReconcileOptions = {}): Pr
   if (alertOnLargeDelta && largeDeltaBuses.length > 0 && !dryRun) {
     try {
       const adminsSnap = await adminDb.collection('admins').get();
-      const batch = adminDb.batch();
       const content = `Bus load reconciliation found large discrepancies on ${largeDeltaBuses.length} bus(es): ${largeDeltaBuses.join(', ')}. Counts were corrected to the recounted values; investigate the systemic cause.`;
-      adminsSnap.docs.forEach((adminDoc) => {
-        const ref = adminDb.collection('notifications').doc();
-        batch.set(ref, {
+      for (const adminDoc of adminsSnap.docs) {
+        await pgInsertNotification({
           title: 'Bus Load Reconciliation — Large Delta',
           content,
           type: 'emergency',
@@ -226,16 +225,11 @@ export async function adminReconcileBusLoads(options: ReconcileOptions = {}): Pr
           recipientIds: [adminDoc.id],
           autoInjectedRecipientIds: [],
           readByUserIds: [],
-          isEdited: false,
-          isDeletedGlobally: false,
-          hiddenForUserIds: [],
-          createdAt: new Date().toISOString(),
           metadata: {
             priority: 'high'
           }
         });
-      });
-      await batch.commit();
+      }
     } catch (e) {
       console.error('Reconciliation large-delta alert failed:', e);
     }

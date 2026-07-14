@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { adminAuth, adminDb } from '@/lib/firebase-admin';
-import { NotificationService } from '@/lib/notifications/NotificationService';
-import { NotificationTarget } from '@/lib/notifications/types';
+import { pgInsertNotification } from '@/domains/notification/repositories/notification.repository.pg';
 import { getSystemConfig, updateSystemConfig } from '@/lib/system-config-service';
 
 // GET: Retrieve system config from Firestore (public — no sensitive data)
@@ -90,22 +89,27 @@ export async function POST(req: NextRequest) {
                 const adminData = adminDoc.exists ? adminDoc.data() : {};
                 const adminName = adminData?.name || adminData?.fullName || 'Admin';
 
-                const notificationService = new NotificationService();
-                const target: NotificationTarget = { type: 'all_users' };
-
                 const oldAmount = oldConfig.busFee?.amount || 0;
                 const newAmount = config.busFee.amount;
 
                 const notificationContent = `The bus fee for the upcoming session has been revised from ₹${oldAmount.toLocaleString('en-IN')} to ₹${newAmount.toLocaleString('en-IN')}. ` +
                     `Please update your payment plans accordingly. For any queries, contact the administration office.`;
 
-                await notificationService.createNotification(
-                    { userId: uid, userName: adminName, userRole: 'admin' },
-                    target,
-                    notificationContent,
-                    '💰 Bus Fee Update - Important Notice',
-                    { type: 'announcement' }
-                );
+                await pgInsertNotification({
+                    title: '💰 Bus Fee Update - Important Notice',
+                    content: notificationContent,
+                    type: 'announcement',
+                    sender: {
+                        userId: uid,
+                        userName: adminName,
+                        userRole: 'admin'
+                    },
+                    target: {
+                        type: 'all_users',
+                    },
+                    recipientIds: [],
+                    readByUserIds: [],
+                });
             } catch (error) {
                 console.error('Failed to send notification:', error);
             }

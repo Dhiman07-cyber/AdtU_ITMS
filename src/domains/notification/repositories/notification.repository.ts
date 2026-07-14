@@ -1,16 +1,42 @@
 /**
  * D10 Notification Repository
  *
- * Persistence only — no business logic. Wraps the existing
- * NotificationService singleton which handles Firestore CRUD,
- * permission checks, recipient resolution, and visibility logic.
+ * Persistence + read-only queries for other domains' data.
  *
- * ponytail: src/lib/notifications/NotificationService.ts already implements
- * the complete notification lifecycle — wrapped by reference, not reimplemented.
- * FCM push notification dispatch (fcm-notification-service.ts) stays internal
- * as it is an implementation detail used by API routes, not a domain capability.
+ * NOTIFICATION WRITES: All notification CRUD goes through PG repository
+ * (notification.repository.pg.ts). Firestore is frozen for notifications.
+ *
+ * RECIPIENT RESOLUTION: Queries other domains' Firestore collections
+ * (users, students, drivers, admins) to resolve notification recipients.
+ * These are READ-ONLY queries on other domains' data — not notification writes.
+ * Will migrate to domain APIs when those domains move to PG.
+ *
+ * PERMISSION CHECKERS: Pure functions, no persistence.
+ *
+ * VISIBILITY: Pure function, no persistence.
  */
-import { notificationService } from '@/lib/notifications/NotificationService';
+import {
+  collection,
+  getDocs,
+  query,
+  where,
+} from 'firebase/firestore';
+import { db } from '@/lib/firebase';
+import { normalizeShift } from '@/lib/utils/shift-utils';
+import {
+  pgFindNotificationById,
+  pgInsertNotification,
+  pgUpdateNotification,
+  pgBulkDeleteNotifications,
+  pgDeleteNotificationsByUser,
+  pgFindNotificationsByUser,
+  pgFindExpiredNotifications,
+  pgDeleteNotification,
+} from './notification.repository.pg';
+import type {
+  NotificationRecord,
+  CreateNotificationInput,
+} from './notification.repository.pg';
 import type {
   UserRole,
   TargetType,
@@ -20,12 +46,47 @@ import type {
   VisibilityCheckResult,
 } from '@/lib/notifications/types';
 
+// ─── Permission Checkers (pure functions, no persistence) ────────────────────
+
 export function canUserSend(
   senderRole: UserRole,
   targetType: TargetType,
   targetRole?: UserRole,
 ): PermissionCheckResult {
-  return notificationService.canUserSend(senderRole, targetType, targetRole);
+  switch (senderRole) {
+    case 'admin':
+      return { allowed: true };
+
+    case 'moderator':
+      if (targetRole === 'admin' && targetType !== 'all_users') {
+        return {
+          allowed: false,
+          reason: 'Moderators cannot directly target admins (but admins will receive copy automatically)',
+        };
+      }
+      return { allowed: true };
+
+    case 'driver':
+      if (targetType === 'all_users' || (targetRole && targetRole !== 'student')) {
+        return {
+          allowed: false,
+          reason: 'Drivers can only send notifications to students',
+        };
+      }
+      return { allowed: true };
+
+    case 'student':
+      return {
+        allowed: false,
+        reason: 'Students cannot send notifications',
+      };
+
+    default:
+      return {
+        allowed: false,
+        reason: 'Invalid user role',
+      };
+  }
 }
 
 export function canUserEdit(
@@ -33,7 +94,21 @@ export function canUserEdit(
   userId: string,
   senderId: string,
 ): PermissionCheckResult {
-  return notificationService.canUserEdit(userRole, userId, senderId);
+  if (userId !== senderId) {
+    return {
+      allowed: false,
+      reason: 'You can only edit your own notifications',
+    };
+  }
+
+  if (userRole === 'driver' || userRole === 'student') {
+    return {
+      allowed: false,
+      reason: `${userRole}s cannot edit notifications`,
+    };
+  }
+
+  return { allowed: true };
 }
 
 export function canUserDeleteGlobally(
@@ -41,56 +116,267 @@ export function canUserDeleteGlobally(
   userId: string,
   senderId: string,
 ): PermissionCheckResult {
-  return notificationService.canUserDeleteGlobally(userRole, userId, senderId);
+  switch (userRole) {
+    case 'admin':
+      return { allowed: true };
+
+    case 'moderator':
+      if (userId !== senderId) {
+        return {
+          allowed: false,
+          reason: 'Moderators can only delete their own notifications globally',
+        };
+      }
+      return { allowed: true };
+
+    case 'driver':
+    case 'student':
+      return {
+        allowed: false,
+        reason: `${userRole}s cannot delete notifications globally`,
+      };
+
+    default:
+      return {
+        allowed: false,
+        reason: 'Invalid user role',
+      };
+  }
 }
 
+// ─── Recipient Resolution (reads other domains' Firestore collections) ───────
+
 export async function getAutoInjectedRecipients(senderRole: UserRole): Promise<string[]> {
-  return notificationService.getAutoInjectedRecipients(senderRole);
+  const injectedUserIds: string[] = [];
+
+  try {
+    switch (senderRole) {
+      case 'moderator': {
+        const adminsQuery = query(
+          collection(db, 'users'),
+          where('role', '==', 'admin')
+        );
+        const adminDocs = await getDocs(adminsQuery);
+        adminDocs.forEach(doc => injectedUserIds.push(doc.id));
+        break;
+      }
+
+      case 'driver': {
+        const staffQuery = query(
+          collection(db, 'users'),
+          where('role', 'in', ['admin', 'moderator'])
+        );
+        const staffDocs = await getDocs(staffQuery);
+        staffDocs.forEach(doc => injectedUserIds.push(doc.id));
+        break;
+      }
+    }
+  } catch (error) {
+    console.error('Error getting auto-injected recipients:', error);
+  }
+
+  return injectedUserIds;
 }
 
 export async function resolveTargetRecipients(target: NotificationTarget): Promise<string[]> {
-  return notificationService.resolveTargetRecipients(target);
+  const recipientIds: string[] = [];
+
+  try {
+    switch (target.type) {
+      case 'all_users': {
+        const allUsersQuery = query(collection(db, 'users'));
+        const allUsersDocs = await getDocs(allUsersQuery);
+        allUsersDocs.forEach(doc => recipientIds.push(doc.id));
+        break;
+      }
+
+      case 'all_role': {
+        if (target.roleFilter) {
+          const roleQuery = query(
+            collection(db, 'users'),
+            where('role', '==', target.roleFilter)
+          );
+          const roleDocs = await getDocs(roleQuery);
+          roleDocs.forEach(doc => recipientIds.push(doc.id));
+        }
+        break;
+      }
+
+      case 'shift_based': {
+        if (target.shift) {
+          const normalizedShift = normalizeShift(target.shift);
+          const shiftQuery = normalizedShift === 'Both'
+            ? query(collection(db, 'students'))
+            : query(collection(db, 'students'), where('shift', '==', normalizedShift));
+          const shiftDocs = await getDocs(shiftQuery);
+          shiftDocs.forEach(doc => recipientIds.push(doc.id));
+        }
+        break;
+      }
+
+      case 'bus_based': {
+        if (target.busIds && target.busIds.length > 0) {
+          const busQuery = query(
+            collection(db, 'students'),
+            where('busId', 'in', target.busIds)
+          );
+          const busDocs = await getDocs(busQuery);
+          busDocs.forEach(doc => recipientIds.push(doc.id));
+        }
+        break;
+      }
+
+      case 'route_based': {
+        if (target.routeIds && target.routeIds.length > 0) {
+          const routeQuery = query(
+            collection(db, 'students'),
+            where('routeId', 'in', target.routeIds)
+          );
+          const routeDocs = await getDocs(routeQuery);
+          routeDocs.forEach(doc => recipientIds.push(doc.id));
+        }
+        break;
+      }
+
+      case 'specific_users': {
+        if (target.specificUserIds) {
+          recipientIds.push(...target.specificUserIds);
+        }
+        break;
+      }
+    }
+  } catch (error) {
+    console.error('Error resolving target recipients:', error);
+  }
+
+  return recipientIds;
 }
 
-export async function createNotification(
-  sender: NotificationSender,
-  target: NotificationTarget,
-  content: string,
-  title: string,
-  metadata?: any,
-): Promise<string> {
-  return notificationService.createNotification(sender, target, content, title, metadata);
+// ─── Notification CRUD (delegates to PG repository) ─────────────────────────
+
+export async function findById(id: string): Promise<NotificationRecord | null> {
+  return pgFindNotificationById(id);
 }
 
-export async function editNotification(
-  userId: string,
-  userRole: UserRole,
-  notificationId: string,
-  updates: { title?: string; content: string; metadata?: any },
-): Promise<void> {
-  return notificationService.editNotification(userId, userRole, notificationId, updates);
+export async function findByUser(uid: string, limit?: number): Promise<NotificationRecord[]> {
+  return pgFindNotificationsByUser(uid, limit);
 }
 
-export async function deleteNotificationGlobally(
-  userId: string,
-  userRole: UserRole,
-  notificationId: string,
-): Promise<void> {
-  return notificationService.deleteNotificationGlobally(userId, userRole, notificationId);
+export async function findExpired(): Promise<NotificationRecord[]> {
+  return pgFindExpiredNotifications();
 }
 
-export async function markAsRead(userId: string, notificationId: string): Promise<void> {
-  return notificationService.markAsRead(userId, notificationId);
+export async function insert(input: CreateNotificationInput): Promise<string> {
+  return pgInsertNotification(input);
 }
+
+export async function update(id: string, input: Record<string, any>): Promise<void> {
+  return pgUpdateNotification(id, input);
+}
+
+export async function remove(id: string): Promise<void> {
+  return pgDeleteNotification(id);
+}
+
+export async function bulkDelete(ids: string[]): Promise<number> {
+  return pgBulkDeleteNotifications(ids);
+}
+
+export async function deleteByUser(userId: string): Promise<number> {
+  return pgDeleteNotificationsByUser(userId);
+}
+
+// ─── Visibility Check (pure function, no persistence) ───────────────────────
 
 export function isNotificationVisibleToUser(
   notification: any,
   userId: string,
   userRole: UserRole,
-  userRouteId?: string | null,
+  userRouteId: string | null = null,
 ): VisibilityCheckResult {
-  return notificationService.isNotificationVisibleToUser(notification, userId, userRole, userRouteId);
+  if (notification.isDeletedGlobally) {
+    return { visible: false, reason: 'Notification was deleted' };
+  }
+
+  if (notification.expiryAt) {
+    let expiryMillis = 0;
+    if (typeof notification.expiryAt?.toMillis === 'function') {
+      expiryMillis = notification.expiryAt.toMillis();
+    } else if (typeof notification.expiryAt === 'number') {
+      expiryMillis = notification.expiryAt;
+    } else if (typeof notification.expiryAt === 'string') {
+      expiryMillis = new Date(notification.expiryAt).getTime();
+    } else if (notification.expiryAt instanceof Date) {
+      expiryMillis = notification.expiryAt.getTime();
+    }
+    if (expiryMillis > 0 && expiryMillis <= Date.now()) {
+      return { visible: false, reason: 'Notification has expired' };
+    }
+  }
+
+  if (userRole === 'admin' || userRole === 'moderator') {
+    return { visible: true };
+  }
+
+  const isSender = notification.sender?.userId === userId;
+  const isRenewalRequest = notification.title?.includes('New Renewal Request') ||
+    notification.title?.includes('Renewal Request');
+
+  if (isSender) {
+    if (notification.sender?.userRole === 'student' && isRenewalRequest) {
+      return { visible: false, reason: 'Student should not see their own renewal request' };
+    }
+    return { visible: true };
+  }
+
+  const isDirectRecipient = notification.recipientIds?.includes(userId);
+  const isAutoInjected = notification.autoInjectedRecipientIds?.includes(userId);
+
+  if (isDirectRecipient || isAutoInjected) {
+    return { visible: true };
+  }
+
+  const target = notification.target;
+
+  if (!target || typeof target !== 'object' || !target.type) {
+    if (isDirectRecipient || isAutoInjected) {
+      return { visible: true };
+    }
+    return { visible: false, reason: 'Invalid notification target' };
+  }
+
+  switch (target.type) {
+    case 'all_users':
+      return { visible: true };
+
+    case 'all_role':
+      if (target.roleFilter === (userRole as UserRole)) {
+        return { visible: true };
+      }
+      break;
+
+    case 'route_based':
+      if (userRole === 'student' && userRouteId && target.routeIds?.includes(userRouteId)) {
+        return { visible: true };
+      }
+      break;
+
+    case 'specific_users':
+      if (target.specificUserIds?.includes(userId)) {
+        return { visible: true };
+      }
+      break;
+  }
+
+  return { visible: false, reason: 'User is not a recipient of this notification' };
 }
+
+// ─── Re-exports ─────────────────────────────────────────────────────────────
+
+export type {
+  NotificationRecord,
+  CreateNotificationInput,
+};
 
 export type {
   UserRole,

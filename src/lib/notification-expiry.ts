@@ -4,7 +4,7 @@
  */
 
 import { cleanupExpired } from '@/domains/payment/repositories/processed-payments.repository';
-import { adminDb } from './firebase-admin';
+import { pgFindExpiredNotifications, pgBulkDeleteNotifications } from '@/domains/notification/repositories/notification.repository.pg';
 
 export function calculateNotificationExpiry(startDate: Date, daysToLive: number = 0): string {
   const expiresAt = new Date(startDate);
@@ -57,7 +57,6 @@ export async function deleteExpiredNotifications(): Promise<{
   };
 
   try {
-    const nowMs = Date.now();
     console.log(`🧹 Starting Robust Cleanup at ${new Date().toISOString()}`);
 
     // 1. Clean up expired processed payments
@@ -72,81 +71,23 @@ export async function deleteExpiredNotifications(): Promise<{
       result.errors.push(`Processed payments cleanup exception: ${payErr.message}`);
     }
 
-    // Paginate through notifications instead of loading all into memory.
-    // Firestore limits `in` queries to 30 items, so we batch deletes
-    // and use cursor-based pagination for reads.
-    const PAGE_SIZE = 500;
-    let lastDoc: any = null;
-    let hasMore = true;
+    // 2. Delete expired notifications via PG
+    try {
+      const expired = await pgFindExpiredNotifications();
+      result.debug.scanned = expired.length;
 
-    while (hasMore) {
-      let query = adminDb.collection('notifications')
-        .orderBy('__name__')
-        .limit(PAGE_SIZE);
-
-      if (lastDoc) {
-        query = query.startAfter(lastDoc);
+      if (expired.length > 0) {
+        const ids = expired.map(n => n.id);
+        await pgBulkDeleteNotifications(ids);
+        result.deletedNotifications = ids.length;
       }
 
-      const snapshot = await query.get();
-      result.debug.scanned += snapshot.size;
-
-      if (snapshot.empty || snapshot.size < PAGE_SIZE) {
-        hasMore = false;
-      }
-
-      if (snapshot.docs.length > 0) {
-        lastDoc = snapshot.docs[snapshot.docs.length - 1];
-      }
-
-      // Identify expired docs in this page
-      const idsToDelete: string[] = [];
-
-      for (const doc of snapshot.docs) {
-        const data = doc.data();
-        let expiryMillis = 0;
-
-        if (data.expiryAt) {
-          if (typeof data.expiryAt.toMillis === 'function') {
-            expiryMillis = data.expiryAt.toMillis();
-          } else if (typeof data.expiryAt === 'number') {
-            expiryMillis = data.expiryAt;
-          } else if (typeof data.expiryAt === 'string') {
-            expiryMillis = new Date(data.expiryAt).getTime();
-          } else if (data.expiryAt instanceof Date) {
-            expiryMillis = data.expiryAt.getTime();
-          }
-        } else if (data.expiresAt) {
-          expiryMillis = new Date(data.expiresAt).getTime();
-        }
-
-        if (expiryMillis > 0 && expiryMillis <= nowMs) {
-          idsToDelete.push(doc.id);
-        }
-      }
-
-      if (idsToDelete.length > 0) {
-        console.log(`   Found ${idsToDelete.length} expired notifications in this page.`);
-
-        // Batch delete in chunks of 400
-        const chunkSize = 400;
-        for (let i = 0; i < idsToDelete.length; i += chunkSize) {
-          const batch = adminDb.batch();
-          const chunk = idsToDelete.slice(i, i + chunkSize);
-
-          chunk.forEach(id => {
-            const ref = adminDb.collection('notifications').doc(id);
-            batch.delete(ref);
-          });
-
-          await batch.commit();
-        }
-
-        result.deletedNotifications += idsToDelete.length;
-      }
+      console.log(`   Scanned ${result.debug.scanned} expired notifications. Deleted ${result.deletedNotifications}.`);
+    } catch (notifErr: any) {
+      console.error('❌ Exception in deleteExpiredNotifications:', notifErr);
+      result.errors.push(`Notification cleanup exception: ${notifErr.message}`);
     }
 
-    console.log(`   Scanned ${result.debug.scanned} total notifications. Deleted ${result.deletedNotifications}.`);
     return result;
   } catch (error: any) {
     console.error('❌ Fatal error in notification expiry cleanup:', error);

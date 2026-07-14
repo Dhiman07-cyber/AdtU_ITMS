@@ -4,7 +4,7 @@
  */
 
 import { adminDb } from './firebase-admin';
-import { FieldValue } from 'firebase-admin/firestore';
+import { pgInsertNotification } from '@/domains/notification/repositories/notification.repository.pg';
 import { calculateCapacityDelta, getShiftDeltas, getShiftLoad, normalizeShift, areShiftsCompatible } from '@/lib/utils/shift-utils';
 
 export interface BusCapacity {
@@ -349,42 +349,32 @@ export async function sendBusFullAlert(busId: string, busNumber: string, routeId
     const routeNum = routeId.replace(/[^0-9]/g, '');
     const formattedRoute = `Route-${routeNum || routeId}`;
 
-    // Send notification to all admins and moderators (chunk batches to avoid >500 limit)
-    for (let i = 0; i < recipientUIDs.length; i += 490) {
-      const chunk = recipientUIDs.slice(i, i + 490);
-      const batch = adminDb.batch();
-      chunk.forEach((userId) => {
-        const notifRef = adminDb.collection('notifications').doc();
-        batch.set(notifRef, {
-          title: 'Bus Capacity Full',
-          content: `${formattedBus} on ${formattedRoute} has reached full capacity. Consider increasing capacity or adding another bus.`,
-          type: 'info',
-          sender: {
-            userId: 'system',
-            userName: 'System',
-            userRole: 'admin'
-          },
-          target: {
-            type: 'specific_users',
-            specificUserIds: [userId]
-          },
-          recipientIds: [userId],
-          autoInjectedRecipientIds: [],
-          readByUserIds: [],
-          isEdited: false,
-          isDeletedGlobally: false,
-          hiddenForUserIds: [],
-          createdAt: FieldValue.serverTimestamp(),
-          expiresAt: expiryDate.toISOString(),
-          metadata: {
-            busId,
-            routeId,
-            action: '/admin/buses',
-            priority: 'high'
-          }
-        });
+    // Send notification to all admins and moderators
+    for (const userId of recipientUIDs) {
+      await pgInsertNotification({
+        title: 'Bus Capacity Full',
+        content: `${formattedBus} on ${formattedRoute} has reached full capacity. Consider increasing capacity or adding another bus.`,
+        type: 'info',
+        sender: {
+          userId: 'system',
+          userName: 'System',
+          userRole: 'admin'
+        },
+        target: {
+          type: 'specific_users',
+          specificUserIds: [userId]
+        },
+        recipientIds: [userId],
+        autoInjectedRecipientIds: [],
+        readByUserIds: [],
+        expiresAt: expiryDate.toISOString(),
+        metadata: {
+          busId,
+          routeId,
+          action: '/admin/buses',
+          priority: 'high'
+        }
       });
-      await batch.commit();
     }
 
     console.log(`📢 Bus full alert sent to ${recipientUIDs.length} user(s) (admins & moderators) for bus ${busId}`);
@@ -414,42 +404,32 @@ async function sendHighDemandAlert(routeId: string, stopId: string): Promise<voi
     expiryDate.setDate(expiryDate.getDate() + 1);
     expiryDate.setHours(23, 59, 59, 999);
 
-    // Send to all admins and moderators (chunk batches to avoid >500 limit)
-    for (let i = 0; i < allStaffUIDs.length; i += 490) {
-      const chunk = allStaffUIDs.slice(i, i + 490);
-      const batch = adminDb.batch();
-      chunk.forEach((staffId) => {
-        const notifRef = adminDb.collection('notifications').doc();
-        batch.set(notifRef, {
-          title: 'High Demand Alert',
-          content: `All buses serving ${stopId} (${routeId}) are at full capacity. Students are unable to register. Action required: Increase capacity or add buses to this route.`,
-          type: 'emergency',
-          sender: {
-            userId: 'system',
-            userName: 'System',
-            userRole: 'admin'
-          },
-          target: {
-            type: 'specific_users',
-            specificUserIds: [staffId]
-          },
-          recipientIds: [staffId],
-          autoInjectedRecipientIds: [],
-          readByUserIds: [],
-          isEdited: false,
-          isDeletedGlobally: false,
-          hiddenForUserIds: [],
-          createdAt: FieldValue.serverTimestamp(),
-          expiresAt: expiryDate.toISOString(),
-          metadata: {
-            routeId,
-            stopId,
-            action: '/admin/buses',
-            priority: 'critical'
-          }
-        });
+    // Send to all admins and moderators
+    for (const staffId of allStaffUIDs) {
+      await pgInsertNotification({
+        title: 'High Demand Alert',
+        content: `All buses serving ${stopId} (${routeId}) are at full capacity. Students are unable to register. Action required: Increase capacity or add buses to this route.`,
+        type: 'emergency',
+        sender: {
+          userId: 'system',
+          userName: 'System',
+          userRole: 'admin'
+        },
+        target: {
+          type: 'specific_users',
+          specificUserIds: [staffId]
+        },
+        recipientIds: [staffId],
+        autoInjectedRecipientIds: [],
+        readByUserIds: [],
+        expiresAt: expiryDate.toISOString(),
+        metadata: {
+          routeId,
+          stopId,
+          action: '/admin/buses',
+          priority: 'critical'
+        }
       });
-      await batch.commit();
     }
 
     console.log(`📢 High-demand alert sent to ${allStaffUIDs.length} staff member(s)`);

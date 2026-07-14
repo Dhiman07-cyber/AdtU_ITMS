@@ -3,7 +3,7 @@
  * 
  * Pre-filled draft templates for different notification types.
  * These are editable in the UI before sending.
- * Drafts are NOT persisted to Firestore - only final sent notifications are.
+ * Drafts are NOT persisted - only final sent notifications are saved.
  */
 
 export type NotificationType = 'notice' | 'pickup' | 'dropoff' | 'trip' | 'announcement';

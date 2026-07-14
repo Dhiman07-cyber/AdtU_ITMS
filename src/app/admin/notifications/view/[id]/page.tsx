@@ -6,8 +6,6 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import Link from "next/link";
-import { doc, getDoc } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
 import { useToast } from "@/contexts/toast-context";
 import { Badge } from "@/components/ui/badge";
 import { format } from "date-fns";
@@ -25,10 +23,10 @@ export default function ViewNotificationPage({ params }: { params: Promise<{ id:
   useEffect(() => {
     const fetchNotification = async () => {
       try {
-        const docRef = doc(db, 'notifications', id);
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) {
-          setNotification({ id: docSnap.id, ...docSnap.data() });
+        const res = await fetch(`/api/notifications/${id}`, { credentials: 'include' });
+        if (res.ok) {
+          const data = await res.json();
+          setNotification(data);
         } else {
           addToast('Notification not found', 'error');
         }

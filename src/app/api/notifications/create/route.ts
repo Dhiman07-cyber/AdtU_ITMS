@@ -23,7 +23,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withSecurity } from '@/lib/security/api-security';
 import { adminDb, adminMessaging } from '@/lib/firebase-admin';
-import { FieldValue, Timestamp } from 'firebase-admin/firestore';
+import { pgInsertNotification } from '@/domains/notification/repositories/notification.repository.pg';
 import { UserRole, TargetType, NotificationType } from '@/lib/notifications/types';
 import { safeErrorMessage } from '@/lib/security/safe-error';
 import { NotificationCreateSchema } from '@/lib/security/validation-schemas';
@@ -399,37 +399,39 @@ export const POST = withSecurity(
         userRole: senderRole,
       };
 
-      const notificationData: Record<string, any> = {
+      const notificationData = {
         title: title.trim(),
         content: content.trim(),
         type: type as NotificationType,
-        sender,
-        target,
+        sender: sender as any,
+        target: target as any,
         recipientIds: allRecipientIds,
         readByUserIds: [auth.uid],
         hiddenForUserIds: [],
-        isEdited: false,
-        isDeletedGlobally: false,
-        createdAt: FieldValue.serverTimestamp(),
+        expiresAt: (expiryAt && typeof expiryAt === 'number')
+          ? new Date(expiryAt).toISOString()
+          : undefined,
+        metadata: {
+          ...(((target as Record<string, any>).roleFilter) && { roleFilter: (target as Record<string, any>).roleFilter }),
+          ...(((target as Record<string, any>).shift) && { shift: (target as Record<string, any>).shift }),
+          ...(((target as Record<string, any>).busIds) && { busIds: (target as Record<string, any>).busIds }),
+          ...(((target as Record<string, any>).routeIds) && { routeIds: (target as Record<string, any>).routeIds }),
+        } as Record<string, any> | undefined,
       };
 
-      if (expiryAt && typeof expiryAt === 'number') {
-        notificationData.expiryAt = Timestamp.fromMillis(expiryAt);
-      }
-
-      const docRef = await adminDb.collection('notifications').add(notificationData);
+      const createdId = await pgInsertNotification(notificationData);
 
       // 11. Send FCM push notifications (non-blocking)
       const fcmResult = await sendFCMNotifications(
         allRecipientIds,
         title.trim(),
         content.trim(),
-        docRef.id
+        createdId
       );
 
       return NextResponse.json({
         success: true,
-        notificationId: docRef.id,
+        notificationId: createdId,
         recipientCount: filteredDirectRecipientIds.length,
         autoInjectedCount: filteredAutoInjectedIds.length,
         fcm: fcmResult,

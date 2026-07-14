@@ -96,10 +96,6 @@ export default function ModeratorApplicationsPage() {
       fetchRenewalRequests();
     }
   }, [currentUser]);
-  const { data: notifications, loading: notificationsLoading, refresh: refreshNotifications } = usePaginatedCollection('notifications', {
-    pageSize: 50, orderByField: 'createdAt', orderDirection: 'desc',
-    autoRefresh: false,
-  });
   const { data: routes, loading: routesLoading, refresh: refreshRoutes } = usePaginatedCollection('routes', {
     pageSize: 50, orderByField: 'routeName', orderDirection: 'asc',
     autoRefresh: false,
@@ -908,7 +904,7 @@ export default function ModeratorApplicationsPage() {
         </div>
       )}
 
-      {loading || loadingRenewals || notificationsLoading || routesLoading || busesLoading ? (
+      {loading || loadingRenewals || routesLoading || busesLoading ? (
         <div className="flex-1 min-h-[calc(100dvh-120px)] flex justify-center items-center">
           <PremiumPageLoader message="Fetching data..." />
         </div>

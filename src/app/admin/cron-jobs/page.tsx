@@ -45,7 +45,7 @@ const CRON_JOBS = [
         method: 'GET',
         schedule: 'Daily at 00:00 UTC',
         category: 'Maintenance',
-        description: 'Deletes expired notifications and their read receipts from Firestore. Notifications with a cleanup period (1-7 days) are automatically removed after their expiry date.',
+        description: 'Deletes expired notifications from PostgreSQL. Notifications with a cleanup period (1-7 days) are automatically removed after their expiry date.',
         details: [
             'Queries notifications where expiresAt < current midnight',
             'Deletes notification documents and associated read receipts',

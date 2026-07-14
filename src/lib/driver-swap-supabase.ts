@@ -8,8 +8,8 @@
 import { RealtimeChannel } from '@supabase/supabase-js';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import { calculateNotificationExpiry } from './notification-expiry';
-// D10: adminDb retained temporarily for notifications (no Supabase notifications table yet)
-import { db as adminDb, FieldValue } from './firebase-admin';
+import { db as adminDb } from './firebase-admin';
+import { pgInsertNotification } from '@/domains/notification/repositories/notification.repository.pg';
 
 // Default notification TTL: 1 day (24 hours)
 const NOTIFICATION_TTL_DAYS = 1;
@@ -1122,19 +1122,15 @@ export class DriverSwapSupabaseService {
             const now = new Date();
             const expiresAt = calculateNotificationExpiry(now, NOTIFICATION_TTL_DAYS);
 
-            await adminDb.collection('notifications').add({
+            await pgInsertNotification({
                 title: '🔄 New Driver Swap Request',
                 content: `${fromDriverName} has requested you to take over Bus ${busNumber}. Please visit the Swap Requests page to accept or reject this request.`,
                 sender: { userId: 'system', userName: 'System', userRole: 'admin' },
                 target: { type: 'specific_users', specificUserIds: [toDriverUID] },
                 recipientIds: [toDriverUID],
                 autoInjectedRecipientIds: [],
-                createdAt: FieldValue.serverTimestamp(),
-                expiresAt,
-                isEdited: false,
-                isDeletedGlobally: false,
-                hiddenForUserIds: [],
                 readByUserIds: [],
+                expiresAt,
                 metadata: {
                     requestId,
                     type: 'swap_request',
@@ -1154,19 +1150,15 @@ export class DriverSwapSupabaseService {
             const now = new Date();
             const expiresAt = calculateNotificationExpiry(now, NOTIFICATION_TTL_DAYS);
 
-            await adminDb.collection('notifications').add({
+            await pgInsertNotification({
                 title: '✅ Swap Request Accepted!',
                 content: `${request.candidate_name} has accepted your swap request for Bus ${request.bus_number || request.bus_id}. The swap will be active during the scheduled period.`,
                 sender: { userId: 'system', userName: 'System', userRole: 'admin' },
                 target: { type: 'specific_users', specificUserIds: [request.requester_driver_uid] },
                 recipientIds: [request.requester_driver_uid],
                 autoInjectedRecipientIds: [],
-                createdAt: FieldValue.serverTimestamp(),
-                expiresAt,
-                isEdited: false,
-                isDeletedGlobally: false,
-                hiddenForUserIds: [],
                 readByUserIds: [],
+                expiresAt,
                 metadata: {
                     requestId: request.id,
                     type: 'swap_accepted',
@@ -1185,19 +1177,15 @@ export class DriverSwapSupabaseService {
             const now = new Date();
             const expiresAt = calculateNotificationExpiry(now, NOTIFICATION_TTL_DAYS);
 
-            await adminDb.collection('notifications').add({
+            await pgInsertNotification({
                 title: '❌ Swap Request Declined',
                 content: `${request.candidate_name} was unable to accept your swap request for Bus ${request.bus_number || request.bus_id}. You may try requesting another driver.`,
                 sender: { userId: 'system', userName: 'System', userRole: 'admin' },
                 target: { type: 'specific_users', specificUserIds: [request.requester_driver_uid] },
                 recipientIds: [request.requester_driver_uid],
                 autoInjectedRecipientIds: [],
-                createdAt: FieldValue.serverTimestamp(),
-                expiresAt,
-                isEdited: false,
-                isDeletedGlobally: false,
-                hiddenForUserIds: [],
                 readByUserIds: [],
+                expiresAt,
                 metadata: {
                     requestId: request.id,
                     type: 'swap_rejected',

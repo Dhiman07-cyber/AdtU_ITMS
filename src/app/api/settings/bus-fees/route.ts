@@ -1,11 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { adminAuth, adminDb } from '@/lib/firebase-admin';
+import { pgInsertNotification } from '@/domains/notification/repositories/notification.repository.pg';
 import { getSystemConfig, updateSystemConfig } from '@/lib/system-config-service';
 import { DEFAULT_BUS_FEE } from '@/config/runtime';
-// NotificationService import might need adjustment if not handling notifications in this route anymore, 
-// but seemingly it sends notifications.
-import { NotificationService } from '@/lib/notifications/NotificationService';
-import { NotificationTarget } from '@/lib/notifications/types';
 
 // GET: Retrieve bus fees from system config (Firestore)
 export async function GET(req: NextRequest) {
@@ -85,36 +82,27 @@ export async function POST(req: NextRequest) {
     const adminDoc = await adminDb.collection('admins').doc(uid).get();
     const adminData = adminDoc.exists ? adminDoc.data() : {};
     const adminName = adminData?.name || adminData?.fullName || 'Admin';
-    const adminEmployeeId = adminData?.employeeId || undefined;
 
     let notificationSent = false;
     try {
-      // Assuming NotificationService is compatible with this environment
-      // We need to instantiate it or use static methods if defined
-      // The original code used `new NotificationService()`.
-      // Ensure NotificationService is robust.
-      const notificationService = new NotificationService(); // Verify if this constructor requires args? Standard service pattern usually doesn't.
-
-      const target: NotificationTarget = { type: 'all_users' };
-
       const notificationContent = `The bus fee for the upcoming session has been revised from ₹${oldAmount.toLocaleString('en-IN')} to ₹${amount.toLocaleString('en-IN')}. ` +
         `Please update your payment plans accordingly. For any queries, contact the administration office.`;
 
-      const sender = {
-        userId: uid,
-        userName: adminName,
-        userRole: 'admin' as const,
-        ...(adminEmployeeId && { employeeId: adminEmployeeId })
-      };
-
-      // Note: createNotification might need 'await'
-      await notificationService.createNotification(
-        sender,
-        target,
-        notificationContent,
-        '💰 Bus Fee Update - Important Notice',
-        { type: 'announcement' }
-      );
+      await pgInsertNotification({
+        title: '💰 Bus Fee Update - Important Notice',
+        content: notificationContent,
+        type: 'announcement',
+        sender: {
+          userId: uid,
+          userName: adminName,
+          userRole: 'admin'
+        },
+        target: {
+          type: 'all_users',
+        },
+        recipientIds: [],
+        readByUserIds: [],
+      });
       notificationSent = true;
       console.log('✅ Notification sent to all users');
     } catch (notificationError: any) {

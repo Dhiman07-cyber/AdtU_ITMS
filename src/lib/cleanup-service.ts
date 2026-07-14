@@ -1,4 +1,5 @@
 import { db as adminDb, FieldValue } from './firebase-admin';
+import { pgInsertNotification } from '@/domains/notification/repositories/notification.repository.pg';
 
 /**
  * Event-Driven Cleanup Service
@@ -252,7 +253,7 @@ export class CleanupService {
         expiryDate.setDate(expiryDate.getDate() + 1);
         expiryDate.setHours(23, 59, 59, 999);
 
-        await adminDb.collection('notifications').add({
+        await pgInsertNotification({
           title: `Driver Change Complete — ${busNumber}`,
           content: `${driverName} is back as your regular driver for Bus ${busNumber}.`,
           type: 'info',
@@ -268,10 +269,6 @@ export class CleanupService {
           recipientIds: studentUIDs,
           autoInjectedRecipientIds: [],
           readByUserIds: [],
-          isEdited: false,
-          isDeletedGlobally: false,
-          hiddenForUserIds: [],
-          createdAt: FieldValue.serverTimestamp(),
           expiresAt: expiryDate.toISOString()
         });
       }
@@ -292,7 +289,7 @@ export class CleanupService {
         mgmtExpiryDate.setDate(mgmtExpiryDate.getDate() + 1);
         mgmtExpiryDate.setHours(23, 59, 59, 999);
 
-        await adminDb.collection('notifications').add({
+        await pgInsertNotification({
           title: 'Driver Swap Auto-Completed',
           content: `Bus ${busNumber} swap period ended. ${driverName} resumed duties.`,
           type: 'info',
@@ -308,10 +305,6 @@ export class CleanupService {
           recipientIds: managementUIDs,
           autoInjectedRecipientIds: [],
           readByUserIds: [],
-          isEdited: false,
-          isDeletedGlobally: false,
-          hiddenForUserIds: [],
-          createdAt: FieldValue.serverTimestamp(),
           expiresAt: mgmtExpiryDate.toISOString()
         });
       }
