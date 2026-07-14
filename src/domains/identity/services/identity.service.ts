@@ -15,11 +15,16 @@ import {
   findUserById as repoFindUserById,
   findUserByEmail as repoFindUserByEmail,
   findUsersByRole as repoFindUsersByRole,
+  findAllUsers as repoFindAllUsers,
   insertUser as repoInsertUser,
   updateUser as repoUpdateUser,
   removeUser as repoRemoveUser,
   findStudentById as repoFindStudentById,
   findStudentsByStatus as repoFindStudentsByStatus,
+  findStudentsByShift as repoFindStudentsByShift,
+  findStudentsByBusIds as repoFindStudentsByBusIds,
+  findStudentsByRouteIds as repoFindStudentsByRouteIds,
+  findAllStudents as repoFindAllStudents,
   insertStudent as repoInsertStudent,
   updateStudent as repoUpdateStudent,
   removeStudent as repoRemoveStudent,
@@ -62,6 +67,10 @@ export async function getUsersByRole(role: UserRole): Promise<User[]> {
   return repoFindUsersByRole(role);
 }
 
+export async function getAllUsers(): Promise<User[]> {
+  return repoFindAllUsers();
+}
+
 export async function createUser(user: Record<string, any>): Promise<void> {
   return repoInsertUser(user as User);
 }
@@ -82,6 +91,22 @@ export async function getStudentById(uid: string): Promise<Record<string, any> |
 
 export async function getStudentsByStatus(status: string): Promise<Record<string, any>[]> {
   return repoFindStudentsByStatus(status);
+}
+
+export async function getStudentsByShift(shift: string): Promise<Record<string, any>[]> {
+  return repoFindStudentsByShift(shift);
+}
+
+export async function getStudentsByBusIds(busIds: string[]): Promise<Record<string, any>[]> {
+  return repoFindStudentsByBusIds(busIds);
+}
+
+export async function getStudentsByRouteIds(routeIds: string[]): Promise<Record<string, any>[]> {
+  return repoFindStudentsByRouteIds(routeIds);
+}
+
+export async function getAllStudents(): Promise<Record<string, any>[]> {
+  return repoFindAllStudents();
 }
 
 export async function createStudent(student: Record<string, any>): Promise<void> {

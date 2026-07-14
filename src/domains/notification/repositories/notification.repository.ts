@@ -6,22 +6,22 @@
  * NOTIFICATION WRITES: All notification CRUD goes through PG repository
  * (notification.repository.pg.ts). Firestore is frozen for notifications.
  *
- * RECIPIENT RESOLUTION: Queries other domains' Firestore collections
- * (users, students, drivers, admins) to resolve notification recipients.
- * These are READ-ONLY queries on other domains' data — not notification writes.
- * Will migrate to domain APIs when those domains move to PG.
+ * RECIPIENT RESOLUTION: Routes through Identity domain service API
+ * (getUsersByRole, getAllUsers, getStudentsByShift, etc.) which read
+ * from PostgreSQL. No direct Firestore access.
  *
  * PERMISSION CHECKERS: Pure functions, no persistence.
  *
  * VISIBILITY: Pure function, no persistence.
  */
 import {
-  collection,
-  getDocs,
-  query,
-  where,
-} from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+  getUsersByRole,
+  getAllUsers,
+  getStudentsByShift,
+  getStudentsByBusIds,
+  getStudentsByRouteIds,
+  getAllStudents,
+} from '@/domains/identity';
 import { normalizeShift } from '@/lib/utils/shift-utils';
 import {
   pgFindNotificationById,
@@ -152,22 +152,16 @@ export async function getAutoInjectedRecipients(senderRole: UserRole): Promise<s
   try {
     switch (senderRole) {
       case 'moderator': {
-        const adminsQuery = query(
-          collection(db, 'users'),
-          where('role', '==', 'admin')
-        );
-        const adminDocs = await getDocs(adminsQuery);
-        adminDocs.forEach(doc => injectedUserIds.push(doc.id));
+        const admins = await getUsersByRole('admin');
+        admins.forEach(user => injectedUserIds.push(user.uid));
         break;
       }
 
       case 'driver': {
-        const staffQuery = query(
-          collection(db, 'users'),
-          where('role', 'in', ['admin', 'moderator'])
-        );
-        const staffDocs = await getDocs(staffQuery);
-        staffDocs.forEach(doc => injectedUserIds.push(doc.id));
+        const admins = await getUsersByRole('admin');
+        const moderators = await getUsersByRole('moderator');
+        admins.forEach(user => injectedUserIds.push(user.uid));
+        moderators.forEach(user => injectedUserIds.push(user.uid));
         break;
       }
     }
@@ -184,20 +178,15 @@ export async function resolveTargetRecipients(target: NotificationTarget): Promi
   try {
     switch (target.type) {
       case 'all_users': {
-        const allUsersQuery = query(collection(db, 'users'));
-        const allUsersDocs = await getDocs(allUsersQuery);
-        allUsersDocs.forEach(doc => recipientIds.push(doc.id));
+        const allUsers = await getAllUsers();
+        allUsers.forEach(user => recipientIds.push(user.uid));
         break;
       }
 
       case 'all_role': {
         if (target.roleFilter) {
-          const roleQuery = query(
-            collection(db, 'users'),
-            where('role', '==', target.roleFilter)
-          );
-          const roleDocs = await getDocs(roleQuery);
-          roleDocs.forEach(doc => recipientIds.push(doc.id));
+          const roleUsers = await getUsersByRole(target.roleFilter as UserRole);
+          roleUsers.forEach(user => recipientIds.push(user.uid));
         }
         break;
       }
@@ -205,35 +194,29 @@ export async function resolveTargetRecipients(target: NotificationTarget): Promi
       case 'shift_based': {
         if (target.shift) {
           const normalizedShift = normalizeShift(target.shift);
-          const shiftQuery = normalizedShift === 'Both'
-            ? query(collection(db, 'students'))
-            : query(collection(db, 'students'), where('shift', '==', normalizedShift));
-          const shiftDocs = await getDocs(shiftQuery);
-          shiftDocs.forEach(doc => recipientIds.push(doc.id));
+          if (normalizedShift === 'Both') {
+            const allStudents = await getAllStudents();
+            allStudents.forEach(doc => recipientIds.push(doc.id));
+          } else {
+            const students = await getStudentsByShift(normalizedShift);
+            students.forEach(doc => recipientIds.push(doc.id));
+          }
         }
         break;
       }
 
       case 'bus_based': {
         if (target.busIds && target.busIds.length > 0) {
-          const busQuery = query(
-            collection(db, 'students'),
-            where('busId', 'in', target.busIds)
-          );
-          const busDocs = await getDocs(busQuery);
-          busDocs.forEach(doc => recipientIds.push(doc.id));
+          const students = await getStudentsByBusIds(target.busIds);
+          students.forEach(doc => recipientIds.push(doc.id));
         }
         break;
       }
 
       case 'route_based': {
         if (target.routeIds && target.routeIds.length > 0) {
-          const routeQuery = query(
-            collection(db, 'students'),
-            where('routeId', 'in', target.routeIds)
-          );
-          const routeDocs = await getDocs(routeQuery);
-          routeDocs.forEach(doc => recipientIds.push(doc.id));
+          const students = await getStudentsByRouteIds(target.routeIds);
+          students.forEach(doc => recipientIds.push(doc.id));
         }
         break;
       }

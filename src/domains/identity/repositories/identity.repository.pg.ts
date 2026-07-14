@@ -112,6 +112,23 @@ export async function pgFindUsersByRole(role: UserRole): Promise<IdentityUser[]>
 }
 
 /**
+ * Find all users (no filter).
+ */
+export async function pgFindAllUsers(): Promise<IdentityUser[]> {
+  const db = getSupabaseServer();
+
+  const { data, error } = await db
+    .from('users')
+    .select('*');
+
+  if (error) {
+    throw new Error(`IdentityRepository (PG) all users query failed: ${error.message}`);
+  }
+
+  return (data || []).map(row => pgRowToUser(row as PgUser));
+}
+
+/**
  * Find a user by email. Returns null if not found.
  */
 export async function pgFindUserByEmail(email: string): Promise<IdentityUser | null> {
@@ -381,6 +398,23 @@ export async function pgFindStudentsByBusId(busId: string): Promise<Record<strin
   return (data || []).map(rowToFirestoreStudent);
 }
 
+/** Find students by multiple bus IDs */
+export async function pgFindStudentsByBusIds(busIds: string[]): Promise<Record<string, any>[]> {
+  if (busIds.length === 0) return [];
+  const db = getSupabaseServer();
+
+  const { data, error } = await db
+    .from('student_profiles')
+    .select('*')
+    .or(busIds.map(id => `(bus_id.eq.${id},assigned_bus_id.eq.${id})`).join(','));
+
+  if (error) {
+    throw new Error(`IdentityRepository (PG) students by bus IDs find failed: ${error.message}`);
+  }
+
+  return (data || []).map(rowToFirestoreStudent);
+}
+
 /** Find students by route ID */
 export async function pgFindStudentsByRouteId(routeId: string): Promise<Record<string, any>[]> {
   const db = getSupabaseServer();
@@ -392,6 +426,23 @@ export async function pgFindStudentsByRouteId(routeId: string): Promise<Record<s
 
   if (error) {
     throw new Error(`IdentityRepository (PG) students by route find failed: ${error.message}`);
+  }
+
+  return (data || []).map(rowToFirestoreStudent);
+}
+
+/** Find students by multiple route IDs */
+export async function pgFindStudentsByRouteIds(routeIds: string[]): Promise<Record<string, any>[]> {
+  if (routeIds.length === 0) return [];
+  const db = getSupabaseServer();
+
+  const { data, error } = await db
+    .from('student_profiles')
+    .select('*')
+    .or(routeIds.map(id => `(route_id.eq.${id},assigned_route_id.eq.${id})`).join(','));
+
+  if (error) {
+    throw new Error(`IdentityRepository (PG) students by route IDs find failed: ${error.message}`);
   }
 
   return (data || []).map(rowToFirestoreStudent);
@@ -507,6 +558,21 @@ export async function pgFindStudentsByShift(shift: string): Promise<Record<strin
 
   if (error) {
     throw new Error(`IdentityRepository (PG) students by shift find failed: ${error.message}`);
+  }
+
+  return (data || []).map(rowToFirestoreStudent);
+}
+
+/** Find all students (no filter) */
+export async function pgFindAllStudents(): Promise<Record<string, any>[]> {
+  const db = getSupabaseServer();
+
+  const { data, error } = await db
+    .from('student_profiles')
+    .select('*');
+
+  if (error) {
+    throw new Error(`IdentityRepository (PG) all students query failed: ${error.message}`);
   }
 
   return (data || []).map(rowToFirestoreStudent);

@@ -46,6 +46,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
 
     // Refs
     const isMountedRef = useRef(true);
+    const abortControllerRef = useRef<AbortController | null>(null);
     const [isVisible, setIsVisible] = useState(true);
 
     // Track page visibility for polling efficiency
@@ -55,7 +56,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
         return () => document.removeEventListener('visibilitychange', handler);
     }, []);
 
-    const fetchNotifications = useCallback(async () => {
+    const fetchNotifications = useCallback(async (signal?: AbortSignal) => {
         if (!currentUser || !userData) {
             setNotifications([]);
             setUnreadCount(0);
@@ -66,6 +67,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
         try {
             const res = await fetch(`/api/notifications?limit=${NOTIFICATION_LIMIT}`, {
                 credentials: 'include',
+                signal,
             });
 
             if (!res.ok) {
@@ -73,16 +75,17 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
             }
 
             const data = await res.json();
-            if (!isMountedRef.current) return;
+            if (!isMountedRef.current || signal?.aborted) return;
 
             setNotifications(data.notifications || []);
             setUnreadCount(data.unreadCount || 0);
             setError(null);
         } catch (err) {
+            if (signal?.aborted) return;
             console.error('[NotificationContext] Fetch error:', err);
             if (isMountedRef.current) setError(err as Error);
         } finally {
-            if (isMountedRef.current) setLoading(false);
+            if (isMountedRef.current && !signal?.aborted) setLoading(false);
         }
     }, [currentUser?.uid, userData?.role]);
 
@@ -100,18 +103,29 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
         }
         setError(null);
 
-        fetchNotifications();
+        const controller = new AbortController();
+        abortControllerRef.current = controller;
+
+        fetchNotifications(controller.signal);
         const pollIntervalId = setInterval(() => {
             if (isVisible && isMountedRef.current) {
-                fetchNotifications();
+                const pollController = new AbortController();
+                abortControllerRef.current = pollController;
+                fetchNotifications(pollController.signal);
             }
         }, NOTIFICATION_POLLING_INTERVAL_MS);
 
-        return () => clearInterval(pollIntervalId);
+        return () => {
+            controller.abort();
+            clearInterval(pollIntervalId);
+        };
     }, [currentUser?.uid, userData?.role, refreshTrigger, fetchNotifications, isVisible]);
 
     useEffect(() => {
-        return () => { isMountedRef.current = false; };
+        return () => {
+            isMountedRef.current = false;
+            abortControllerRef.current?.abort();
+        };
     }, []);
 
     const markAsRead = useCallback(async (notificationId: string) => {
