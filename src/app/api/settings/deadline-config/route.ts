@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { adminAuth, adminDb } from '@/lib/firebase-admin';
 import { getDeadlineConfig, updateDeadlineConfig } from '@/lib/deadline-config-service';
-import { getSystemConfig, updateSystemConfig } from '@/lib/system-config-service';
 import { DeadlineConfig } from '@/lib/types/deadline-config';
 import { safeGetNested, stripUnsafeObjectKeys } from '@/lib/security/object-safety';
 

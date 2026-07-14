@@ -4,6 +4,7 @@ import { RateLimits } from '@/lib/security/rate-limiter';
 import { adminDb } from '@/lib/firebase-admin';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import { getDeadlineConfig } from '@/lib/deadline-config-service';
+import { getSystemConfig } from '@/domains/admin';
 
 /**
  * GET /api/admin/dashboard-counts
@@ -43,7 +44,7 @@ export const GET = withSecurity(
         feedbackSnap,
         statusSnap,
         paymentsSnap,
-        sysSnap,
+        systemConfig,
         deadlineConfig
       ] = await Promise.all([
         adminDb.collection('students').count().get(),
@@ -60,7 +61,7 @@ export const GET = withSecurity(
         adminDb.collection('feedbacks').where('createdAt', '>=', sevenDaysAgo).count().get().catch(() => ({ data: () => ({ count: 0 }) })),
         supabase.from('driver_status').select('*').in('status', ['enroute', 'on_trip']),
         supabase.from('payments').select('amount, method').or('status.eq.Completed,status.eq.completed'),
-        adminDb.collection('settings').doc('config').get(),
+        getSystemConfig().catch(() => null),
         getDeadlineConfig()
       ]);
 
@@ -119,12 +120,11 @@ export const GET = withSecurity(
       });
 
       // ── 6. Config Dates ──
-      const systemData = sysSnap.exists ? sysSnap.data() : null;
       const configDates = {
         academicYearEnd: `${new Date().getFullYear()}-${String(deadlineConfig.academicYear.anchorMonth + 1).padStart(2, '0')}-${String(deadlineConfig.academicYear.anchorDay).padStart(2, '0')}`,
         softBlock: `${new Date().getFullYear()}-${String(deadlineConfig.softBlock.month + 1).padStart(2, '0')}-${String(deadlineConfig.softBlock.day).padStart(2, '0')}`,
         hardBlock: `${new Date().getFullYear()}-${String(deadlineConfig.hardDelete.month + 1).padStart(2, '0')}-${String(deadlineConfig.hardDelete.day).padStart(2, '0')}`,
-        busFee: Number(systemData?.busFee?.amount || systemData?.busFee || systemData?.amount || 0)
+        busFee: Number(systemConfig?.busFee?.amount || 0)
       };
 
       const payload = {

@@ -1,34 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { adminAuth, adminDb } from '@/lib/firebase-admin';
-import { SETTINGS_COLLECTION } from '@/config/firestore-collections';
+import { adminAuth } from '@/lib/firebase-admin';
+import { getLandingConfig, updateLandingConfig } from '@/domains/admin';
 
 export const dynamic = 'force-dynamic';
 
-const DOC_ID = 'landing';
-
-const DEFAULT_CONFIG = {
-    videoPath: 'landing_video/Welcome_Final.mp4',
-    supportPhones: [
-        '+91 93657 71454',
-        '+91 91270 70577',
-        '+91 60039 03319'
-    ],
-    email: 'support@adtu.in', // Example default
-};
-
 export async function GET(req: NextRequest) {
     try {
-        let config = DEFAULT_CONFIG;
-
-        if (adminDb) {
-            const doc = await adminDb.collection(SETTINGS_COLLECTION).doc(DOC_ID).get();
-            if (doc.exists) {
-                const data = doc.data();
-                config = { ...DEFAULT_CONFIG, ...data };
-            }
-        } else {
-            console.warn('⚠️ Firebase Admin DB not initialized. Returning default landing config.');
-        }
+        const config = await getLandingConfig();
 
         return NextResponse.json({
             success: true,
@@ -50,7 +28,6 @@ export async function POST(req: NextRequest) {
         const token = authHeader.split('Bearer ')[1];
         const decodedToken = await adminAuth.verifyIdToken(token);
 
-        // Check admin role
         const userDoc = await adminAuth.getUser(decodedToken.uid);
         if (userDoc.customClaims?.role !== 'admin') {
             return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
@@ -63,10 +40,7 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ success: false, error: 'Invalid data' }, { status: 400 });
         }
 
-        await adminDb.collection(SETTINGS_COLLECTION).doc(DOC_ID).set({
-            ...config,
-            lastUpdated: new Date().toISOString(),
-        }, { merge: true });
+        await updateLandingConfig(config, decodedToken.uid);
 
         return NextResponse.json({ success: true, message: 'Config updated' });
     } catch (error: any) {

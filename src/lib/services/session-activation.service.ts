@@ -48,6 +48,7 @@ import { normalizeShift, areShiftsCompatible, getShiftLoad } from '@/lib/utils/s
 import { createUser, createStudent } from '@/domains/identity';
 import { getAllByState } from '@/domains/application';
 import { getSupabaseServer } from '@/lib/supabase-server';
+import { findMarker, upsertMarker } from '@/domains/admin';
 import * as Notification from '@/domains/notification';
 
 // Page size for paginating verified_upcoming applications.
@@ -597,9 +598,8 @@ export async function activateUpcomingSessionApplications(opts: {
   }
 
   // 2. Check Soft Block Completion Marker
-  const softBlockCompletedMarkerRef = adminDb.collection('settings').doc(`soft_block_completed_${currentSessionStartYear}`);
-  const softBlockCompletedSnap = await softBlockCompletedMarkerRef.get();
-  if (!softBlockCompletedSnap.exists) {
+  const softBlockMarkerData = await findMarker(`soft_block_completed_${currentSessionStartYear}`);
+  if (!softBlockMarkerData) {
     console.log(`⚠️ Soft Block completion marker 'soft_block_completed_${currentSessionStartYear}' is missing. Postponing session activation.`);
     summary.activationReached = false;
     summary.completedAt = new Date().toISOString();
@@ -607,9 +607,8 @@ export async function activateUpcomingSessionApplications(opts: {
   }
 
   // 3. Check Activation Marker (if marker already exists, exit immediately)
-  const markerRef = adminDb.collection('settings').doc(`activation_${currentSessionStartYear}`);
-  const markerSnap = await markerRef.get();
-  if (markerSnap.exists) {
+  const activationMarkerData = await findMarker(`activation_${currentSessionStartYear}`);
+  if (activationMarkerData) {
     summary.activationReached = false;
     summary.completedAt = new Date().toISOString();
     return summary;
@@ -651,7 +650,7 @@ export async function activateUpcomingSessionApplications(opts: {
 
   // Write activation marker only if NO eligible verified_upcoming applications remain
   if (!hasRemainingForCurrentSession) {
-    await markerRef.set({
+    await upsertMarker(`activation_${currentSessionStartYear}`, {
       activatedAt: new Date().toISOString(),
       currentSessionStartYear,
       scanned: summary.scanned,

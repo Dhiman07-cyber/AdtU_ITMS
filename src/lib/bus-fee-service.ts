@@ -1,10 +1,10 @@
 // @ts-nocheck
 /**
  * Bus Fee Management Service
- * Handles bus fee storage in Firestore (migrated from system_config.json)
+ * Handles bus fee storage in PostgreSQL (migrated from Firestore)
  */
 
-import { getSystemConfig, updateSystemConfig } from './system-config-service';
+import { getSystemConfig, updateSystemConfig } from '@/domains/admin';
 
 export interface BusFeeData {
   amount: number;

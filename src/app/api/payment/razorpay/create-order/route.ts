@@ -3,7 +3,7 @@ import { createRazorpayOrder, generateReceiptId } from '@/lib/payment/razorpay.s
 import { withSecurity } from '@/lib/security/api-security';
 import { CreateOrderSchema } from '@/lib/security/validation-schemas';
 import { RateLimits } from '@/lib/security/rate-limiter';
-import { getSystemConfig } from '@/lib/system-config-service';
+import { getSystemConfig } from '@/domains/admin';
 import { z } from 'zod';
 import { getByUid as getStudentByUid } from '@/domains/student';
 

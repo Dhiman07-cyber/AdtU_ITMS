@@ -1,5 +1,5 @@
 import { MetadataRoute } from 'next';
-import { getSystemConfig } from '@/lib/system-config-service';
+import { getSystemConfig } from '@/domains/admin';
 
 export default async function manifest(): Promise<MetadataRoute.Manifest> {
     let appName = 'AdtU Bus Services';

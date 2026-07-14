@@ -1,4 +1,3 @@
-
 import { NextRequest, NextResponse } from 'next/server';
 import { adminAuth, adminDb } from '@/lib/firebase-admin';
 import crypto from 'crypto';
@@ -13,6 +12,7 @@ import { createAuditLogInTransaction, createAuditLog, SYSTEM_ACTOR } from '@/lib
 import { getCurrentSessionStartYear } from '@/lib/services/session-activation.service';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import * as Notification from '@/domains/notification';
+import { upsertMarker } from '@/domains/admin';
 
 // Configure Cloudinary
 if (process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME) {
@@ -525,8 +525,7 @@ export async function GET(request: NextRequest) {
         try {
             const config = await getDeadlineConfig();
             const currentSessionStartYear = getCurrentSessionStartYear(config);
-            const markerRef = adminDb.collection('settings').doc(`soft_block_completed_${currentSessionStartYear}`);
-            await markerRef.set({
+            await upsertMarker(`soft_block_completed_${currentSessionStartYear}`, {
                 completedAt: new Date().toISOString(),
                 softBlockedCount: results.softBlocked,
                 hardDeletedCount: results.hardDeleted,

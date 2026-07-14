@@ -11,7 +11,7 @@ import {
     StudentAddedEmailData,
 } from '@/lib/services/admin-email.service';
 import { generateReceiptPdf } from '@/lib/services/receipt.service';
-import { getSystemConfig } from '@/lib/system-config-service';
+import { getSystemConfig } from '@/domains/admin';
 import { getDeadlineConfig } from '@/lib/deadline-config-service';
 import { withSecurity } from '@/lib/security/api-security';
 import { CreateUserSchema } from '@/lib/security/validation-schemas';

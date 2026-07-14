@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { adminDb } from '@/lib/firebase-admin';
+import { getLandingConfig } from '@/domains/admin';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,15 +22,12 @@ export async function GET() {
             );
         }
 
-        // Fetch dynamic path from Firestore
+        // Fetch dynamic path from PostgreSQL
         let videoPath = DEFAULT_VIDEO_PATH;
         try {
-            const configDoc = await adminDb.collection('settings').doc('landing').get();
-            if (configDoc.exists) {
-                const config = configDoc.data();
-                if (config && config.videoPath) {
-                    videoPath = config.videoPath;
-                }
+            const landingConfig = await getLandingConfig();
+            if (landingConfig && landingConfig.videoPath) {
+                videoPath = landingConfig.videoPath;
             }
         } catch (e) {
             console.warn('Could not fetch landing config, using default video path:', e);

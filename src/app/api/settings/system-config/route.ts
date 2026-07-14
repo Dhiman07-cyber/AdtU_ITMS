@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { adminAuth, adminDb } from '@/lib/firebase-admin';
 import { pgInsertNotification } from '@/domains/notification/repositories/notification.repository.pg';
-import { getSystemConfig, updateSystemConfig } from '@/lib/system-config-service';
+import { getSystemConfig, updateSystemConfig } from '@/domains/admin';
 
 // GET: Retrieve system config from Firestore (public — no sensitive data)
 export async function GET(req: NextRequest) {

@@ -1,37 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { adminDb } from '@/lib/firebase-admin';
 import { verifyApiAuth } from '@/lib/security/api-auth';
-import { getSystemConfig } from '@/lib/system-config-service';
+import { getSystemConfig, getLegalConfig, updateLegalConfig } from '@/domains/admin';
 import { sanitizeLegalConfig } from '@/lib/security/object-safety';
-import { SETTINGS_COLLECTION } from '@/config/firestore-collections';
-const DOC_ID = 'privacy';
 const FALLBACK_TITLE = 'Privacy Policy';
 
 export async function GET(req: NextRequest) {
     try {
-        let config;
-        let source;
+        let config = await getLegalConfig('privacy');
+        let source = 'postgresql';
 
-        // 1. Try Firestore
-        const doc = await adminDb.collection(SETTINGS_COLLECTION).doc(DOC_ID).get();
-        if (doc.exists) {
-            config = doc.data();
-            source = 'firestore';
-        }
-
-        // 2. No Fallback allowed
-
-
-        if (!config) {
-            config = {
-                title: FALLBACK_TITLE,
-                lastUpdated: new Date().toISOString().split('T')[0],
-                sections: []
-            };
-            source = 'default';
-        }
-
-        // 3. Inject App Name dynamically
+        // Inject App Name dynamically
         try {
             const systemConfig = await getSystemConfig();
             const appName = systemConfig?.appName || "AdtU Bus Services";
@@ -71,8 +49,7 @@ export async function POST(req: NextRequest) {
         const safeConfig = sanitizeLegalConfig(config, FALLBACK_TITLE);
         safeConfig.lastUpdated = new Date().toISOString().split('T')[0];
 
-        // Save to Firestore
-        await adminDb.collection(SETTINGS_COLLECTION).doc(DOC_ID).set(safeConfig);
+        await updateLegalConfig('privacy', safeConfig, auth.uid!);
 
         return NextResponse.json({ success: true, message: 'Configuration saved successfully', config: safeConfig });
 

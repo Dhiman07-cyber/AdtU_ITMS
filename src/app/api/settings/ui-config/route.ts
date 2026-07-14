@@ -1,28 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { adminAuth, adminDb } from '@/lib/firebase-admin';
-import { SETTINGS_COLLECTION } from '@/config/firestore-collections';
-const DOC_ID = 'ui';
+import { adminAuth } from '@/lib/firebase-admin';
+import { getUiConfig, updateUiConfig } from '@/domains/admin';
 
 /**
  * GET /api/settings/ui-config
- * Returns the UI configuration from Firestore (or fallback to local JSON)
+ * Returns the UI configuration from PostgreSQL
  */
 export async function GET(req: NextRequest) {
     try {
-        // 1. Try fetching from Firestore
-        const doc = await adminDb.collection(SETTINGS_COLLECTION).doc(DOC_ID).get();
+        const config = await getUiConfig();
 
-        if (doc.exists) {
-            return NextResponse.json({
-                config: doc.data(),
-                source: 'firestore'
-            });
+        if (!config) {
+            return NextResponse.json(
+                { message: 'UI configuration file not found' },
+                { status: 404 }
+            );
         }
 
-        return NextResponse.json(
-            { message: 'UI configuration file not found' },
-            { status: 404 }
-        );
+        return NextResponse.json({
+            config,
+            source: 'postgresql'
+        });
     } catch (error: any) {
         console.error('Error reading UI config:', error);
         return NextResponse.json(
@@ -34,11 +32,10 @@ export async function GET(req: NextRequest) {
 
 /**
  * POST /api/settings/ui-config
- * Updates the UI configuration in Firestore
+ * Updates the UI configuration in PostgreSQL
  */
 export async function POST(req: NextRequest) {
     try {
-        // Verify authentication
         const authHeader = req.headers.get('authorization');
         if (!authHeader?.startsWith('Bearer ')) {
             return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
@@ -47,7 +44,6 @@ export async function POST(req: NextRequest) {
         const token = authHeader.split('Bearer ')[1];
         const decodedToken = await adminAuth.verifyIdToken(token);
 
-        // Check if user is admin
         const userDoc = await adminAuth.getUser(decodedToken.uid);
         const customClaims = userDoc.customClaims;
         if (customClaims?.role !== 'admin') {
@@ -60,26 +56,17 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ message: 'Config data required' }, { status: 400 });
         }
 
-        // Get current config (from Firestore or File) to merge
-        let currentConfig = {};
-        const doc = await adminDb.collection(SETTINGS_COLLECTION).doc(DOC_ID).get();
-        if (doc.exists) {
-            currentConfig = doc.data() || {};
-        }
+        const currentConfig = await getUiConfig();
 
-        // Merge with updates
         const updatedConfig = {
             ...currentConfig,
             ...config,
-            version: config.version || (currentConfig as any).version || "1.0.0",
+            version: config.version || currentConfig?.version || "1.0.0",
             lastUpdated: new Date().toISOString().split('T')[0],
             lastUpdatedBy: decodedToken.uid
         };
 
-        // Write to Firestore (Primary)
-        await adminDb.collection(SETTINGS_COLLECTION).doc(DOC_ID).set(updatedConfig);
-
-        console.log(`[UI-Config] Updated by ${decodedToken.uid.substring(0,8)}... in Firestore`);
+        await updateUiConfig(updatedConfig, decodedToken.uid);
 
         return NextResponse.json({
             message: 'UI configuration updated successfully',
