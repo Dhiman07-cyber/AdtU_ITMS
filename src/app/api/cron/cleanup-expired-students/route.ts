@@ -8,7 +8,7 @@ import { buildCapacityDelta } from '@/lib/busCapacityService';
 import { getDeadlineConfig } from '@/lib/deadline-config-service';
 import { isSeatReleaseAtSoftBlockEnabled, wasSeatReleased } from '@/lib/config/capacity-flags';
 import { adminReconcileBusLoads } from '@/lib/services/admin-reconcile-bus-loads';
-import { createAuditLogInTransaction, createAuditLog, SYSTEM_ACTOR } from '@/lib/services/audit.service';
+import { createAuditEvent, SYSTEM_ACTOR, type AuditEventInsert } from '@/domains/audit';
 import { getCurrentSessionStartYear } from '@/lib/services/session-activation.service';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import * as Notification from '@/domains/notification';
@@ -254,15 +254,16 @@ export async function GET(request: NextRequest) {
                     }
 
                     // 7. Tier A — ATOMIC hard delete: bus seat decrement + student/user
-                    //    doc deletion + a durable audit row commit together. A student
-                    //    can never be hard-deleted without a reconstructible record of
-                    //    what was destroyed. DEDUP GUARD: skip the decrement if the seat
+                    //    doc deletion commit together. A student can never be
+                    //    hard-deleted without a reconstructible record of what was
+                    //    destroyed. DEDUP GUARD: skip the decrement if the seat
                     //    was already released at soft block (seatReleasedAt marker).
                     //    FRESH READ: busId and shift are re-read inside the transaction
                     //    so capacity always decrements on the correct bus.
                     const studentRef = adminDb.collection('students').doc(uid);
                     const userRef = adminDb.collection('users').doc(uid);
                     let seatDecremented = false;
+                    let auditEvent: AuditEventInsert | null = null;
 
                     await adminDb.runTransaction(async (transaction) => {
                         const freshSnap = await transaction.get(studentRef);
@@ -280,16 +281,17 @@ export async function GET(request: NextRequest) {
                             transaction.update(busRef, delta.updates);
                             seatDecremented = true;
                         }
-                        createAuditLogInTransaction(transaction, {
+                        const fullName = freshData.fullName || '';
+                        auditEvent = {
                             action: 'student_hard_deleted',
-                            performedBy: SYSTEM_ACTOR.id,
-                            performedByName: SYSTEM_ACTOR.name,
-                            performedByRole: SYSTEM_ACTOR.role,
-                            targetId: uid,
-                            targetType: 'student',
-                            targetName: freshData.fullName || '',
+                            actor_id: SYSTEM_ACTOR.id,
+                            actor_name: SYSTEM_ACTOR.name,
+                            actor_role: SYSTEM_ACTOR.role,
+                            target_id: uid,
+                            target_type: 'student',
+                            target_name: fullName,
                             category: 'system',
-                            summary: 'Student hard-deleted: ' + (freshData.fullName || ''),
+                            summary: 'Student hard-deleted: ' + fullName,
                             severity: 'high',
                             metadata: {
                                 before: {
@@ -308,8 +310,11 @@ export async function GET(request: NextRequest) {
                                 reason: 'lifecycle_hard_delete_expired',
                                 correlationId: uid,
                             },
-                        });
+                        };
                     });
+
+                    if (auditEvent) void createAuditEvent(auditEvent);
+
                     console.log(`   ✅ Hard-deleted student ${uid} (seatDecremented=${seatDecremented})`);
 
                     results.hardDeleted++;
@@ -329,13 +334,12 @@ export async function GET(request: NextRequest) {
                     const sbStudentRef = adminDb.collection('students').doc(uid);
 
                     // Tier A — ATOMIC soft block: the status transition, the seatReleasedAt
-                    //   marker, the bus seat decrement, AND the audit row commit together
-                    //   or not at all. This removes the former window where a student could
-                    //   be blocked while the seat decrement failed (relying on the tail
-                    //   reconciliation to heal). If the bus read fails, the whole soft
-                    //   block is retried on the next run — no half-state. Re-reads status
-                    //   AND current busId/shift inside the transaction for idempotency.
+                    //   marker, and the bus seat decrement commit together or not at all.
+                    //   If the bus read fails, the whole soft block is retried on the next
+                    //   run — no half-state. Re-reads status AND current busId/shift inside
+                    //   the transaction for idempotency.
                     let didBlock = false;
+                    let auditEvent: AuditEventInsert | null = null;
                     try {
                         await adminDb.runTransaction(async (transaction) => {
                             const freshStudent = await transaction.get(sbStudentRef);
@@ -362,16 +366,17 @@ export async function GET(request: NextRequest) {
                                 decremented = true;
                             }
 
-                            createAuditLogInTransaction(transaction, {
+                            const fullName = freshData.fullName || '';
+                            auditEvent = {
                                 action: releaseSeat ? 'student_soft_blocked_seat_released' : 'student_soft_blocked',
-                                performedBy: SYSTEM_ACTOR.id,
-                                performedByName: SYSTEM_ACTOR.name,
-                                performedByRole: SYSTEM_ACTOR.role,
-                                targetId: uid,
-                                targetType: 'student',
-                                targetName: freshData.fullName || '',
+                                actor_id: SYSTEM_ACTOR.id,
+                                actor_name: SYSTEM_ACTOR.name,
+                                actor_role: SYSTEM_ACTOR.role,
+                                target_id: uid,
+                                target_type: 'student',
+                                target_name: fullName,
                                 category: 'system',
-                                summary: (releaseSeat ? 'Student soft-blocked (seat released): ' : 'Student soft-blocked: ') + (freshData.fullName || ''),
+                                summary: (releaseSeat ? 'Student soft-blocked (seat released): ' : 'Student soft-blocked: ') + fullName,
                                 severity: 'high',
                                 metadata: {
                                     before: { status: 'active', busId: sbBusId, shift: sbShift || null },
@@ -381,10 +386,11 @@ export async function GET(request: NextRequest) {
                                     reason: 'soft_block',
                                     correlationId: uid,
                                 },
-                            });
+                            };
                             didBlock = true;
                         });
                         if (didBlock) {
+                            if (auditEvent) void createAuditEvent(auditEvent);
                             results.softBlocked++;
                             console.log(`   ✅ Soft-blocked ${uid}${releaseSeat ? ' (seat released)' : ''}`);
                         }
@@ -508,13 +514,14 @@ export async function GET(request: NextRequest) {
         // Tier B — operational visibility. Surface the run summary (and any healed
         //   drift) into the audit stream so admins can SEE what the cron did without
         //   reading server logs. Best-effort with audit_failure capture on write loss.
-        await createAuditLog({
+        await createAuditEvent({
             action: 'cron_cleanup_expired_students_completed',
-            performedBy: SYSTEM_ACTOR.id,
-            performedByName: SYSTEM_ACTOR.name,
-            performedByRole: SYSTEM_ACTOR.role,
-            targetId: 'cron:cleanup-expired-students',
-            targetType: 'cron',
+            actor_id: SYSTEM_ACTOR.id,
+            actor_name: SYSTEM_ACTOR.name,
+            actor_role: SYSTEM_ACTOR.role,
+            target_id: 'cron:cleanup-expired-students',
+            target_type: 'cron',
+            target_name: '',
             category: 'system',
             summary: 'Cron cleanup completed',
             severity: 'medium',

@@ -59,19 +59,6 @@ export const POST = withSecurity(
             
             if (error) console.error('Error cleaning reassignment_logs:', error);
             results.reassignmentLogsDeleted = count || 0;
-
-            // Also clean legacy Firestore audit_logs
-            try {
-                const oldAuditSnapshot = await adminDb.collection('audit_logs').where('timestamp', '<', cutoffDate).limit(400).get();
-                if (oldAuditSnapshot.size > 0) {
-                    const batch = adminDb.batch();
-                    oldAuditSnapshot.docs.forEach(doc => batch.delete(doc.ref));
-                    await batch.commit();
-                    results.firestoreAuditLogsDeleted = oldAuditSnapshot.size;
-                }
-            } catch (fsError) {
-                console.warn('Firestore audit_logs cleanup non-critical error:', fsError);
-            }
         }
 
         // 3. Clean Driver Location Updates (Historical)

@@ -4,7 +4,7 @@ import {
   activateUpcomingSessionApplications,
   activateSingleApplication,
 } from '@/lib/services/session-activation.service';
-import { recordOperationalEvent } from '@/lib/audit/audit-service';
+import { createAuditEvent } from '@/domains/audit';
 
 /**
  * Admin manual trigger for the canonical session-activation service.
@@ -45,18 +45,19 @@ export async function POST(request: NextRequest) {
       ? await activateSingleApplication(applicationId, 'admin')
       : await activateUpcomingSessionApplications({ trigger: 'admin' });
 
-    await recordOperationalEvent({
+    void createAuditEvent({
       action: 'admin_session_activation_triggered',
-      actor: {
-        id: decoded.uid,
-        role: 'admin',
-        name: adminDoc.data()?.fullName || adminDoc.data()?.name || 'Admin',
-      },
-      targetId: 'admin:run-session-activation',
-      targetType: 'admin_action',
-      reason: 'manual_trigger',
-      details: summary as unknown as Record<string, unknown>,
-    }).catch(() => {});
+      actor_id: decoded.uid,
+      actor_name: adminDoc.data()?.fullName || adminDoc.data()?.name || 'Admin',
+      actor_role: 'admin',
+      target_id: 'admin:run-session-activation',
+      target_type: 'admin_action',
+      target_name: '',
+      category: 'system',
+      summary: 'Admin triggered session activation',
+      severity: 'medium',
+      metadata: { reason: 'manual_trigger', ...summary },
+    });
 
     return NextResponse.json({ success: true, summary });
   } catch (error: any) {

@@ -9,10 +9,7 @@ import {
     doc,
     runTransaction,
     serverTimestamp,
-    Timestamp,
     writeBatch,
-    collection,
-    addDoc,
 } from "firebase/firestore";
 import { generatePrefixedId } from '@/lib/security/random-id';
 
@@ -559,15 +556,6 @@ export async function commitAssignments(
         else failureCount++;
     });
 
-    // Optional: Write minimal audit log with TTL
-    if (successCount > 0) {
-        try {
-            await writeAuditLog(adminUid, operations.length, successCount, failureCount);
-        } catch (e) {
-            console.warn("Audit log write failed (non-critical):", e);
-        }
-    }
-
     return {
         success: failureCount === 0,
         totalOperations: operations.length,
@@ -575,46 +563,6 @@ export async function commitAssignments(
         failureCount,
         results,
     };
-}
-
-/**
- * Writes a minimal audit log entry with 30-day TTL
- */
-async function writeAuditLog(
-    adminUid: string,
-    totalOps: number,
-    successCount: number,
-    failureCount: number
-): Promise<void> {
-    const ttlDate = new Date();
-    ttlDate.setDate(ttlDate.getDate() + 30); // 30-day TTL
-
-    try {
-        const auditLogsRef = collection(db, 'audit_logs');
-        const docId = generatePrefixedId('aud_');
-        await addDoc(auditLogsRef, {
-            auditId: docId,
-            createdAt: serverTimestamp(),
-            expiresAt: Timestamp.fromDate(ttlDate),
-            category: 'reassignments',
-            action: 'assignment_commit',
-            summary: `Committed ${successCount}/${totalOps} assignments`,
-            description: '',
-            severity: 'low',
-            performedBy: adminUid,
-            performedByName: 'Admin',
-            performedByRole: 'admin',
-            performedAt: serverTimestamp(),
-            targetType: 'bus',
-            targetId: adminUid,
-            targetName: '',
-            metadata: { rowsAffected: successCount, totalOps },
-            ipAddress: '',
-            userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : ''
-        });
-    } catch (err) {
-        console.error('Failed to write client-side audit log:', err);
-    }
 }
 
 // ============================================

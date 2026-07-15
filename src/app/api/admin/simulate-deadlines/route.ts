@@ -8,6 +8,7 @@ import { withSecurity } from '@/lib/security/api-security';
 import { SimulateDeadlinesSchema } from '@/lib/security/validation-schemas';
 import { RateLimits } from '@/lib/security/rate-limiter';
 import { deriveAcademicLifecycle } from '@/lib/utils/deadline-computation';
+import { createAuditEvent } from '@/domains/audit';
 
 if (process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME) {
     cloudinary.config({
@@ -118,12 +119,24 @@ export const POST = withSecurity(
                         if (sbBusId) {
                             try {
                                 await decrementBusCapacity(sbBusId, student.uid, sbData.shift);
-                                await adminDb.collection('activity_logs').add({
-                                    action: 'seat_released', reason: 'soft_block_simulation',
-                                    targetId: student.uid, targetName: sbData.fullName || '',
-                                    details: { busId: sbBusId, shift: sbData.shift || null, at: nowIso },
-                                    timestamp: nowIso
-                                }).catch(() => {});
+                                void createAuditEvent({
+                                    action: 'seat_released',
+                                    actor_id: 'system',
+                                    actor_name: 'System (Simulation)',
+                                    actor_role: 'admin',
+                                    target_id: student.uid,
+                                    target_type: 'student',
+                                    target_name: sbData.fullName || '',
+                                    category: 'system',
+                                    summary: 'Seat released during simulation',
+                                    severity: 'low',
+                                    metadata: {
+                                        reason: 'soft_block_simulation',
+                                        busId: sbBusId,
+                                        shift: sbData.shift || null,
+                                        at: nowIso,
+                                    },
+                                });
                             } catch (e: any) {
                                 executionResults.errors.push(`Soft-block decrement failed for ${student.uid}: ${e.message}`);
                             }

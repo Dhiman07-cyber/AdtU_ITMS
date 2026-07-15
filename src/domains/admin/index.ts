@@ -34,6 +34,7 @@ export {
   upsertMarker,
 } from './services/config.service';
 export type {
+  ConfigResult,
   SystemConfig,
   LandingConfig,
   UiConfig,

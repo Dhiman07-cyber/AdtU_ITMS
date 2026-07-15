@@ -10,13 +10,14 @@ const FALLBACK_TITLE = 'Terms & Conditions';
  */
 export async function GET(req: NextRequest) {
     try {
-        let config = await getLegalConfig('terms');
+        const termsConfigResult = await getLegalConfig('terms');
+        let config = termsConfigResult.data;
         let source = 'postgresql';
 
         // Inject App Name dynamically
         try {
-            const systemConfig = await getSystemConfig();
-            const appName = systemConfig?.appName || "AdtU Bus Services";
+            const systemConfigResult = await getSystemConfig();
+            const appName = systemConfigResult.data?.appName || "AdtU Bus Services";
             if (config && typeof config === 'object') {
                 let configStr = JSON.stringify(config);
                 configStr = configStr.replace(/AdtU Bus Services/g, appName);
@@ -29,6 +30,7 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({
             success: true,
             config,
+            updatedAt: termsConfigResult.updatedAt,
             source
         });
 
@@ -55,7 +57,6 @@ export async function POST(req: NextRequest) {
         }
 
         const safeConfig = sanitizeLegalConfig(config, FALLBACK_TITLE);
-        safeConfig.lastUpdated = new Date().toISOString().split('T')[0];
 
         await updateLegalConfig('terms', safeConfig, auth.uid!);
 

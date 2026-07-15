@@ -44,7 +44,7 @@ export const GET = withSecurity(
         feedbackSnap,
         statusSnap,
         paymentsSnap,
-        systemConfig,
+        systemConfigResult,
         deadlineConfig
       ] = await Promise.all([
         adminDb.collection('students').count().get(),
@@ -124,7 +124,7 @@ export const GET = withSecurity(
         academicYearEnd: `${new Date().getFullYear()}-${String(deadlineConfig.academicYear.anchorMonth + 1).padStart(2, '0')}-${String(deadlineConfig.academicYear.anchorDay).padStart(2, '0')}`,
         softBlock: `${new Date().getFullYear()}-${String(deadlineConfig.softBlock.month + 1).padStart(2, '0')}-${String(deadlineConfig.softBlock.day).padStart(2, '0')}`,
         hardBlock: `${new Date().getFullYear()}-${String(deadlineConfig.hardDelete.month + 1).padStart(2, '0')}-${String(deadlineConfig.hardDelete.day).padStart(2, '0')}`,
-        busFee: Number(systemConfig?.busFee?.amount || 0)
+        busFee: Number(systemConfigResult?.data?.busFee?.amount || 0)
       };
 
       const payload = {

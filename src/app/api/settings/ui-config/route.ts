@@ -8,9 +8,9 @@ import { getUiConfig, updateUiConfig } from '@/domains/admin';
  */
 export async function GET(req: NextRequest) {
     try {
-        const config = await getUiConfig();
+        const result = await getUiConfig();
 
-        if (!config) {
+        if (!result) {
             return NextResponse.json(
                 { message: 'UI configuration file not found' },
                 { status: 404 }
@@ -18,7 +18,8 @@ export async function GET(req: NextRequest) {
         }
 
         return NextResponse.json({
-            config,
+            config: result.data,
+            updatedAt: result.updatedAt,
             source: 'postgresql'
         });
     } catch (error: any) {
@@ -56,14 +57,13 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ message: 'Config data required' }, { status: 400 });
         }
 
-        const currentConfig = await getUiConfig();
+        const uiConfigResult = await getUiConfig();
+        const currentConfig = uiConfigResult?.data;
 
         const updatedConfig = {
             ...currentConfig,
             ...config,
             version: config.version || currentConfig?.version || "1.0.0",
-            lastUpdated: new Date().toISOString().split('T')[0],
-            lastUpdatedBy: decodedToken.uid
         };
 
         await updateUiConfig(updatedConfig, decodedToken.uid);

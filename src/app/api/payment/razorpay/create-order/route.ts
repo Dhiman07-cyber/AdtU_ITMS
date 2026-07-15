@@ -18,8 +18,8 @@ export const POST = withSecurity<CreateOrderBody>(
         const { amount, notes, userName, purpose, enrollmentId, durationYears } = body;
         const trustedUserId = auth.uid;
         const trustedDurationYears = durationYears || Number(notes?.duration || 1);
-        const systemConfig = await getSystemConfig();
-        const busFeeAmount = Number(systemConfig.busFee?.amount || 0);
+        const systemConfigResult = await getSystemConfig();
+        const busFeeAmount = Number(systemConfigResult.data.busFee?.amount || 0);
         const expectedAmount = busFeeAmount * trustedDurationYears;
 
         if (!busFeeAmount || !amountsMatch(amount, expectedAmount)) {

@@ -15,7 +15,6 @@ interface TermsSection {
 
 interface TermsConfig {
   title: string;
-  lastUpdated: string;
   sections: TermsSection[];
 }
 
@@ -23,6 +22,7 @@ export default function TermsAndConditionsPage() {
   const { currentUser, userData, needsApplication } = useAuth();
   const appName = APP_NAME;
   const [config, setConfig] = useState<TermsConfig | null>(null);
+  const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -32,6 +32,7 @@ export default function TermsAndConditionsPage() {
         if (response.ok) {
           const data = await response.json();
           setConfig(data.config);
+          setUpdatedAt(data.updatedAt);
         }
       } catch (error) {
         console.error('Failed to load terms:', error);
@@ -123,7 +124,7 @@ export default function TermsAndConditionsPage() {
         <div className="space-y-6">
           <div className="inline-flex items-center gap-2.5 px-3.5 py-1.5 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-[10px] font-bold tracking-widest uppercase">
             <Bookmark className="h-3 w-3 fill-indigo-400" />
-            System Policy • Updated {config.lastUpdated}
+            System Policy {updatedAt && `• Updated ${updatedAt}`}
           </div>
 
           <h1 className="text-5xl md:text-7xl font-black tracking-tight leading-tight text-slate-200 mb-6 font-display">

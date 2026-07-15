@@ -25,9 +25,9 @@ export async function GET() {
         // Fetch dynamic path from PostgreSQL
         let videoPath = DEFAULT_VIDEO_PATH;
         try {
-            const landingConfig = await getLandingConfig();
-            if (landingConfig && landingConfig.videoPath) {
-                videoPath = landingConfig.videoPath;
+            const landingConfigResult = await getLandingConfig();
+            if (landingConfigResult.data && landingConfigResult.data.videoPath) {
+                videoPath = landingConfigResult.data.videoPath;
             }
         } catch (e) {
             console.warn('Could not fetch landing config, using default video path:', e);

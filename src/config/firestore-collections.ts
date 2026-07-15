@@ -17,10 +17,7 @@ export const APPLICATIONS_COLLECTION = 'applications';
 export const NOTIFICATIONS_COLLECTION = 'notifications';
 
 // ── Operational collections ─────────────────────────────────────
-export const ACTIVITY_LOGS_COLLECTION = 'activity_logs';
-export const AUDIT_LOGS_COLLECTION = 'audit_logs';
 export const DRIVER_SWAP_REQUESTS_COLLECTION = 'driver_swap_requests';
-export const DRIVER_SWAP_AUDIT_COLLECTION = 'driver_swap_audit';
 
 // ── Settings ───────────────────────────────────────────────────
 export const SETTINGS_COLLECTION = 'settings';

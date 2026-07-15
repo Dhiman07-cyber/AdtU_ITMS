@@ -4,12 +4,12 @@ import { pgInsertNotification } from '@/domains/notification/repositories/notifi
 import { getSystemConfig, updateSystemConfig } from '@/domains/admin';
 import { DEFAULT_BUS_FEE } from '@/config/runtime';
 
-// GET: Retrieve bus fees from system config (Firestore)
+// GET: Retrieve bus fees from system config (PostgreSQL)
 export async function GET(req: NextRequest) {
   try {
-    const systemConfig = await getSystemConfig();
+    const systemConfigResult = await getSystemConfig();
     // Access busFee from system config
-    const busFeeData = systemConfig?.busFee || { amount: DEFAULT_BUS_FEE };
+    const busFeeData = systemConfigResult.data?.busFee || { amount: DEFAULT_BUS_FEE };
 
     return NextResponse.json({
       amount: busFeeData.amount,
@@ -49,30 +49,30 @@ export async function POST(req: NextRequest) {
     }
 
     // Get current config
-    const systemConfig = await getSystemConfig();
-    const oldAmount = systemConfig?.busFee?.amount || DEFAULT_BUS_FEE;
+    const systemConfigResult = await getSystemConfig();
+    const oldAmount = systemConfigResult.data?.busFee?.amount || DEFAULT_BUS_FEE;
 
     // Prepare updated bus fee data
     // Note: The service will handle truncation of history
-    const existingHistory = systemConfig?.busFee?.history || [];
+    const existingHistory = systemConfigResult.data?.busFee?.history || [];
     const newHistoryEntry = {
       amount: oldAmount,
-      updatedAt: systemConfig?.busFee?.updatedAt || new Date().toISOString(),
+      updatedAt: systemConfigResult.data?.busFee?.updatedAt || new Date().toISOString(),
     };
 
     // Construct new config object
     // We clone the existing config to preserve other fields
     const updatedConfig = {
-      ...systemConfig,
+      ...systemConfigResult.data,
       busFee: {
         amount: amount,
         updatedAt: new Date().toISOString(),
-        version: (systemConfig?.busFee?.version || 0) + 1,
+        version: (systemConfigResult.data?.busFee?.version || 0) + 1,
         history: [...existingHistory, newHistoryEntry]
       }
     };
 
-    // Save to Firestore using service (which handles cleaning/truncation)
+    // Save via service (which handles cleaning/truncation)
     await updateSystemConfig(updatedConfig, uid);
 
     console.log(`✅ Bus fee updated by admin ${uid}: ${oldAmount} -> ${amount}`);

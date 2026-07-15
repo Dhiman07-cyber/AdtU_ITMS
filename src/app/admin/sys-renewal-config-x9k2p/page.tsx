@@ -66,7 +66,6 @@ interface TermsSection {
 
 interface TermsConfig {
     title: string;
-    lastUpdated: string;
     sections: TermsSection[];
 }
 
@@ -402,7 +401,6 @@ export default function SystemRenewalConfigPage() {
     // Terms Config State
     const [termsConfig, setTermsConfig] = useState<TermsConfig>({
         title: '',
-        lastUpdated: '',
         sections: []
     });
     const [originalTermsConfig, setOriginalTermsConfig] = useState<TermsConfig | null>(null);
@@ -410,10 +408,13 @@ export default function SystemRenewalConfigPage() {
     // Privacy Config State
     const [privacyConfig, setPrivacyConfig] = useState<TermsConfig>({
         title: '',
-        lastUpdated: '',
         sections: []
     });
     const [originalPrivacyConfig, setOriginalPrivacyConfig] = useState<TermsConfig | null>(null);
+
+    // Timestamp metadata from PostgreSQL (replaces JSON-level lastUpdated)
+    const [termsUpdatedAt, setTermsUpdatedAt] = useState<string | null>(null);
+    const [privacyUpdatedAt, setPrivacyUpdatedAt] = useState<string | null>(null);
 
     // Load configurations
     const loadConfigs = useCallback(async () => {
@@ -485,6 +486,7 @@ export default function SystemRenewalConfigPage() {
                 const config = termsData.config as TermsConfig;
                 setTermsConfig(config);
                 setOriginalTermsConfig(JSON.parse(JSON.stringify(config)));
+                setTermsUpdatedAt(termsData.updatedAt);
             }
 
             // Process Privacy config
@@ -493,6 +495,7 @@ export default function SystemRenewalConfigPage() {
                 const config = privacyData.config as TermsConfig;
                 setPrivacyConfig(config);
                 setOriginalPrivacyConfig(JSON.parse(JSON.stringify(config)));
+                setPrivacyUpdatedAt(privacyData.updatedAt);
             }
 
         } catch (error) {
@@ -1106,7 +1109,7 @@ export default function SystemRenewalConfigPage() {
                                                             Currently, it has <strong>{termsConfig.sections.length}</strong> sections.
                                                         </p>
                                                         <p>
-                                                            Last Updated: <span className="text-white">{termsConfig.lastUpdated || 'Not set'}</span>
+                                                            Last Updated: <span className="text-white">{termsUpdatedAt || 'Not set'}</span>
                                                         </p>
                                                     </div>
                                                 </div>
@@ -1235,7 +1238,7 @@ export default function SystemRenewalConfigPage() {
                                                             Currently, it has <strong>{privacyConfig.sections.length}</strong> sections.
                                                         </p>
                                                         <p>
-                                                            Last Updated: <span className="text-white">{privacyConfig.lastUpdated || 'Not set'}</span>
+                                                            Last Updated: <span className="text-white">{privacyUpdatedAt || 'Not set'}</span>
                                                         </p>
                                                     </div>
                                                 </div>

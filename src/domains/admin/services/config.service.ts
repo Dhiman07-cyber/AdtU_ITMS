@@ -17,6 +17,12 @@ import {
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
+export type ConfigResult<T> = {
+  data: T;
+  updatedAt: string | null;
+  updatedByUid: string | null;
+};
+
 export interface SystemConfig {
   appName: string;
   busFee: {
@@ -37,8 +43,6 @@ export interface SystemConfig {
   hardBlock?: string;
   version?: string;
   mapProvider?: 'guwahati';
-  lastUpdated?: string;
-  updatedBy?: string;
   [key: string]: any;
 }
 
@@ -46,14 +50,11 @@ export interface LandingConfig {
   videoPath: string;
   supportPhones: string[];
   email: string;
-  lastUpdated?: string;
   [key: string]: any;
 }
 
 export interface UiConfig {
   version: string;
-  lastUpdated?: string;
-  lastUpdatedBy?: string;
   [key: string]: any;
 }
 
@@ -64,7 +65,6 @@ export interface LegalConfigSection {
 
 export interface LegalConfig {
   title: string;
-  lastUpdated: string;
   sections: LegalConfigSection[];
 }
 
@@ -106,12 +106,16 @@ function cleanConfigForStorage(config: Record<string, unknown>): Record<string, 
 
 // ─── System Config ───────────────────────────────────────────────────────────
 
-export async function getSystemConfig(): Promise<SystemConfig> {
+export async function getSystemConfig(): Promise<ConfigResult<SystemConfig>> {
   const row = await pgFindConfig('config');
   if (!row) {
     throw new Error('System configuration missing in database');
   }
-  return row.config_data as SystemConfig;
+  return {
+    data: row.config_data as SystemConfig,
+    updatedAt: row.updated_at,
+    updatedByUid: row.updated_by_uid,
+  };
 }
 
 export async function updateSystemConfig(
@@ -123,8 +127,6 @@ export async function updateSystemConfig(
 
   const merged = { ...previous, ...data };
   const cleaned = cleanConfigForStorage(merged as Record<string, unknown>);
-  cleaned.lastUpdated = new Date().toISOString();
-  cleaned.updatedBy = updatedByUid;
 
   await pgUpsertConfig('config', cleaned, updatedByUid);
   return cleaned as SystemConfig;
@@ -132,12 +134,20 @@ export async function updateSystemConfig(
 
 // ─── Landing Config ──────────────────────────────────────────────────────────
 
-export async function getLandingConfig(): Promise<LandingConfig> {
+export async function getLandingConfig(): Promise<ConfigResult<LandingConfig>> {
   const row = await pgFindConfig('landing');
   if (!row) {
-    return { ...DEFAULT_LANDING };
+    return {
+      data: { ...DEFAULT_LANDING },
+      updatedAt: null,
+      updatedByUid: null,
+    };
   }
-  return { ...DEFAULT_LANDING, ...row.config_data } as LandingConfig;
+  return {
+    data: { ...DEFAULT_LANDING, ...row.config_data } as LandingConfig,
+    updatedAt: row.updated_at,
+    updatedByUid: row.updated_by_uid,
+  };
 }
 
 export async function updateLandingConfig(
@@ -155,12 +165,16 @@ export async function updateLandingConfig(
 
 // ─── UI Config ───────────────────────────────────────────────────────────────
 
-export async function getUiConfig(): Promise<UiConfig | null> {
+export async function getUiConfig(): Promise<ConfigResult<UiConfig> | null> {
   const row = await pgFindConfig('ui');
   if (!row) {
     return null;
   }
-  return row.config_data as UiConfig;
+  return {
+    data: row.config_data as UiConfig,
+    updatedAt: row.updated_at,
+    updatedByUid: row.updated_by_uid,
+  };
 }
 
 export async function updateUiConfig(
@@ -176,17 +190,21 @@ export async function updateUiConfig(
 
 // ─── Legal Config (Privacy / Terms) ──────────────────────────────────────────
 
-export async function getLegalConfig(type: 'privacy' | 'terms'): Promise<LegalConfig> {
+export async function getLegalConfig(type: 'privacy' | 'terms'): Promise<ConfigResult<LegalConfig>> {
   const row = await pgFindConfig(type);
   if (!row) {
     const fallbackTitle = type === 'privacy' ? 'Privacy Policy' : 'Terms & Conditions';
     return {
-      title: fallbackTitle,
-      lastUpdated: new Date().toISOString().split('T')[0],
-      sections: [],
+      data: { title: fallbackTitle, sections: [] },
+      updatedAt: null,
+      updatedByUid: null,
     };
   }
-  return row.config_data as unknown as LegalConfig;
+  return {
+    data: row.config_data as unknown as LegalConfig,
+    updatedAt: row.updated_at,
+    updatedByUid: row.updated_by_uid,
+  };
 }
 
 export async function updateLegalConfig(
@@ -198,7 +216,7 @@ export async function updateLegalConfig(
   const fallbackTitle = type === 'privacy' ? 'Privacy Policy' : 'Terms & Conditions';
   const previous: LegalConfig = existing
     ? (existing.config_data as unknown as LegalConfig)
-    : { title: fallbackTitle, lastUpdated: new Date().toISOString().split('T')[0], sections: [] };
+    : { title: fallbackTitle, sections: [] };
 
   const merged = { ...previous, ...data };
   await pgUpsertConfig(type, merged as Record<string, unknown>, updatedByUid);

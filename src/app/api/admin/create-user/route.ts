@@ -18,7 +18,7 @@ import { CreateUserSchema } from '@/lib/security/validation-schemas';
 import { RateLimits } from '@/lib/security/rate-limiter';
 import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
 import { z } from 'zod';
-import { createAuditLog } from '@/lib/services/audit.service';
+import { createAuditEvent } from '@/domains/audit';
 import { normalizeShift } from '@/lib/utils/shift-utils';
 import { createUser, createStudent, createDriver } from '@/domains/identity';
 
@@ -74,7 +74,7 @@ export const POST = withSecurity<CreateUserBody>(
         const currentUserRole = auth.role;
 
         // 1. Parallelize initial validation & configuration fetching
-        const [approverDoc, systemConfig, deadlineConfig] = await Promise.all([
+        const [approverDoc, systemConfigResult, deadlineConfig] = await Promise.all([
             adminDb.collection(currentUserRole === 'admin' ? 'admins' : 'moderators').doc(currentUserUid).get(),
             getSystemConfig(),
             getDeadlineConfig()
@@ -138,7 +138,7 @@ export const POST = withSecurity<CreateUserBody>(
             }
 
             const blockDates = computeBlockDatesFromValidUntil(finalValidUntil, deadlineConfig);
-            const busFeeAmount = systemConfig?.busFee?.amount || DEFAULT_BUS_FEE;
+            const busFeeAmount = systemConfigResult.data?.busFee?.amount || DEFAULT_BUS_FEE;
             const totalAmount = busFeeAmount * finalDuration;
             const paymentId = totalAmount > 0 ? generateOfflinePaymentId('new_registration') : null;
 
@@ -249,19 +249,19 @@ export const POST = withSecurity<CreateUserBody>(
             }
             if (capExceeded) {
                 console.warn(`🚨 ADMIN OVER-FILL: bus ${assignedBusId} now ${capNewMembers}/${capLimit} via admin-create of ${uid}`);
-                await createAuditLog({
+                await createAuditEvent({
                     category: 'additions',
                     action: 'capacity_exceeded_admin_create',
                     summary: `Admin created user with capacity exceeded: ${name}`,
                     severity: 'medium',
-                    performedBy: currentUserUid,
-                    performedByName: currentUserName,
-                    performedByRole: currentUserRole as any,
-                    targetType: 'student',
-                    targetId: uid,
-                    targetName: name,
+                    actor_id: currentUserUid,
+                    actor_name: currentUserName,
+                    actor_role: currentUserRole,
+                    target_type: 'student',
+                    target_id: uid,
+                    target_name: name,
                     metadata: { busId: assignedBusId, newMembers: capNewMembers, capacity: capLimit, shift: studentDoc.shift },
-                }).catch(e => console.error('Over-fill audit log failed:', e));
+                });
             }
 
             // 4. Fire-and-forget notifications (if moderator added)

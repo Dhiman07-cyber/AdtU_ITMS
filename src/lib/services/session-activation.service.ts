@@ -42,7 +42,7 @@ import { getDeadlineConfig } from '@/lib/deadline-config-service';
 import { DeadlineConfig } from '@/lib/types/deadline-config';
 import { buildCapacityDelta, sendBusFullAlert } from '@/lib/busCapacityService';
 import { computeBlockDatesFromValidUntil } from '@/lib/utils/deadline-computation';
-import { createAuditLogInTransaction, SYSTEM_ACTOR } from '@/lib/services/audit.service';
+import { createAuditEvent, SYSTEM_ACTOR } from '@/domains/audit';
 import { CapacityFullError } from '@/lib/errors/sentinel-errors';
 import { normalizeShift, areShiftsCompatible, getShiftLoad } from '@/lib/utils/shift-utils';
 import { createUser, createStudent } from '@/domains/identity';
@@ -310,38 +310,38 @@ async function activateOne(
           routeId: busData?.routeId || '',
         };
       }
+    });
 
-      createAuditLogInTransaction(transaction, {
-        action: 'application_session_activated',
-        performedBy: SYSTEM_ACTOR.id,
-        performedByName: SYSTEM_ACTOR.name,
-        performedByRole: SYSTEM_ACTOR.role,
-        targetId: app.applicantUid,
-        targetType: 'student',
-        targetName: formData.fullName || '',
-        category: 'applications',
-        summary: 'Application session activated: ' + (formData.fullName || ''),
-        severity: 'high',
-        metadata: {
-          before: { applicationId: appId, state: 'verified_upcoming', targetSession },
-          after: {
-            studentUid: app.applicantUid,
-            busId: targetBusId,
-            shift,
-            sessionStartYear: startYear,
-            sessionEndYear: endYear,
-            validUntil,
-            status: 'active',
-          },
-          applicationId: appId,
-          trigger,
-          alternativeBusAllocated: isAlternative,
-          originalBusId: requestedBusId,
-          originalRouteId: requestedRouteId,
-          reason: trigger === 'cron' ? 'session_activation_cron' : 'session_activation_admin_trigger',
-          correlationId: appId,
+    void createAuditEvent({
+      action: 'application_session_activated',
+      actor_id: SYSTEM_ACTOR.id,
+      actor_name: SYSTEM_ACTOR.name,
+      actor_role: SYSTEM_ACTOR.role,
+      target_id: app.applicantUid,
+      target_type: 'student',
+      target_name: formData.fullName || '',
+      category: 'applications',
+      summary: 'Application session activated: ' + (formData.fullName || ''),
+      severity: 'high',
+      metadata: {
+        before: { applicationId: appId, state: 'verified_upcoming', targetSession },
+        after: {
+          studentUid: app.applicantUid,
+          busId: targetBusId,
+          shift,
+          sessionStartYear: startYear,
+          sessionEndYear: endYear,
+          validUntil,
+          status: 'active',
         },
-      });
+        applicationId: appId,
+        trigger,
+        alternativeBusAllocated: isAlternative,
+        originalBusId: requestedBusId,
+        originalRouteId: requestedRouteId,
+        reason: trigger === 'cron' ? 'session_activation_cron' : 'session_activation_admin_trigger',
+        correlationId: appId,
+      },
     });
 
     // Delete application from PG after successful transaction
@@ -409,34 +409,27 @@ async function activateOne(
 
         if (pgErr) throw new StateChangedError();
 
-        // Audit log (best-effort, in Firestore for admin visibility)
-        try {
-          await adminDb.runTransaction(async (transaction) => {
-            createAuditLogInTransaction(transaction, {
-              action: 'application_pending_seat_allocation',
-              performedBy: SYSTEM_ACTOR.id,
-              performedByName: SYSTEM_ACTOR.name,
-              performedByRole: SYSTEM_ACTOR.role,
-              targetId: app.applicantUid,
-              targetType: 'application',
-              targetName: formData.fullName || '',
-              category: 'applications',
-              summary: 'Application pending seat allocation: ' + (formData.fullName || ''),
-              severity: 'high',
-              metadata: {
-                before: { applicationId: appId, state: 'verified_upcoming' },
-                after: { applicationId: appId, state: 'pending_seat_allocation' },
-                busId: requestedBusId,
-                shift,
-                trigger,
-                reason: 'session_activation_capacity_full',
-                correlationId: appId,
-              },
-            });
-          });
-        } catch {
-          // Audit is best-effort
-        }
+        void createAuditEvent({
+          action: 'application_pending_seat_allocation',
+          actor_id: SYSTEM_ACTOR.id,
+          actor_name: SYSTEM_ACTOR.name,
+          actor_role: SYSTEM_ACTOR.role,
+          target_id: app.applicantUid,
+          target_type: 'application',
+          target_name: formData.fullName || '',
+          category: 'applications',
+          summary: 'Application pending seat allocation: ' + (formData.fullName || ''),
+          severity: 'high',
+          metadata: {
+            before: { applicationId: appId, state: 'verified_upcoming' },
+            after: { applicationId: appId, state: 'pending_seat_allocation' },
+            busId: requestedBusId,
+            shift,
+            trigger,
+            reason: 'session_activation_capacity_full',
+            correlationId: appId,
+          },
+        });
 
         await notifyPendingSeatAllocation(appId, app, formData).catch((e) =>
           console.error('[session-activation] pending-seat notify failed:', e?.message || e)

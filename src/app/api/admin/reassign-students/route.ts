@@ -6,7 +6,7 @@ import { withSecurity } from '@/lib/security/api-security';
 import { ReassignStudentsSchema } from '@/lib/security/validation-schemas';
 import { RateLimits } from '@/lib/security/rate-limiter';
 import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
-import { createAuditLogInTransaction, createAuditLog, type AuditActorRole } from '@/lib/services/audit.service';
+import { createAuditEvent, type AuditActorRole } from '@/domains/audit';
 import { getShiftDeltas, normalizeShift } from '@/lib/utils/shift-utils';
 import crypto from 'crypto';
 
@@ -216,37 +216,6 @@ export const POST = withSecurity<ReassignStudentsBody>(
                     });
                 }
 
-                // ── Tier A audit (in-transaction): a durable Firestore record of the
-                //    reassignment commit, atomic with the student/bus mutations. This
-                //    survives even if the detailed Supabase rollback snapshot below
-                //    fails to write. Skipped for pure no-ops (no effective moves).
-                if (effectiveAssignments.length > 0) {
-                    createAuditLogInTransaction(transaction, {
-                        action: 'students_reassigned',
-                        performedBy: currentUserUid,
-                        performedByName: actorLabel,
-                        performedByRole: (currentUserRole as AuditActorRole) || 'system',
-                        targetId: sourceBusId || effectiveAssignments[0].fromBusId,
-                        targetType: 'bus',
-                        targetName: sourceBusId || '',
-                        category: 'reassignments',
-                        summary: `Reassigned ${effectiveAssignments.length} student(s) from ${sourceBusId || ''}`,
-                        severity: 'medium',
-                        metadata: {
-                            before: { sourceBusId },
-                            after: { movedCount: effectiveAssignments.length },
-                            operationId,
-                            sourceBusId,
-                            assignments: effectiveAssignments.map((a) => ({
-                                studentId: a.studentId,
-                                from: a.fromBusId,
-                                to: a.toBusId,
-                                shift: a.shift,
-                            })),
-                            correlationId: operationId,
-                        },
-                    });
-                }
             });
         } catch (error) {
             if (error instanceof ReassignmentValidationError) {
@@ -353,13 +322,14 @@ export const POST = withSecurity<ReassignStudentsBody>(
             // operationId would be impossible — so make the gap DETECTABLE (Tier B)
             // rather than swallowing it in a console warning.
             console.error('Failed to create Supabase reassignment rollback snapshot:', auditError);
-            await createAuditLog({
+            await createAuditEvent({
                 action: 'reassignment_rollback_snapshot_failed',
-                performedBy: currentUserUid,
-                performedByName: actorLabel,
-                performedByRole: (currentUserRole as AuditActorRole) || 'system',
-                targetId: sourceBusId || '',
-                targetType: 'bus',
+                actor_id: currentUserUid,
+                actor_name: actorLabel,
+                actor_role: (currentUserRole as AuditActorRole) || 'system',
+                target_id: sourceBusId || '',
+                target_type: 'bus',
+                target_name: '',
                 category: 'reassignments',
                 summary: 'Reassignment rollback snapshot failed',
                 severity: 'medium',
@@ -372,6 +342,32 @@ export const POST = withSecurity<ReassignStudentsBody>(
                 },
             });
         }
+
+        void createAuditEvent({
+            action: 'students_reassigned',
+            actor_id: currentUserUid,
+            actor_name: actorLabel,
+            actor_role: (currentUserRole as AuditActorRole) || 'system',
+            target_id: sourceBusId || effectiveAssignments[0].fromBusId,
+            target_type: 'bus',
+            target_name: sourceBusId || '',
+            category: 'reassignments',
+            summary: `Reassigned ${effectiveAssignments.length} student(s) from ${sourceBusId || ''}`,
+            severity: 'medium',
+            metadata: {
+                before: { sourceBusId },
+                after: { movedCount: effectiveAssignments.length },
+                operationId,
+                sourceBusId,
+                assignments: effectiveAssignments.map((a) => ({
+                    studentId: a.studentId,
+                    from: a.fromBusId,
+                    to: a.toBusId,
+                    shift: a.shift,
+                })),
+                correlationId: operationId,
+            },
+        });
 
         return NextResponse.json({
             success: true,

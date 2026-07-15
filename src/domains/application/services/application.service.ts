@@ -23,7 +23,7 @@
  */
 import * as repository from '../repositories/application.repository';
 import { getSupabaseServer } from '@/lib/supabase-server';
-import { createAuditLog } from '@/domains/audit';
+import { createAuditEvent } from '@/domains/audit';
 import * as Notification from '@/domains/notification';
 import * as Student from '@/domains/student';
 import * as Seat from '@/domains/seat';
@@ -31,7 +31,6 @@ import { calculateValidUntilDate } from '@/lib/utils/date-utils';
 import { computeBlockDatesFromValidUntil } from '@/lib/utils/deadline-computation';
 import { getDeadlineConfig } from '@/lib/deadline-config-service';
 import type { Application, ApplicationState, ApplicationType } from '@/lib/types/application';
-import type { CreateAuditLogInput } from '@/lib/services/audit.service';
 
 // ─── CRUD Methods ────────────────────────────────────────────────────────────
 
@@ -457,19 +456,19 @@ export async function reject(
     }
 
     // Step 2b: Audit
-    await createAuditLog({
+    await createAuditEvent({
       category: 'applications',
       action: 'application_rejected',
       summary: `Application rejected: ${app.full_name || ''}`,
       severity: 'medium',
-      performedBy: rejectorData.uid,
-      performedByName: rejectorData.name,
-      performedByRole: rejectorData.role as any,
-      targetType: 'application',
-      targetId: app.applicant_uid,
-      targetName: app.full_name || '',
+      actor_id: rejectorData.uid,
+      actor_name: rejectorData.name,
+      actor_role: rejectorData.role,
+      target_type: 'application',
+      target_id: app.applicant_uid,
+      target_name: app.full_name || '',
       metadata: { reason },
-    }).catch(err => console.error('Audit log failed:', err));
+    });
 
     // Step 2c: Notification
     if (app.email || app.applicant_email) {
@@ -688,19 +687,19 @@ async function postCommitApprovalSideEffects(
 
   // Audit (idempotent)
   tasks.push(
-    createAuditLog({
+    createAuditEvent({
       category: 'applications',
       action: 'application_approved',
       summary: `Application approved: ${app.full_name || ''}`,
       severity: 'high',
-      performedBy: approverData.uid,
-      performedByName: approverData.name,
-      performedByRole: approverData.role as any,
-      targetType: 'student',
-      targetId: app.applicant_uid,
-      targetName: app.full_name || '',
+      actor_id: approverData.uid,
+      actor_name: approverData.name,
+      actor_role: approverData.role,
+      target_type: 'student',
+      target_id: app.applicant_uid,
+      target_name: app.full_name || '',
       metadata: { applicationId: app.application_id },
-    }).catch(err => { console.error('Audit log failed:', err); })
+    })
   );
 
   // Notification (idempotent)

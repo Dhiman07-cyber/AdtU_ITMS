@@ -52,7 +52,6 @@ const LANDING_CONFIG_DATA = {
 
 const PRIVACY_CONFIG_DATA = {
   title: 'Privacy Policy',
-  lastUpdated: '2026-07-14',
   sections: [{ title: 'Section 1', content: 'Content here' }],
 };
 
@@ -65,6 +64,11 @@ const ACTIVATION_MARKER = {
   trigger: 'admin',
 };
 
+const ROW_META = {
+  updated_at: '2026-07-14T12:00:00Z',
+  updated_by_uid: 'admin-uid',
+};
+
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 beforeEach(() => {
@@ -75,14 +79,17 @@ describe('Config Service', () => {
   // ── System Config ────────────────────────────────────────────────────────
 
   describe('getSystemConfig', () => {
-    it('returns system config from PG', async () => {
+    it('returns ConfigResult with data and metadata from PG', async () => {
       mockPgFindConfig.mockResolvedValue({
         config_key: 'config',
         config_data: SYSTEM_CONFIG_DATA,
+        ...ROW_META,
       });
 
       const result = await getSystemConfig();
-      expect(result).toEqual(SYSTEM_CONFIG_DATA);
+      expect(result.data).toEqual(SYSTEM_CONFIG_DATA);
+      expect(result.updatedAt).toBe(ROW_META.updated_at);
+      expect(result.updatedByUid).toBe(ROW_META.updated_by_uid);
       expect(mockPgFindConfig).toHaveBeenCalledWith('config');
     });
 
@@ -93,7 +100,7 @@ describe('Config Service', () => {
   });
 
   describe('updateSystemConfig', () => {
-    it('upserts cleaned config with metadata', async () => {
+    it('upserts cleaned config without JSON metadata', async () => {
       mockPgFindConfig.mockResolvedValue(null);
       mockPgUpsertConfig.mockResolvedValue(undefined);
 
@@ -106,8 +113,8 @@ describe('Config Service', () => {
       const [key, data, uid] = mockPgUpsertConfig.mock.calls[0];
       expect(key).toBe('config');
       expect(data.appName).toBe('Test');
-      expect(data.updatedBy).toBe('admin-uid');
-      expect(data.lastUpdated).toBeDefined();
+      expect(data.updatedBy).toBeUndefined();
+      expect(data.lastUpdated).toBeUndefined();
       expect(uid).toBe('admin-uid');
     });
 
@@ -137,23 +144,27 @@ describe('Config Service', () => {
   // ── Landing Config ───────────────────────────────────────────────────────
 
   describe('getLandingConfig', () => {
-    it('returns config from PG merged with defaults', async () => {
+    it('returns ConfigResult with data merged with defaults', async () => {
       mockPgFindConfig.mockResolvedValue({
         config_key: 'landing',
         config_data: LANDING_CONFIG_DATA,
+        ...ROW_META,
       });
 
       const result = await getLandingConfig();
-      expect(result.videoPath).toBe('landing_video/test.mp4');
-      expect(result.email).toBe('test@example.com');
+      expect(result.data.videoPath).toBe('landing_video/test.mp4');
+      expect(result.data.email).toBe('test@example.com');
+      expect(result.updatedAt).toBe(ROW_META.updated_at);
     });
 
-    it('returns defaults when no config in PG', async () => {
+    it('returns defaults with null metadata when no config in PG', async () => {
       mockPgFindConfig.mockResolvedValue(null);
 
       const result = await getLandingConfig();
-      expect(result.videoPath).toBe('landing_video/Welcome_Final.mp4');
-      expect(result.supportPhones).toHaveLength(3);
+      expect(result.data.videoPath).toBe('landing_video/Welcome_Final.mp4');
+      expect(result.data.supportPhones).toHaveLength(3);
+      expect(result.updatedAt).toBeNull();
+      expect(result.updatedByUid).toBeNull();
     });
   });
 
@@ -190,14 +201,16 @@ describe('Config Service', () => {
   // ── UI Config ────────────────────────────────────────────────────────────
 
   describe('getUiConfig', () => {
-    it('returns UI config from PG', async () => {
+    it('returns ConfigResult with UI config from PG', async () => {
       mockPgFindConfig.mockResolvedValue({
         config_key: 'ui',
-        config_data: { version: '2.0.0', lastUpdated: '2026-07-14' },
+        config_data: { version: '2.0.0' },
+        ...ROW_META,
       });
 
       const result = await getUiConfig();
-      expect(result?.version).toBe('2.0.0');
+      expect(result?.data.version).toBe('2.0.0');
+      expect(result?.updatedAt).toBe(ROW_META.updated_at);
     });
 
     it('returns null when no config', async () => {
@@ -210,30 +223,33 @@ describe('Config Service', () => {
   // ── Legal Config ─────────────────────────────────────────────────────────
 
   describe('getLegalConfig', () => {
-    it('returns privacy config from PG', async () => {
+    it('returns ConfigResult with privacy config from PG', async () => {
       mockPgFindConfig.mockResolvedValue({
         config_key: 'privacy',
         config_data: PRIVACY_CONFIG_DATA,
+        ...ROW_META,
       });
 
       const result = await getLegalConfig('privacy');
-      expect(result.title).toBe('Privacy Policy');
-      expect(result.sections).toHaveLength(1);
+      expect(result.data.title).toBe('Privacy Policy');
+      expect(result.data.sections).toHaveLength(1);
+      expect(result.updatedAt).toBe(ROW_META.updated_at);
     });
 
-    it('returns default privacy config when not in PG', async () => {
+    it('returns default privacy config with null metadata when not in PG', async () => {
       mockPgFindConfig.mockResolvedValue(null);
 
       const result = await getLegalConfig('privacy');
-      expect(result.title).toBe('Privacy Policy');
-      expect(result.sections).toEqual([]);
+      expect(result.data.title).toBe('Privacy Policy');
+      expect(result.data.sections).toEqual([]);
+      expect(result.updatedAt).toBeNull();
     });
 
     it('returns default terms config when not in PG', async () => {
       mockPgFindConfig.mockResolvedValue(null);
 
       const result = await getLegalConfig('terms');
-      expect(result.title).toBe('Terms & Conditions');
+      expect(result.data.title).toBe('Terms & Conditions');
     });
   });
 
@@ -267,7 +283,7 @@ describe('Config Service', () => {
     it('merges partial update with existing legal config', async () => {
       mockPgFindConfig.mockResolvedValue({
         config_key: 'privacy',
-        config_data: { title: 'My Privacy', lastUpdated: '2026-01-01', sections: [{ title: 'Old', content: 'Old content' }] },
+        config_data: { title: 'My Privacy', sections: [{ title: 'Old', content: 'Old content' }] },
       });
       mockPgUpsertConfig.mockResolvedValue(undefined);
 

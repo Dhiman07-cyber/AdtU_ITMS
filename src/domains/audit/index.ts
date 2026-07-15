@@ -1,7 +1,21 @@
-// D12 Audit — public surface. Only this file may be imported by other domains.
+// D12 Audit — public surface.
 //
-// ONE business capability: create an audit log entry.
-// All infrastructure (transactional writers, recovery, actor resolution)
-// remains internal — not exposed through the domain boundary.
-export { createAuditLog } from './services/audit.service';
-export type { CreateAuditLogInput } from './services/audit.service';
+// Single audit capability via PostgreSQL. createAuditEvent is the canonical API.
+
+export {
+  createAuditEvent,
+  queryAuditEvents,
+  SYSTEM_ACTOR,
+} from './services/audit.service.pg';
+
+export { resolveAuditActor } from './utils';
+
+export type {
+  AuditActorRole,
+  AuditEventInsert,
+  AuditEventRow,
+  AuditEventFilters,
+  AuditEventPagination,
+  AuditEventQueryResult,
+  AuditResult,
+} from './services/audit.service.pg';

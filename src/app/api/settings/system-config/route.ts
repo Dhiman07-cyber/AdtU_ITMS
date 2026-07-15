@@ -3,11 +3,11 @@ import { adminAuth, adminDb } from '@/lib/firebase-admin';
 import { pgInsertNotification } from '@/domains/notification/repositories/notification.repository.pg';
 import { getSystemConfig, updateSystemConfig } from '@/domains/admin';
 
-// GET: Retrieve system config from Firestore (public — no sensitive data)
+// GET: Retrieve system config from PostgreSQL (public — no sensitive data)
 export async function GET(req: NextRequest) {
     try {
-        const config = await getSystemConfig();
-        return NextResponse.json({ config });
+        const systemConfigResult = await getSystemConfig();
+        return NextResponse.json({ config: systemConfigResult.data, updatedAt: systemConfigResult.updatedAt });
     } catch (error: any) {
         console.error('Error fetching system config:', error);
         return NextResponse.json(
@@ -58,13 +58,13 @@ export async function POST(req: NextRequest) {
         const config = rawConfig;
 
         // Read current config to compare changes
-        const oldConfig = await getSystemConfig();
+        const oldConfigResult = await getSystemConfig();
+        const oldConfig = oldConfigResult.data;
 
         // Prepare updated config object
         const updatedConfig = {
             ...oldConfig,
             ...config,
-            lastUpdated: new Date().toISOString(),
         };
 
         // Special handling for bus fee updates (history, notifications)
@@ -115,7 +115,7 @@ export async function POST(req: NextRequest) {
             }
         }
 
-        // Sync with Firestore via service (handles cleaning and history limiting)
+        // Save via service (handles cleaning and history limiting)
         const savedConfig = await updateSystemConfig(updatedConfig, uid);
 
         return NextResponse.json({

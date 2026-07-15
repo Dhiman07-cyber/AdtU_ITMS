@@ -21,9 +21,10 @@ vi.mock('@/lib/utils/deadline-computation', () => ({
   computeBlockDatesFromValidUntil: (...args: any[]) => mockComputeBlockDates(...args),
 }));
 
-vi.mock('@/lib/audit/audit-service', () => ({
-  writeAuditInTransaction: (...args: any[]) => mockWriteAudit(...args),
-  SYSTEM_ACTOR: 'system',
+vi.mock('@/domains/audit', () => ({
+  createAuditEvent: (...args: any[]) => mockWriteAudit(...args),
+  SYSTEM_ACTOR: { id: 'system', name: 'System (automated)', role: 'system' },
+  queryAuditEvents: vi.fn().mockResolvedValue({ events: [], total: 0 }),
 }));
 
 vi.mock('@/domains/identity', () => ({

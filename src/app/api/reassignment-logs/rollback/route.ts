@@ -11,7 +11,7 @@ import { NextResponse } from 'next/server';
 import { adminDb } from '@/lib/firebase-admin';
 import { withSecurity } from '@/lib/security/api-security';
 import { RateLimits } from '@/lib/security/rate-limiter';
-import { createAuditLogInTransaction, type AuditActorRole } from '@/lib/services/audit.service';
+import { createAuditEvent, type AuditActorRole } from '@/domains/audit';
 import { z } from 'zod';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -266,24 +266,7 @@ export const POST = withSecurity(
                     rollbackChanges.push({ ...change, before: change.after, after: change.before });
                 });
 
-                createAuditLogInTransaction(transaction, {
-                    action: 'reassignment_rolled_back',
-                    performedBy: auth.uid,
-                    performedByName: actorLabel,
-                    performedByRole: (auth.role as AuditActorRole) || 'admin',
-                    targetId: operationId,
-                    targetType: 'reassignment',
-                    category: 'reassignments',
-                    summary: `Rolled back operation ${operationId}`,
-                    severity: 'high',
-                    metadata: {
-                        before: { rolledBackOperation: operationId, status: 'committed' },
-                        after: { status: 'rolled_back', revertedDocCount: reverts.length },
-                        rollbackOperationId: rollbackOpId,
-                        revertedDocs: reverts.map((c) => c.docPath),
-                        correlationId: operationId,
-                    },
-                });
+
             });
         } catch (err: unknown) {
             const message = err instanceof RollbackConflictError
@@ -304,7 +287,27 @@ export const POST = withSecurity(
             }, { status: 409 });
         }
 
-        // Firestore rollback committed atomically (with its in-tx audit). Finalize the
+        void createAuditEvent({
+            action: 'reassignment_rolled_back',
+            actor_id: auth.uid,
+            actor_name: actorLabel,
+            actor_role: (auth.role as AuditActorRole) || 'admin',
+            target_id: operationId,
+            target_type: 'reassignment',
+            target_name: operationId,
+            category: 'reassignments',
+            summary: `Rolled back operation ${operationId}`,
+            severity: 'high',
+            metadata: {
+                before: { rolledBackOperation: operationId, status: 'committed' },
+                after: { status: 'rolled_back', revertedDocCount: reverts.length },
+                rollbackOperationId: rollbackOpId,
+                revertedDocs: reverts.map((c) => c.docPath),
+                correlationId: operationId,
+            },
+        });
+
+        // Firestore rollback committed atomically. Finalize the
         // Supabase audit logs best-effort — failures here do NOT undo the rollback.
         const postErrors: string[] = [];
 

@@ -55,7 +55,6 @@ export type LegalConfigSection = {
 
 export function sanitizeLegalConfig(raw: unknown, fallbackTitle: string): {
   title: string;
-  lastUpdated: string;
   sections: LegalConfigSection[];
 } {
   const input = raw && typeof raw === 'object' && !Array.isArray(raw)
@@ -65,10 +64,6 @@ export function sanitizeLegalConfig(raw: unknown, fallbackTitle: string): {
   const title = typeof input.title === 'string' && input.title.trim()
     ? input.title.trim().slice(0, 200)
     : fallbackTitle;
-
-  const lastUpdated = typeof input.lastUpdated === 'string' && input.lastUpdated.trim()
-    ? input.lastUpdated.trim().slice(0, 50)
-    : new Date().toISOString().split('T')[0];
 
   const sections = Array.isArray(input.sections)
     ? input.sections.slice(0, 100).map((section) => {
@@ -82,5 +77,5 @@ export function sanitizeLegalConfig(raw: unknown, fallbackTitle: string): {
     })
     : [];
 
-  return { title, lastUpdated, sections };
+  return { title, sections };
 }

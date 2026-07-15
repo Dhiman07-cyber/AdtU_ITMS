@@ -6,11 +6,12 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
     try {
-        const config = await getLandingConfig();
+        const landingConfigResult = await getLandingConfig();
 
         return NextResponse.json({
             success: true,
-            config
+            config: landingConfigResult.data,
+            updatedAt: landingConfigResult.updatedAt
         });
     } catch (error: any) {
         console.error('Error fetching landing config:', error);

@@ -19,7 +19,7 @@ import { adminDb } from '@/lib/firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
 import { paymentsSupabaseService, type PaymentRecord } from '@/lib/services/payments-supabase';
 import { ensureReceiptSignature } from '@/lib/services/receipt.service';
-import { createAuditLog } from '@/lib/services/audit.service';
+import { createAuditEvent } from '@/domains/audit';
 import { getDeadlineConfig } from '@/lib/deadline-config-service';
 import { calculateValidUntilDate } from '@/lib/utils/date-utils';
 import { fetchOrderDetails } from '@/lib/payment/razorpay.service';
@@ -677,14 +677,14 @@ export async function approveOfflinePayment(
             console.error(`⚠️ Receipt signature failed for payment ${request.paymentId}:`, sigErr.message);
         }
 
-        await createAuditLog({
+        await createAuditEvent({
             action: 'payment_approved',
-            performedBy: request.approverUserId,
-            performedByName: request.approverName,
-            performedByRole: (request.approverRole?.toLowerCase() || 'admin') as any,
-            targetId: request.paymentId,
-            targetType: 'payment',
-            targetName: completedPayment.student_name || '',
+            actor_id: request.approverUserId,
+            actor_name: request.approverName || '',
+            actor_role: request.approverRole?.toLowerCase() || 'admin',
+            target_id: request.paymentId,
+            target_type: 'payment',
+            target_name: completedPayment.student_name || '',
             category: 'renewals',
             summary: 'Payment approved for ' + (completedPayment.student_name || ''),
             severity: 'medium',
@@ -695,7 +695,7 @@ export async function approveOfflinePayment(
                 empId: request.approverEmpId,
                 reason: 'manual_offline_approval',
             },
-        }).catch((e) => console.error('Payment approval audit write failed:', e));
+        });
 
         // Return compatible format
         return {
@@ -777,14 +777,14 @@ export async function rejectOfflinePayment(
 
         console.log(`🗑️ Payment ${request.paymentId.substring(0,8)}... rejected by ${request.rejectorName?.substring(0,8) || 'admin'}...`);
 
-        await createAuditLog({
+        await createAuditEvent({
             action: 'payment_rejected',
-            performedBy: request.rejectorUserId,
-            performedByName: request.rejectorName,
-            performedByRole: (request.rejectorRole?.toLowerCase() || 'admin') as any,
-            targetId: request.paymentId,
-            targetType: 'payment',
-            targetName: payment.student_name || '',
+            actor_id: request.rejectorUserId,
+            actor_name: request.rejectorName || '',
+            actor_role: request.rejectorRole?.toLowerCase() || 'admin',
+            target_id: request.paymentId,
+            target_type: 'payment',
+            target_name: payment.student_name || '',
             category: 'renewals',
             summary: 'Payment rejected for ' + (payment.student_name || ''),
             severity: 'medium',
@@ -795,7 +795,7 @@ export async function rejectOfflinePayment(
                 empId: request.rejectorEmpId,
                 reason: 'manual_offline_rejection',
             },
-        }).catch((e) => console.error('Payment rejection audit write failed:', e));
+        });
 
         return { success: true };
     } catch (error) {

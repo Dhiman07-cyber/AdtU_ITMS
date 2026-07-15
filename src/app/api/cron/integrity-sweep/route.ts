@@ -11,8 +11,6 @@
  *      GATED on the seat-release flag for the SAME reason as the cleanup cron:
  *      an active-only recount is authoritative only under seat-release semantics;
  *      running it in legacy (flag-off) mode would wrongly drop soft-blocked owners.
- *   3. Audit-failure replay (recovery) — drain the Tier B outbox so operational
- *      events lost to a transient write failure are recovered.
  *
  * Detection ≠ repair: the scan never mutates business state. Whatever it finds is
  * reported (and emitted as an operational event) for an administrator to action.
@@ -22,8 +20,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { adminReconcileBusLoads } from '@/lib/services/admin-reconcile-bus-loads';
 import { runIntegrityScan } from '@/lib/services/integrity-detector';
 import { isSeatReleaseAtSoftBlockEnabled } from '@/lib/config/capacity-flags';
-import { createAuditLog, SYSTEM_ACTOR } from '@/lib/services/audit.service';
-import { replayAuditFailures } from '@/lib/audit/audit-service';
+import { createAuditEvent, SYSTEM_ACTOR } from '@/domains/audit';
 import crypto from 'crypto';
 
 export const dynamic = 'force-dynamic';
@@ -65,14 +62,6 @@ export async function GET(request: NextRequest) {
       reconciliation = { skipped: true, reason: 'seat-release flag disabled' };
     }
 
-    // 3. Recovery — drain the audit-failure outbox.
-    let auditRecovery: unknown;
-    try {
-      auditRecovery = await replayAuditFailures();
-    } catch (replayErr: any) {
-      auditRecovery = { error: replayErr?.message || 'audit replay failed' };
-    }
-
     const report = {
       integrity: {
         scannedAt: integrity.scannedAt,
@@ -80,26 +69,24 @@ export async function GET(request: NextRequest) {
         totalFindings: integrity.totalFindings,
         bySeverity: integrity.bySeverity,
         byType: integrity.byType,
-        // Cap embedded findings so a flood doesn't bloat the audit doc; the admin
-        // route returns the full list on demand.
         findings: integrity.findings.slice(0, 50),
         truncated: integrity.totalFindings > 50,
       },
       reconciliation,
-      auditRecovery,
     };
 
     // Durable, admin-visible summary of the whole sweep.
-    await createAuditLog({
+    await createAuditEvent({
       category: 'system',
       action: 'integrity_sweep_completed',
       summary: 'Integrity sweep completed',
       severity: 'medium',
-      performedBy: SYSTEM_ACTOR.id,
-      performedByName: SYSTEM_ACTOR.name,
-      performedByRole: SYSTEM_ACTOR.role,
-      targetType: 'cron',
-      targetId: 'cron:integrity-sweep',
+      actor_id: SYSTEM_ACTOR.id,
+      actor_name: SYSTEM_ACTOR.name,
+      actor_role: SYSTEM_ACTOR.role,
+      target_type: 'cron',
+      target_id: 'cron:integrity-sweep',
+      target_name: '',
       metadata: report,
     });
 

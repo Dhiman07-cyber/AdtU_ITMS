@@ -6,7 +6,7 @@ import { wasSeatReleased } from '@/lib/config/capacity-flags';
 import { withSecurity } from '@/lib/security/api-security';
 import { DeleteStudentSchema } from '@/lib/security/validation-schemas';
 import { RateLimits } from '@/lib/security/rate-limiter';
-import { createAuditLogInTransaction, resolveAuditActor } from '@/lib/services/audit.service';
+import { createAuditEvent, resolveAuditActor } from '@/domains/audit';
 
 export const POST = withSecurity(
     async (request, { auth, body }) => {
@@ -45,32 +45,34 @@ export const POST = withSecurity(
                 transaction.update(busRef, delta.updates);
             }
 
-            createAuditLogInTransaction(transaction, {
-                category: 'system',
-                action: 'student_deleted',
-                summary: `Student deleted: ${studentData?.fullName || studentData?.name || ''}`,
-                severity: 'high',
-                performedBy: auth.uid,
-                performedByName: actor.name,
-                performedByRole: actor.role as any,
-                targetType: 'student',
-                targetId: uid,
-                targetName: studentData?.fullName || studentData?.name || '',
-                metadata: {
-                    reason: 'admin_manual_delete',
-                    before: {
-                        enrollmentId: studentData?.enrollmentId || null,
-                        busId: busId || null,
-                        shift: studentData?.shift || null,
-                        status: studentData?.status || null,
-                        validUntil: studentData?.validUntil || null,
-                        sessionEndYear: studentData?.sessionEndYear || null,
-                        seatReleasedAt: studentData?.seatReleasedAt || null,
-                    },
-                    after: { deleted: true },
-                    details: { seatDecremented: shouldDecrement, busId: busId || null },
+
+        });
+
+        void createAuditEvent({
+            category: 'system',
+            action: 'student_deleted',
+            summary: `Student deleted: ${studentData?.fullName || studentData?.name || ''}`,
+            severity: 'high',
+            actor_id: auth.uid,
+            actor_name: actor.name,
+            actor_role: actor.role as any,
+            target_type: 'student',
+            target_id: uid,
+            target_name: studentData?.fullName || studentData?.name || '',
+            metadata: {
+                reason: 'admin_manual_delete',
+                before: {
+                    enrollmentId: studentData?.enrollmentId || null,
+                    busId: busId || null,
+                    shift: studentData?.shift || null,
+                    status: studentData?.status || null,
+                    validUntil: studentData?.validUntil || null,
+                    sessionEndYear: studentData?.sessionEndYear || null,
+                    seatReleasedAt: studentData?.seatReleasedAt || null,
                 },
-            });
+                after: { deleted: true },
+                details: { seatDecremented: shouldDecrement, busId: busId || null },
+            },
         });
 
         // Post-commit best-effort cleanup of NON-ownership data (external systems and

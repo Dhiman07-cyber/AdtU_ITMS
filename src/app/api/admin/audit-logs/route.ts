@@ -1,9 +1,44 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { adminAuth, adminDb } from '@/lib/firebase-admin';
-import { AUDIT_LOGS_COLLECTION } from '@/lib/services/audit.service';
-import { Timestamp } from 'firebase-admin/firestore';
+import { queryAuditEvents, type AuditEventRow } from '@/domains/audit';
 
 const PAGE_SIZE = 20;
+
+export interface AuditLogResponse {
+  id: string;
+  createdAt: string;
+  category: string;
+  action: string;
+  summary: string;
+  severity: string;
+  performedBy: string;
+  performedByName: string;
+  performedByRole: string;
+  performedAt: string;
+  targetType: string;
+  targetId: string;
+  targetName: string;
+  metadata: Record<string, unknown>;
+}
+
+function rowToResponse(row: AuditEventRow): AuditLogResponse {
+  return {
+    id: row.id,
+    createdAt: row.created_at,
+    category: row.category,
+    action: row.action,
+    summary: row.summary || '',
+    severity: row.severity,
+    performedBy: row.actor_id,
+    performedByName: row.actor_name || '',
+    performedByRole: row.actor_role,
+    performedAt: row.created_at,
+    targetType: row.target_type || '',
+    targetId: row.target_id || '',
+    targetName: row.target_name || '',
+    metadata: row.metadata ?? {},
+  };
+}
 
 export async function GET(req: NextRequest) {
   try {
@@ -24,94 +59,25 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const category = searchParams.get('category') || '';
     const severity = searchParams.get('severity') || '';
-    const performedBy = searchParams.get('performedBy') || '';
     const performedByRole = searchParams.get('performedByRole') || '';
-    const targetType = searchParams.get('targetType') || '';
     const search = searchParams.get('search') || '';
     const startDate = searchParams.get('startDate') || '';
     const endDate = searchParams.get('endDate') || '';
     const page = parseInt(searchParams.get('page') || '1', 10);
     const limit = Math.min(parseInt(searchParams.get('limit') || String(PAGE_SIZE), 10), 50);
 
-    let query: FirebaseFirestore.Query = adminDb
-      .collection(AUDIT_LOGS_COLLECTION)
-      .orderBy('createdAt', 'desc');
+    const result = await queryAuditEvents(
+      {
+        category: category || undefined,
+        severity: severity || undefined,
+        actor_role: performedByRole || undefined,
+        from_date: startDate || undefined,
+        to_date: endDate ? endDate + 'T23:59:59.999Z' : undefined,
+      },
+      { page, per_page: limit }
+    );
 
-    if (category) {
-      query = query.where('category', '==', category);
-    }
-    if (severity) {
-      query = query.where('severity', '==', severity);
-    }
-    if (performedByRole) {
-      query = query.where('performedByRole', '==', performedByRole);
-    }
-
-    if (startDate) {
-      const startTs = Timestamp.fromDate(new Date(startDate));
-      query = query.where('createdAt', '>=', startTs);
-    }
-    if (endDate) {
-      const endTs = Timestamp.fromDate(new Date(endDate + 'T23:59:59.999Z'));
-      query = query.where('createdAt', '<=', endTs);
-    }
-
-    const offset = (page - 1) * limit;
-
-    if (offset > 0) {
-      const anchorSnap = await adminDb
-        .collection(AUDIT_LOGS_COLLECTION)
-        .orderBy('createdAt', 'desc')
-        .limit(offset)
-        .get();
-      const lastDoc = anchorSnap.docs[anchorSnap.docs.length - 1];
-      if (lastDoc) {
-        query = query.startAfter(lastDoc);
-      }
-    }
-
-    query = query.limit(limit + 1);
-    const snapshot = await query.get();
-    const hasMore = snapshot.docs.length > limit;
-    const docs = snapshot.docs.slice(0, limit);
-
-    let results = docs.map((doc) => {
-      const data = doc.data();
-      return {
-        id: doc.id,
-        auditId: data.auditId || doc.id,
-        createdAt: data.createdAt?.toDate?.()?.toISOString() || data.createdAtISO || '',
-        expiresAt: data.expiresAt?.toDate?.()?.toISOString() || '',
-        category: data.category || '',
-        action: data.action || '',
-        summary: data.summary || '',
-        description: data.description || '',
-        severity: data.severity || 'low',
-        performedBy: data.performedBy || '',
-        performedByName: data.performedByName || '',
-        performedByRole: data.performedByRole || '',
-        performedAt: data.performedAt?.toDate?.()?.toISOString() || '',
-        targetType: data.targetType || '',
-        targetId: data.targetId || '',
-        targetName: data.targetName || '',
-        metadata: data.metadata || {},
-        ipAddress: data.ipAddress || '',
-        userAgent: data.userAgent || '',
-      };
-    });
-
-    if (performedBy) {
-      const lowerSearch = performedBy.toLowerCase();
-      results = results.filter(
-        (r) =>
-          r.performedBy.toLowerCase().includes(lowerSearch) ||
-          r.performedByName.toLowerCase().includes(lowerSearch)
-      );
-    }
-
-    if (targetType) {
-      results = results.filter((r) => r.targetType === targetType);
-    }
+    let results = result.data.map(rowToResponse);
 
     if (search) {
       const lowerSearch = search.toLowerCase();
@@ -119,11 +85,13 @@ export async function GET(req: NextRequest) {
         (r) =>
           r.action.toLowerCase().includes(lowerSearch) ||
           r.summary.toLowerCase().includes(lowerSearch) ||
-          r.description.toLowerCase().includes(lowerSearch) ||
           r.targetName.toLowerCase().includes(lowerSearch) ||
           r.performedByName.toLowerCase().includes(lowerSearch)
       );
     }
+
+    const offset = (page - 1) * limit;
+    const hasMore = offset + limit < result.total;
 
     return NextResponse.json({
       logs: results,

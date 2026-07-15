@@ -70,9 +70,6 @@ export class ReassignmentService {
     // Send notifications
     await this.sendNotifications(plans, reason);
 
-    // Create audit log
-    await this.createAuditLog(plans, reason, actorId, actorName);
-
     console.log('✅ Reassignment completed successfully');
   }
 
@@ -387,52 +384,6 @@ export class ReassignmentService {
     } catch (error) {
       console.error('Failed to create notification:', error);
       throw error;
-    }
-  }
-
-  async createAuditLog(
-    plans: ReassignmentPlan[],
-    reason: string,
-    actorId: string,
-    actorName: string
-  ): Promise<void> {
-    try {
-      const auditLogsRef = collection(db, 'audit_logs');
-      const expiresAt = new Date();
-      expiresAt.setMonth(expiresAt.getMonth() + 6); // 6 months retention for medium severity
-
-      await addDoc(auditLogsRef, {
-        category: 'reassignments',
-        action: 'bus_reassignment',
-        summary: `Bus reassigned: ${plans.length} student(s)`,
-        description: '',
-        severity: 'medium',
-        performedBy: actorId,
-        performedByName: actorName,
-        performedByRole: 'admin',
-        performedAt: serverTimestamp(),
-        createdAt: serverTimestamp(),
-        expiresAt: expiresAt,
-        targetType: 'bus',
-        targetId: plans[0]?.fromBusId || '',
-        targetName: '',
-        ipAddress: '',
-        userAgent: typeof window !== 'undefined' ? window.navigator.userAgent : '',
-        metadata: {
-          studentCount: plans.length,
-          reason,
-          plans: plans.map(p => ({
-            studentId: p.studentId,
-            studentName: p.studentName,
-            fromBusId: p.fromBusId,
-            toBusId: p.toBusId,
-            toBusNumber: p.toBusNumber,
-          })),
-        },
-      });
-    } catch (error) {
-      console.error('Failed to create audit log:', error);
-      // Don't throw - audit logs are not critical
     }
   }
 

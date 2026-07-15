@@ -159,19 +159,6 @@ export async function deleteUserAndData(
             console.log(`✅ Decremented bus capacity for bus ${busId}`);
           } catch (busError) {
             console.error(`⚠️ Error decrementing bus capacity for bus ${busId}:`, busError);
-            try {
-              await adminDb.collection('audit_failures').add({
-                kind: 'bus_capacity_decrement',
-                studentUid: userId,
-                busId: busId,
-                shift: userData?.shift || null,
-                error: busError instanceof Error ? busError.message : String(busError),
-                recovered: false,
-                createdAtISO: new Date().toISOString(),
-              });
-            } catch (outboxErr) {
-              console.error('CRITICAL: Could not write audit_failure outbox for bus capacity decrement', outboxErr);
-            }
           }
         }
       }
