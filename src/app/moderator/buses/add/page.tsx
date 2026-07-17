@@ -47,7 +47,7 @@ export default function AddBusPage() {
     driverUID: "",
     routeId: "",
     shift: "",
-    status: "Active",
+    status: "active",
     morningLoad: "",
     eveningLoad: ""
   });
@@ -86,7 +86,7 @@ export default function AddBusPage() {
         const nextNum = busesData.length + 1;
         const nextIdDisplay = nextNum.toString();
 
-        setBusData(prev => ({ ...prev, busId: nextIdDisplay, status: "Active" }));
+        setBusData(prev => ({ ...prev, busId: nextIdDisplay, status: "active" }));
         setDefaultBusIdValue(nextIdDisplay);
         setBuses(busesData);
 
@@ -199,7 +199,7 @@ export default function AddBusPage() {
             morningCount: parseInt(busData.morningLoad) || 0,
             eveningCount: parseInt(busData.eveningLoad) || 0
           },
-          status: busData.status || "Active"
+          status: busData.status || "active"
         }),
       });
 
@@ -227,7 +227,7 @@ export default function AddBusPage() {
       driverUID: "",
       routeId: "",
       shift: "",
-      status: "Active",
+      status: "active",
       morningLoad: "",
       eveningLoad: ""
     });
@@ -430,12 +430,12 @@ export default function AddBusPage() {
                 <Label htmlFor="status" className="mb-2 block text-sm font-semibold text-gray-200">Status *</Label>
                 <Select value={busData.status} onValueChange={(val) => handleInputChange('status', val)}>
                   <SelectTrigger className="bg-gray-800 border-gray-700 focus:border-purple-500 text-white py-6 cursor-pointer">
-                    <SelectValue placeholder="Active" />
+                    <SelectValue placeholder="active" />
                   </SelectTrigger>
                   <SelectContent className="bg-gray-900 border-gray-700">
-                    <SelectItem value="Active">Active</SelectItem>
-                    <SelectItem value="Inactive">Inactive</SelectItem>
-                    <SelectItem value="Maintenance">Maintenance</SelectItem>
+                    <SelectItem value="active">Active</SelectItem>
+                    <SelectItem value="inactive">Inactive</SelectItem>
+                    <SelectItem value="maintenance">Maintenance</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

@@ -14,10 +14,7 @@
  *   dob, enrollmentId, bloodGroup, address, profilePhotoUrl, busId, routeId,
  *   assignedRouteId, stopId, shift, status, sessionDuration, sessionStartYear,
  *   sessionEndYear, validUntil, softBlock, hardBlock, approvedBy, approvedAt,
- *   createdAt, updatedAt
- *
- * Non-core fields → extras JSONB:
- *   semester, pendingProfileUpdate, fcmMessage, etc.
+ *   createdAt, updatedAt, pendingProfileUpdate, expiryReminderCount, lastExpiryReminderSentAt
  *
  * Infrastructure only. No business logic. No service calls.
  */
@@ -36,6 +33,7 @@ const CORE_FIELDS = new Set([
   'assignedBusId', 'stopId', 'stopName', 'shift', 'status', 'sessionDuration',
   'sessionStartYear', 'sessionEndYear', 'semester', 'validUntil', 'softBlock',
   'hardBlock', 'approvedBy', 'approvedAt', 'createdAt', 'updatedAt',
+  'pendingProfileUpdate', 'expiryReminderCount', 'lastExpiryReminderSentAt',
 ]);
 
 // ─── Firestore field → PostgreSQL column mapping ─────────────────────────────
@@ -63,6 +61,9 @@ const FIELD_MAP: Record<string, string> = {
   approvedAt: 'approved_at',
   createdAt: 'created_at',
   updatedAt: 'updated_at',
+  pendingProfileUpdate: 'pending_profile_update',
+  expiryReminderCount: 'expiry_reminder_count',
+  lastExpiryReminderSentAt: 'last_expiry_reminder_sent_at',
 };
 
 // ─── Timestamp handling ──────────────────────────────────────────────────────
@@ -120,14 +121,13 @@ async function up(): Promise<MigrationResult> {
         const pgCol = FIELD_MAP[key];
         if (pgCol) {
           // Handle timestamp fields
-          if (['validUntil', 'softBlock', 'hardBlock', 'approvedAt', 'createdAt', 'updatedAt'].includes(pgCol)) {
-            student[pgCol] = toISOString(value);
+          if (['valid_until', 'soft_block', 'hard_block', 'approved_at', 'created_at', 'updated_at', 'last_expiry_reminder_sent_at'].includes(pgCol)) {
+            student[pgCol] = value ? toISOString(value) : null;
           } else {
             student[pgCol] = value;
           }
         } else if (!CORE_FIELDS.has(key)) {
-          // Non-core field → extras
-          student[key] = value;
+          throw new Error(`Unexpected Firestore student field: "${key}" with value ${JSON.stringify(value)}`);
         }
       }
 

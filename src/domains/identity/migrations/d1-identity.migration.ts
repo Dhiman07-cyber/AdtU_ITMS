@@ -12,9 +12,6 @@
  * Core fields → typed columns:
  *   uid, email, name, role, createdAt, lastLoginAt
  *
- * Non-core fields → extras JSONB:
- *   firstAdmin, busFee, profilePhotoUrl, fullName, displayName, etc.
- *
  * Infrastructure only. No business logic. No service calls.
  */
 import type { MigrationDefinition, MigrationResult, ValidationResult } from '@/infrastructure/migration/contracts';
@@ -84,10 +81,11 @@ async function up(): Promise<MigrationResult> {
         ...(fsData.lastLoginAt ? { lastLoginAt: toISOString(fsData.lastLoginAt) } : {}),
       };
 
-      // Non-core fields → extras
+      // Ensure no unexpected fields are present
+      const EXPECTED_FIELDS = new Set(['uid', 'email', 'name', 'fullName', 'displayName', 'role', 'createdAt', 'lastLoginAt', 'id']);
       for (const [key, value] of Object.entries(fsData)) {
-        if (!CORE_FIELDS.has(key) && key !== 'uid') {
-          user[key] = value;
+        if (!EXPECTED_FIELDS.has(key)) {
+          throw new Error(`Unexpected Firestore user field: "${key}" with value ${JSON.stringify(value)}`);
         }
       }
 

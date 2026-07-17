@@ -9,8 +9,7 @@
  * SCHEMA MAPPING
  * ──────────────────────────────────────────────────────────────────────────
  * PostgreSQL column              → Route field
- * id                             → id
- * route_id                       → routeId
+ * id                             → id (PRIMARY KEY; route_id alias dropped — was always identical)
  * route_name                     → routeName
  * stops                          → stops (JSONB array)
  * total_stops                    → totalStops
@@ -36,7 +35,9 @@ function toISOOrNull(value: any): string | null {
 function routeDomainToRow(data: Partial<Route>): Record<string, any> {
   const row: Record<string, any> = {};
 
-  if (data.routeId !== undefined) row.route_id = data.routeId;
+  // route_id column dropped — was always identical to id. routeId domain field is preserved
+  // for backward compatibility but maps to id at the persistence level.
+  // Do NOT write route_id to the database.
   if (data.routeName !== undefined) row.route_name = data.routeName;
   if (data.stops !== undefined) row.stops = data.stops;
   if (data.totalStops !== undefined) row.total_stops = data.totalStops;
@@ -60,7 +61,7 @@ function routeDomainToRow(data: Partial<Route>): Record<string, any> {
 function pgRowToRoute(row: Record<string, any>): Route {
   return {
     id: row.id,
-    routeId: row.route_id,
+    routeId: row.id,  // route_id column dropped; routeId domain field reads from id
     routeName: row.route_name,
     stops: row.stops || [],
     totalStops: row.total_stops || 0,

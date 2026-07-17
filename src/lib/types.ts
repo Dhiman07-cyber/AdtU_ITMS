@@ -125,9 +125,7 @@ export interface Bus {
   routeId?: string;
   routeRef?: any; // Reference to the route document
   routeName?: string; // Legacy/Display
-  status: 'active' | 'inactive' | 'maintenance' | 'enroute' | 'idle' | 'Active' | 'Inactive' | 'Maintenance';
-  currentStudents?: string[];
-  currentPassengerCount?: number;
+  status: 'active' | 'inactive' | 'maintenance' | 'enroute' | 'idle';
   currentMembers?: number;
   morningLoad?: number;
   eveningLoad?: number;

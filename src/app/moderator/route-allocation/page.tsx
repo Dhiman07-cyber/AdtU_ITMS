@@ -331,7 +331,7 @@ export default function SmartRouteAllocationPage() {
             return;
         }
 
-        if (route.active === false || route.status === "Inactive") {
+        if (route.active === false || route.status === "inactive") {
             toast.error(`Route ${route.routeName} is not active`);
             return;
         }

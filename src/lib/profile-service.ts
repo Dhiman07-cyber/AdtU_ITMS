@@ -3,7 +3,7 @@
  * Fetches and normalizes user profile data with reference resolution
  */
 
-import { getRouteById } from '@/lib/dataService';
+import { getById as getRouteById } from '@/domains/route';
 import { getAdminById } from '@/domains/identity';
 
 export type UserRole = 'student' | 'driver' | 'moderator' | 'admin';

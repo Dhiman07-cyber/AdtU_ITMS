@@ -14,7 +14,7 @@
  * SCHEMA MAPPING
  * ──────────────────────────────────────────────────────────────────────────
  * Bus (Firestore)            → buses (PostgreSQL)
- * id / busId                 → id / bus_id
+ * id                          → id (PRIMARY KEY; bus_id alias dropped — was always identical)
  * busNumber                  → bus_number
  * model                      → model
  * year                       → year
@@ -25,7 +25,8 @@
  * routeName                  → route_name
  * status                     → status
  * currentStudents            → current_students (JSONB array)
- * currentPassengerCount      → current_passenger_count
+ * morning/eveningLoad        → morning_load / evening_load
+ * currentMembers             → GENERATED AS (morning_load + evening_load) — READ ONLY, never written
  * lastStartedAt              → last_started_at
  * lastEndedAt                → last_ended_at
  * createdAt / updatedAt      → created_at / updated_at
@@ -58,7 +59,7 @@ import type { Bus, Driver } from '@/lib/types';
 
 const BUS_FIELD_MAP: Record<string, string> = {
   id: 'id',
-  busId: 'bus_id',
+  // busId removed — bus_id column dropped; was always identical to id
   busNumber: 'bus_number',
   model: 'model',
   year: 'year',
@@ -68,9 +69,9 @@ const BUS_FIELD_MAP: Record<string, string> = {
   routeId: 'route_id',
   routeName: 'route_name',
   status: 'status',
-  currentStudents: 'current_students',
-  currentPassengerCount: 'current_passenger_count',
-  currentMembers: 'current_members',
+  // currentPassengerCount removed — current_passenger_count column dropped; was always identical to current_members
+  // currentMembers removed — current_members is now GENERATED ALWAYS AS (morning_load + evening_load) STORED;
+  //   writing it explicitly causes a PostgreSQL error. It is READ ONLY.
   morningLoad: 'morning_load',
   eveningLoad: 'evening_load',
   lastStartedAt: 'last_started_at',
@@ -79,7 +80,7 @@ const BUS_FIELD_MAP: Record<string, string> = {
   updatedAt: 'updated_at',
 };
 
-const KNOWN_BUS_FIELDS = new Set(Object.keys(BUS_FIELD_MAP));
+const VIRTUAL_BUS_FIELDS = new Set(['busId', 'currentPassengerCount', 'currentMembers', 'routeRef']);
 
 // ─── Timestamp helper ─────────────────────────────────────────────────────────
 
@@ -96,27 +97,27 @@ function toISOOrNull(value: any): string | null {
 
 function busDomainToRow(data: Partial<Bus>): Record<string, any> {
   const row: Record<string, any> = {};
-  const extras: Record<string, any> = {};
 
   for (const [key, value] of Object.entries(data)) {
+    if (VIRTUAL_BUS_FIELDS.has(key)) continue;
+
     const pgCol = BUS_FIELD_MAP[key];
     if (pgCol) {
-      row[pgCol] = value;
-    } else if (!KNOWN_BUS_FIELDS.has(key)) {
-      extras[key] = value;
+      if (pgCol === 'status' && value) {
+        row[pgCol] = String(value).toLowerCase();
+      } else {
+        row[pgCol] = value;
+      }
     }
   }
 
-  if (Object.keys(extras).length > 0) {
-    row.extras = extras;
-  }
   return row;
 }
 
 function pgRowToBus(row: Record<string, any>): Bus {
   const bus: Bus = {
     id: row.id,
-    busId: row.bus_id || row.id,
+    busId: row.id,  // bus_id column dropped; busId domain field now reads from id
     busNumber: row.bus_number || '',
     model: row.model,
     year: row.year,
@@ -126,9 +127,9 @@ function pgRowToBus(row: Record<string, any>): Bus {
     routeId: row.route_id,
     routeName: row.route_name,
     status: row.status || 'inactive',
-    currentStudents: row.current_students,
-    currentPassengerCount: row.current_passenger_count,
-    currentMembers: row.current_members ?? row.current_passenger_count ?? 0,
+    // current_passenger_count column dropped; currentPassengerCount now reads from current_members
+    currentPassengerCount: row.current_members ?? 0,
+    currentMembers: row.current_members ?? 0,
     morningLoad: row.morning_load ?? 0,
     eveningLoad: row.evening_load ?? 0,
     lastStartedAt: row.last_started_at,
@@ -136,10 +137,6 @@ function pgRowToBus(row: Record<string, any>): Bus {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
-
-  if (row.extras && typeof row.extras === 'object') {
-    Object.assign(bus, row.extras);
-  }
 
   return bus;
 }

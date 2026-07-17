@@ -27,6 +27,7 @@ import { createAuditEvent } from '@/domains/audit';
 import * as Notification from '@/domains/notification';
 import * as Student from '@/domains/student';
 import * as Seat from '@/domains/seat';
+import { deleteUnauthUser } from '@/domains/identity';
 import { calculateValidUntilDate } from '@/lib/utils/date-utils';
 import { computeBlockDatesFromValidUntil } from '@/lib/utils/deadline-computation';
 import { getDeadlineConfig } from '@/lib/deadline-config-service';
@@ -255,6 +256,10 @@ export async function approve(
       if (!identityResult?.success) {
         throw new Error('Identity activation failed');
       }
+
+      // Identity now owns this user — the transient unauth_users row is
+      // superseded. Best-effort delete (45-day TTL cron is the fallback).
+      await deleteUnauthUser(app.applicant_uid).catch(() => {});
     }
 
     // ── Step 2: Finalize application — atomic commit ────────────────

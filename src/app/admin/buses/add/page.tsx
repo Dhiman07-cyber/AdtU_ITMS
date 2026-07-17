@@ -43,7 +43,7 @@ export default function AddBusPage() {
     driverUID: "",
     routeId: "",
     shift: "", // No default shift
-    status: "Active",
+    status: "active",
     morningLoad: "",
     eveningLoad: ""
   });
@@ -83,7 +83,7 @@ export default function AddBusPage() {
         const nextNum = busesData.length + 1;
         const nextIdDisplay = nextNum.toString();
 
-        setBusData(prev => ({ ...prev, busId: nextIdDisplay, status: "Active" }));
+        setBusData(prev => ({ ...prev, busId: nextIdDisplay, status: "active" }));
         setDefaultBusIdValue(nextIdDisplay);
         setBuses(busesData);
 
@@ -216,7 +216,7 @@ export default function AddBusPage() {
             morningCount: parseInt(busData.morningLoad) || 0,
             eveningCount: parseInt(busData.eveningLoad) || 0
           },
-          status: busData.status || "Active"
+          status: busData.status || "active"
         }),
       });
 
@@ -247,7 +247,7 @@ export default function AddBusPage() {
       driverUID: "",
       routeId: "",
       shift: "",
-      status: "Active",
+      status: "active",
       morningLoad: "",
       eveningLoad: ""
     });
@@ -451,13 +451,13 @@ export default function AddBusPage() {
                   label="Status"
                   value={busData.status}
                   onChange={(value) => setBusData(prev => ({ ...prev, status: value }))}
-                  placeholder="Active"
+                  placeholder="active"
                   className="bg-gray-800 border-gray-700 focus:border-purple-500 text-white py-6 cursor-pointer"
                   required
                 >
-                  <SelectItem value="Active">Active</SelectItem>
-                  <SelectItem value="Inactive">Inactive</SelectItem>
-                  <SelectItem value="Maintenance">Maintenance</SelectItem>
+                  <SelectItem value="active">Active</SelectItem>
+                  <SelectItem value="inactive">Inactive</SelectItem>
+                  <SelectItem value="maintenance">Maintenance</SelectItem>
                 </OptimizedSelect>
               </div>
 

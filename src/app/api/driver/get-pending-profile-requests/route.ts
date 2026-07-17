@@ -64,7 +64,7 @@ export const POST = withSecurity(
         .or(`assigned_bus_id.eq.${busId},bus_id.eq.${busId}`);
 
       for (const studentData of students || []) {
-        const pendingProfileUpdate = studentData.extras?.pendingProfileUpdate || (studentData as any).pendingProfileUpdate;
+        const pendingProfileUpdate = studentData.pendingProfileUpdate;
         if (pendingProfileUpdate) {
           const existingRequest = requests.find(r => r.requestId === pendingProfileUpdate);
           if (!existingRequest) {

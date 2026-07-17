@@ -606,7 +606,7 @@ export default function DriverLiveTrackingPage() {
           if (busId) {
             const bus = await getBusById(busId);
             if (bus) {
-              if (bus.status === 'Inactive') {
+              if (bus.status === 'inactive') {
                 addToast("Your assigned bus is currently Inactive. You cannot start a trip.", "error");
                 router.push("/driver");
                 return;
@@ -1407,7 +1407,7 @@ export default function DriverLiveTrackingPage() {
     if (loading) return;
     if (!busData || !routeData || !currentUser) return;
 
-    if (busData.status === 'Inactive') {
+    if (busData.status === 'inactive') {
       addToast("Cannot start trip: Bus is Inactive", "error");
       router.push("/driver");
       return;

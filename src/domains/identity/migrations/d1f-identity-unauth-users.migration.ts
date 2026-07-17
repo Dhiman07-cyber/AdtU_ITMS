@@ -12,9 +12,6 @@
  * Core fields → typed columns:
  *   uid, email, displayName, photoURL, status, needsApplication, createdAt, lastLoginAt
  *
- * Non-core fields → extras JSONB:
- *   any other fields present in the Firestore document
- *
  * Infrastructure only. No business logic. No service calls.
  */
 import type { MigrationDefinition, MigrationResult, ValidationResult } from '@/infrastructure/migration/contracts';
@@ -76,7 +73,7 @@ async function up(): Promise<MigrationResult> {
       const fsData = doc.data;
       const uid = fsData.uid || doc.id;
 
-      // Build unauth user record — core fields + extras
+      // Build unauth user record — core fields
       const user: Record<string, any> = {
         uid,
         email: fsData.email || '',
@@ -88,10 +85,11 @@ async function up(): Promise<MigrationResult> {
         lastLoginAt: toISOString(fsData.lastLoginAt),
       };
 
-      // Non-core fields → spread into user (will become extras in pgInsertUnauthUser)
+      // Ensure no unexpected fields
       for (const [key, value] of Object.entries(fsData)) {
+        if (key === 'id') continue;
         if (!CORE_FIELDS.has(key) && key !== 'uid') {
-          user[key] = value;
+          throw new Error(`Unexpected Firestore unauth user field: "${key}" with value ${JSON.stringify(value)}`);
         }
       }
 

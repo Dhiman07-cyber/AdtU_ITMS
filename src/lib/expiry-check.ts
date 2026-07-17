@@ -71,8 +71,7 @@ export async function checkAndNotifyExpiringStudents(force: boolean = false): Pr
       validUntil: row.valid_until,
       sessionStartYear: row.session_start_year,
       sessionEndYear: row.session_end_year,
-      expiryReminderCount: row.extras?.expiryReminderCount || 0,
-      ...row.extras
+      expiryReminderCount: row.expiry_reminder_count || 0,
     }));
 
     result.totalChecked = mappedStudents.length;
@@ -130,7 +129,7 @@ export async function checkAndNotifyExpiringStudents(force: boolean = false): Pr
 
         // 2. Fetch fresh student details to count reminders and update in PostgreSQL (non-transactional, low-risk)
         const freshStudent = await getStudentById(studentUid);
-        const freshCount = freshStudent?.expiryReminderCount || freshStudent?.extras?.expiryReminderCount || 0;
+        const freshCount = freshStudent?.expiryReminderCount || 0;
 
         await updateStudent(studentUid, {
           lastExpiryReminderSentAt: nowIso,

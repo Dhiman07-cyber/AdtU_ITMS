@@ -40,7 +40,7 @@ export default function AddRoutePage() {
   const [routeData, setRouteData] = useState<RouteFormData>({
     routeId: "",
     routeName: "",
-    status: "Active"
+    status: "active"
   });
 
   const [stops, setStops] = useState<Stop[]>([]);
@@ -243,7 +243,7 @@ export default function AddRoutePage() {
     setRouteData({
       routeId: "",
       routeName: "",
-      status: "Active"
+      status: "active"
     });
     setStops([]);
     setCurrentStopInput("");
@@ -356,9 +356,8 @@ export default function AddRoutePage() {
                     <SelectValue placeholder="Select status" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="Active">Active</SelectItem>
-                    <SelectItem value="Inactive">Inactive</SelectItem>
-                    <SelectItem value="Under Maintenance">Under Maintenance</SelectItem>
+                    <SelectItem value="active">Active</SelectItem>
+                    <SelectItem value="inactive">Inactive</SelectItem>
                   </SelectContent>
                 </Select>
                 {errors.status && <p className="text-red-400 text-sm mt-1">{errors.status}</p>}

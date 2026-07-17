@@ -133,19 +133,12 @@ export async function invalidateToken(
 export async function deleteTokenByPath(docPath: string): Promise<void> {
   if (!adminDb) return;
   try {
-    // SECURITY: If the path is a student document (legacy token), do NOT delete it.
-    // Instead, clear the fcmToken field.
+    // SECURITY: If the path is a student document (legacy), do NOT delete it.
     if (docPath.startsWith('students/') && !docPath.includes('/tokens/')) {
-      console.log(`🧹 Clearing legacy FCM token on student doc instead of deleting: ${docPath}`);
-      await adminDb.doc(docPath).update({
-        fcmToken: FieldValue.delete(),
-        fcmPlatform: FieldValue.delete(),
-        updatedAt: FieldValue.serverTimestamp()
-      });
+      console.log(`Skipping legacy student doc path: ${docPath}`);
       return;
     }
 
-    // Standard subcollection token: safe to delete the specific token doc
     await adminDb.doc(docPath).delete();
   } catch (error: any) {
     console.error(`Error deleting token doc at ${docPath}:`, error.message);

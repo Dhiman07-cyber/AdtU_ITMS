@@ -543,9 +543,9 @@ export default function BusesPage() {
                       <TableCell>
                         <span className={cn(
                           "inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium",
-                          (bus.status === 'active' || bus.status === 'Active' || bus.status === 'idle' || bus.status === 'Idle' || bus.status === 'enroute' || bus.status === 'EnRoute') ? 'bg-green-500 text-white' :
-                          (bus.status === 'inactive' || bus.status === 'Inactive' || bus.status === 'expired' || bus.status === 'Expired') ? 'bg-red-500 text-white' :
-                          (bus.status === 'maintenance' || bus.status === 'Maintenance') ? 'bg-yellow-500 text-white' :
+                          (bus.status === 'active' || bus.status === 'idle' || bus.status === 'enroute') ? 'bg-green-500 text-white' :
+                          (bus.status === 'inactive' || bus.status === 'expired') ? 'bg-red-500 text-white' :
+                          (bus.status === 'maintenance') ? 'bg-yellow-500 text-white' :
                           theme === 'dark' ? 'bg-gray-100 text-gray-800' : 'bg-gray-200 text-gray-700'
                         )}>
                           {(() => {

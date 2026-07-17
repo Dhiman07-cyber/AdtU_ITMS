@@ -13,9 +13,6 @@
  *   uid, email, name, fullName, phone, employeeId, role, assignedFaculty,
  *   yearsOfService, altPhone, dob, profilePhotoUrl, username, createdAt, updatedAt
  *
- * Non-core fields → extras JSONB:
- *   any other fields present in the Firestore document
- *
  * Infrastructure only. No business logic. No service calls.
  */
 import type { MigrationDefinition, MigrationResult, ValidationResult } from '@/infrastructure/migration/contracts';
@@ -78,7 +75,7 @@ async function up(): Promise<MigrationResult> {
       const fsData = doc.data;
       const uid = fsData.uid || doc.id;
 
-      // Build admin record — core fields + extras
+      // Build admin record — core fields
       const admin: Record<string, any> = {
         uid,
         email: fsData.email || '',
@@ -97,10 +94,11 @@ async function up(): Promise<MigrationResult> {
         updatedAt: toISOString(fsData.updatedAt),
       };
 
-      // Non-core fields → spread into admin (will become extras in pgInsertAdmin)
+      // Ensure no unexpected fields
       for (const [key, value] of Object.entries(fsData)) {
+        if (key === 'id') continue;
         if (!CORE_FIELDS.has(key) && key !== 'uid') {
-          admin[key] = value;
+          throw new Error(`Unexpected Firestore admin field: "${key}" with value ${JSON.stringify(value)}`);
         }
       }
 

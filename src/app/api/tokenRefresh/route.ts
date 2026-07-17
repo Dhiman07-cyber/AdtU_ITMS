@@ -10,7 +10,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { adminAuth, adminDb } from '@/lib/firebase-admin';
+import { adminAuth } from '@/lib/firebase-admin';
 import { saveToken, isValidTokenFormat } from '@/lib/services/fcm-token-service';
 import { resolveUserRole } from '@/lib/security/role-cache';
 
@@ -28,7 +28,7 @@ export async function POST(request: NextRequest) {
     const idToken = authHeader.substring(7);
 
     // 2. Verify ID token
-    if (!adminAuth || !adminDb) {
+    if (!adminAuth) {
       return NextResponse.json(
         { success: false, error: 'Server not initialized' },
         { status: 500 }
@@ -90,13 +90,6 @@ export async function POST(request: NextRequest) {
         { status: 500 }
       );
     }
-
-    // 6. Also update legacy field
-    await adminDb.collection(targetCollection).doc(uid).set({
-      fcmToken: token,
-      fcmPlatform: platform || 'web',
-      fcmUpdatedAt: new Date().toISOString(),
-    }, { merge: true });
 
     console.log(`🔄 FCM token refreshed for ${targetCollection}/${uid}`);
     return NextResponse.json({ success: true });

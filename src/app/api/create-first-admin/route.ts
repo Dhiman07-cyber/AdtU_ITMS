@@ -63,10 +63,6 @@ export async function POST(request: Request) {
       name,
       role: 'admin',
       createdAt: new Date().toISOString(),
-      firstAdmin: true,
-      busFee: 0,
-      busFeeUpdatedAt: new Date().toISOString(),
-      busFeeVersion: 1,
     });
 
     return new Response(JSON.stringify({

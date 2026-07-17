@@ -393,7 +393,7 @@ function StudentBusLive() {
                   </div>
                   <div>
                     <p className="text-sm text-muted-foreground">Current Passengers</p>
-                    <p className="font-medium">{busData.currentPassengerCount || 0} passengers</p>
+                    <p className="font-medium">{busData.currentMembers || 0} passengers</p>
                   </div>
                 </div>
 

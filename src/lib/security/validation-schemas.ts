@@ -41,7 +41,7 @@ export const ReassignStudentsSchema = z.object({
         fromBusId: z.string().min(1).max(100),
         toBusId: z.string().min(1).max(100),
         toBusNumber: z.string().min(1).max(50),
-        shift: z.enum(['Morning', 'Evening', 'Both']),
+        shift: z.enum(['Morning', 'Evening']),
         stopId: z.string().max(100).optional(),
         stopName: z.string().max(200).optional(),
     })),

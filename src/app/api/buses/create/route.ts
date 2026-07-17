@@ -39,7 +39,7 @@ export async function POST(request: Request) {
       capacity,
       driverUID,
       routeId,
-      status = 'Active',
+      status = 'active',
       shift,
       load
     } = busData;

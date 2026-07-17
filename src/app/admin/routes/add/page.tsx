@@ -34,7 +34,7 @@ export default function AddRoutePage() {
   const [routeData, setRouteData] = useState<RouteFormData>({
     routeId: "",
     routeName: "",
-    status: "Active"
+    status: "active"
   });
 
   const [stops, setStops] = useState<Stop[]>([]);
@@ -307,9 +307,8 @@ export default function AddRoutePage() {
                     <SelectValue placeholder="Select Status" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="Active">Active</SelectItem>
-                    <SelectItem value="Inactive">Inactive</SelectItem>
-                    <SelectItem value="Under Maintenance">Under Maintenance</SelectItem>
+                    <SelectItem value="active">Active</SelectItem>
+                    <SelectItem value="inactive">Inactive</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -379,7 +378,7 @@ export default function AddRoutePage() {
             </div>
 
             <div className="grid grid-cols-3 gap-3 pt-6 border-t border-gray-800 w-full">
-              <Button type="button" onClick={() => { setRouteData(prev => ({ ...prev, routeName: "", status: "Active" })); setStops([]); }} className="bg-blue-600 hover:bg-blue-700 text-white w-full">Reset</Button>
+              <Button type="button" onClick={() => { setRouteData(prev => ({ ...prev, routeName: "", status: "active" })); setStops([]); }} className="bg-blue-600 hover:bg-blue-700 text-white w-full">Reset</Button>
               <Link href="/admin/routes" className="w-full block">
                 <Button type="button" className="bg-red-600 hover:bg-red-700 text-white w-full">Cancel</Button>
               </Link>

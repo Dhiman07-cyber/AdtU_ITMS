@@ -45,7 +45,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     // FIELD ALLOW-LIST: Only safe fields may be updated via this API.
     // Complex assignment/capacity updates go through /api/buses/update (transaction-safe).
     const ALLOWED_FIELDS = new Set(['busNumber', 'busName', 'routeId', 'capacity', 'status', 'notes', 'model', 'year', 'routeName', 'driverName']);
-    const BLOCKED_FIELDS = new Set(['activeDriverId', 'assignedDriverId', 'driverUID', 'currentStudents', 'currentPassengerCount']);
+    const BLOCKED_FIELDS = new Set(['activeDriverId', 'assignedDriverId', 'driverUID']);
 
     const busData: Record<string, any> = {};
     for (const [key, value] of Object.entries(requestBody)) {

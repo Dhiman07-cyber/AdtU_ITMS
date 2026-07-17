@@ -15,9 +15,6 @@
  *   assignedFaculty, permissions, permissionsUpdatedAt, permissionsUpdatedBy,
  *   createdAt, updatedAt
  *
- * Non-core fields → extras JSONB:
- *   (any additional Firestore fields not in the typed columns)
- *
  * Infrastructure only. No business logic. No service calls.
  */
 import type { MigrationDefinition, MigrationResult, ValidationResult } from '@/infrastructure/migration/contracts';
@@ -115,7 +112,7 @@ async function up(): Promise<MigrationResult> {
             moderator[pgCol] = value;
           }
         } else if (!CORE_FIELDS.has(key)) {
-          moderator[key] = value;
+          throw new Error(`Unexpected Firestore moderator field: "${key}" with value ${JSON.stringify(value)}`);
         }
       }
 

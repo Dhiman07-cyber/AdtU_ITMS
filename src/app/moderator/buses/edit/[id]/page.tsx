@@ -67,7 +67,7 @@ export default function EditBusPage({ params }: { params: Promise<{ id: string }
     driverUID: "",
     routeId: "",
     shift: "",
-    status: "Active",
+    status: "active",
     morningLoad: "0",
     eveningLoad: "0"
   });
@@ -114,7 +114,7 @@ export default function EditBusPage({ params }: { params: Promise<{ id: string }
           driverUID: bus.assignedDriverId || bus.driverUID || bus.activeDriverId || "",
           routeId: bus.routeId,
           shift: bus.shift || "",
-          status: bus.status || "Active",
+          status: bus.status || "active",
           morningLoad: mLoad.toString(),
           eveningLoad: eLoad.toString()
         });
@@ -424,9 +424,9 @@ export default function EditBusPage({ params }: { params: Promise<{ id: string }
                     <SelectValue placeholder="Select Status" />
                   </SelectTrigger>
                   <SelectContent position="popper" side="bottom" align="start">
-                    <SelectItem value="Active">Active</SelectItem>
-                    <SelectItem value="Inactive">Inactive</SelectItem>
-                    <SelectItem value="Maintenance">Maintenance</SelectItem>
+                    <SelectItem value="active">Active</SelectItem>
+                    <SelectItem value="inactive">Inactive</SelectItem>
+                    <SelectItem value="maintenance">Maintenance</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

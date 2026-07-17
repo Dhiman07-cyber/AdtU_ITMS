@@ -463,8 +463,8 @@ export default function DriverDashboard() {
                 ) : (
                   <Button
                     onClick={() => router.push('/driver/live-tracking')}
-                    disabled={busData?.status === 'Inactive'}
-                    className={`group relative overflow-hidden font-bold shadow-xl transform transition-all duration-300 px-3 py-6 sm:px-6 sm:py-3 rounded-2xl border ${busData?.status === 'Inactive'
+                    disabled={busData?.status === 'inactive'}
+                    className={`group relative overflow-hidden font-bold shadow-xl transform transition-all duration-300 px-3 py-6 sm:px-6 sm:py-3 rounded-2xl border ${busData?.status === 'inactive'
                       ? 'bg-gray-600 text-gray-300 border-gray-500 cursor-not-allowed opacity-70'
                       : 'bg-gradient-to-r from-green-600 via-emerald-500 to-teal-600 hover:from-green-700 hover:via-emerald-600 hover:to-teal-700 text-white border-green-400/30 shadow-green-500/20 hover:shadow-green-600/40 active:scale-95'
                       }`}
@@ -772,9 +772,9 @@ export default function DriverDashboard() {
                           <Activity className="h-2.5 w-2.5 sm:h-3 sm:w-3 text-amber-500" />
                           Bus
                         </p>
-                        <span className={`text-xs sm:text-sm font-bold ${busData?.status === 'Active' ? 'text-green-500' :
-                          busData?.status === 'Inactive' ? 'text-red-500' :
-                            busData?.status === 'Maintenance' ? 'text-yellow-500' :
+                        <span className={`text-xs sm:text-sm font-bold ${busData?.status === 'active' ? 'text-green-500' :
+                          busData?.status === 'inactive' ? 'text-red-500' :
+                            busData?.status === 'maintenance' ? 'text-yellow-500' :
                               'text-gray-500'
                           }`}>
                           {busData?.status || 'N/A'}

@@ -15,9 +15,6 @@
  *   assignedRouteId, busId, routeId, busAssigned, driverId, joiningDate,
  *   shift, status, tripActive, activeTripId, isReserved, createdAt, updatedAt
  *
- * Non-core fields → extras JSONB:
- *   (any additional Firestore fields not in the typed columns)
- *
  * Infrastructure only. No business logic. No service calls.
  */
 import type { MigrationDefinition, MigrationResult, ValidationResult } from '@/infrastructure/migration/contracts';
@@ -121,7 +118,7 @@ async function up(): Promise<MigrationResult> {
             driver[pgCol] = value;
           }
         } else if (!CORE_FIELDS.has(key)) {
-          driver[key] = value;
+          throw new Error(`Unexpected Firestore driver field: "${key}" with value ${JSON.stringify(value)}`);
         }
       }
 

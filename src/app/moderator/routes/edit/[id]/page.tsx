@@ -39,7 +39,7 @@ export default function EditRoutePage({ params }: { params: Promise<{ id: string
   const [routeData, setRouteData] = useState<RouteFormData>({
     routeId: "",
     routeName: "",
-    status: "Active"
+    status: "active"
   });
 
   const [stops, setStops] = useState<Stop[]>([]);
@@ -65,7 +65,7 @@ export default function EditRoutePage({ params }: { params: Promise<{ id: string
         setRouteData({
           routeId: displayId,
           routeName: foundRoute.routeName || "",
-          status: foundRoute.status || "Active"
+          status: foundRoute.status || "active"
         });
 
         if (foundRoute.stops && Array.isArray(foundRoute.stops)) {
@@ -297,9 +297,8 @@ export default function EditRoutePage({ params }: { params: Promise<{ id: string
                     <SelectValue placeholder="Select Status" />
                   </SelectTrigger>
                   <SelectContent position="popper" side="bottom" align="start">
-                    <SelectItem value="Active">Active</SelectItem>
-                    <SelectItem value="Inactive">Inactive</SelectItem>
-                    <SelectItem value="Under Maintenance">Under Maintenance</SelectItem>
+                    <SelectItem value="active">Active</SelectItem>
+                    <SelectItem value="inactive">Inactive</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

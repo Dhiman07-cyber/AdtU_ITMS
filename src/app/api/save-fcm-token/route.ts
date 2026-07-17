@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { adminDb } from '@/lib/firebase-admin';
 import { saveToken, isValidTokenFormat, subscribeToTopic } from '@/lib/services/fcm-token-service';
 import { withSecurity } from '@/lib/security/api-security';
 import { SaveFCMTokenSchema } from '@/lib/security/validation-schemas';
@@ -94,20 +93,6 @@ export const POST = withSecurity(
         await subscribeToTopic(token, topic);
       } catch (topicErr) {
         console.warn(`[${requestId}] Topic subscription failed (non-critical):`, topicErr);
-      }
-    }
-
-    // 9. Legacy field sync (backward compatibility with older notification queries)
-    if (adminDb) {
-      try {
-        await adminDb.collection(targetCollection).doc(uid).set({
-          fcmToken: token,
-          fcmPlatform: platform || 'web',
-          fcmUpdatedAt: new Date().toISOString(),
-        }, { merge: true });
-      } catch (err) {
-        // Non-critical: subcollection is the source of truth
-        console.warn(`[${requestId}] Legacy FCM sync failed (non-critical):`, err);
       }
     }
 

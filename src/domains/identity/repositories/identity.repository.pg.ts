@@ -16,11 +16,6 @@
  * role                 → role
  * created_at           → createdAt (ISO string)
  * last_login_at        → lastLoginAt
- * extras               → spread into result for backward compatibility
- *
- * The extras JSONB captures unmapped Firestore fields (firstAdmin, busFee,
- * profilePhotoUrl, etc.) for migration compatibility. Any field that becomes
- * business-critical must be promoted to a typed column and removed from extras.
  */
 import { getSupabaseServer } from '@/lib/supabase-server';
 import type { UserRole } from '@/lib/user-service';
@@ -37,7 +32,6 @@ interface PgUser {
   created_at: string;
   updated_at: string;
   last_login_at: string | null;
-  extras: Record<string, any>;
 }
 
 /** User type compatible with existing codebase ([key: string]: any) */
@@ -55,8 +49,6 @@ export interface IdentityUser {
 
 /**
  * Maps a PostgreSQL row to the IdentityUser type.
- * Spreads extras for backward compatibility with code that accesses
- * arbitrary fields (e.g., profilePhotoUrl, fullName, firstAdmin).
  */
 function pgRowToUser(row: PgUser): IdentityUser {
   const user: IdentityUser = {
@@ -66,7 +58,6 @@ function pgRowToUser(row: PgUser): IdentityUser {
     role: row.role,
     createdAt: row.created_at,
     ...(row.last_login_at ? { lastLoginAt: row.last_login_at } : {}),
-    ...row.extras,
   };
   return user;
 }
@@ -157,15 +148,6 @@ export async function pgFindUserByEmail(email: string): Promise<IdentityUser | n
 export async function pgInsertUser(user: IdentityUser): Promise<void> {
   const db = getSupabaseServer();
 
-  const extras: Record<string, any> = {};
-  const coreKeys = new Set(['uid', 'email', 'name', 'role', 'createdAt', 'lastLoginAt']);
-
-  for (const [key, value] of Object.entries(user)) {
-    if (!coreKeys.has(key)) {
-      extras[key] = value;
-    }
-  }
-
   const payload = {
     uid: user.uid,
     email: user.email,
@@ -173,7 +155,6 @@ export async function pgInsertUser(user: IdentityUser): Promise<void> {
     role: user.role,
     created_at: user.createdAt || new Date().toISOString(),
     last_login_at: user.lastLoginAt || null,
-    extras,
   };
 
   const { error } = await db
@@ -187,7 +168,6 @@ export async function pgInsertUser(user: IdentityUser): Promise<void> {
 
 /**
  * Update user data. Merges into existing record.
- * Non-core fields are merged into extras JSONB.
  */
 export async function pgUpdateUser(uid: string, data: Partial<IdentityUser>): Promise<void> {
   const db = getSupabaseServer();
@@ -199,42 +179,7 @@ export async function pgUpdateUser(uid: string, data: Partial<IdentityUser>): Pr
   if (data.role !== undefined) payload.role = data.role;
   if (data.lastLoginAt !== undefined) payload.last_login_at = data.lastLoginAt;
 
-  // Merge non-core fields into extras
-  const coreKeys = new Set(['uid', 'email', 'name', 'role', 'createdAt', 'lastLoginAt']);
-  const extrasMerge: Record<string, any> = {};
-  let hasExtras = false;
-
-  for (const [key, value] of Object.entries(data)) {
-    if (!coreKeys.has(key)) {
-      extrasMerge[key] = value;
-      hasExtras = true;
-    }
-  }
-
-  if (hasExtras) {
-    // Use PostgreSQL jsonb || operator to merge extras
-    const { error: rpcError } = await db.rpc('merge_user_extras', {
-      p_uid: uid,
-      p_extras: extrasMerge,
-    });
-
-    if (rpcError) {
-      // Fallback: read current extras, merge, write back
-      const { data: current } = await db
-        .from('users')
-        .select('extras')
-        .eq('uid', uid)
-        .maybeSingle();
-
-      if (current) {
-        payload.extras = { ...(current.extras || {}), ...extrasMerge };
-      }
-    }
-  }
-
-  // Update core fields (if any)
-  const coreFields = Object.keys(payload).filter(k => k !== '_extras_merge' && k !== 'extras');
-  if (coreFields.length > 0 || payload.extras) {
+  if (Object.keys(payload).length > 0) {
     const { error } = await db
       .from('users')
       .update(payload)
@@ -411,7 +356,6 @@ const KNOWN_DRIVER_FIELDS = new Set(Object.keys(DRIVER_FIELD_MAP));
 /** Convert Firestore driver data to PostgreSQL row */
 function firestoreDriverToRow(data: Record<string, any>): Record<string, any> {
   const row: Record<string, any> = {};
-  const extras: Record<string, any> = {};
 
   for (const [key, value] of Object.entries(data)) {
     if (key === 'id') continue;
@@ -422,14 +366,9 @@ function firestoreDriverToRow(data: Record<string, any>): Record<string, any> {
       } else {
         row[pgCol] = value;
       }
-    } else if (!KNOWN_DRIVER_FIELDS.has(key)) {
-      extras[key] = value;
     }
   }
 
-  if (Object.keys(extras).length > 0) {
-    row.extras = extras;
-  }
   return row;
 }
 
@@ -440,9 +379,6 @@ function rowToFirestoreDriver(row: Record<string, any>): Record<string, any> {
     if (row[pgCol] !== undefined && row[pgCol] !== null) {
       result[firestoreField] = row[pgCol];
     }
-  }
-  if (row.extras && typeof row.extras === 'object') {
-    Object.assign(result, row.extras);
   }
   return result;
 }
@@ -581,19 +517,13 @@ export async function pgUpsertDriver(driver: Record<string, any>): Promise<void>
   }
 }
 
-/** Update a driver profile (partial update)
- * FIXED: Uses atomic merge_driver_extras RPC for extras fields.
- */
+/** Update a driver profile (partial update) */
 export async function pgUpdateDriver(uid: string, data: Record<string, any>): Promise<void> {
   const db = getSupabaseServer();
   const row = firestoreDriverToRow(data);
 
   delete row.uid;
   row.updated_at = new Date().toISOString();
-
-  // Extract extras for atomic merge (if any)
-  const extrasToMerge = row.extras;
-  delete row.extras; // Don't include in the UPDATE
 
   const { error } = await db
     .from('driver_profiles')
@@ -602,17 +532,6 @@ export async function pgUpdateDriver(uid: string, data: Record<string, any>): Pr
 
   if (error) {
     throw new Error(`IdentityRepository (PG) driver update failed: ${error.message}`);
-  }
-
-  // Atomically merge extras using RPC (prevents race condition)
-  if (extrasToMerge && Object.keys(extrasToMerge).length > 0) {
-    const { error: rpcError } = await db.rpc('merge_driver_extras', {
-      p_uid: uid,
-      p_extras: extrasToMerge,
-    });
-    if (rpcError) {
-      throw new Error(`IdentityRepository (PG) driver extras merge failed: ${rpcError.message}`);
-    }
   }
 }
 
@@ -695,7 +614,6 @@ const KNOWN_MODERATOR_FIELDS = new Set(Object.keys(MODERATOR_FIELD_MAP));
 /** Convert Firestore moderator data to PostgreSQL row */
 function firestoreModeratorToRow(data: Record<string, any>): Record<string, any> {
   const row: Record<string, any> = {};
-  const extras: Record<string, any> = {};
 
   for (const [key, value] of Object.entries(data)) {
     if (key === 'id') continue;
@@ -706,14 +624,9 @@ function firestoreModeratorToRow(data: Record<string, any>): Record<string, any>
       } else {
         row[pgCol] = value;
       }
-    } else if (!KNOWN_MODERATOR_FIELDS.has(key)) {
-      extras[key] = value;
     }
   }
 
-  if (Object.keys(extras).length > 0) {
-    row.extras = extras;
-  }
   return row;
 }
 
@@ -724,9 +637,6 @@ function rowToFirestoreModerator(row: Record<string, any>): Record<string, any> 
     if (row[pgCol] !== undefined && row[pgCol] !== null) {
       result[firestoreField] = row[pgCol];
     }
-  }
-  if (row.extras && typeof row.extras === 'object') {
-    Object.assign(result, row.extras);
   }
   return result;
 }
@@ -799,19 +709,13 @@ export async function pgInsertModerator(moderator: Record<string, any>): Promise
   }
 }
 
-/** Update a moderator profile (partial update)
- * FIXED: Uses atomic merge_moderator_extras RPC instead of unsafe read-before-write pattern.
- */
+/** Update a moderator profile (partial update) */
 export async function pgUpdateModerator(uid: string, data: Record<string, any>): Promise<void> {
   const db = getSupabaseServer();
   const row = firestoreModeratorToRow(data);
 
   delete row.uid;
   row.updated_at = new Date().toISOString();
-
-  // Extract extras for atomic merge (if any)
-  const extrasToMerge = row.extras;
-  delete row.extras; // Don't include in the UPDATE
 
   // Update core fields
   const { error } = await db
@@ -821,17 +725,6 @@ export async function pgUpdateModerator(uid: string, data: Record<string, any>):
 
   if (error) {
     throw new Error(`IdentityRepository (PG) moderator update failed: ${error.message}`);
-  }
-
-  // Atomically merge extras using RPC (prevents race condition)
-  if (extrasToMerge && Object.keys(extrasToMerge).length > 0) {
-    const { error: rpcError } = await db.rpc('merge_moderator_extras', {
-      p_uid: uid,
-      p_extras: extrasToMerge,
-    });
-    if (rpcError) {
-      throw new Error(`IdentityRepository (PG) moderator extras merge failed: ${rpcError.message}`);
-    }
   }
 }
 
@@ -932,7 +825,6 @@ const KNOWN_ADMIN_FIELDS = new Set(Object.keys(ADMIN_FIELD_MAP));
 /** Convert Firestore admin data to PostgreSQL row */
 function firestoreAdminToRow(data: Record<string, any>): Record<string, any> {
   const row: Record<string, any> = {};
-  const extras: Record<string, any> = {};
 
   for (const [key, value] of Object.entries(data)) {
     if (key === 'id') continue;
@@ -943,14 +835,9 @@ function firestoreAdminToRow(data: Record<string, any>): Record<string, any> {
       } else {
         row[pgCol] = value;
       }
-    } else if (!KNOWN_ADMIN_FIELDS.has(key)) {
-      extras[key] = value;
     }
   }
 
-  if (Object.keys(extras).length > 0) {
-    row.extras = extras;
-  }
   return row;
 }
 
@@ -961,9 +848,6 @@ function rowToFirestoreAdmin(row: Record<string, any>): Record<string, any> {
     if (row[pgCol] !== undefined && row[pgCol] !== null) {
       result[firestoreField] = row[pgCol];
     }
-  }
-  if (row.extras && typeof row.extras === 'object') {
-    Object.assign(result, row.extras);
   }
   return result;
 }
@@ -1073,7 +957,6 @@ const KNOWN_UNAUTH_FIELDS = new Set(Object.keys(UNAUTH_FIELD_MAP));
 /** Convert Firestore unauth user data to PostgreSQL row */
 function firestoreUnauthToRow(data: Record<string, any>): Record<string, any> {
   const row: Record<string, any> = {};
-  const extras: Record<string, any> = {};
 
   for (const [key, value] of Object.entries(data)) {
     if (key === 'id') continue;
@@ -1084,14 +967,9 @@ function firestoreUnauthToRow(data: Record<string, any>): Record<string, any> {
       } else {
         row[pgCol] = value;
       }
-    } else if (!KNOWN_UNAUTH_FIELDS.has(key)) {
-      extras[key] = value;
     }
   }
 
-  if (Object.keys(extras).length > 0) {
-    row.extras = extras;
-  }
   return row;
 }
 
@@ -1102,9 +980,6 @@ function rowToFirestoreUnauth(row: Record<string, any>): Record<string, any> {
     if (row[pgCol] !== undefined && row[pgCol] !== null) {
       result[firestoreField] = row[pgCol];
     }
-  }
-  if (row.extras && typeof row.extras === 'object') {
-    Object.assign(result, row.extras);
   }
   return result;
 }

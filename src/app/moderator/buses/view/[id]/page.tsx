@@ -295,7 +295,7 @@ export default function ViewBusPage({ params }: { params: Promise<{ id: string }
                         <Bus className="h-8 w-8 text-white" />
                       </div>
                       <div className="absolute -top-1 -right-1 w-6 h-6 rounded-full bg-gradient-to-br from-emerald-400 to-green-500 flex items-center justify-center shadow-md">
-                        <span className="text-xs font-bold text-white">{bus.status === 'Active' ? '✓' : '⚠'}</span>
+                        <span className="text-xs font-bold text-white">{bus.status === 'active' ? '✓' : '⚠'}</span>
                       </div>
                     </div>
 

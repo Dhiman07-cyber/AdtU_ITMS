@@ -22,8 +22,6 @@
  *   driverId, joiningDate, shift, status, tripActive, activeTripId,
  *   profilePhotoUrl, createdAt, updatedAt
  *
- * Non-core fields → extras JSONB.
- *
  * Infrastructure only. No business logic. No service calls.
  */
 import type { MigrationDefinition, MigrationResult, ValidationResult } from '@/infrastructure/migration/contracts';
@@ -102,7 +100,7 @@ async function up(): Promise<MigrationResult> {
 
       const bus: Record<string, any> = {
         id,
-        bus_id: fsData.busId || id,
+        // bus_id column dropped — was always identical to id
         bus_number: fsData.busNumber || '',
         model: fsData.model || null,
         year: fsData.year || null,
@@ -112,23 +110,18 @@ async function up(): Promise<MigrationResult> {
         route_id: fsData.routeId || null,
         route_name: fsData.routeName || null,
         status: fsData.status || 'inactive',
-        current_students: Array.isArray(fsData.currentStudents) ? fsData.currentStudents : [],
-        current_passenger_count: fsData.currentPassengerCount ?? 0,
+        // current_passenger_count column dropped — current_members is now GENERATED
         last_started_at: toISOOrNull(fsData.lastStartedAt),
         last_ended_at: toISOOrNull(fsData.lastEndedAt),
         created_at: toISOString(fsData.createdAt),
         updated_at: toISOString(fsData.updatedAt),
       };
 
-      // Non-core fields → extras
-      const extras: Record<string, any> = {};
+      // Ensure no unexpected fields
       for (const [key, value] of Object.entries(fsData)) {
         if (!BUS_CORE_FIELDS.has(key)) {
-          extras[key] = value;
+          throw new Error(`Unexpected Firestore bus field: "${key}" with value ${JSON.stringify(value)}`);
         }
-      }
-      if (Object.keys(extras).length > 0) {
-        bus.extras = extras;
       }
 
       await pgUpsertBus(bus as any);
@@ -181,15 +174,11 @@ async function up(): Promise<MigrationResult> {
         updated_at: toISOString(fsData.updatedAt),
       };
 
-      // Non-core fields → extras
-      const extras: Record<string, any> = {};
+      // Ensure no unexpected fields
       for (const [key, value] of Object.entries(fsData)) {
         if (!DRIVER_CORE_FIELDS.has(key)) {
-          extras[key] = value;
+          throw new Error(`Unexpected Firestore driver field: "${key}" with value ${JSON.stringify(value)}`);
         }
-      }
-      if (Object.keys(extras).length > 0) {
-        driver.extras = extras;
       }
 
       await pgUpsertDriver(driver as any);

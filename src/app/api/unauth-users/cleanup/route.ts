@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { adminAuth, adminDb } from '@/lib/firebase-admin';
+import { adminAuth } from '@/lib/firebase-admin';
 import { verifyApiAuth, verifyCronSecret } from '@/lib/security/api-auth';
 import { createUser, getUserById, createStudent, deleteUnauthUser, getAllUnauthUsers } from '@/domains/identity';
 
@@ -45,11 +45,6 @@ export async function POST(request: NextRequest) {
           console.error(`PG delete failed for ${userId}:`, pgErr.message);
         }
 
-        // Mirror cleanup to Firestore
-        if (adminDb) {
-          await adminDb.collection('unauthUsers').doc(userId).delete().catch(() => {});
-        }
-
         deletedCount++;
         cleanupResults.push({ userId, action: 'deleted', reason: '45+ days inactive' });
         continue;
@@ -89,11 +84,6 @@ export async function POST(request: NextRequest) {
             console.error(`PG delete failed for ${userId}:`, pgErr.message);
           }
 
-          // Mirror cleanup to Firestore
-          if (adminDb) {
-            await adminDb.collection('unauthUsers').doc(userId).delete().catch(() => {});
-          }
-
           movedCount++;
           cleanupResults.push({ userId, action: 'moved', reason: 'approved application' });
         } catch (moveError: any) {
@@ -115,11 +105,6 @@ export async function POST(request: NextRequest) {
           await deleteUnauthUser(userId);
         } catch (pgErr: any) {
           console.error(`PG delete failed for ${userId}:`, pgErr.message);
-        }
-
-        // Mirror cleanup to Firestore
-        if (adminDb) {
-          await adminDb.collection('unauthUsers').doc(userId).delete().catch(() => {});
         }
 
         deletedCount++;

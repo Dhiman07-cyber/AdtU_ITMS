@@ -44,7 +44,6 @@
  * approved_at                    → approvedAt (ISO string)
  * created_at                     → createdAt (ISO string)
  * updated_at                     → updatedAt (ISO string)
- * extras                         → spread into result for backward compatibility
  *
  * Derived fields and business logic are NOT stored here.
  */
@@ -89,33 +88,27 @@ const STUDENT_FIELD_MAP: Record<string, string> = {
   approvedAt: 'approved_at',
   lastProcessedApplicationId: 'last_processed_application_id',
   seatReleasedAt: 'seat_released_at',
+  pendingProfileUpdate: 'pending_profile_update',
+  expiryReminderCount: 'expiry_reminder_count',
+  lastExpiryReminderSentAt: 'last_expiry_reminder_sent_at',
   createdAt: 'created_at',
   updatedAt: 'updated_at',
 };
-
-/** Known fields that map to typed PostgreSQL columns */
-const KNOWN_STUDENT_FIELDS = new Set(Object.keys(STUDENT_FIELD_MAP));
 
 // ─── Mappers ─────────────────────────────────────────────────────────────────
 
 /** Convert domain student data to PostgreSQL row */
 function pgStudentToRow(data: Partial<Student>): Record<string, any> {
   const row: Record<string, any> = {};
-  const extras: Record<string, any> = {};
 
   for (const [key, value] of Object.entries(data)) {
     if (key === 'id') continue; // 'id' maps to uid
     const pgCol = STUDENT_FIELD_MAP[key];
     if (pgCol) {
       row[pgCol] = value;
-    } else if (!KNOWN_STUDENT_FIELDS.has(key)) {
-      extras[key] = value;
     }
   }
 
-  if (Object.keys(extras).length > 0) {
-    row.extras = extras;
-  }
   return row;
 }
 
@@ -157,14 +150,12 @@ function pgRowToStudent(row: Record<string, any>): Student {
     approvedBy: row.approved_by,
     approvedAt: row.approved_at,
     seatReleasedAt: row.seat_released_at,
+    pendingProfileUpdate: row.pending_profile_update,
+    expiryReminderCount: row.expiry_reminder_count ?? 0,
+    lastExpiryReminderSentAt: row.last_expiry_reminder_sent_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
-
-  // Spread extras for backward compatibility with [key: string]: any
-  if (row.extras && typeof row.extras === 'object') {
-    Object.assign(student, row.extras);
-  }
 
   return student;
 }
@@ -298,7 +289,6 @@ export async function pgInsert(student: Partial<Student>): Promise<void> {
 
 /**
  * Update a student profile (partial update).
- * FIXED: Uses atomic merge_student_extras RPC instead of unsafe read-before-write pattern.
  */
 export async function pgUpdate(uid: string, data: Partial<Student>): Promise<void> {
   const db = getSupabaseServer();
@@ -308,10 +298,6 @@ export async function pgUpdate(uid: string, data: Partial<Student>): Promise<voi
   delete row.uid;
   row.updated_at = new Date().toISOString();
 
-  // Extract extras for atomic merge (if any)
-  const extrasToMerge = row.extras;
-  delete row.extras; // Don't include in the UPDATE
-
   // Update core fields
   const { error } = await db
     .from('student_profiles')
@@ -320,17 +306,6 @@ export async function pgUpdate(uid: string, data: Partial<Student>): Promise<voi
 
   if (error) {
     throw new Error(`StudentRepository (PG) update failed: ${error.message}`);
-  }
-
-  // Atomically merge extras using RPC (prevents race condition)
-  if (extrasToMerge && Object.keys(extrasToMerge).length > 0) {
-    const { error: rpcError } = await db.rpc('merge_student_extras', {
-      p_uid: uid,
-      p_extras: extrasToMerge,
-    });
-    if (rpcError) {
-      throw new Error(`StudentRepository (PG) extras merge failed: ${rpcError.message}`);
-    }
   }
 }
 

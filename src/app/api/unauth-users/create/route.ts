@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withSecurity } from '@/lib/security/api-security';
-import { createUnauthUser, getUnauthUserById, getUserById } from '@/domains/identity';
+import { createUnauthUser, getUnauthUserById, getUserById, updateUnauthUser } from '@/domains/identity';
 
 /**
  * Create or update an unauthenticated user entry
@@ -27,10 +27,8 @@ export const POST = withSecurity(
 
       const existingPgUser = await getUnauthUserById(uid);
       if (existingPgUser) {
-        await createUnauthUser({
-          uid,
-          lastLoginAt: new Date().toISOString(),
-        });
+        // Existing row: bump last_login_at (an insert here PK-violates)
+        await updateUnauthUser(uid, { lastLoginAt: new Date().toISOString() });
 
         return NextResponse.json({
           success: true,

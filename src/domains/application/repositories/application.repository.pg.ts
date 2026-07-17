@@ -48,7 +48,6 @@
  * expired_at                     → expiredAt (ISO string)
  * expiry_reason                  → expiryReason
  * eligible_reminder_sent_at      → eligibleReminderSentAt (ISO string)
- * extras                         → spread into result for backward compatibility
  *
  * Promoted form_data sub-fields (typed columns):
  *   route_id, bus_id, stop_id, shift, session_start_year, session_end_year,
@@ -118,7 +117,6 @@ const TIMESTAMP_FIELDS = new Set([
 /** Convert domain application data to PostgreSQL row */
 function pgApplicationToRow(data: Partial<Application>): Record<string, any> {
   const row: Record<string, any> = {};
-  const extras: Record<string, any> = {};
 
   for (const [key, value] of Object.entries(data)) {
     if (key === 'id') continue; // 'id' maps to application_id
@@ -130,14 +128,9 @@ function pgApplicationToRow(data: Partial<Application>): Record<string, any> {
       // JSONB fields: formData → form_data, stateHistory → state_history, etc.
       const snakeKey = key.replace(/([A-Z])/g, '_$1').toLowerCase();
       row[snakeKey] = value;
-      } else if (!KNOWN_APPLICATION_FIELDS.has(key)) {
-      extras[key] = value;
     }
   }
 
-  if (Object.keys(extras).length > 0) {
-    row.extras = extras;
-  }
   return row;
 }
 
@@ -175,10 +168,7 @@ function pgRowToApplication(row: Record<string, any>): Application {
     linkedStudentUid: row.linked_student_uid,
   } as Application;
 
-  // Spread extras for backward compatibility
-  if (row.extras && typeof row.extras === 'object') {
-    Object.assign(app, row.extras);
-  }
+
 
   return app;
 }
@@ -314,12 +304,6 @@ export async function pgUpdate(applicationId: string, data: Partial<Application>
   delete row.application_id;
   row.updated_at = new Date().toISOString();
 
-  // Extract extras for atomic merge (if any)
-  // FIXED: was unsafe read-before-write (TOCTOU). Now uses merge_application_extras RPC.
-  const extrasToMerge = row.extras;
-  delete row.extras; // Don't include in the UPDATE
-
-  // Update core fields
   const { error } = await db
     .from('applications')
     .update(row)
@@ -327,17 +311,6 @@ export async function pgUpdate(applicationId: string, data: Partial<Application>
 
   if (error) {
     throw new Error(`ApplicationRepository (PG) update failed: ${error.message}`);
-  }
-
-  // Atomically merge extras using RPC (prevents TOCTOU race condition)
-  if (extrasToMerge && Object.keys(extrasToMerge).length > 0) {
-    const { error: rpcError } = await db.rpc('merge_application_extras', {
-      p_application_id: applicationId,
-      p_extras: extrasToMerge,
-    });
-    if (rpcError) {
-      throw new Error(`ApplicationRepository (PG) extras merge failed: ${rpcError.message}`);
-    }
   }
 }
 

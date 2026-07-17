@@ -621,9 +621,9 @@ export default function StudentDashboard() {
                         <Activity className="h-2.5 w-2.5 sm:h-3 sm:w-3 text-amber-500" />
                         Status
                       </p>
-                      <Badge className={`text-[10px] sm:text-xs font-bold ${busData?.status === 'Active' ? 'bg-green-500 text-white' :
-                        busData?.status === 'Inactive' ? 'bg-red-500 text-white' :
-                          busData?.status === 'Maintenance' ? 'bg-yellow-500 text-white' :
+                      <Badge className={`text-[10px] sm:text-xs font-bold ${busData?.status === 'active' ? 'bg-green-500 text-white' :
+                        busData?.status === 'inactive' ? 'bg-red-500 text-white' :
+                          busData?.status === 'maintenance' ? 'bg-yellow-500 text-white' :
                             'bg-gray-500 text-white'
                         }`}>
                         {busData?.status || 'N/A'}
