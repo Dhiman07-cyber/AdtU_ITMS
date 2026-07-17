@@ -72,13 +72,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { adminAuth, adminDb } = await import('@/lib/firebase-admin');
+    const { adminAuth } = await import('@/lib/firebase-admin');
     const decodedToken = await adminAuth.verifyIdToken(token);
 
-    // Verify user is admin
-    const adminDoc = await adminDb.collection('admins').doc(decodedToken.uid).get();
+    const { resolveUserRole } = await import('@/lib/security/role-cache');
+    const userRole = await resolveUserRole(decodedToken.uid);
 
-    if (!adminDoc.exists) {
+    if (userRole.role !== 'admin') {
       return NextResponse.json({ error: 'Admin access required' }, { status: 403 });
     }
 

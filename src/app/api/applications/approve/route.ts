@@ -3,6 +3,8 @@ import { adminAuth, adminDb } from '@/lib/firebase-admin';
 import { approve } from '@/domains/application';
 import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
 import { safeErrorMessage } from '@/lib/security/safe-error';
+import { resolveUserRole } from '@/lib/security/role-cache';
+import { getUpdaterInfo } from '@/lib/utils/updatedBy';
 
 export async function POST(request: NextRequest) {
   try {
@@ -16,22 +18,18 @@ export async function POST(request: NextRequest) {
     const decodedToken = await adminAuth.verifyIdToken(token);
     const uid = decodedToken.uid;
 
-    const [adminSnap, modSnap] = (await adminDb.getAll(
-      adminDb.collection('admins').doc(uid),
-      adminDb.collection('moderators').doc(uid),
-    )) as any[];
-
-    if (!adminSnap.exists && !modSnap.exists) {
+    const userRole = await resolveUserRole(uid);
+    if (!userRole.role) {
       return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 });
     }
+    const updaterInfo = await getUpdaterInfo(adminDb, uid);
 
-    const approverData = adminSnap.exists ? adminSnap.data() : modSnap.data();
     const permissionDenied = await requireModeratorPermission(
       {
         uid,
         email: decodedToken.email || '',
-        role: adminSnap.exists ? 'admin' : 'moderator',
-        name: approverData?.fullName || approverData?.name || '',
+        role: userRole.role,
+        name: updaterInfo.name,
       },
       'applications',
       'canApprove'
@@ -42,8 +40,8 @@ export async function POST(request: NextRequest) {
       applicationId,
       {
         uid,
-        name: approverData?.fullName || approverData?.name || 'Admin',
-        role: adminSnap.exists ? 'admin' : 'moderator',
+        name: updaterInfo.name || 'Admin',
+        role: userRole.role,
       },
       notes,
       {

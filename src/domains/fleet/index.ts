@@ -2,15 +2,17 @@
 // Runtime owner: PostgreSQL (Supabase buses + driver_profiles tables).
 // Firestore buses/drivers collections are no longer used.
 export {
+  createBus,
   getAllBuses,
   getBusById,
   getBusesByRouteId,
   unassignRoute,
   updateBus,
   removeBus,
-  getAllDrivers,
-  getDriverById,
-  updateDriver,
-  removeDriver,
+
+  checkBusCapacity,
+  incrementBusCapacity,
+  decrementBusCapacity,
+  findBusesWithAvailableCapacity,
 } from './services/fleet.service';
 export type { Bus, Driver } from './services/fleet.service';

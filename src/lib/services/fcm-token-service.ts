@@ -11,6 +11,7 @@
 
 import { db as adminDb, FieldValue, messaging } from '@/lib/firebase-admin';
 import * as crypto from 'crypto';
+import { getStudentsByRouteIds, getStudentsByBusIds, getAllStudents } from '@/domains/identity';
 
 // Minimum token length for basic validation
 const MIN_TOKEN_LENGTH = 100;
@@ -191,29 +192,19 @@ export async function unsubscribeFromTopic(token: string, topic: string): Promis
 export async function getValidTokensForRoute(routeId: string): Promise<TokenWithMeta[]> {
   if (!adminDb) return [];
 
-  // Query students by routeId (try multiple field names for compatibility)
-  let studentsSnap = await adminDb
-    .collection('students')
-    .where('routeId', '==', routeId)
-    .get();
+  // Query students by routeId from PostgreSQL
+  const students = await getStudentsByRouteIds([routeId]);
 
-  // Fallback alternatives
-  if (studentsSnap.empty) {
-    const alt1 = await adminDb.collection('students').where('route_id', '==', routeId).get();
-    const alt2 = await adminDb.collection('students').where('assignedRouteId', '==', routeId).get();
-    if (!alt1.empty) studentsSnap = alt1;
-    else if (!alt2.empty) studentsSnap = alt2;
-  }
-
-  if (studentsSnap.empty) {
+  if (students.length === 0) {
     console.log(`📭 No students found for route ${routeId}`);
     return [];
   }
 
   const tokens: TokenWithMeta[] = [];
 
-  for (const studentDoc of studentsSnap.docs) {
-    const tokensSnap = await studentDoc.ref
+  for (const student of students) {
+    const studentDocRef = adminDb.collection('students').doc(student.uid);
+    const tokensSnap = await studentDocRef
       .collection('tokens')
       .where('valid', '==', true)
       .get();
@@ -224,7 +215,7 @@ export async function getValidTokensForRoute(routeId: string): Promise<TokenWith
         tokens.push({
           token: data.token,
           platform: data.platform || 'web',
-          studentId: studentDoc.id,
+          studentId: student.uid,
           tokenDocPath: tokenDoc.ref.path,
         });
       }
@@ -246,32 +237,24 @@ export async function getValidTokensForRoute(routeId: string): Promise<TokenWith
 
 /**
  * Get all valid tokens for students assigned to a specific bus.
- * Tries assignedBusId, busId, bus_id field names.
+ * Tries assignedBusId, busId, bus_id field names from PostgreSQL.
  */
 export async function getValidTokensForBus(busId: string): Promise<TokenWithMeta[]> {
   if (!adminDb) return [];
 
-  let studentsSnap = await adminDb
-    .collection('students')
-    .where('assignedBusId', '==', busId)
-    .get();
+  // Query students by busId from PostgreSQL
+  const students = await getStudentsByBusIds([busId]);
 
-  if (studentsSnap.empty) {
-    const alt1 = await adminDb.collection('students').where('busId', '==', busId).get();
-    const alt2 = await adminDb.collection('students').where('bus_id', '==', busId).get();
-    if (!alt1.empty) studentsSnap = alt1;
-    else if (!alt2.empty) studentsSnap = alt2;
-  }
-
-  if (studentsSnap.empty) {
+  if (students.length === 0) {
     console.log(`📭 No students found for bus ${busId}`);
     return [];
   }
 
   const tokens: TokenWithMeta[] = [];
 
-  for (const studentDoc of studentsSnap.docs) {
-    const tokensSnap = await studentDoc.ref
+  for (const student of students) {
+    const studentDocRef = adminDb.collection('students').doc(student.uid);
+    const tokensSnap = await studentDocRef
       .collection('tokens')
       .where('valid', '==', true)
       .get();
@@ -282,7 +265,7 @@ export async function getValidTokensForBus(busId: string): Promise<TokenWithMeta
         tokens.push({
           token: data.token,
           platform: data.platform || 'web',
-          studentId: studentDoc.id,
+          studentId: student.uid,
           tokenDocPath: tokenDoc.ref.path,
         });
       }
@@ -315,12 +298,14 @@ export async function cleanupStaleTokens(maxAgeDays: number = 30): Promise<{
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - maxAgeDays);
 
-  const studentsSnap = await adminDb.collection('students').get();
+  // Get students list from PostgreSQL
+  const students = await getAllStudents();
   let scanned = 0;
   let deleted = 0;
 
-  for (const studentDoc of studentsSnap.docs) {
-    const tokensSnap = await studentDoc.ref.collection('tokens').get();
+  for (const student of students) {
+    const studentDocRef = adminDb.collection('students').doc(student.uid);
+    const tokensSnap = await studentDocRef.collection('tokens').get();
 
     for (const tokenDoc of tokensSnap.docs) {
       scanned++;

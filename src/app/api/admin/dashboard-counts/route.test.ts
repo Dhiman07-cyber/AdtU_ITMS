@@ -65,27 +65,91 @@ vi.mock('@/lib/firebase-admin', () => ({
 }));
 
 // Mock Supabase Server
-const mockSupabaseSelect = vi.fn().mockReturnValue({
-  in: vi.fn().mockResolvedValue({
-    data: [
-      { id: 'trip-1', bus_id: 'bus-1', route_id: 'route-1', status: 'enroute', started_at: '2026-07-01T12:00:00Z' }
-    ]
-  }),
-  or: vi.fn().mockResolvedValue({
-    data: [
-      { amount: 1500, method: 'online' },
-      { amount: 500, method: 'offline' }
-    ]
-  })
+const mockRenewalAppsCount = vi.fn().mockResolvedValue({ count: 3, error: null, data: null });
+const mockDriverStatusData = vi.fn().mockResolvedValue({
+  data: [{ id: 'trip-1', bus_id: 'bus-1', route_id: 'route-1', status: 'enroute', started_at: '2026-07-01T12:00:00Z' }],
+  error: null,
+});
+const mockPaymentsData = vi.fn().mockResolvedValue({
+  data: [
+    { amount: 1500, method: 'online' },
+    { amount: 500, method: 'offline' }
+  ],
+  error: null,
 });
 
-vi.mock('@/lib/supabase-server', () => ({
-  getSupabaseServer: () => ({
-    from: () => ({
-      select: mockSupabaseSelect
-    })
-  })
-}));
+const mockSupabaseSelect = vi.fn().mockReturnValue({
+  eq: vi.fn().mockReturnValue({
+    in: mockRenewalAppsCount,
+  }),
+  in: vi.fn().mockReturnValue({
+    then: undefined,
+  }),
+  or: vi.fn().mockReturnValue({
+    then: undefined,
+  }),
+});
+
+function createSupabaseChain() {
+  const chain: Record<string, any> = {};
+  chain.select = vi.fn().mockReturnValue({
+    eq: vi.fn().mockReturnValue({
+      in: mockRenewalAppsCount,
+    }),
+    in: vi.fn().mockReturnValue({
+      resolve: (cb: any) => cb(mockDriverStatusData()),
+      then: undefined,
+    }),
+    or: vi.fn().mockReturnValue({
+      resolve: (cb: any) => cb(mockPaymentsData()),
+      then: undefined,
+    }),
+  });
+  return chain;
+}
+
+vi.mock('@/lib/supabase-server', () => {
+  const createMockChain = (tableName: string) => {
+    const chain: any = {};
+    chain.select = vi.fn().mockReturnValue(chain);
+    chain.eq = vi.fn().mockReturnValue(chain);
+    chain.in = vi.fn().mockReturnValue(chain);
+    chain.or = vi.fn().mockReturnValue(chain);
+    chain.then = (onfulfilled: any) => {
+      let result: any = { data: [], count: 0, error: null };
+      if (tableName === 'applications') {
+        result = { data: [], count: 3, error: null };
+      } else if (tableName === 'student_profiles') {
+        result = { data: [], count: 10, error: null };
+      } else if (tableName === 'driver_profiles') {
+        result = { data: [], count: 5, error: null };
+      } else if (tableName === 'driver_status') {
+        result = {
+          data: [{ id: 'trip-1', bus_id: 'bus-1', route_id: 'route-1', status: 'enroute', started_at: '2026-07-01T12:00:00Z' }],
+          count: 1,
+          error: null,
+        };
+      } else if (tableName === 'payments') {
+        result = {
+          data: [
+            { amount: 1500, method: 'online' },
+            { amount: 500, method: 'offline' }
+          ],
+          count: 2,
+          error: null,
+        };
+      }
+      return Promise.resolve(result).then(onfulfilled);
+    };
+    return chain;
+  };
+
+  return {
+    getSupabaseServer: () => ({
+      from: (table: string) => createMockChain(table),
+    }),
+  };
+});
 
 // Mock Deadline Config
 vi.mock('@/lib/deadline-config-service', () => ({

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { headers } from 'next/headers';
-import { adminDb, adminAuth } from '@/lib/firebase-admin';
+import { adminAuth } from '@/lib/firebase-admin';
+import { resolveUserRole } from '@/lib/security/role-cache';
 import * as routeService from '@/domains/route';
 
 /**
@@ -19,8 +20,8 @@ export async function POST(request: Request) {
     const decodedToken = await adminAuth.verifyIdToken(token);
 
     // Check if user is admin or moderator
-    const userDoc = await adminDb.collection('users').doc(decodedToken.uid).get();
-    if (!userDoc.exists || !['admin', 'moderator'].includes(userDoc.data()?.role)) {
+    const userRole = await resolveUserRole(decodedToken.uid);
+    if (!['admin', 'moderator'].includes(userRole.role)) {
       return NextResponse.json(
         { success: false, error: 'Forbidden: Admin or Moderator access required' },
         { status: 403 }

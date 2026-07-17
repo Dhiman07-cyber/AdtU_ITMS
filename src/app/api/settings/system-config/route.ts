@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { adminAuth, adminDb } from '@/lib/firebase-admin';
+import { adminAuth } from '@/lib/firebase-admin';
 import { pgInsertNotification } from '@/domains/notification/repositories/notification.repository.pg';
 import { getSystemConfig, updateSystemConfig } from '@/domains/admin';
+import { getUserById, getAdminById } from '@/domains/identity';
 
 // GET: Retrieve system config from PostgreSQL (public — no sensitive data)
 export async function GET(req: NextRequest) {
@@ -34,9 +35,9 @@ export async function POST(req: NextRequest) {
         const decodedToken = await adminAuth.verifyIdToken(token);
         const uid = decodedToken.uid;
 
-        // Check if user is admin
-        const userDoc = await adminDb.collection('users').doc(uid).get();
-        if (!userDoc.exists || userDoc.data()?.role !== 'admin') {
+        // Check if user is admin via PostgreSQL (canonical source of truth)
+        const user = await getUserById(uid);
+        if (!user || user.role !== 'admin') {
             return NextResponse.json(
                 { message: 'Access denied. Admin only.' },
                 { status: 403 }
@@ -85,8 +86,7 @@ export async function POST(req: NextRequest) {
 
             // Notify users about bus fee change
             try {
-                const adminDoc = await adminDb.collection('admins').doc(uid).get();
-                const adminData = adminDoc.exists ? adminDoc.data() : {};
+                const adminData = await getAdminById(uid);
                 const adminName = adminData?.name || adminData?.fullName || 'Admin';
 
                 const oldAmount = oldConfig.busFee?.amount || 0;

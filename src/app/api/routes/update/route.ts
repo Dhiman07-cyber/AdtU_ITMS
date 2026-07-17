@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { headers } from 'next/headers';
-import { adminDb, adminAuth } from '@/lib/firebase-admin';
+import { adminAuth } from '@/lib/firebase-admin';
+import { resolveUserRole } from '@/lib/security/role-cache';
 import * as routeService from '@/domains/route';
 
 /**
@@ -17,9 +18,9 @@ async function handleUpdate(request: Request) {
 
     const token = authHeader.substring(7);
     const decodedToken = await adminAuth.verifyIdToken(token);
-    const userDoc = await adminDb.collection('users').doc(decodedToken.uid).get();
+    const userRole = await resolveUserRole(decodedToken.uid);
 
-    if (!userDoc.exists || !['admin', 'moderator'].includes(userDoc.data()?.role)) {
+    if (!['admin', 'moderator'].includes(userRole.role)) {
       return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
     }
 

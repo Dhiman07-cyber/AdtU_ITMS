@@ -1,14 +1,16 @@
 import { NextResponse } from 'next/server';
 import { adminDb } from '@/lib/firebase-admin';
-import { FieldValue } from 'firebase-admin/firestore';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import { withSecurity } from '@/lib/security/api-security';
 import { ReassignStudentsSchema } from '@/lib/security/validation-schemas';
 import { RateLimits } from '@/lib/security/rate-limiter';
 import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
 import { createAuditEvent, type AuditActorRole } from '@/domains/audit';
-import { getShiftDeltas, normalizeShift } from '@/lib/utils/shift-utils';
+import { normalizeShift, getShiftDeltas } from '@/lib/utils/shift-utils';
+import { decrementBusCapacity, incrementBusCapacity, getAllBuses, getBusById } from '@/domains/fleet';
 import crypto from 'crypto';
+import { getStudentById, updateStudent } from '@/domains/identity';
+import { getUpdaterInfo } from '@/lib/utils/updatedBy';
 
 type ReassignmentAssignment = {
     studentId: string;
@@ -27,7 +29,6 @@ type ReassignStudentsBody = {
 };
 
 type BusLoadDeltas = { morningDelta: number; eveningDelta: number };
-type FirestoreSnapshot = FirebaseFirestore.DocumentSnapshot<FirebaseFirestore.DocumentData>;
 
 class ReassignmentValidationError extends Error {
     status: number;
@@ -58,165 +59,160 @@ export const POST = withSecurity<ReassignStudentsBody>(
             busIdsToLoad.add(assignment.fromBusId);
         }
         if (sourceBusId) busIdsToLoad.add(sourceBusId);
-
-        const busRefs = Array.from(busIdsToLoad).map(id => adminDb.collection('buses').doc(id));
-        const studentRefs = assignments.map((assignment) => adminDb.collection('students').doc(assignment.studentId));
         
-        // Fetch actor info, students, and all buses in parallel
+        // Fetch actor info, students, and buses (PG) in parallel
         const actorInfoPromise = (async () => {
             let label = auth.name || 'System';
-            if (currentUserRole === 'admin') {
-                const adminDoc = await adminDb.collection('admins').doc(currentUserUid).get();
-                if (adminDoc.exists) {
-                    const data = adminDoc.data();
-                    label = `${data?.fullName || data?.name || auth.name || 'Admin'} (Admin)`;
-                }
-            } else if (currentUserRole === 'moderator') {
-                const modDoc = await adminDb.collection('moderators').doc(currentUserUid).get();
-                if (modDoc.exists) {
-                    const modData = modDoc.data();
-                    label = `${modData?.fullName || modData?.name || auth.name || 'Moderator'} (${modData?.employeeId || 'Moderator'})`;
-                }
+            if (currentUserRole === 'admin' || currentUserRole === 'moderator') {
+                const info = await getUpdaterInfo(adminDb, currentUserUid);
+                label = currentUserRole === 'admin'
+                    ? `${info.name} (Admin)`
+                    : `${info.name} (${info.roleOrEmployeeId})`;
             }
             return label;
         })();
 
         const actorLabel = await actorInfoPromise;
-        const busSnapshots = new Map<string, FirestoreSnapshot>();
+        const busPgData = new Map<string, any>();
         const busLoadChanges = new Map<string, BusLoadDeltas>();
         const effectiveAssignments: ReassignmentAssignment[] = [];
-        // Generated up-front so the in-transaction Firestore audit and the Supabase
-        // rollback snapshot share ONE correlation id.
         const operationId = `student_reassignment_${Date.now()}_${crypto.randomUUID()}`;
 
         try {
-            await adminDb.runTransaction(async (transaction) => {
-                const busSnapsList = await Promise.all(busRefs.map((ref) => transaction.get(ref)));
-                const studentSnapsList = await Promise.all(studentRefs.map((ref) => transaction.get(ref)));
+            // ── Phase 1: Read student docs from PostgreSQL + bus docs from PG ──
+            const pgStudentsList = await Promise.all(assignments.map((a) => getStudentById(a.studentId)));
+            const pgBuses = await getAllBuses();
 
-                busSnapshots.clear();
-                busSnapsList.forEach((snap) => {
-                    if (snap.exists) busSnapshots.set(snap.id, snap);
-                });
+            const busIdSet = new Set(busIdsToLoad);
+            for (const bus of pgBuses) {
+                const busId = bus.busId || bus.id || '';
+                if (busIdSet.has(busId)) {
+                    busPgData.set(busId, bus);
+                }
+            }
 
-                const studentSnapshots = new Map<string, FirestoreSnapshot>();
-                studentSnapsList.forEach((snap) => {
-                    if (snap.exists) studentSnapshots.set(snap.id, snap);
-                });
+            const studentRecords = new Map<string, any>();
+            pgStudentsList.forEach((student) => {
+                if (student && student.uid) studentRecords.set(student.uid, student);
+            });
 
-                busLoadChanges.clear();
-                effectiveAssignments.length = 0;
+            busLoadChanges.clear();
+            effectiveAssignments.length = 0;
 
-                for (const assignment of assignments) {
-                    const { studentId, fromBusId, toBusId, shift: targetShift } = assignment;
-                    const studentRef = adminDb.collection('students').doc(studentId);
-                    const studentSnap = studentSnapshots.get(studentId);
+            // ── Phase 2: Validate + compute deltas ──
+            for (const assignment of assignments) {
+                const { studentId, fromBusId, toBusId, shift: targetShift } = assignment;
+                const studentData = studentRecords.get(studentId);
 
-                    if (!studentSnap?.exists) {
-                        throw new ReassignmentValidationError(`Student ${studentId} not found`, 404);
-                    }
+                if (!studentData) {
+                    throw new ReassignmentValidationError(`Student ${studentId} not found`, 404);
+                }
 
-                    const studentData = studentSnap.data()!;
-                    const currentBusId = studentData.busId || '';
+                const currentBusId = studentData.busId || studentData.assignedBusId || '';
 
-                    if (currentBusId === toBusId && studentData.shift === targetShift) {
-                        // Already on the target bus with the correct shift — pure no-op
-                        continue;
-                    }
+                if (currentBusId === toBusId && studentData.shift === targetShift) {
+                    continue;
+                }
 
-                    if (currentBusId && currentBusId !== fromBusId) {
+                if (currentBusId && currentBusId !== fromBusId) {
+                    throw new ReassignmentValidationError(
+                        `Stale reassignment data for ${assignment.studentName || studentId}. Refresh and try again.`,
+                        409
+                    );
+                }
+
+                const targetBusData = busPgData.get(toBusId);
+                if (!targetBusData) {
+                    throw new ReassignmentValidationError(`Target bus ${toBusId} not found`, 404);
+                }
+
+                const originalShift = normalizeShift(studentData.shift || 'Morning');
+
+                const studentUpdateData: Record<string, unknown> = {
+                    busId: toBusId,
+                    assignedBusId: toBusId,
+                    shift: targetShift,
+                    routeId: (targetBusData as any).routeId || '',
+                    assignedRouteId: (targetBusData as any).routeId || '',
+                    updatedAt: new Date().toISOString(),
+                };
+                if (assignment.stopId) studentUpdateData.stopId = assignment.stopId;
+                if (assignment.stopName) studentUpdateData.stopName = assignment.stopName;
+
+                if (currentBusId && currentBusId === fromBusId) {
+                    if (!busLoadChanges.has(fromBusId)) busLoadChanges.set(fromBusId, { morningDelta: 0, eveningDelta: 0 });
+                    const sourceChanges = busLoadChanges.get(fromBusId)!;
+                    const srcDeltas = getShiftDeltas(originalShift);
+                    if (srcDeltas.affectsMorning) sourceChanges.morningDelta--;
+                    if (srcDeltas.affectsEvening) sourceChanges.eveningDelta--;
+                }
+
+                if (!busLoadChanges.has(toBusId)) busLoadChanges.set(toBusId, { morningDelta: 0, eveningDelta: 0 });
+                const targetChanges = busLoadChanges.get(toBusId)!;
+                const dstDeltas = getShiftDeltas(targetShift);
+                if (dstDeltas.affectsMorning) targetChanges.morningDelta++;
+                if (dstDeltas.affectsEvening) targetChanges.eveningDelta++;
+
+                effectiveAssignments.push({ ...assignment, _originalShift: originalShift, _studentUpdateData: studentUpdateData } as any);
+            }
+
+            // ── Phase 2b: Validate capacity per bus using accumulated deltas (PG bus data) ──
+            for (const [busId, deltas] of busLoadChanges.entries()) {
+                const busData = busPgData.get(busId);
+                if (!busData) {
+                    throw new ReassignmentValidationError(`Bus ${busId} not found`, 404);
+                }
+                const newMorning = Math.max(0, (busData.morningLoad || 0) + deltas.morningDelta);
+                const newEvening = Math.max(0, (busData.eveningLoad || 0) + deltas.eveningDelta);
+                const capacity = busData.capacity || 0;
+
+                if (capacity > 0) {
+                    if (deltas.morningDelta > 0 && newMorning > capacity) {
                         throw new ReassignmentValidationError(
-                            `Stale reassignment data for ${assignment.studentName || studentId}. Refresh and try again.`,
+                            `Bus ${busData.busNumber || busId} Morning trip would exceed capacity (${newMorning}/${capacity})`,
                             409
                         );
                     }
-
-                    const targetBusSnap = busSnapshots.get(toBusId);
-                    if (!targetBusSnap?.exists) {
-                        throw new ReassignmentValidationError(`Target bus ${toBusId} not found`, 404);
+                    if (deltas.eveningDelta > 0 && newEvening > capacity) {
+                        throw new ReassignmentValidationError(
+                            `Bus ${busData.busNumber || busId} Evening trip would exceed capacity (${newEvening}/${capacity})`,
+                            409
+                        );
                     }
-                    const targetBusData = targetBusSnap.data()!;
+                }
+            }
 
-                    // ── Original Shift: what is currently stored on the student in Firestore.
-                    // MUST be used for source-bus decrement.
-                    // Normalise to canonical form; default to 'Morning' if missing.
-                    const originalShift = normalizeShift(studentData.shift || 'Morning') as 'Morning' | 'Evening';
+            // ── Phase 3: PG capacity mutations (source of truth) ──
+            const pgCompensations: Array<() => Promise<any>> = [];
 
-                    // ── Target Shift: what the moderator has selected for the student.
-                    // MUST be persisted on the student document and used for dest-bus increment.
-                    const studentUpdateData: Record<string, unknown> = {
-                        busId: toBusId,
-                        shift: targetShift,          // ← persist the new shift
-                        routeId: targetBusData.route?.routeId || targetBusData.routeId || '',
-                        updatedAt: FieldValue.serverTimestamp(),
-                    };
-                    if (assignment.stopId) studentUpdateData.stopId = assignment.stopId;
-                    if (assignment.stopName) studentUpdateData.stopName = assignment.stopName;
-                    transaction.update(studentRef, studentUpdateData);
+            for (const a of effectiveAssignments) {
+                const anyA = a as any;
+                const originalShift = anyA._originalShift;
+                const currentBusId = (studentRecords.get(a.studentId) || {}).busId || (studentRecords.get(a.studentId) || {}).assignedBusId || '';
 
-                    // Source bus: DECREMENT using ORIGINAL shift
-                    // Only decrement if the student was actually on the source bus
-                    // (skip if student has no current bus assignment)
-                    if (currentBusId && currentBusId === fromBusId) {
-                        if (!busLoadChanges.has(fromBusId)) busLoadChanges.set(fromBusId, { morningDelta: 0, eveningDelta: 0 });
-                        const sourceChanges = busLoadChanges.get(fromBusId)!;
-                        const srcDeltas = getShiftDeltas(originalShift);
-                        if (srcDeltas.affectsMorning) sourceChanges.morningDelta--;
-                        if (srcDeltas.affectsEvening) sourceChanges.eveningDelta--;
-                    }
-
-                    // Destination bus: INCREMENT using TARGET shift
-                    if (!busLoadChanges.has(toBusId)) busLoadChanges.set(toBusId, { morningDelta: 0, eveningDelta: 0 });
-                    const targetChanges = busLoadChanges.get(toBusId)!;
-                    const dstDeltas = getShiftDeltas(targetShift);
-                    if (dstDeltas.affectsMorning) targetChanges.morningDelta++;
-                    if (dstDeltas.affectsEvening) targetChanges.eveningDelta++;
-
-                    effectiveAssignments.push({ ...assignment, _originalShift: originalShift } as any);
+                if (currentBusId && currentBusId === a.fromBusId) {
+                    await decrementBusCapacity(a.fromBusId, originalShift);
+                    pgCompensations.push(() => incrementBusCapacity(a.fromBusId, originalShift));
                 }
 
-                for (const [busId, deltas] of busLoadChanges.entries()) {
-                    const busRef = adminDb.collection('buses').doc(busId);
-                    const busSnap = busSnapshots.get(busId);
-                    if (!busSnap?.exists) {
-                        throw new ReassignmentValidationError(`Bus ${busId} not found`, 404);
-                    }
+                await incrementBusCapacity(a.toBusId, a.shift);
+                pgCompensations.push(() => decrementBusCapacity(a.toBusId, a.shift));
+            }
 
-                    const busData = busSnap.data()!;
-                    const currentLoad = busData.load || { morningCount: 0, eveningCount: 0 };
-                    const newMorning = Math.max(0, (currentLoad.morningCount || 0) + deltas.morningDelta);
-                    const newEvening = Math.max(0, (currentLoad.eveningCount || 0) + deltas.eveningDelta);
-                    const capacity = Number(busData.capacity || busData.capacitySeats || 0);
-
-                    // ── CANONICAL CAPACITY MODEL (per-shift, independent trips) ──
-                    // Morning and Evening are separate physical trips sharing the same
-                    // seat count. Each shift is gated INDEPENDENTLY against capacity.
-                    // NEVER gate on morningCount + eveningCount > capacity.
-                    if (capacity > 0) {
-                        if (deltas.morningDelta > 0 && newMorning > capacity) {
-                            throw new ReassignmentValidationError(
-                                `Bus ${busData.busNumber || busId} Morning trip would exceed capacity (${newMorning}/${capacity})`,
-                                409
-                            );
-                        }
-                        if (deltas.eveningDelta > 0 && newEvening > capacity) {
-                            throw new ReassignmentValidationError(
-                                `Bus ${busData.busNumber || busId} Evening trip would exceed capacity (${newEvening}/${capacity})`,
-                                409
-                            );
-                        }
-                    }
-
-                    // currentMembers is a DERIVED statistic: always morningCount + eveningCount.
-                    transaction.update(busRef, {
-                        'load.morningCount': newMorning,
-                        'load.eveningCount': newEvening,
-                        currentMembers: newMorning + newEvening,
-                        updatedAt: FieldValue.serverTimestamp(),
-                    });
+            // ── Phase 4: PostgreSQL updates ──
+            try {
+                for (const a of effectiveAssignments) {
+                    const anyA = a as any;
+                    await updateStudent(a.studentId, anyA._studentUpdateData);
                 }
+            } catch (updErr) {
+                // Compensate all PG capacity mutations
+                for (const comp of pgCompensations.reverse()) {
+                    await comp().catch(() => {});
+                }
+                throw updErr;
+            }
 
-            });
         } catch (error) {
             if (error instanceof ReassignmentValidationError) {
                 return NextResponse.json(
@@ -243,11 +239,10 @@ export const POST = withSecurity<ReassignStudentsBody>(
             const busLabels = new Map<string, string>();
 
             for (const bId of uniqueBusIds) {
-                const bSnap = busSnapshots.get(bId);
-                if (bSnap?.exists) {
-                    const bData = bSnap.data()!;
+                const bData = busPgData.get(bId);
+                if (bData) {
                     const bNum = bId.replace(/[^0-9]/g, '') || '?';
-                    busLabels.set(bId, `Bus-${bNum} (${bData.busNumber || bData.registrationNumber || 'N/A'})`);
+                    busLabels.set(bId, `Bus-${bNum} (${bData.busNumber || 'N/A'})`);
                 } else busLabels.set(bId, bId);
             }
 
@@ -269,20 +264,18 @@ export const POST = withSecurity<ReassignStudentsBody>(
             }
 
             for (const [busId, deltas] of busLoadChanges.entries()) {
-                const busSnap = busSnapshots.get(busId);
-                if (busSnap?.exists) {
-                    const busData = busSnap.data()!;
-                    const currentLoad = busData.load || { morningCount: 0, eveningCount: 0 };
-                    const beforeMorning = currentLoad.morningCount || 0;
-                    const beforeEvening = currentLoad.eveningCount || 0;
+                const busData = busPgData.get(busId);
+                if (busData) {
+                    const beforeMorning = busData.morningLoad || 0;
+                    const beforeEvening = busData.eveningLoad || 0;
                     const afterMorning = Math.max(0, beforeMorning + deltas.morningDelta);
                     const afterEvening = Math.max(0, beforeEvening + deltas.eveningDelta);
                     changes.push({
                         docPath: `buses/${busId}`,
                         collection: 'buses',
                         docId: busId,
-                        before: { 'load.morningCount': beforeMorning, 'load.eveningCount': beforeEvening, currentMembers: beforeMorning + beforeEvening },
-                        after: { 'load.morningCount': afterMorning, 'load.eveningCount': afterEvening, currentMembers: afterMorning + afterEvening },
+                        before: { morningLoad: beforeMorning, eveningLoad: beforeEvening, currentMembers: beforeMorning + beforeEvening },
+                        after: { morningLoad: afterMorning, eveningLoad: afterEvening, currentMembers: afterMorning + afterEvening },
                     });
                 }
             }
@@ -374,6 +367,7 @@ export const POST = withSecurity<ReassignStudentsBody>(
             message: `Successfully reassigned ${effectiveAssignments.length} student(s)`,
             movedCount: effectiveAssignments.length,
             assignments: effectiveAssignments,
+            operationId: operationId,
         });
     },
     {

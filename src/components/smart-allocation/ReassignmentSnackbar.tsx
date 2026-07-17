@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import type { CanonicalShift } from '@/lib/utils/shift-utils';
 
 export interface RevertBufferData {
+  operationId: string;
   affectedStudents: Array<{
     uid: string;
     oldBusId: string;

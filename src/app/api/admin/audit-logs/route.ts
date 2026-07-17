@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { adminAuth, adminDb } from '@/lib/firebase-admin';
+import { adminAuth } from '@/lib/firebase-admin';
+import { resolveUserRole } from '@/lib/security/role-cache';
 import { queryAuditEvents, type AuditEventRow } from '@/domains/audit';
 
 const PAGE_SIZE = 20;
@@ -51,8 +52,8 @@ export async function GET(req: NextRequest) {
     const decodedToken = await adminAuth.verifyIdToken(token);
     const uid = decodedToken.uid;
 
-    const userDoc = await adminDb.collection('users').doc(uid).get();
-    if (!userDoc.exists || userDoc.data()?.role !== 'admin') {
+    const userRole = await resolveUserRole(uid);
+    if (userRole.role !== 'admin') {
       return NextResponse.json({ message: 'Access denied. Admin only.' }, { status: 403 });
     }
 

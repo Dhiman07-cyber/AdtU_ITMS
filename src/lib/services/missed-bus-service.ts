@@ -15,7 +15,6 @@
 
 import { SupabaseClient } from '@supabase/supabase-js';
 import { getSupabaseServer } from '@/lib/supabase-server';
-import { db as adminDb } from '@/lib/firebase-admin';
 import * as routeService from '@/domains/route';
 
 // Configuration (per spec)

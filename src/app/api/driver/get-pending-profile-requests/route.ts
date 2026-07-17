@@ -3,6 +3,9 @@ import { db as adminDb } from '@/lib/firebase-admin';
 import { withSecurity } from '@/lib/security/api-security';
 import { EmptySchema } from '@/lib/security/validation-schemas';
 import { RateLimits } from '@/lib/security/rate-limiter';
+import { getAllBuses } from '@/domains/fleet';
+import { getSupabaseServer } from '@/lib/supabase-server';
+import { getStudentById } from '@/domains/identity';
 
 /**
  * POST /api/driver/get-pending-profile-requests
@@ -13,12 +16,14 @@ export const POST = withSecurity(
   async (request, { auth }) => {
     const driverUid = auth.uid;
 
-    // Get all buses assigned to this driver
-    const busesSnapshot = await adminDb.collection('buses')
-      .where('assignedDriverId', '==', driverUid)
-      .get();
+    if (!adminDb) {
+      return NextResponse.json({ success: false, error: 'Firebase Admin not initialized' }, { status: 500 });
+    }
 
-    const busIds = busesSnapshot.docs.map((doc: any) => doc.id);
+    // Get all buses assigned to this driver (from PG)
+    const allBuses = await getAllBuses();
+    const driverBuses = allBuses.filter(b => (b as any).assignedDriverId === driverUid);
+    const busIds = driverBuses.map(b => b.busId || b.id || '');
     console.log(`Driver ${driverUid} has buses:`, busIds);
 
     if (busIds.length === 0) {
@@ -50,36 +55,26 @@ export const POST = withSecurity(
       });
     }
 
-    // Also check for legacy requests without assignedBusId by looking at students
+    // Also check for legacy requests without assignedBusId by looking at student_profiles in PostgreSQL
+    const supabase = getSupabaseServer();
     for (const busId of busIds) {
-      const studentsSnapshot1 = await adminDb.collection('students')
-        .where('assignedBusId', '==', busId)
-        .get();
+      const { data: students } = await supabase
+        .from('student_profiles')
+        .select('*')
+        .or(`assigned_bus_id.eq.${busId},bus_id.eq.${busId}`);
 
-      const studentsSnapshot2 = await adminDb.collection('students')
-        .where('busId', '==', busId)
-        .get();
-
-      const allStudentDocs = [...studentsSnapshot1.docs];
-      const existingIds = new Set(allStudentDocs.map((d: any) => d.id));
-      for (const doc of studentsSnapshot2.docs) {
-        if (!existingIds.has(doc.id)) {
-          allStudentDocs.push(doc);
-        }
-      }
-
-      for (const studentDoc of allStudentDocs) {
-        const studentData = studentDoc.data();
-        if (studentData.pendingProfileUpdate) {
-          const existingRequest = requests.find(r => r.requestId === studentData.pendingProfileUpdate);
+      for (const studentData of students || []) {
+        const pendingProfileUpdate = studentData.extras?.pendingProfileUpdate || (studentData as any).pendingProfileUpdate;
+        if (pendingProfileUpdate) {
+          const existingRequest = requests.find(r => r.requestId === pendingProfileUpdate);
           if (!existingRequest) {
             const requestDoc = await adminDb.collection('profile_update_requests')
-              .doc(studentData.pendingProfileUpdate)
+              .doc(pendingProfileUpdate)
               .get();
 
             if (requestDoc.exists) {
               const data = requestDoc.data();
-              if (data.status === 'pending') {
+              if (data && data.status === 'pending') {
                 requests.push({
                   requestId: requestDoc.id,
                   ...data,
@@ -113,9 +108,8 @@ export const POST = withSecurity(
         if (requestData.assignedBusId && !busIds.includes(requestData.assignedBusId)) continue;
 
         if (requestData.studentUid) {
-          const studentDoc = await adminDb.collection('students').doc(requestData.studentUid).get();
-          if (studentDoc.exists) {
-            const studentData = studentDoc.data();
+          const studentData = await getStudentById(requestData.studentUid);
+          if (studentData) {
             const studentBusId = studentData.assignedBusId || studentData.busId;
 
             if (studentBusId && busIds.includes(studentBusId)) {

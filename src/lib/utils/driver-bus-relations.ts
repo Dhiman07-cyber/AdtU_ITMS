@@ -4,33 +4,31 @@
  * Canonical helpers for resolving driver↔bus relationships.
  * Eliminates duplicated logic across components and API routes.
  * 
- * Canonical field mapping (Firestore):
- * - Bus document: assignedDriverId (permanent), activeDriverId (temporary swap)
- * - Driver document: assignedBusId (permanent), busId (legacy alias)
- * 
- * These helpers use the canonical fields and provide fallbacks for legacy data.
+ * Canonical field mapping (PostgreSQL):
+ * - Bus: driverUID (assigned), activeDriverId (temporary swap), assignedDriverId (permanent)
+ * - Driver: assignedBusId, busId, busAssigned
  */
 
-import { adminDb } from '@/lib/firebase-admin';
+import { getBusById, getAllBuses } from '@/domains/fleet';
+import { getDriverById } from '@/domains/identity';
 
 /**
  * Get the effective driver for a bus.
- * Checks activeDriverId first (temporary swap), then assignedDriverId (permanent).
+ * Checks activeDriverId first (temporary swap), then assignedDriverId (permanent), then driverUID.
  * 
- * @param busData - Bus document data
+ * @param busData - Bus document/object data
  * @returns Driver UID or null if no driver assigned
  */
 export function getEffectiveDriverId(busData: { assignedDriverId?: string; activeDriverId?: string; driverUID?: string } | null | undefined): string | null {
     if (!busData) return null;
-    // activeDriverId takes precedence (temporary assignment from swap)
     return busData.activeDriverId || busData.assignedDriverId || busData.driverUID || null;
 }
 
 /**
  * Get the effective bus for a driver.
- * Checks assignedBusId (canonical), falls back to busId (legacy).
+ * Checks assignedBusId (canonical), falls back to busId or busAssigned.
  * 
- * @param driverData - Driver document data
+ * @param driverData - Driver document/object data
  * @returns Bus ID or null if no bus assigned
  */
 export function getEffectiveBusId(driverData: { assignedBusId?: string; busId?: string; busAssigned?: string; assignedBusIds?: string[] } | null | undefined): string | null {
@@ -43,7 +41,7 @@ export function getEffectiveBusId(driverData: { assignedBusId?: string; busId?: 
  * 
  * @param driverId - Driver UID
  * @param busId - Bus ID
- * @param busData - Optional bus document data (avoids extra read if already fetched)
+ * @param busData - Optional bus object data (avoids extra read if already fetched)
  * @returns True if driver is assigned to bus
  */
 export async function isDriverAssignedToBus(
@@ -51,10 +49,9 @@ export async function isDriverAssignedToBus(
     busId: string,
     busData?: { assignedDriverId?: string; activeDriverId?: string; driverUID?: string } | null
 ): Promise<boolean> {
-    if (!busData && adminDb) {
-        const busDoc = await adminDb.collection('buses').doc(busId).get();
-        if (!busDoc.exists) return false;
-        busData = busDoc.data() as any;
+    if (!busData) {
+        busData = await getBusById(busId);
+        if (!busData) return false;
     }
     const effectiveDriverId = getEffectiveDriverId(busData);
     return effectiveDriverId === driverId;
@@ -65,7 +62,7 @@ export async function isDriverAssignedToBus(
  * 
  * @param busId - Bus ID
  * @param driverId - Driver UID
- * @param driverData - Optional driver document data (avoids extra read if already fetched)
+ * @param driverData - Optional driver object data (avoids extra read if already fetched)
  * @returns True if bus is assigned to driver
  */
 export async function isBusAssignedToDriver(
@@ -73,10 +70,9 @@ export async function isBusAssignedToDriver(
     driverId: string,
     driverData?: { assignedBusId?: string; busId?: string; busAssigned?: string; assignedBusIds?: string[] } | null
 ): Promise<boolean> {
-    if (!driverData && adminDb) {
-        const driverDoc = await adminDb.collection('drivers').doc(driverId).get();
-        if (!driverDoc.exists) return false;
-        driverData = driverDoc.data() as any;
+    if (!driverData) {
+        driverData = await getDriverById(driverId);
+        if (!driverData) return false;
     }
     const effectiveBusId = getEffectiveBusId(driverData);
     return effectiveBusId === busId;
@@ -94,25 +90,19 @@ export async function verifyDriverBusBinding(
     driverId: string,
     busId: string
 ): Promise<{ authorized: boolean; reason?: string }> {
-    if (!adminDb) return { authorized: false, reason: 'Firebase Admin not initialized' };
-
     try {
-        // Check bus document for driver assignment
-        const busDoc = await adminDb.collection('buses').doc(busId).get();
-        if (!busDoc.exists) return { authorized: false, reason: 'Bus not found' };
+        // Check bus for driver assignment
+        const busData = await getBusById(busId);
+        if (!busData) return { authorized: false, reason: 'Bus not found' };
 
-        const busData = busDoc.data();
         const effectiveDriverId = getEffectiveDriverId(busData);
-        
         if (effectiveDriverId === driverId) return { authorized: true };
 
-        // Fallback: check driver document for bus assignment
-        const driverDoc = await adminDb.collection('drivers').doc(driverId).get();
-        if (!driverDoc.exists) return { authorized: false, reason: 'Driver not found' };
+        // Fallback: check driver for bus assignment
+        const driverData = await getDriverById(driverId);
+        if (!driverData) return { authorized: false, reason: 'Driver not found' };
 
-        const driverData = driverDoc.data();
         const effectiveBusId = getEffectiveBusId(driverData);
-        
         if (effectiveBusId === busId) return { authorized: true };
 
         return { authorized: false, reason: 'Driver is not assigned to this bus' };
@@ -131,23 +121,19 @@ export async function verifyDriverBusBinding(
  * @returns Array of bus IDs
  */
 export async function getBusesForDriver(driverId: string): Promise<string[]> {
-    if (!adminDb) return [];
-
-    // Check for temporary assignments (activeDriverId)
-    const tempBusesSnap = await adminDb.collection('buses')
-        .where('activeDriverId', '==', driverId)
-        .get();
-
-    // Check for permanent assignments (assignedDriverId)
-    const permBusesSnap = await adminDb.collection('buses')
-        .where('assignedDriverId', '==', driverId)
-        .get();
-
-    const busIds = new Set<string>();
-    tempBusesSnap.docs.forEach(doc => busIds.add(doc.id));
-    permBusesSnap.docs.forEach(doc => busIds.add(doc.id));
-
-    return Array.from(busIds);
+    try {
+        const buses = await getAllBuses();
+        const busIds = new Set<string>();
+        for (const bus of buses) {
+            if (bus.driverUID === driverId || (bus as any).assignedDriverId === driverId || (bus as any).activeDriverId === driverId) {
+                busIds.add(bus.id);
+            }
+        }
+        return Array.from(busIds);
+    } catch (error) {
+        console.error('Error getting buses for driver:', error);
+        return [];
+    }
 }
 
 // Re-export canonical shift utilities from shift-utils.ts

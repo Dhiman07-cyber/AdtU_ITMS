@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { adminAuth, adminDb } from '@/lib/firebase-admin';
+import { adminAuth } from '@/lib/firebase-admin';
+import { resolveUserRole } from '@/lib/security/role-cache';
 import { deleteRouteAndData } from '@/lib/cleanup-helpers';
 
 export async function DELETE(request: NextRequest) {
@@ -14,10 +15,8 @@ export async function DELETE(request: NextRequest) {
     const actorUid = decodedToken.uid;
 
     // Verify user is admin or moderator
-    const adminDoc = await adminDb.collection('admins').doc(actorUid).get();
-    const modDoc = await adminDb.collection('moderators').doc(actorUid).get();
-    
-    if (!adminDoc.exists && !modDoc.exists) {
+    const userRole = await resolveUserRole(actorUid);
+    if (userRole.role !== 'admin' && userRole.role !== 'moderator') {
       return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 });
     }
 

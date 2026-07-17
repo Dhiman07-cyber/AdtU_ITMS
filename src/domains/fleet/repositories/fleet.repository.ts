@@ -22,11 +22,10 @@ import {
   pgRemoveBus,
   pgUpsertBus,
   pgUnassignRoute,
-  pgFindAllDrivers,
-  pgFindDriverById,
-  pgUpdateDriver,
-  pgRemoveDriver,
-  pgUpsertDriver,
+  pgCheckBusCapacity,
+  pgIncrementBusCapacity,
+  pgDecrementBusCapacity,
+  pgFindBusesWithAvailableCapacity,
 } from './fleet.repository.pg';
 import type { Bus, Driver } from '@/lib/types';
 
@@ -74,34 +73,26 @@ export async function upsertBus(bus: Partial<Bus> & { id: string }): Promise<voi
   return pgUpsertBus(bus);
 }
 
-export async function findAllDrivers(): Promise<Driver[]> {
-  return pgFindAllDrivers();
+
+
+// ─── Capacity Operations ────────────────────────────────────────────────────
+
+export type { CapacityCheckResult, CapacityMutationResult } from './fleet.repository.pg';
+
+export async function checkBusCapacity(busId: string, shift?: string) {
+  return pgCheckBusCapacity(busId, shift);
 }
 
-export async function findDriverById(id: string): Promise<Driver | null> {
-  return pgFindDriverById(id);
+export async function incrementBusCapacity(busId: string, shift?: string) {
+  return pgIncrementBusCapacity(busId, shift);
 }
 
-export async function updateDriverRecord(id: string, data: Partial<Driver>): Promise<boolean> {
-  try {
-    await pgUpdateDriver(id, data);
-    return true;
-  } catch {
-    return false;
-  }
+export async function decrementBusCapacity(busId: string, shift?: string) {
+  return pgDecrementBusCapacity(busId, shift);
 }
 
-export async function removeDriver(id: string): Promise<boolean> {
-  try {
-    await pgRemoveDriver(id);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-export async function upsertDriver(driver: Partial<Driver> & { uid: string }): Promise<void> {
-  return pgUpsertDriver(driver);
+export async function findBusesWithAvailableCapacity(shift?: string) {
+  return pgFindBusesWithAvailableCapacity(shift);
 }
 
 export type { Bus, Driver };

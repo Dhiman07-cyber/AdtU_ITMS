@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { adminAuth, adminDb } from '@/lib/firebase-admin';
+import { adminAuth } from '@/lib/firebase-admin';
 import { pgInsertNotification } from '@/domains/notification/repositories/notification.repository.pg';
 import { getSystemConfig, updateSystemConfig } from '@/domains/admin';
 import { DEFAULT_BUS_FEE } from '@/config/runtime';
+import { getUserById, getAdminById } from '@/domains/identity';
 
 // GET: Retrieve bus fees from system config (PostgreSQL)
 export async function GET(req: NextRequest) {
@@ -36,9 +37,9 @@ export async function POST(req: NextRequest) {
     const decodedToken = await adminAuth.verifyIdToken(token);
     const uid = decodedToken.uid;
 
-    // Check if user is admin
-    const userDoc = await adminDb.collection('users').doc(uid).get();
-    if (!userDoc.exists || userDoc.data()?.role !== 'admin') {
+    // Check if user is admin via PostgreSQL (canonical source of truth)
+    const user = await getUserById(uid);
+    if (!user || user.role !== 'admin') {
       return NextResponse.json({ message: 'Access denied. Admin only.' }, { status: 403 });
     }
 
@@ -79,8 +80,7 @@ export async function POST(req: NextRequest) {
 
     // --- Notification Logic ---
     // Get admin user details for notification sender
-    const adminDoc = await adminDb.collection('admins').doc(uid).get();
-    const adminData = adminDoc.exists ? adminDoc.data() : {};
+    const adminData = await getAdminById(uid);
     const adminName = adminData?.name || adminData?.fullName || 'Admin';
 
     let notificationSent = false;
@@ -104,20 +104,21 @@ export async function POST(req: NextRequest) {
         readByUserIds: [],
       });
       notificationSent = true;
-      console.log('✅ Notification sent to all users');
-    } catch (notificationError: any) {
-      console.error('Failed to send notification (non-critical):', notificationError);
+    } catch (error) {
+      console.error('Failed to send announcement notification:', error);
     }
 
     return NextResponse.json({
-      message: notificationSent
-        ? 'Bus fees updated successfully. Notification sent to all users.'
-        : 'Bus fees updated successfully.',
-      amount: amount,
-      oldAmount: oldAmount
+      message: 'Bus fee updated successfully',
+      fees: amount,
+      notificationSent
     });
+
   } catch (error) {
     console.error('Error updating bus fees:', error);
-    return NextResponse.json({ message: 'Failed to update bus fees' }, { status: 500 });
+    return NextResponse.json(
+      { message: 'Failed to update bus fees' },
+      { status: 500 }
+    );
   }
 }

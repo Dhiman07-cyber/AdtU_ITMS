@@ -19,6 +19,9 @@ export {
   // Student Profiles
   getStudentById,
   getStudentsByStatus,
+  getStudentsByStatuses,
+  getSeatOccupyingStudents,
+  getBusOccupancyStats,
   getStudentsByShift,
   getStudentsByBusIds,
   getStudentsByRouteIds,
@@ -29,6 +32,8 @@ export {
   // Driver Profiles
   getDriverById,
   getDriversByStatus,
+  getAllDrivers,
+  getDriversByBusId,
   createDriver,
   updateDriver,
   deleteDriver,
@@ -52,5 +57,6 @@ export {
   createUnauthUser,
   updateUnauthUser,
   deleteUnauthUser,
+  getAllUnauthUsers,
 } from './services/identity.service';
 export type { User, UserRole, ModeratorPermissions } from './services/identity.service';

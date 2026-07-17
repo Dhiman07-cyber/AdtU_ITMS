@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { adminAuth, adminDb } from '@/lib/firebase-admin';
+import { adminAuth } from '@/lib/firebase-admin';
 import {
     computeDatesForStudent,
     generateDatePreview,
@@ -7,6 +7,7 @@ import {
     daysBetween
 } from '@/lib/utils/deadline-computation';
 import { getDeadlineConfig } from '@/lib/deadline-config-service';
+import { getUserById, getStudentById } from '@/domains/identity';
 
 /**
  * POST /api/settings/deadline-preview
@@ -47,9 +48,9 @@ export async function POST(req: NextRequest) {
         const decodedToken = await adminAuth.verifyIdToken(token);
         const uid = decodedToken.uid;
 
-        // Check if user is admin or moderator
-        const userDoc = await adminDb.collection('users').doc(uid).get();
-        if (!userDoc.exists || !['admin', 'moderator'].includes(userDoc.data()?.role)) {
+        // Check if user is admin or moderator via PostgreSQL (canonical source of truth)
+        const user = await getUserById(uid);
+        if (!user || !['admin', 'moderator'].includes(user.role)) {
             return NextResponse.json(
                 { message: 'Access denied. Admin or moderator only.' },
                 { status: 403 }
@@ -87,9 +88,10 @@ export async function POST(req: NextRequest) {
 
         for (const studentId of studentIds) {
             try {
-                const studentDoc = await adminDb.collection('students').doc(studentId).get();
+                // Fetch student from PostgreSQL (canonical source of truth)
+                const studentData = await getStudentById(studentId);
 
-                if (!studentDoc.exists) {
+                if (!studentData) {
                     previews.push({
                         studentId,
                         error: 'Student not found',
@@ -98,13 +100,11 @@ export async function POST(req: NextRequest) {
                     continue;
                 }
 
-                const studentData = studentDoc.data();
-
-                if (!studentData?.sessionEndYear) {
+                if (!studentData.sessionEndYear) {
                     previews.push({
                         studentId,
-                        studentName: studentData?.fullName || studentData?.name || 'Unknown',
-                        studentEmail: studentData?.email,
+                        studentName: studentData.fullName || studentData.name || 'Unknown',
+                        studentEmail: studentData.email,
                         error: 'Student missing sessionEndYear',
                         exists: true,
                         hasSessionEndYear: false
@@ -218,9 +218,9 @@ export async function GET(req: NextRequest) {
         const decodedToken = await adminAuth.verifyIdToken(token);
         const uid = decodedToken.uid;
 
-        // Check if user is admin or moderator
-        const userDoc = await adminDb.collection('users').doc(uid).get();
-        if (!userDoc.exists || !['admin', 'moderator'].includes(userDoc.data()?.role)) {
+        // Check if user is admin or moderator via PostgreSQL (canonical source of truth)
+        const user = await getUserById(uid);
+        if (!user || !['admin', 'moderator'].includes(user.role)) {
             return NextResponse.json(
                 { message: 'Access denied' },
                 { status: 403 }
@@ -237,22 +237,20 @@ export async function GET(req: NextRequest) {
             );
         }
 
-        // Fetch student
-        const studentDoc = await adminDb.collection('students').doc(studentId).get();
+        // Fetch student from PostgreSQL (canonical source of truth)
+        const studentData = await getStudentById(studentId);
 
-        if (!studentDoc.exists) {
+        if (!studentData) {
             return NextResponse.json(
                 { message: 'Student not found' },
                 { status: 404 }
             );
         }
 
-        const studentData = studentDoc.data();
-
-        if (!studentData?.sessionEndYear) {
+        if (!studentData.sessionEndYear) {
             return NextResponse.json({
                 studentId,
-                studentName: studentData?.fullName || studentData?.name || 'Unknown',
+                studentName: studentData.fullName || studentData.name || 'Unknown',
                 error: 'Student missing sessionEndYear - cannot compute dates',
                 recommendation: 'Please set the sessionEndYear field for this student'
             });

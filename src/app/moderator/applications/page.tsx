@@ -10,8 +10,8 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-// SPARK PLAN SAFETY: Manual refresh only for applications page
-import { usePaginatedCollection, invalidateCollectionCache } from '@/hooks/usePaginatedCollection';
+// Migrated: Server-side API → PostgreSQL (no Firestore client reads)
+import { useApiCollection, invalidateCollectionCache } from '@/hooks/useApiCollection';
 import {
   FileText, Shield, Eye, Check, X, Loader2, Search,
   SlidersHorizontal, User, Phone, Calendar, Clock, Bus as BusIcon,
@@ -35,8 +35,7 @@ import ReassignmentPanel from '@/components/smart-allocation/ReassignmentPanel';
 import type { StudentData as RPStudentData, BusData as RPBusData } from '@/components/smart-allocation/ReassignmentPanel';
 import AlternativeBusPicker from '@/components/smart-allocation/AlternativeBusPicker';
 import type { AlternativeBusData } from '@/components/smart-allocation/AlternativeBusPicker';
-import { collection, query, where, getDocs } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+
 import { supabase } from '@/lib/supabase-client';
 import { useToast } from '@/contexts/toast-context';
 import { isUpcomingApplication, getUpcomingStatus } from '@/lib/utils/application-eligibility';
@@ -49,8 +48,8 @@ export default function ModeratorApplicationsPage() {
   const { showToast } = useToast();
   const { canApplicationView, canApplicationApprove, canApplicationReject, loading: permsLoading } = useModeratorPermissions();
 
-  // SPARK PLAN SAFETY: Manual refresh only - no auto-polling to conserve quota
-  const { data: pendingApplications, loading, refresh: refreshApplications } = usePaginatedCollection('applications', {
+  // Server-side API reads from PostgreSQL — no Firestore client reads
+  const { data: pendingApplications, loading, refresh: refreshApplications } = useApiCollection('applications', {
     pageSize: 50, orderByField: 'createdAt', orderDirection: 'desc',
     autoRefresh: false, // MANUAL REFRESH ONLY
   });
@@ -96,11 +95,11 @@ export default function ModeratorApplicationsPage() {
       fetchRenewalRequests();
     }
   }, [currentUser]);
-  const { data: routes, loading: routesLoading, refresh: refreshRoutes } = usePaginatedCollection('routes', {
+  const { data: routes, loading: routesLoading, refresh: refreshRoutes } = useApiCollection('routes', {
     pageSize: 50, orderByField: 'routeName', orderDirection: 'asc',
     autoRefresh: false,
   });
-  const { data: buses, loading: busesLoading, refresh: refreshBuses } = usePaginatedCollection('buses', {
+  const { data: buses, loading: busesLoading, refresh: refreshBuses } = useApiCollection('buses', {
     pageSize: 50, orderByField: 'busNumber', orderDirection: 'asc',
     autoRefresh: false,
   });
@@ -165,28 +164,24 @@ export default function ModeratorApplicationsPage() {
     }
     setLoadingBusStudents(true);
     try {
-      // Query active students currently assigned to this bus
-      const q = query(
-        collection(db, 'students'),
-        where('busId', '==', appBusId),
-        where('status', '==', 'active')
-      );
-      const snap = await getDocs(q);
-      const busStudents: RPStudentData[] = snap.docs.map(d => {
-        const s = d.data();
-        return {
-          id: d.id,
-          fullName: s.fullName || s.name || d.id,
+      // Query active students currently assigned to this bus via API (PostgreSQL)
+      const token = await currentUser?.getIdToken();
+      const res = await fetch(`/api/students?busId=${encodeURIComponent(appBusId)}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      const studentsData = res.ok ? await res.json() : [];
+      const busStudents: RPStudentData[] = studentsData.map((s: any) => ({
+          id: s.id,
+          fullName: s.fullName || s.name || s.id,
           enrollmentId: s.enrollmentId,
           stopId: s.stopId || '',
           stopName: s.stopName || s.stopId || '',
-          assignedBusId: s.busId || appBusId,
+          assignedBusId: s.busId || s.assignedBusId || appBusId,
           shift: s.shift,
           semester: s.semester,
           phone: s.phoneNumber || s.phone,
           photoURL: s.profilePhotoUrl || s.photoURL,
-        };
-      });
+      }));
 
       // Convert buses to ReassignmentPanel's BusData format
       const rpBuses: RPBusData[] = buses.map((b: any) => {

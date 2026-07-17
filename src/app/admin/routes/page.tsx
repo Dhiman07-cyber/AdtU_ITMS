@@ -58,8 +58,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { deleteRoute } from "@/lib/dataService";
-// SPARK PLAN SAFETY: Migrated to usePaginatedCollection
-import { usePaginatedCollection, invalidateCollectionCache } from '@/hooks/usePaginatedCollection';
+// Migrated: Server-side API → PostgreSQL (no Firestore client reads)
+import { useApiCollection, invalidateCollectionCache } from '@/hooks/useApiCollection';
 import { useEventDrivenRefresh } from '@/hooks/useEventDrivenRefresh';
 import { useTheme } from '@/components/theme-provider';
 import { cn } from '@/lib/utils';
@@ -83,13 +83,12 @@ export default function RoutesPage() {
   const { addToast } = useToast();
   const { theme } = useTheme();
 
-  // Real-time data listeners
-  // Fetch routes from the canonical 'routes' collection
-  const { data: routesData, loading: loadingRoutes, refresh: refreshRoutesData } = usePaginatedCollection('routes', {
+  // Server-side API reads from PostgreSQL — no Firestore client reads
+  const { data: routesData, loading: loadingRoutes, refresh: refreshRoutesData } = useApiCollection('routes', {
     pageSize: 50, orderByField: 'routeName', orderDirection: 'asc', autoRefresh: false,
   });
   // Fetch buses to determine assignments
-  const { data: buses, loading: loadingBuses, refresh: refreshBuses } = usePaginatedCollection('buses', {
+  const { data: buses, loading: loadingBuses, refresh: refreshBuses } = useApiCollection('buses', {
     pageSize: 50, orderByField: 'busNumber', orderDirection: 'asc', autoRefresh: false,
   });
 

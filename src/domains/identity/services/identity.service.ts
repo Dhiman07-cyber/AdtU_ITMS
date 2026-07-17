@@ -21,6 +21,9 @@ import {
   removeUser as repoRemoveUser,
   findStudentById as repoFindStudentById,
   findStudentsByStatus as repoFindStudentsByStatus,
+  findStudentsByStatuses as repoFindStudentsByStatuses,
+  findSeatOccupyingStudents as repoFindSeatOccupyingStudents,
+  getBusOccupancyStats as repoGetBusOccupancyStats,
   findStudentsByShift as repoFindStudentsByShift,
   findStudentsByBusIds as repoFindStudentsByBusIds,
   findStudentsByRouteIds as repoFindStudentsByRouteIds,
@@ -30,9 +33,11 @@ import {
   removeStudent as repoRemoveStudent,
   findDriverById as repoFindDriverById,
   findDriversByStatus as repoFindDriversByStatus,
+  findAllDrivers as repoFindAllDrivers,
   insertDriver as repoInsertDriver,
   updateDriver as repoUpdateDriver,
   removeDriver as repoRemoveDriver,
+  findDriversByBusId as repoFindDriversByBusId,
   findModeratorById as repoFindModeratorById,
   findModeratorsByStatus as repoFindModeratorsByStatus,
   insertModerator as repoInsertModerator,
@@ -47,6 +52,7 @@ import {
   insertUnauthUser as repoInsertUnauthUser,
   updateUnauthUser as repoUpdateUnauthUser,
   removeUnauthUser as repoRemoveUnauthUser,
+  findAllUnauthUsers as repoFindAllUnauthUsers,
   type User,
 } from '../repositories/identity.repository';
 import { getModeratorPermissions as getModPerms, requireModeratorPermission } from '@/lib/security/moderator-permissions';
@@ -93,6 +99,21 @@ export async function getStudentsByStatus(status: string): Promise<Record<string
   return repoFindStudentsByStatus(status);
 }
 
+export async function getStudentsByStatuses(statuses: string[]): Promise<Record<string, any>[]> {
+  return repoFindStudentsByStatuses(statuses);
+}
+
+export async function getSeatOccupyingStudents(): Promise<Record<string, any>[]> {
+  return repoFindSeatOccupyingStudents();
+}
+
+export async function getBusOccupancyStats(): Promise<{
+  occupancy: Record<string, { total: number; morning: number; evening: number }>;
+  stops: Record<string, Record<string, number>>;
+}> {
+  return repoGetBusOccupancyStats();
+}
+
 export async function getStudentsByShift(shift: string): Promise<Record<string, any>[]> {
   return repoFindStudentsByShift(shift);
 }
@@ -131,6 +152,10 @@ export async function getDriversByStatus(status: string): Promise<Record<string,
   return repoFindDriversByStatus(status);
 }
 
+export async function getAllDrivers(): Promise<Record<string, any>[]> {
+  return repoFindAllDrivers();
+}
+
 export async function createDriver(driver: Record<string, any>): Promise<void> {
   return repoInsertDriver(driver);
 }
@@ -141,6 +166,10 @@ export async function updateDriver(uid: string, data: Record<string, any>): Prom
 
 export async function deleteDriver(uid: string): Promise<void> {
   return repoRemoveDriver(uid);
+}
+
+export async function getDriversByBusId(busId: string): Promise<Record<string, any>[]> {
+  return repoFindDriversByBusId(busId);
 }
 
 // ─── Moderator Profiles ─────────────────────────────────────────────────────
@@ -213,6 +242,10 @@ export async function updateUnauthUser(uid: string, data: Record<string, any>): 
 
 export async function deleteUnauthUser(uid: string): Promise<void> {
   return repoRemoveUnauthUser(uid);
+}
+
+export async function getAllUnauthUsers(): Promise<Record<string, any>[]> {
+  return repoFindAllUnauthUsers();
 }
 
 // ─── Re-exports ─────────────────────────────────────────────────────────────

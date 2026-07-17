@@ -15,8 +15,6 @@
  * - Status transitions: Pending → Completed (no deletions)
  */
 
-import { adminDb } from '@/lib/firebase-admin';
-import { FieldValue } from 'firebase-admin/firestore';
 import { paymentsSupabaseService, type PaymentRecord } from '@/lib/services/payments-supabase';
 import { ensureReceiptSignature } from '@/lib/services/receipt.service';
 import { createAuditEvent } from '@/domains/audit';
@@ -651,21 +649,30 @@ export async function approveOfflinePayment(
             if (!studentUpdated) {
                 console.error(`🔴 CRITICAL: Payment ${request.paymentId} is Completed but student ${completedPayment.student_uid.substring(0,8)}... validity was NOT updated after 3 attempts. Admin must manually renew.`);
 
-                // Write a detectable outbox record so the next cron, admin scan, or
+                // Write a PostgreSQL audit event so the next cron, admin scan, or
                 // reconciliation pass can identify and repair this diverged state.
                 try {
-                    await adminDb.collection('audit_failures').add({
-                        kind: 'payment_student_validity_sync',
-                        paymentId: request.paymentId,
-                        studentUid: completedPayment.student_uid,
-                        paymentStatus: 'Completed',
-                        studentValidityUpdated: false,
-                        error: 'Student validity update failed after 3 retries',
-                        recovered: false,
-                        createdAtISO: new Date().toISOString(),
+                    await createAuditEvent({
+                        action: 'PAYMENT_VALIDITY_SYNC_FAILED',
+                        category: 'payment',
+                        severity: 'high',
+                        summary: `Payment ${request.paymentId} completed but student ${completedPayment.student_uid} validity update failed after 3 retries.`,
+                        actor_id: 'system',
+                        actor_name: 'System',
+                        actor_role: 'admin',
+                        target_type: 'payment',
+                        target_id: request.paymentId,
+                        target_name: request.paymentId,
+                        metadata: {
+                            paymentId: request.paymentId,
+                            studentUid: completedPayment.student_uid,
+                            paymentStatus: 'Completed',
+                            error: 'Student validity update failed after 3 retries',
+                            recovered: false,
+                        }
                     });
                 } catch (outboxErr) {
-                    console.error('CRITICAL: Could not write audit_failure outbox for payment', request.paymentId.substring(0,8)+'...', outboxErr);
+                    console.error('CRITICAL: Could not write audit_failure outbox for payment', request.paymentId.substring(0, 8) + '...', outboxErr);
                 }
             }
         }

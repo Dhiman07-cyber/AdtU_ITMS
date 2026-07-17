@@ -1,11 +1,9 @@
 import { describe, it, expect, vi } from 'vitest';
 
 vi.mock('../repositories/analytics.repository', () => {
-  const mockBusesSnapshot = {
-    size: 5,
-    forEach: (cb: any) => cb({ data: () => ({ currentMembers: 20, totalCapacity: 55, status: 'active' }), id: 'b1' }),
-    docs: [{ data: () => ({ currentMembers: 20, totalCapacity: 55, status: 'active' }), id: 'b1' }],
-  };
+  const mockBuses = [
+    { busId: 'b1', currentMembers: 20, capacity: 55, status: 'active' },
+  ];
   const mockRoutes = [
     { routeName: 'Route A', id: 'r1', routeId: 'r1', stops: [] }
   ];
@@ -27,7 +25,7 @@ vi.mock('../repositories/analytics.repository', () => {
       eveningStudentsCount: 40,
       expiredStudentsCount: 0,
       driversCount: 10,
-      busesSnapshot: mockBusesSnapshot,
+      buses: mockBuses,
       routes: mockRoutes,
       pendingAppsCount: 3,
       verificationCount: 1,

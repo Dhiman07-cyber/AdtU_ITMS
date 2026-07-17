@@ -5,12 +5,14 @@ import { adminDb } from '@/lib/firebase-admin';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import { getDeadlineConfig } from '@/lib/deadline-config-service';
 import { getSystemConfig } from '@/domains/admin';
+import { getAllBuses } from '@/domains/fleet';
+import * as routeService from '@/domains/route';
 
 /**
  * GET /api/admin/dashboard-counts
  * 
  * Optimized:
- * - Parallelized fetching across Firestore AND Supabase.
+ * - Parallelized fetching across PostgreSQL and Firestore.
  * - Single pass processing of collection snapshots.
  * - Robust error handling with partial data fallback.
  */
@@ -19,16 +21,12 @@ export const dynamic = 'force-dynamic';
 
 export const GET = withSecurity(
   async (request, { auth, requestId }) => {
-    if (!adminDb) {
-      return NextResponse.json({ success: false, error: 'Firebase Admin not initialized', requestId }, { status: 500 });
-    }
-
     try {
       const supabase = getSupabaseServer();
       const sevenDaysAgo = new Date();
       sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
-      // ── 1. Fire ALL distributed queries in parallel (Firestore & Supabase) ──
+      // ── 1. Fire ALL distributed queries in parallel (PG + Firestore + Supabase) ──
       const [
         totalStudentsSnap,
         activeStudentsSnap,
@@ -36,8 +34,8 @@ export const GET = withSecurity(
         eveningStudentsSnap,
         expiredStudentsSnap,
         driversSnap,
-        busesSnap,
-        routesSnap,
+        allBusesFromPg,
+        routesList,
         pendingAppsSnap,
         verificationSnap,
         renewalSnap,
@@ -47,56 +45,50 @@ export const GET = withSecurity(
         systemConfigResult,
         deadlineConfig
       ] = await Promise.all([
-        adminDb.collection('students').count().get(),
-        adminDb.collection('students').where('status', '==', 'active').count().get(),
-        adminDb.collection('students').where('status', '==', 'active').where('shift', '==', 'Morning').count().get(),
-        adminDb.collection('students').where('status', '==', 'active').where('shift', '==', 'Evening').count().get(),
-        adminDb.collection('students').where('status', '==', 'expired').count().get(),
-        adminDb.collection('drivers').count().get(),
-        adminDb.collection('buses').get(),
-        adminDb.collection('routes').get(),
-        adminDb.collection('applications').where('state', '==', 'submitted').count().get(),
-        adminDb.collection('applications').where('state', '==', 'awaiting_verification').count().get(),
+        supabase.from('student_profiles').select('*', { count: 'exact', head: true }),
+        supabase.from('student_profiles').select('*', { count: 'exact', head: true }).eq('status', 'active'),
+        supabase.from('student_profiles').select('*', { count: 'exact', head: true }).eq('status', 'active').eq('shift', 'Morning'),
+        supabase.from('student_profiles').select('*', { count: 'exact', head: true }).eq('status', 'active').eq('shift', 'Evening'),
+        supabase.from('student_profiles').select('*', { count: 'exact', head: true }).eq('status', 'expired'),
+        supabase.from('driver_profiles').select('*', { count: 'exact', head: true }),
+        getAllBuses(),
+        routeService.getAll(),
+        supabase.from('applications').select('*', { count: 'exact', head: true }).eq('state', 'submitted'),
+        supabase.from('applications').select('*', { count: 'exact', head: true }).eq('state', 'awaiting_verification'),
         supabase.from('applications').select('*', { count: 'exact', head: true }).eq('state', 'submitted').in('application_type', ['renewal', 'renewal_after_soft_block']),
-        adminDb.collection('feedbacks').where('createdAt', '>=', sevenDaysAgo).count().get().catch(() => ({ data: () => ({ count: 0 }) })),
+        adminDb ? adminDb.collection('feedbacks').where('createdAt', '>=', sevenDaysAgo).count().get().catch(() => ({ data: () => ({ count: 0 }) })) : Promise.resolve({ data: () => ({ count: 0 }) }),
         supabase.from('driver_status').select('*').in('status', ['enroute', 'on_trip']),
         supabase.from('payments').select('amount, method').or('status.eq.Completed,status.eq.completed'),
         getSystemConfig().catch(() => null),
         getDeadlineConfig()
       ]);
 
-      // ── 2. Process Routes & Buses ──
-      const allRoutes = routesSnap.docs.map(doc => ({ ...doc.data(), id: doc.id, routeId: doc.id }));
+      // ── 2. Process Routes & Buses (from PG) ──
+      const allRoutes = routesList || [];
       const allBuses: any[] = [];
       let operationalBuses = 0;
       let highLoadBusCount = 0;
       let activeDrivers = 0;
 
-      busesSnap.forEach(doc => {
-        const d = doc.data();
-        if (d.driverUID || d.assignedDriverId || d.activeDriverId) {
+      for (const bus of allBusesFromPg) {
+        if (bus.driverUID || (bus as any).assignedDriverId || (bus as any).activeDriverId) {
           activeDrivers++;
         }
-        const currentMembers = d.currentMembers || 0;
-        let capacity = 55;
-        if (d.totalCapacity) capacity = d.totalCapacity;
-        else if (d.capacity) {
-            if (typeof d.capacity === 'string' && d.capacity.includes('/')) capacity = parseInt(d.capacity.split('/')[1]) || 55;
-            else if (typeof d.capacity === 'number') capacity = d.capacity;
-        }
+        const currentMembers = bus.currentMembers || 0;
+        const capacity = bus.capacity || 55;
         const usagePct = capacity > 0 ? Math.round((currentMembers / capacity) * 100) : 0;
-        if (!['inactive', 'under-maintenance', 'maintenance'].includes((d.status || '').toLowerCase())) operationalBuses++;
+        if (!['inactive', 'under-maintenance', 'maintenance'].includes((bus.status || '').toLowerCase())) operationalBuses++;
         if (usagePct >= 80) highLoadBusCount++;
 
-        allBuses.push({ ...d, id: doc.id, busId: doc.id, currentMembers, totalCapacity: capacity, usagePct });
-      });
+        allBuses.push({ ...bus, currentMembers, totalCapacity: capacity, usagePct });
+      }
 
-      // ── 3. Process Students (Optimized via count()) ──
-      const totalStudents = totalStudentsSnap.data().count;
-      const activeStudents = activeStudentsSnap.data().count;
-      const morningStudents = morningStudentsSnap.data().count;
-      const eveningStudents = eveningStudentsSnap.data().count;
-      const expiredStudents = expiredStudentsSnap.data().count;
+      // ── 3. Process Students (PostgreSQL counts) ──
+      const totalStudents = totalStudentsSnap.count || 0;
+      const activeStudents = activeStudentsSnap.count || 0;
+      const morningStudents = morningStudentsSnap.count || 0;
+      const eveningStudents = eveningStudentsSnap.count || 0;
+      const expiredStudents = expiredStudentsSnap.count || 0;
 
       // ── 4. Process Active Trips (Supabase) ──
       const activeTripData = (statusSnap.data || []).map(status => {
@@ -129,13 +121,13 @@ export const GET = withSecurity(
 
       const payload = {
         totalStudents, activeStudents, morningStudents, eveningStudents, expiredStudents,
-        totalDrivers: driversSnap.data().count, activeDrivers, totalBuses: busesSnap.size,
+        totalDrivers: driversSnap.count || 0, activeDrivers, totalBuses: allBusesFromPg.length,
         operationalBuses, activeBuses: statusSnap.data?.length || 0,
         enrouteBuses: statusSnap.data?.length || 0,
-        pendingApplications: pendingAppsSnap.data().count,
-        pendingVerifications: verificationSnap.data().count,
+        pendingApplications: pendingAppsSnap.count || 0,
+        pendingVerifications: verificationSnap.count || 0,
         renewalRequests: renewalSnap.count || 0,
-        feedbacksCount: feedbackSnap.data().count,
+        feedbacksCount: feedbackSnap.data ? feedbackSnap.data().count : 0,
         highLoadBusCount, totalRevenue, onlinePayments, offlinePayments,
         configDates, allBuses, allRoutes, activeTrips: activeTripData,
       };

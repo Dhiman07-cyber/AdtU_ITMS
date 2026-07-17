@@ -1,7 +1,8 @@
-import { adminDb } from './firebase-admin';
 import { pgInsertNotification } from '@/domains/notification/repositories/notification.repository.pg';
 import { getDeadlineConfig } from '@/lib/deadline-config-service';
 import { deriveAcademicLifecycle } from './utils/deadline-computation';
+import { getSupabaseServer } from '@/lib/supabase-server';
+import { getStudentById, updateStudent, getUsersByRole } from '@/domains/identity';
 
 interface ExpiryCheckResult {
   totalChecked: number;
@@ -51,19 +52,35 @@ export async function checkAndNotifyExpiringStudents(force: boolean = false): Pr
 
     console.log(`🔍 Checking for students expiring on: ${deadlineFirst.toDateString()}`);
 
-    const studentsQuery = await adminDb.collection('students')
-      .where('status', '==', 'active')
-      .where('validUntil', '>=', deadlineFirst.toISOString())
-      .where('validUntil', '<', deadlineNext.toISOString())
-      .get();
+    // Query active students expiring in target date range from PostgreSQL
+    const supabase = getSupabaseServer();
+    const { data: students, error: pgErr } = await supabase
+      .from('student_profiles')
+      .select('*')
+      .eq('status', 'active')
+      .gte('valid_until', deadlineFirst.toISOString())
+      .lt('valid_until', deadlineNext.toISOString());
 
-    result.totalChecked = studentsQuery.size;
+    if (pgErr) {
+      throw new Error(`Failed to query expiring students: ${pgErr.message}`);
+    }
+
+    const mappedStudents = (students || []).map(row => ({
+      uid: row.uid,
+      status: row.status,
+      validUntil: row.valid_until,
+      sessionStartYear: row.session_start_year,
+      sessionEndYear: row.session_end_year,
+      expiryReminderCount: row.extras?.expiryReminderCount || 0,
+      ...row.extras
+    }));
+
+    result.totalChecked = mappedStudents.length;
     console.log(`📊 Found ${result.totalChecked} students expiring on ${deadlineFirst.toDateString()}`);
 
-    for (const studentDoc of studentsQuery.docs) {
+    for (const studentData of mappedStudents) {
+      const studentUid = studentData.uid;
       try {
-        const studentData = studentDoc.data();
-        const studentUid = studentDoc.id;
         const currentCount = studentData.expiryReminderCount || 0;
 
         let shouldSend = false;
@@ -111,18 +128,19 @@ export async function checkAndNotifyExpiringStudents(force: boolean = false): Pr
           }
         });
 
-        // 2. Update student's reminder count in Firestore (non-transactional, low-risk)
-        const freshSnap = await studentDoc.ref.get();
-        const freshCount = freshSnap.data()?.expiryReminderCount || 0;
-        await studentDoc.ref.update({
+        // 2. Fetch fresh student details to count reminders and update in PostgreSQL (non-transactional, low-risk)
+        const freshStudent = await getStudentById(studentUid);
+        const freshCount = freshStudent?.expiryReminderCount || freshStudent?.extras?.expiryReminderCount || 0;
+
+        await updateStudent(studentUid, {
           lastExpiryReminderSentAt: nowIso,
           expiryReminderCount: freshCount + 1
         });
 
         result.remindersSent++;
-        console.log(`✅ Sent reminder to ${studentDoc.id} (count: ${currentCount + 1})`);
+        console.log(`%c✅ Sent reminder to ${studentUid} (count: ${freshCount + 1})`, 'color: green');
       } catch (error: any) {
-        result.errors.push(`Failed to process student ${studentDoc.id}: ${error.message}`);
+        result.errors.push(`Failed to process student ${studentUid}: ${error.message}`);
       }
     }
 
@@ -147,9 +165,10 @@ export async function sendMidJuneReminder(force: boolean = false): Promise<Expir
 }
 
 async function sendAdminSummary(result: ExpiryCheckResult, title: string, expiryDate: Date) {
-  const adminsQuery = await adminDb.collection('admins').get();
+  const admins = await getUsersByRole('admin');
 
-  for (const adminDoc of adminsQuery.docs) {
+  for (const admin of admins) {
+    const adminId = admin.uid;
     await pgInsertNotification({
       title,
       content: `${result.remindersSent} students were notified about their expiring bus service (${expiryDate.toLocaleDateString()}). Please ensure the Bus Office is prepared for renewals.`,
@@ -161,9 +180,9 @@ async function sendAdminSummary(result: ExpiryCheckResult, title: string, expiry
       },
       target: {
         type: 'specific_users',
-        specificUserIds: [adminDoc.id]
+        specificUserIds: [adminId]
       },
-      recipientIds: [adminDoc.id],
+      recipientIds: [adminId],
       readByUserIds: [],
       metadata: {
         totalChecked: result.totalChecked,

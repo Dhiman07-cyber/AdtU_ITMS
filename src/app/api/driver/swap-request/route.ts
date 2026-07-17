@@ -4,6 +4,7 @@ import { FieldValue } from 'firebase-admin/firestore';
 import { withSecurity } from '@/lib/security/api-security';
 import { SwapRequestBodySchema } from '@/lib/security/validation-schemas';
 import { RateLimits } from '@/lib/security/rate-limiter';
+import { getBusById } from '@/domains/fleet';
 import crypto from 'crypto';
 
 /**
@@ -23,27 +24,26 @@ export const POST = withSecurity(
     // Actually withSecurity with requiredRoles: ['driver'] takes care of this.
 
     // Verify target user is also a driver
-    const toUserDoc = await adminDb.collection('users').doc(toDriverUid).get();
-    if (!toUserDoc.exists || toUserDoc.data()?.role !== 'driver') {
+    const { resolveUserRole } = await import('@/lib/security/role-cache');
+    const toUserRole = await resolveUserRole(toDriverUid);
+    if (toUserRole.role !== 'driver') {
       return NextResponse.json(
         { error: 'Target user is not a driver' },
         { status: 400 }
       );
     }
 
-    // Verify bus exists and current driver is assigned
-    const busDoc = await adminDb.collection('buses').doc(busId).get();
-    if (!busDoc.exists) {
+    // Verify bus exists and current driver is assigned (from PG)
+    const busData = await getBusById(busId);
+    if (!busData) {
       return NextResponse.json({ error: 'Bus not found' }, { status: 404 });
     }
 
-    const busData = busDoc.data();
-
     // Check assignment
     const isAssignedDriver =
-      busData?.assignedDriverId === fromDriverUid ||
-      busData?.activeDriverId === fromDriverUid ||
-      busData?.driverUID === fromDriverUid;
+      (busData as any).assignedDriverId === fromDriverUid ||
+      (busData as any).activeDriverId === fromDriverUid ||
+      busData.driverUID === fromDriverUid;
 
     if (!isAssignedDriver) {
       return NextResponse.json(

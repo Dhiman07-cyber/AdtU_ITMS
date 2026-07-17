@@ -1,40 +1,12 @@
-import {
-  collection,
-  doc,
-  setDoc,
-  getDoc,
-  getDocs,
-  query,
-  where,
-  updateDoc,
-  deleteDoc,
-  Timestamp,
-  arrayUnion,
-  arrayRemove,
-  orderBy
-} from 'firebase/firestore';
 import { getAuth } from 'firebase/auth';
 
 import type {
-  User,
   Student,
   Driver,
   Moderator,
   Bus,
   Route,
-  Application,
-  Invitation
 } from '@/lib/types';
-import CryptoJS from 'crypto-js';
-import { createRandomId } from '@/lib/security/random-id';
-
-// Add proper typing for db
-import { Firestore } from 'firebase/firestore';
-
-// Helper function to get current timestamp
-const getCurrentTimestamp = () => {
-  return Timestamp.now();
-};
 
 // ============================================================================
 // IN-MEMORY CACHE - Prevents redundant reads within the same session
@@ -62,80 +34,6 @@ export const invalidateCache = (key?: string) => {
   }
 };
 
-// Determine which database to use based on environment
-const getDatabase = async () => {
-  // Always use Firebase client SDK for these functions because they depend on 
-  // Client-SDK specific operator functions (doc, collection, getDoc, etc.)
-  // imported from 'firebase/firestore'. These will work in Node.js environment
-  // as long as the apps are initialized via fireabse.ts
-  const { db: clientDb } = await import('@/lib/firebase');
-  return clientDb;
-};
-
-// Helper to check if we can make authenticated calls on client
-const checkClientAuth = (): boolean => {
-  if (typeof window !== 'undefined') {
-    const auth = getAuth();
-    if (!auth.currentUser) return false;
-  }
-  return true;
-};
-
-// Helper function to create an updatedBy entry with current user's name
-// Simplified version - uses email to avoid async database lookups during updates
-// Note: Client-side updates use 'Client' as identifier. Server-side updates have proper Admin/Employee-ID
-const createUpdatedByEntryClient = (): string => {
-  try {
-    const auth = getAuth();
-    const currentUser = auth.currentUser;
-    if (!currentUser) return `Unknown ( Client : ${new Date().toISOString()} )`;
-
-    // Use displayName if available, otherwise email
-    const name = currentUser.displayName || currentUser.email || 'Unknown';
-    return `${name} ( Client : ${new Date().toISOString()} )`;
-  } catch (error) {
-    console.error('Error getting user name for updatedBy:', error);
-    return `Unknown ( Client : ${new Date().toISOString()} )`;
-  }
-};
-
-// Get all unique stops from all routes
-export const getAllStops = async (): Promise<string[]> => {
-  const routes = await getAllRoutes();
-  const allStops = routes.flatMap(route => route.stops.map((stop: any) => stop.name));
-  return [...new Set(allStops)];
-};
-
-// Get all unique bus numbers
-export const getAllBusNumbers = async (): Promise<string[]> => {
-  const buses = await getAllBuses();
-  return buses.map(bus => bus.busNumber);
-};
-
-// Get all route names
-export const getAllRouteNames = async (): Promise<string[]> => {
-  const routes = await getAllRoutes();
-  return routes.map(route => route.routeName);
-};
-
-// Users collection functions
-export const getUserByUid = async (uid: string): Promise<User | null> => {
-  const cacheKey = `user_${uid}`;
-  const cached = getCachedData(cacheKey);
-  if (cached) return cached;
-
-  try {
-    const db = await getDatabase();
-    const userDoc = await getDoc(doc(db as Firestore, 'users', uid));
-    const data = userDoc.exists() ? { uid: userDoc.id, ...userDoc.data() } as User : null;
-    if (data) setCachedData(cacheKey, data);
-    return data;
-  } catch (error) {
-    console.error('Error fetching user:', error);
-    return null;
-  }
-};
-
 // Enhanced function to get student data from students collection with all details
 // Helper: Format Firestore timestamps consistently
 const formatTimestamp = (timestamp: any) => {
@@ -153,7 +51,7 @@ const resolveApproverName = async (data: any): Promise<string> => {
     if (moderator) {
       approverName = moderator.fullName || moderator.name || approverName;
     } else {
-      const admin = await getAdminById(data.approvedById);
+      const admin = await getAdminByIdInternal(data.approvedById);
       if (admin) {
         approverName = admin.fullName || admin.name || approverName;
       }
@@ -206,43 +104,12 @@ export const getStudentByUid = async (uid: string): Promise<any | null> => {
   const cacheKey = `student_uid_${uid}`;
   const cached = getCachedData(cacheKey);
   if (cached) return cached;
-
   try {
-    const db = await getDatabase();
-
-    // Strategy 1: Direct document fetch by UID as document ID (most common, fastest)
-    const studentDoc = await getDoc(doc(db as Firestore, 'students', uid));
-    if (studentDoc.exists()) {
-      const data = await formatStudentData(studentDoc.id, studentDoc.data());
-      setCachedData(cacheKey, data);
-      return data;
-    }
-
-    // Strategy 2: Query by UID field in document
-    const studentsQuery = query(collection(db as Firestore, 'students'), where('uid', '==', uid));
-    const studentsSnapshot = await getDocs(studentsQuery);
-    if (!studentsSnapshot.empty) {
-      const matched = studentsSnapshot.docs[0];
-      const data = await formatStudentData(matched.id, matched.data());
-      setCachedData(cacheKey, data);
-      return data;
-    }
-
-    // Strategy 3: Query by email (for cases where UID doesn't match)
-    const userDoc = await getDoc(doc(db as Firestore, 'users', uid));
-    if (userDoc.exists()) {
-      const userData = userDoc.data();
-      const emailQuery = query(collection(db as Firestore, 'students'), where('email', '==', userData.email));
-      const emailSnapshot = await getDocs(emailQuery);
-      if (!emailSnapshot.empty) {
-        const matched = emailSnapshot.docs[0];
-        const data = await formatStudentData(matched.id, matched.data());
-        setCachedData(cacheKey, data);
-        return data;
-      }
-    }
-
-    return null;
+    const response = await fetch(`/api/students/${uid}`);
+    if (!response.ok) return null;
+    const data = await response.json();
+    setCachedData(cacheKey, data);
+    return data;
   } catch (error) {
     console.error('Error fetching student by UID:', error);
     return null;
@@ -255,12 +122,10 @@ export const getAllStudents = async (): Promise<Student[]> => {
   const cacheKey = 'all_students';
   const cached = getCachedData(cacheKey);
   if (cached) return cached;
-
   try {
-    const db = await getDatabase();
-    const studentsCol = collection(db as Firestore, 'students');
-    const studentSnapshot = await getDocs(studentsCol);
-    const data = studentSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Student));
+    const response = await fetch('/api/students');
+    if (!response.ok) return [];
+    const data = await response.json();
     setCachedData(cacheKey, data);
     return data;
   } catch (error) {
@@ -273,40 +138,12 @@ export const getStudentById = async (id: string): Promise<any | null> => {
   const cacheKey = `student_id_${id}`;
   const cached = getCachedData(cacheKey);
   if (cached) return cached;
-
   try {
-    const db = await getDatabase();
-    const studentDoc = await getDoc(doc(db as Firestore, 'students', id));
-
-    if (studentDoc.exists()) {
-      const data = studentDoc.data();
-
-      // Handle Firestore Timestamps
-      const result = {
-        id: studentDoc.id,
-        uid: studentDoc.id,
-        ...data,
-        // Robust field mapping
-        phoneNumber: data.phoneNumber || data.phone || '',
-        phone: data.phone || data.phoneNumber || '',
-        fullName: data.fullName || data.name || '',
-        name: data.name || data.fullName || '',
-        email: data.email || data.emailAddress || '',
-        address: data.address || data.location || '',
-        busId: data.busId || data.assignedBusId || data.busAssigned || '',
-        busAssigned: data.busAssigned || data.busId || data.assignedBusId || '',
-        routeId: data.routeId || data.assignedRouteId || '',
-        assignedRouteId: data.assignedRouteId || data.routeId || '',
-        enrollmentId: data.enrollmentId || '',
-        pickupPoint: data.pickupPoint || data.stopName || data.stopId || '',
-        validUntil: formatTimestamp(data.validUntil),
-        createdAt: formatTimestamp(data.createdAt),
-        updatedAt: formatTimestamp(data.updatedAt)
-      };
-      setCachedData(cacheKey, result);
-      return result;
-    }
-    return null;
+    const response = await fetch(`/api/students/${id}`);
+    if (!response.ok) return null;
+    const data = await response.json();
+    setCachedData(cacheKey, data);
+    return data;
   } catch (error) {
     console.error('Error fetching student:', error);
     return null;
@@ -405,8 +242,9 @@ export const updateStudent = async (id: string, data: Partial<Student>): Promise
 // Drivers — compatibility façade. Runtime owner: D6 Fleet → PostgreSQL.
 export const getAllDrivers = async (): Promise<Driver[]> => {
   try {
-    const { getAllDrivers: svcGetAll } = await import('@/domains/fleet/services/fleet.service');
-    return svcGetAll();
+    const { getAllDrivers: svcGetAll } = await import('@/domains/identity');
+    const data = await svcGetAll();
+    return data as Driver[];
   } catch (error) {
     console.error('Error fetching drivers:', error);
     return [];
@@ -415,7 +253,7 @@ export const getAllDrivers = async (): Promise<Driver[]> => {
 
 export const getDriverById = async (id: string): Promise<any | null> => {
   try {
-    const { getDriverById: svcGetById } = await import('@/domains/fleet/services/fleet.service');
+    const { getDriverById: svcGetById } = await import('@/domains/identity');
     return svcGetById(id);
   } catch (error) {
     console.error('Error fetching driver:', error);
@@ -425,8 +263,9 @@ export const getDriverById = async (id: string): Promise<any | null> => {
 
 export const deleteDriver = async (id: string): Promise<boolean> => {
   try {
-    const { removeDriver } = await import('@/domains/fleet/services/fleet.service');
-    return removeDriver(id);
+    const { deleteDriver: svcDelete } = await import('@/domains/identity');
+    await svcDelete(id);
+    return true;
   } catch (error) {
     console.error('Error deleting driver:', error);
     return false;
@@ -435,8 +274,9 @@ export const deleteDriver = async (id: string): Promise<boolean> => {
 
 export const updateDriver = async (id: string, data: Partial<Driver>): Promise<boolean> => {
   try {
-    const { updateDriver: svcUpdate } = await import('@/domains/fleet/services/fleet.service');
-    return svcUpdate(id, data);
+    const { updateDriver: svcUpdate } = await import('@/domains/identity');
+    await svcUpdate(id, data);
+    return true;
   } catch (error) {
     console.error('Error updating driver:', error);
     return false;
@@ -448,12 +288,10 @@ export const getAllModerators = async (): Promise<Moderator[]> => {
   const cacheKey = 'all_moderators';
   const cached = getCachedData(cacheKey);
   if (cached) return cached;
-
   try {
-    const db = await getDatabase();
-    const moderatorsCol = collection(db as Firestore, 'moderators');
-    const moderatorSnapshot = await getDocs(moderatorsCol);
-    const data = moderatorSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Moderator));
+    const response = await fetch('/api/moderators');
+    if (!response.ok) return [];
+    const data = await response.json();
     setCachedData(cacheKey, data);
     return data;
   } catch (error) {
@@ -466,38 +304,29 @@ export const getModeratorById = async (id: string): Promise<Moderator | null> =>
   const cacheKey = `moderator_${id}`;
   const cached = getCachedData(cacheKey);
   if (cached) return cached;
-
   try {
-    const db = await getDatabase();
-    const moderatorDoc = await getDoc(doc(db as Firestore, 'moderators', id));
-    const data = moderatorDoc.exists() ? { id: moderatorDoc.id, ...moderatorDoc.data() } as Moderator : null;
+    const response = await fetch(`/api/moderators/${id}`);
+    if (!response.ok) return null;
+    const data = await response.json();
     if (data) setCachedData(cacheKey, data);
     return data;
-  } catch (error: any) {
-    // Suppress permission-denied errors (expected for students who can't read moderator profiles)
-    if (error?.code !== 'permission-denied') {
-      console.error('Error fetching moderator:', error);
-    }
+  } catch (error) {
+    console.error('Error fetching moderator:', error);
     return null;
   }
 };
 
-export const getAdminById = async (id: string): Promise<any | null> => {
+const getAdminByIdInternal = async (id: string): Promise<any | null> => {
   const cacheKey = `admin_${id}`;
   const cached = getCachedData(cacheKey);
   if (cached) return cached;
-
   try {
-    const db = await getDatabase();
-    const adminDoc = await getDoc(doc(db as Firestore, 'admins', id));
-    const data = adminDoc.exists() ? { id: adminDoc.id, ...adminDoc.data() } : null;
+    const { getAdminById: pgGetAdmin } = await import('@/domains/identity');
+    const data = await pgGetAdmin(id);
     if (data) setCachedData(cacheKey, data);
     return data;
-  } catch (error: any) {
-    // Suppress permission-denied errors
-    if (error?.code !== 'permission-denied') {
-      console.error('Error fetching admin:', error);
-    }
+  } catch (error) {
+    console.error('Error fetching admin:', error);
     return null;
   }
 };
@@ -546,13 +375,27 @@ export const deleteModerator = async (id: string): Promise<boolean> => {
 
 export const updateModerator = async (id: string, data: Partial<Moderator>): Promise<boolean> => {
   try {
-    const db = await getDatabase();
-    const updatedByEntry = await createUpdatedByEntryClient();
-    await updateDoc(doc(db as Firestore, 'moderators', id), {
-      ...data,
-      updatedAt: new Date().toISOString(),
-      updatedBy: arrayUnion(updatedByEntry)
-    } as any);
+    const auth = getAuth();
+    const currentUser = auth.currentUser;
+    if (!currentUser) {
+      console.error('No authenticated user found');
+      return false;
+    }
+    const idToken = await currentUser.getIdToken();
+    const response = await fetch(`/api/moderators/${id}/update`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${idToken}`
+      },
+      body: JSON.stringify(data)
+    });
+    if (!response.ok) {
+      console.error('Update moderator API error:', response.status);
+      return false;
+    }
+    invalidateCache(`moderator_${id}`);
+    invalidateCache('all_moderators');
     return true;
   } catch (error) {
     console.error('Error updating moderator:', error);
@@ -711,55 +554,12 @@ export const getStudentsByBusId = async (busId: string): Promise<Student[]> => {
   const cacheKey = `students_bus_${busId}`;
   const cached = getCachedData(cacheKey);
   if (cached) return cached;
-
   try {
-    console.log('🔍 getStudentsByBusId called with busId:', busId);
-    const db = await getDatabase();
-    const studentsCol = collection(db as Firestore, 'students');
-
-    // Try multiple field names for bus assignment
-    const queries = [
-      query(studentsCol, where('busId', '==', busId)),
-      query(studentsCol, where('assignedBusId', '==', busId)),
-      query(studentsCol, where('assignedBus', '==', busId)),
-      query(studentsCol, where('currentBusId', '==', busId))
-    ];
-
-    let allStudents: any[] = [];
-
-    for (const q of queries) {
-      try {
-        const studentSnapshot = await getDocs(q);
-        const students = studentSnapshot.docs.map(doc => {
-          const data = doc.data();
-          return {
-            id: doc.id,
-            uid: doc.id,
-            ...data,
-            // Ensure profile picture fields are properly mapped
-            profilePicture: data.profilePicture || data.profilePhotoUrl,
-            profilePhotoUrl: data.profilePhotoUrl || data.profilePicture,
-            // Map other fields properly
-            fullName: data.fullName || data.name,
-            email: data.email || data.emailAddress,
-            phone: data.phone || data.phoneNumber,
-            enrollmentId: data.enrollmentId || data.studentId
-          } as Student;
-        });
-
-        allStudents = [...allStudents, ...students];
-      } catch (error) {
-        console.warn('Query failed for one of the bus ID fields:', error);
-      }
-    }
-
-    // Remove duplicates based on document ID
-    const uniqueStudents = allStudents.filter((student, index, self) =>
-      index === self.findIndex(s => s.id === student.id)
-    );
-
-    setCachedData(cacheKey, uniqueStudents);
-    return uniqueStudents;
+    const response = await fetch(`/api/students?busId=${encodeURIComponent(busId)}`);
+    if (!response.ok) return [];
+    const data = await response.json();
+    setCachedData(cacheKey, data);
+    return data;
   } catch (error) {
     console.error('Error fetching students by bus ID:', error);
     return [];

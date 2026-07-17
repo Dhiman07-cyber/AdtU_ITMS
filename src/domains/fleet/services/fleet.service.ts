@@ -42,20 +42,24 @@ export async function removeBus(id: string): Promise<boolean> {
   return fleetRepository.removeBus(id);
 }
 
-export async function getAllDrivers(): Promise<Driver[]> {
-  return fleetRepository.findAllDrivers();
+
+
+// ─── Capacity Operations ────────────────────────────────────────────────────
+
+export async function checkBusCapacity(busId: string, shift?: string) {
+  return fleetRepository.checkBusCapacity(busId, shift);
 }
 
-export async function getDriverById(id: string): Promise<Driver | null> {
-  return fleetRepository.findDriverById(id);
+export async function incrementBusCapacity(busId: string, shift?: string) {
+  return fleetRepository.incrementBusCapacity(busId, shift);
 }
 
-export async function updateDriver(id: string, data: Partial<Driver>): Promise<boolean> {
-  return fleetRepository.updateDriverRecord(id, data);
+export async function decrementBusCapacity(busId: string, shift?: string) {
+  return fleetRepository.decrementBusCapacity(busId, shift);
 }
 
-export async function removeDriver(id: string): Promise<boolean> {
-  return fleetRepository.removeDriver(id);
+export async function findBusesWithAvailableCapacity(shift?: string) {
+  return fleetRepository.findBusesWithAvailableCapacity(shift);
 }
 
 export type { Bus, Driver };

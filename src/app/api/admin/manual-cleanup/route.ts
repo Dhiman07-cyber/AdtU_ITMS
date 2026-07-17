@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server';
-import { adminDb } from '@/lib/firebase-admin';
 import { CleanupService } from '@/lib/cleanup-service';
 import { withSecurity } from '@/lib/security/api-security';
 import { EmptySchema } from '@/lib/security/validation-schemas';
 import { RateLimits } from '@/lib/security/rate-limiter';
+import { getAllBuses } from '@/domains/fleet';
+import { getAllStudents, getAllDrivers } from '@/domains/identity';
 
 export const POST = withSecurity(
     async (request, { auth }) => {
@@ -29,34 +30,31 @@ export const POST = withSecurity(
 
 export const GET = withSecurity(
     async () => {
-        // Get collection counts for monitoring (remaining relevant collections)
-        const [studentsSnapshot, driversSnapshot, busesSnapshot] = await Promise.all([
-            adminDb.collection('students').get(),
-            adminDb.collection('drivers').get(),
-            adminDb.collection('buses').get()
+        // Get counts from PostgreSQL (source of truth) via domains
+        const [allStudents, allDrivers, allBusesFromPg] = await Promise.all([
+            getAllStudents(),
+            getAllDrivers(),
+            getAllBuses()
         ]);
 
-        // Get active students count
-        const activeStudentsSnapshot = await adminDb.collection('students')
-            .where('status', '==', 'active')
-            .get();
+        const activeStudentsCount = allStudents.filter((s: any) => s.status === 'active').length;
 
         return NextResponse.json({
             success: true,
             timestamp: new Date().toISOString(),
             collectionStats: {
                 students: {
-                    total: studentsSnapshot.size,
-                    active: activeStudentsSnapshot.size
+                    total: allStudents.length,
+                    active: activeStudentsCount
                 },
                 drivers: {
-                    total: driversSnapshot.size
+                    total: allDrivers.length
                 },
                 buses: {
-                    total: busesSnapshot.size
+                    total: allBusesFromPg.length
                 }
             },
-            message: 'Collection statistics retrieved.'
+            message: 'Collection statistics retrieved from PostgreSQL.'
         });
     },
     {

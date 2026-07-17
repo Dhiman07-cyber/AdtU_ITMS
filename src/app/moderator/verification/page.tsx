@@ -34,8 +34,7 @@ import ReceiptVerificationModal from '@/components/ReceiptVerificationModal';
 import jsQR from 'jsqr';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
-import { auth, db } from '@/lib/firebase';
-import { doc, getDoc } from 'firebase/firestore';
+import { auth } from '@/lib/firebase';
 import { safeImageSrc } from '@/lib/security/url-sanitizer';
 
 // Result interfaces
@@ -285,24 +284,19 @@ export default function ModeratorVerificationPage() {
             const result = await response.json();
 
             let studentData = result.studentData;
-            // Fetch profile photo from Firestore if missing
+            // Fetch profile photo from API if missing
             if (studentData?.uid && (!studentData.profilePhotoUrl || studentData.profilePhotoUrl === '')) {
                 try {
-                    // Check students collection first
-                    let snap = await getDoc(doc(db, 'students', studentData.uid));
-                    if (!snap.exists()) {
-                        snap = await getDoc(doc(db, 'users', studentData.uid));
-                    }
-
-                    if (snap.exists()) {
-                        const uData = snap.data();
+                    const studentRes = await fetch(`/api/students/${studentData.uid}`);
+                    if (studentRes.ok) {
+                        const studentDoc = await studentRes.json();
                         studentData = {
                             ...studentData,
-                            profilePhotoUrl: uData.profilePhotoUrl || uData.profileImage || uData.photoURL
+                            profilePhotoUrl: studentDoc.profilePhotoUrl || studentDoc.profileImage || studentDoc.photoURL
                         };
                     }
                 } catch (e) {
-                    console.error('Firestore image fetch error:', e);
+                    console.error('Student image fetch error:', e);
                 }
             }
 

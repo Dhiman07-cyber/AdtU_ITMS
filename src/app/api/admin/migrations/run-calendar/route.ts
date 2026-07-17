@@ -11,7 +11,8 @@
  *   ?action=status    — return current migration record from migration_log
  */
 import { NextRequest, NextResponse } from 'next/server';
-import { adminAuth, adminDb } from '@/lib/firebase-admin';
+import { adminAuth } from '@/lib/firebase-admin';
+import { resolveUserRole } from '@/lib/security/role-cache';
 import { MigrationRunner } from '@/infrastructure/migration/migration-runner';
 import { SupabaseMigrationStore } from '@/infrastructure/migration/supabase-migration-store';
 import { RollbackManager } from '@/infrastructure/migration/rollback-manager';
@@ -24,8 +25,8 @@ async function requireAdmin(req: NextRequest): Promise<string | null> {
   const token = authHeader.split('Bearer ')[1];
   try {
     const decoded = await adminAuth.verifyIdToken(token);
-    const userDoc  = await adminDb.collection('users').doc(decoded.uid).get();
-    if (!userDoc.exists || userDoc.data()?.role !== 'admin') return null;
+    const userRole = await resolveUserRole(decoded.uid);
+    if (userRole.role !== 'admin') return null;
     return decoded.uid;
   } catch {
     return null;

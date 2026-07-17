@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server';
-import { db as adminDb } from '@/lib/firebase-admin';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import { withSecurity } from '@/lib/security/api-security';
 import { MarkBoardedSchema } from '@/lib/security/validation-schemas';
@@ -12,7 +11,6 @@ import { RateLimits } from '@/lib/security/rate-limiter';
  * 
  * Optimized:
  * - Parallel broadcasts to all channels
- * - Non-blocking Firestore sync
  * - Atomic Supabase update
  */
 export const POST = withSecurity(
@@ -79,18 +77,6 @@ export const POST = withSecurity(
                 payload: { flagId, studentUid: flagData.student_uid, busId: flagData.bus_id, routeId: flagData.route_id, status: 'picked_up', timestamp: new Date().toISOString() }
             })
         ]);
-
-        // 4. Non-blocking Firestore sync
-        const firestoreTask = (async () => {
-            try {
-                const snapshot = await adminDb.collection('waiting_flags').where('supabaseId', '==', flagId).limit(1).get();
-                if (!snapshot.empty) {
-                    await snapshot.docs[0].ref.update({ status: 'picked_up', boarded_at: new Date().toISOString() });
-                }
-            } catch (err) { 
-                console.error('Firestore sync failed:', err); 
-            }
-        })();
 
         // Await broadcasts briefly to ensure they are initiated
         await broadcastTask;

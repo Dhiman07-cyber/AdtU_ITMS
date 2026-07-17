@@ -1,32 +1,47 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { adminAuth, adminDb } from '@/lib/firebase-admin';
+import { adminAuth } from '@/lib/firebase-admin';
 import { getDeadlineConfig, updateDeadlineConfig } from '@/lib/deadline-config-service';
 import { DeadlineConfig } from '@/lib/types/deadline-config';
-import { safeGetNested, stripUnsafeObjectKeys } from '@/lib/security/object-safety';
+import { stripUnsafeObjectKeys } from '@/lib/security/object-safety';
+import { getSupabaseServer } from '@/lib/supabase-server';
+import { getUserById } from '@/domains/identity';
 
 /**
- * Check if dependent lifecycle records exist in the system
+ * Check if dependent lifecycle records exist in the system (PostgreSQL)
  */
 async function checkDependencies(): Promise<boolean> {
     try {
-        const studentsSnap = await adminDb.collection('students').limit(1).get();
-        if (!studentsSnap.empty) {
+        const supabase = getSupabaseServer();
+
+        // Check if any student profiles exist in PG
+        const { count: studentCount } = await supabase
+            .from('student_profiles')
+            .select('*', { count: 'exact', head: true })
+            .limit(1);
+
+        if (studentCount && studentCount > 0) {
             return true;
         }
 
-        const verifiedUpcomingSnap = await adminDb.collection('applications')
-            .where('state', '==', 'verified_upcoming')
-            .limit(1)
-            .get();
-        if (!verifiedUpcomingSnap.empty) {
+        // Check if any verified_upcoming applications exist in PG
+        const { count: upcomingCount } = await supabase
+            .from('applications')
+            .select('*', { count: 'exact', head: true })
+            .eq('state', 'verified_upcoming')
+            .limit(1);
+
+        if (upcomingCount && upcomingCount > 0) {
             return true;
         }
 
-        const pendingSeatSnap = await adminDb.collection('applications')
-            .where('state', '==', 'pending_seat_allocation')
-            .limit(1)
-            .get();
-        if (!pendingSeatSnap.empty) {
+        // Check if any pending_seat_allocation applications exist in PG
+        const { count: pendingSeatCount } = await supabase
+            .from('applications')
+            .select('*', { count: 'exact', head: true })
+            .eq('state', 'pending_seat_allocation')
+            .limit(1);
+
+        if (pendingSeatCount && pendingSeatCount > 0) {
             return true;
         }
 
@@ -73,21 +88,13 @@ export async function POST(req: NextRequest) {
         const decodedToken = await adminAuth.verifyIdToken(token);
         const uid = decodedToken.uid;
 
-        // Check if user is admin
-        try {
-            const userDoc = await adminDb.collection('users').doc(uid).get();
-            if (!userDoc.exists || userDoc.data()?.role !== 'admin') {
-                return NextResponse.json(
-                    { message: 'Access denied. Admin only.' },
-                    { status: 403 }
-                );
-            }
-        } catch (error: any) {
-            if (error.code === 8 || error.message?.includes('RESOURCE_EXHAUSTED')) {
-                console.warn('⚠️ Firestore quota exceeded. Bypassing admin role check for verified user.');
-            } else {
-                throw error;
-            }
+        // Check if user is admin via PostgreSQL (canonical source of truth)
+        const user = await getUserById(uid);
+        if (!user || user.role !== 'admin') {
+            return NextResponse.json(
+                { message: 'Access denied. Admin only.' },
+                { status: 403 }
+            );
         }
 
         const { config: rawConfig } = await req.json();
@@ -128,7 +135,7 @@ export async function POST(req: NextRequest) {
             );
         }
 
-        // 1. Update Deadline Config in Firestore
+        // 1. Update Deadline Config in Firestore (infrastructure configuration stays in Firestore)
         await updateDeadlineConfig(config, uid);
 
         // 2. Sync concrete dates to System Config

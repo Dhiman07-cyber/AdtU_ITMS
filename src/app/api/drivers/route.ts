@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { verifyApiAuth } from '@/lib/security/api-auth';
 import { applyRateLimit, createRateLimitId, RateLimits } from '@/lib/security/rate-limiter';
 import { handleApiError } from '@/lib/security/safe-error';
-import { getAllDrivers } from '@/domains/fleet/services/fleet.service';
+import { getAllDrivers } from '@/domains/identity';
 
 // D6 Fleet — Drivers list API. Runtime owner: PostgreSQL (driver_profiles table).
 

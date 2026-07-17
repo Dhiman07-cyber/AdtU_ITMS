@@ -3,6 +3,7 @@ import { adminDb } from '@/lib/firebase-admin';
 import { withSecurity } from '@/lib/security/api-security';
 import { InvalidTokensQuerySchema } from '@/lib/security/validation-schemas';
 import { RateLimits } from '@/lib/security/rate-limiter';
+import { getAllStudents } from '@/domains/identity';
 
 export const GET = withSecurity(
     async (request, { body }) => {
@@ -11,7 +12,7 @@ export const GET = withSecurity(
         cutoff.setDate(cutoff.getDate() - olderThanDays);
 
         // Scan students for stale tokens
-        const studentsSnap = await adminDb.collection('students').get();
+        const students = await getAllStudents();
         const staleTokens: Array<{
             studentId: string;
             tokenHash: string;
@@ -23,8 +24,8 @@ export const GET = withSecurity(
         let totalTokens = 0;
         let validTokens = 0;
 
-        for (const studentDoc of studentsSnap.docs) {
-            const tokensSnap = await studentDoc.ref.collection('tokens').get();
+        for (const student of students) {
+            const tokensSnap = await adminDb!.collection('students').doc(student.uid).collection('tokens').get();
             for (const tokenDoc of tokensSnap.docs) {
                 totalTokens++;
                 const data = tokenDoc.data();
@@ -42,7 +43,7 @@ export const GET = withSecurity(
 
                 if (isStale || isInvalid) {
                     staleTokens.push({
-                        studentId: studentDoc.id,
+                        studentId: student.uid,
                         tokenHash: tokenDoc.id,
                         platform: data?.platform || 'unknown',
                         lastSeen: lastSeenDate?.toISOString() || 'unknown',
@@ -54,16 +55,15 @@ export const GET = withSecurity(
 
         // Also check for legacy fcmToken fields that aren't in subcollection
         let legacyTokenCount = 0;
-        for (const studentDoc of studentsSnap.docs) {
-            const data = studentDoc.data();
-            if (data?.fcmToken && typeof data.fcmToken === 'string') {
+        for (const student of students) {
+            if (student.fcmToken && typeof student.fcmToken === 'string') {
                 legacyTokenCount++;
             }
         }
 
         return NextResponse.json({
             summary: {
-                totalStudents: studentsSnap.size,
+                totalStudents: students.length,
                 totalTokens,
                 validTokens,
                 staleOrInvalidTokens: staleTokens.length,

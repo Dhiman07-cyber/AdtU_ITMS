@@ -1,11 +1,12 @@
 import { NextResponse } from 'next/server';
-import { adminDb } from '@/lib/firebase-admin';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import { withSecurity } from '@/lib/security/api-security';
 import { RateLimits } from '@/lib/security/rate-limiter';
 import { getTransportEntitlement } from '@/lib/entitlement/transport-entitlement';
 import { getByUid } from '@/domains/student';
 import * as routeService from '@/domains/route';
+import { getBusById } from '@/domains/fleet';
+import { getDriversByBusId } from '@/domains/identity';
 
 /**
  * GET /api/student/dashboard-data
@@ -63,22 +64,21 @@ export const GET = withSecurity(
         const busId = studentData.busId || studentData.assignedBusId;
         const routeId = studentData.routeId || studentData.assignedRouteId;
 
-        // 2. Parallelize everything else (bus/driver in Firestore, route in PG via Route Service)
-        const [busSnap, dbRoute, driverSnaps, tripStatus] = await Promise.all([
-            busId ? adminDb.collection('buses').doc(busId).get() : Promise.resolve(null),
+        // 2. Parallelize everything else (bus from PG, driver from PG, route from PG)
+        const [busData, dbRoute, drivers, tripStatus] = await Promise.all([
+            busId ? getBusById(busId) : Promise.resolve(null),
             routeId ? routeService.getById(routeId) : Promise.resolve(null),
-            busId ? adminDb.collection('drivers').where('assignedBusId', '==', busId).get() : Promise.resolve(null),
+            busId ? getDriversByBusId(busId) : Promise.resolve([]),
             busId ? supabase.from('driver_status').select('status, started_at, last_updated_at').eq('bus_id', busId).maybeSingle() : Promise.resolve(null)
         ]);
 
         // Process Bus & Route
-        const bus = busSnap?.exists ? { id: busSnap.id, ...busSnap.data() } : null;
+        const bus = busData || null;
         const route = dbRoute ? { ...dbRoute, active: dbRoute.status === 'active' } : null;
 
         // Process Driver (Match shift)
         let driver = null;
-        if (driverSnaps && !driverSnaps.empty) {
-            const drivers = driverSnaps.docs.map(d => ({ id: d.id, ...d.data() }));
+        if (drivers && drivers.length > 0) {
             const studentShift = (studentData.shift || 'Morning').toString().toLowerCase();
             
             // Try shift match

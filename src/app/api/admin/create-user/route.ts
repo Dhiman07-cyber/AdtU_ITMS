@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server';
-import { adminAuth, adminDb } from '@/lib/firebase-admin';
+import { adminAuth } from '@/lib/firebase-admin';
+import { getUpdaterInfo } from '@/lib/utils/updatedBy';
 import { calculateRenewalDate } from '@/lib/utils/renewal-utils';
-import { buildCapacityDelta, sendBusFullAlert } from '@/lib/busCapacityService';
+import { sendBusFullAlert } from '@/lib/busCapacityService';
+import { incrementBusCapacity, getBusById, updateBus } from '@/domains/fleet';
 import { generateOfflinePaymentId } from '@/lib/types/payment';
 import { computeBlockDatesFromValidUntil } from '@/lib/utils/deadline-computation';
 import { DEFAULT_BUS_FEE } from '@/config/runtime';
@@ -20,7 +22,8 @@ import { requireModeratorPermission } from '@/lib/security/moderator-permissions
 import { z } from 'zod';
 import { createAuditEvent } from '@/domains/audit';
 import { normalizeShift } from '@/lib/utils/shift-utils';
-import { createUser, createStudent, createDriver } from '@/domains/identity';
+import { createUser, createStudent, createDriver, getStudentById } from '@/domains/identity';
+import * as routeService from '@/domains/route';
 
 type CreateUserBody = z.infer<typeof CreateUserSchema>;
 
@@ -46,21 +49,20 @@ async function resolveReferenceNames(routeId?: string, busId?: string, stopId?: 
     const tasks: Promise<string>[] = [
         (async () => {
             if (!routeId) return 'Not Assigned';
-            const doc = await adminDb.collection('routes').doc(routeId).get();
-            return doc.data()?.routeName || doc.data()?.name || routeId;
+            const route = await routeService.getById(routeId);
+            return route?.routeName || routeId;
         })(),
         (async () => {
             if (!busId) return 'Auto-assigned';
-            const doc = await adminDb.collection('buses').doc(busId).get();
-            const d = doc.data();
-            if (!d) return busId;
-            const busNum = d.displayIndex || d.sequenceNumber || d.busNumber;
-            return busNum ? `Bus-${busNum} (${d.licensePlate || d.plateNumber || '?'})` : (d.name || busId);
+            const bus = await getBusById(busId);
+            if (!bus) return busId;
+            const busNum = (bus as any).displayIndex || (bus as any).sequenceNumber || bus.busNumber;
+            return busNum ? `Bus-${busNum} (${(bus as any).licensePlate || (bus as any).plateNumber || '?'})` : (bus.busNumber || busId);
         })(),
         (async () => {
             if (!routeId || !stopId) return 'Not Selected';
-            const doc = await adminDb.collection('routes').doc(routeId).get();
-            const stops = (doc.data()?.stops || []) as RouteStop[];
+            const route = await routeService.getById(routeId);
+            const stops = (route?.stops || []) as RouteStop[];
             const stop = stops.find((s) => s.id === stopId || s.stopId === stopId);
             return stop?.name || stop?.stopName || stopId;
         })()
@@ -74,15 +76,14 @@ export const POST = withSecurity<CreateUserBody>(
         const currentUserRole = auth.role;
 
         // 1. Parallelize initial validation & configuration fetching
-        const [approverDoc, systemConfigResult, deadlineConfig] = await Promise.all([
-            adminDb.collection(currentUserRole === 'admin' ? 'admins' : 'moderators').doc(currentUserUid).get(),
+        const [approverInfo, systemConfigResult, deadlineConfig] = await Promise.all([
+            getUpdaterInfo(adminAuth, currentUserUid),
             getSystemConfig(),
             getDeadlineConfig()
         ]);
 
-        const appData = approverDoc.data();
-        const currentUserName = appData?.fullName || appData?.name || auth.name || 'System';
-        const currentUserEmployeeId = appData?.employeeId || appData?.staffId || (currentUserRole === 'admin' ? 'ADMIN' : 'MOD');
+        const currentUserName = approverInfo.name || auth.name || 'System';
+        const currentUserEmployeeId = approverInfo.roleOrEmployeeId || (currentUserRole === 'admin' ? 'ADMIN' : 'MOD');
         const approvedByDisplay = `${currentUserName} (${currentUserRole === 'admin' ? 'Admin' : currentUserEmployeeId})`;
 
         const {
@@ -143,14 +144,14 @@ export const POST = withSecurity<CreateUserBody>(
             const paymentId = totalAmount > 0 ? generateOfflinePaymentId('new_registration') : null;
 
             const studentDoc = {
-                address: address || '', alternatePhone: alternatePhone || '', approvedAt: now,
+                address: address || '', alternatePhone: alternatePhone || '', altPhone: alternatePhone || '', approvedAt: now,
                 approvedBy: approvedByDisplay, bloodGroup: bloodGroup || '',
                 busId: busId || (routeId ? routeId.replace('route_', 'bus_') : ''),
                 createdAt: now, department: department || '', dob: dob || '',
                 durationYears: finalDuration, email, enrollmentId: enrollmentId || '',
                 faculty: faculty || '', fullName: name, gender: gender || '',
                 parentName: parentName || '', parentPhone: parentPhone || '',
-                phoneNumber: phone || '', profilePhotoUrl: profilePhotoUrl || '',
+                phoneNumber: phone || '', phone: phone || '', profilePhotoUrl: profilePhotoUrl || '',
                 role: 'student', routeId: routeId || '', semester: semester || '',
                 sessionEndYear: finalSessionEndYear, sessionStartYear: sessionStartYear || new Date().getFullYear(),
                 shift: normalizeShift(shift), status: 'active', stopId: finalStopId,
@@ -182,7 +183,6 @@ export const POST = withSecurity<CreateUserBody>(
             //   Admin-create intentionally preserves over-fill capability (no capacity
             //   gate). Capacity is incremented only when the student did not already
             //   exist, so a double-submit (same uid) can never double-allocate a seat.
-            const studentRef = adminDb.collection('students').doc(uid);
             const assignedBusId = studentDoc.busId;
 
             // Write user to PostgreSQL (canonical source of truth)
@@ -209,36 +209,27 @@ export const POST = withSecurity<CreateUserBody>(
             let capBusNumber = '';
             let capRouteId = '';
 
-            await adminDb.runTransaction(async (transaction) => {
-                // Reads first (Firestore requires all reads before writes)
-                const studentSnap = await transaction.get(studentRef);
-                const alreadyExisted = studentSnap.exists;
+            // Idempotency gate: PostgreSQL check via Domain determines if capacity should be allocated
+            const studentData = await getStudentById(uid);
+            const alreadyExisted = !!studentData;
 
-                let busSnap: FirebaseFirestore.DocumentSnapshot | null = null;
-                if (assignedBusId && !alreadyExisted) {
-                    busSnap = await transaction.get(adminDb.collection('buses').doc(assignedBusId));
+            if (assignedBusId && !alreadyExisted) {
+                // Increment capacity in PG (source of truth) — admin-create intentionally
+                // over-fills (no capacity gate), matching legacy behavior.
+                try {
+                    const capResult = await incrementBusCapacity(assignedBusId, studentDoc.shift);
+                    capNewMembers = capResult.newShiftLoad;
+                    capLimit = capResult.capacity;
+                    capExceeded = capNewMembers > capLimit;
+                    const busData = await getBusById(assignedBusId);
+                    capBusNumber = busData?.busNumber || '';
+                    capRouteId = busData?.routeId || '';
+                } catch (pgErr) {
+                    console.warn(`⚠️ create-user: PG capacity increment failed for bus ${assignedBusId}; student created without capacity increment:`, pgErr);
                 }
-
-                // Writes (role-specific data only — users is now in PostgreSQL)
-                transaction.set(studentRef, studentDoc);
-
-                if (assignedBusId && !alreadyExisted) {
-                    if (busSnap && busSnap.exists) {
-                        const busData = busSnap.data();
-                        const delta = buildCapacityDelta(busData, studentDoc.shift, 1);
-                        capNewMembers = delta.newMembers;
-                        capLimit = delta.capacity;
-                        capExceeded = delta.newMembers > delta.capacity;
-                        capBusNumber = busData?.busNumber || '';
-                        capRouteId = busData?.routeId || '';
-                        transaction.update(busSnap.ref, delta.updates);
-                    } else {
-                        console.warn(`⚠️ create-user: bus ${assignedBusId} not found; student created without capacity increment`);
-                    }
-                } else if (assignedBusId && alreadyExisted) {
-                    capAlreadyCounted = true;
-                }
-            });
+            } else if (assignedBusId && alreadyExisted) {
+                capAlreadyCounted = true;
+            }
 
             // Phase 3 — Post-commit: alert + admin over-fill audit (never affects committed state).
             if (capAlreadyCounted) {
@@ -305,8 +296,6 @@ export const POST = withSecurity<CreateUserBody>(
                 status: 'active', createdAt: now, updatedAt: now,
             };
 
-            const driverRef = adminDb.collection('drivers').doc(uid);
-
             // Write user to PostgreSQL (canonical source of truth)
             await createUser({
                 uid,
@@ -324,24 +313,9 @@ export const POST = withSecurity<CreateUserBody>(
                 updatedAt: now,
             });
 
-            try {
-                await adminDb.runTransaction(async (transaction) => {
-                    transaction.set(driverRef, driverDocData);
-
-                    if (busId) {
-                        const busRef = adminDb.collection('buses').doc(busId);
-                        transaction.update(busRef, {
-                            activeDriverId: uid, assignedDriverId: uid, activeTripId: null, updatedAt: now
-                        });
-                    }
-                });
-            } catch (firestoreError) {
-                if (authUserCreated) {
-                    try { await adminAuth.deleteUser(uid); } catch (cleanupErr) {
-                        console.error('Failed to cleanup Auth user after Firestore failure:', cleanupErr);
-                    }
-                }
-                throw firestoreError;
+            // Update bus driver assignment via PG
+            if (busId) {
+                await updateBus(busId, { driverUID: uid, activeTripId: null } as any);
             }
         } else {
             // Moderator or Admin
@@ -354,8 +328,6 @@ export const POST = withSecurity<CreateUserBody>(
                 address: address || '', status: status || 'active', createdAt: now, updatedAt: now,
             };
 
-            const profileRef = adminDb.collection(col).doc(uid);
-
             // Write user to PostgreSQL (canonical source of truth)
             await createUser({
                 uid,
@@ -365,18 +337,6 @@ export const POST = withSecurity<CreateUserBody>(
                 createdAt: now,
             });
 
-            try {
-                await adminDb.runTransaction(async (transaction) => {
-                    transaction.set(profileRef, docData);
-                });
-            } catch (firestoreError) {
-                if (authUserCreated) {
-                    try { await adminAuth.deleteUser(uid); } catch (cleanupErr) {
-                        console.error('Failed to cleanup Auth user after Firestore failure:', cleanupErr);
-                    }
-                }
-                throw firestoreError;
-            }
         }
 
         return NextResponse.json({

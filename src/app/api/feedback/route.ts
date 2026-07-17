@@ -1,6 +1,9 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/firebase-admin';
+import { resolveUserRole } from '@/lib/security/role-cache';
+import { getDriverById } from '@/domains/identity';
+import { getBusById } from '@/domains/fleet';
 import {
   readFeedback,
   addFeedback, // Changed from writeFeedback
@@ -53,30 +56,28 @@ export async function POST(request: NextRequest) {
 
     const userId = decodedToken.uid;
 
-    const { db } = await import('@/lib/firebase-admin');
+    const userRoleData = await resolveUserRole(userId);
+    const userRole = userRoleData.role;
+
     const { getByUid } = await import('@/domains/student');
     let userData: any = null;
-    let userRole: string = '';
-
-    // First check users collection for role
-    const userDoc = await db.collection('users').doc(userId).get();
-    if (userDoc.exists) {
-      const userDocData = userDoc.data();
-      userRole = userDocData?.role || '';
-
-      // If user has student role, get data from PostgreSQL
-      if (userRole === 'student') {
-        userData = await getByUid(userId) as Record<string, any> | null;
-      } else if (userRole === 'driver') {
-        const driverDoc = await db.collection('drivers').doc(userId).get();
-        if (driverDoc.exists) {
-          userData = driverDoc.data();
-        }
-      }
-    }
 
     // Reject if user is not student or driver
-    if (!userData || (userRole !== 'student' && userRole !== 'driver')) {
+    if (userRole !== 'student' && userRole !== 'driver') {
+      return NextResponse.json(
+        { error: 'Only students and drivers can submit feedback' },
+        { status: 403 }
+      );
+    }
+
+    // Get user data based on role
+    if (userRole === 'student') {
+      userData = await getByUid(userId) as Record<string, any> | null;
+    } else if (userRole === 'driver') {
+      userData = await getDriverById(userId);
+    }
+
+    if (!userData) {
       return NextResponse.json(
         { error: 'Only students and drivers can submit feedback' },
         { status: 403 }
@@ -121,9 +122,9 @@ export async function POST(request: NextRequest) {
 
     if (bus_id) {
       try {
-        const busDoc = await db.collection('buses').doc(bus_id).get();
-        if (busDoc.exists) {
-          bus_plate = busDoc.data()?.plateNumber || null;
+        const busData = await getBusById(bus_id);
+        if (busData) {
+          bus_plate = busData.plateNumber || null;
         }
       } catch (e) {
         console.error('Error fetching bus info for feedback:', e);
@@ -206,12 +207,9 @@ export async function GET(request: NextRequest) {
 
     const userId = decodedToken.uid;
 
-    // Get user role from Firestore
-    const { db } = await import('@/lib/firebase-admin');
-    const adminDoc = await db.collection('admins').doc(userId).get();
-    const moderatorDoc = await db.collection('moderators').doc(userId).get();
-
-    if (!adminDoc.exists && !moderatorDoc.exists) {
+    // Get user role
+    const userRole = await resolveUserRole(userId);
+    if (userRole.role !== 'admin' && userRole.role !== 'moderator') {
       return NextResponse.json(
         { error: 'Access denied. Admin or Moderator role required.' },
         { status: 403 }

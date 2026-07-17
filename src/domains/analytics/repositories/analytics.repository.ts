@@ -5,7 +5,7 @@
  * data sources. All aggregation, formatting, and computation belongs in
  * the service layer.
  *
- * ponytail: wraps GA4 client, Supabase payment service, and Firestore
+ * ponytail: wraps GA4 client, Supabase payment service, and Firestore/PG
  * count queries — returns raw responses without transformation.
  */
 import { BetaAnalyticsDataClient } from '@google-analytics/data';
@@ -14,7 +14,8 @@ import { adminDb } from '@/lib/firebase-admin';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import { getDeadlineConfig } from '@/lib/deadline-config-service';
 import * as routeService from '@/domains/route';
-import type { Route } from '@/lib/types';
+import { getAllBuses } from '@/domains/fleet';
+import type { Route, Bus } from '@/lib/types';
 
 const formatPrivateKey = (key?: string) => {
   if (!key) return undefined;
@@ -84,7 +85,7 @@ export interface DashboardRawData {
   eveningStudentsCount: number;
   expiredStudentsCount: number;
   driversCount: number;
-  busesSnapshot: FirebaseFirestore.QuerySnapshot;
+  buses: Bus[];
   routes: Route[];
   pendingAppsCount: number;
   verificationCount: number;
@@ -112,7 +113,7 @@ export async function fetchDashboardRawData(): Promise<DashboardRawData> {
     eveningStudentsSnap,
     expiredStudentsSnap,
     driversSnap,
-    busesSnap,
+    allBusesFromPg,
     routesList,
     pendingAppsSnap,
     verificationSnap,
@@ -123,16 +124,16 @@ export async function fetchDashboardRawData(): Promise<DashboardRawData> {
     sysSnap,
     deadlineConfig,
   ] = await Promise.all([
-    adminDb.collection('students').count().get(),
-    adminDb.collection('students').where('status', '==', 'active').count().get(),
-    adminDb.collection('students').where('status', '==', 'active').where('shift', '==', 'Morning').count().get(),
-    adminDb.collection('students').where('status', '==', 'active').where('shift', '==', 'Evening').count().get(),
-    adminDb.collection('students').where('status', '==', 'expired').count().get(),
-    adminDb.collection('drivers').count().get(),
-    adminDb.collection('buses').get(),
+    supabase.from('student_profiles').select('*', { count: 'exact', head: true }),
+    supabase.from('student_profiles').select('*', { count: 'exact', head: true }).eq('status', 'active'),
+    supabase.from('student_profiles').select('*', { count: 'exact', head: true }).eq('status', 'active').eq('shift', 'Morning'),
+    supabase.from('student_profiles').select('*', { count: 'exact', head: true }).eq('status', 'active').eq('shift', 'Evening'),
+    supabase.from('student_profiles').select('*', { count: 'exact', head: true }).eq('status', 'expired'),
+    supabase.from('driver_profiles').select('*', { count: 'exact', head: true }),
+    getAllBuses(),
     routeService.getAll(),
-    adminDb.collection('applications').where('state', '==', 'submitted').count().get(),
-    adminDb.collection('applications').where('state', '==', 'awaiting_verification').count().get(),
+    supabase.from('applications').select('*', { count: 'exact', head: true }).eq('state', 'submitted'),
+    supabase.from('applications').select('*', { count: 'exact', head: true }).eq('state', 'awaiting_verification'),
     supabase.from('applications').select('*', { count: 'exact', head: true }).eq('state', 'submitted').in('application_type', ['renewal', 'renewal_after_soft_block']),
     adminDb.collection('feedbacks').where('createdAt', '>=', sevenDaysAgo).count().get().catch(() => ({ data: () => ({ count: 0 }) })),
     supabase.from('driver_status').select('*').in('status', ['enroute', 'on_trip']),
@@ -142,18 +143,18 @@ export async function fetchDashboardRawData(): Promise<DashboardRawData> {
   ]);
 
   return {
-    totalStudentsCount: totalStudentsSnap.data().count,
-    activeStudentsCount: activeStudentsSnap.data().count,
-    morningStudentsCount: morningStudentsSnap.data().count,
-    eveningStudentsCount: eveningStudentsSnap.data().count,
-    expiredStudentsCount: expiredStudentsSnap.data().count,
-    driversCount: driversSnap.data().count,
-    busesSnapshot: busesSnap,
+    totalStudentsCount: totalStudentsSnap.count || 0,
+    activeStudentsCount: activeStudentsSnap.count || 0,
+    morningStudentsCount: morningStudentsSnap.count || 0,
+    eveningStudentsCount: eveningStudentsSnap.count || 0,
+    expiredStudentsCount: expiredStudentsSnap.count || 0,
+    driversCount: driversSnap.count || 0,
+    buses: allBusesFromPg,
     routes: routesList,
-    pendingAppsCount: pendingAppsSnap.data().count,
-    verificationCount: verificationSnap.data().count,
+    pendingAppsCount: pendingAppsSnap.count || 0,
+    verificationCount: verificationSnap.count || 0,
     renewalCount: renewalSnap.count || 0,
-    feedbackCount: feedbackSnap.data().count,
+    feedbackCount: (feedbackSnap as any).data ? (feedbackSnap as any).data().count : 0,
     driverStatusData: statusSnap.data || [],
     paymentsData: paymentsSnap.data || [],
     systemConfigDoc: sysSnap,

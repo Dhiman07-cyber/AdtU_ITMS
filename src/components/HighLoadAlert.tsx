@@ -6,8 +6,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { AlertTriangle, Settings, Bus, TrendingUp, Users, ChevronRight, Zap } from 'lucide-react';
-// SPARK PLAN SAFETY: Migrated to usePaginatedCollection
-import { usePaginatedCollection } from '@/hooks/usePaginatedCollection';
+// Migrated: Server-side API → PostgreSQL (no Firestore client reads)
+import { useApiCollection } from '@/hooks/useApiCollection';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
 
@@ -31,7 +31,7 @@ interface HighLoadAlertProps {
 
 export default function HighLoadAlert({ role, className = '' }: HighLoadAlertProps) {
   const router = useRouter();
-  const { data: buses, refresh: refreshBuses } = usePaginatedCollection('buses', {
+  const { data: buses, refresh: refreshBuses } = useApiCollection('buses', {
     pageSize: 50, orderByField: 'busNumber', orderDirection: 'asc', autoRefresh: false, cacheTTL: 0,
   });
   const [selectedBus, setSelectedBus] = useState<string | null>(null);

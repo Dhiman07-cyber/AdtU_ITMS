@@ -30,8 +30,6 @@ import { downloadFile } from '@/lib/download-utils';
 import { PremiumPageLoader } from '@/components/LoadingSpinner';
 import { invalidateCollectionCache } from '@/hooks/usePaginatedCollection';
 import { safeImageSrc, safeMailtoHref, safeTelHref } from '@/lib/security/url-sanitizer';
-import { collection, query, where, getDocs } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
 import ReassignmentPanel, { type StudentData as RPStudentData, type BusData as RPBusData } from '@/components/smart-allocation/ReassignmentPanel';
 
 
@@ -183,36 +181,36 @@ export default function AdminApplicationDetailPage() {
     try {
       const studentAssignedBusId = application.formData?.busId || application.formData?.assignedBusId || application.formData?.routeId?.replace('route_', 'bus_') || '';
 
-      const q = query(
-        collection(db, 'students'),
-        where('busId', '==', studentAssignedBusId),
-        where('status', '==', 'active')
-      );
-      const snap = await getDocs(q);
-      const busStudents: RPStudentData[] = snap.docs.map(d => {
-        const s = d.data();
-        return {
-          id: d.id,
-          fullName: s.fullName || s.name || d.id,
-          enrollmentId: s.enrollmentId,
-          stopId: s.stopId || '',
-          stopName: s.stopName || s.stopId || '',
-          assignedBusId: s.busId || studentAssignedBusId,
-          shift: s.shift,
-          semester: s.semester,
-          phone: s.phoneNumber || s.phone,
-          photoURL: s.profilePhotoUrl || s.photoURL,
-        };
+      const authToken = await currentUser?.getIdToken();
+      const studentsRes = await fetch('/api/students?busId=' + encodeURIComponent(studentAssignedBusId), {
+        headers: { 'Authorization': `Bearer ${authToken}` }
       });
+      const studentsJson = await studentsRes.json();
+      const busStudents: RPStudentData[] = (Array.isArray(studentsJson) ? studentsJson : []).map((s: any) => ({
+        id: s.id || '',
+        fullName: s.name || s.id || '',
+        enrollmentId: s.enrollmentId,
+        stopId: s.stopId || '',
+        stopName: s.stopName || s.stopId || '',
+        assignedBusId: s.assignedBusId || s.busId || studentAssignedBusId,
+        shift: s.shift,
+        semester: s.semester,
+        phone: s.phone,
+        photoURL: s.profilePhotoUrl,
+      }));
 
       let rpBuses = allBuses;
       if (rpBuses.length === 0) {
-        const routesSnap = await getDocs(collection(db, 'routes'));
-        const routesList = routesSnap.docs.map(rd => ({ id: rd.id, ...rd.data() as any }));
-        const busesSnap = await getDocs(collection(db, 'buses'));
-        rpBuses = busesSnap.docs.map(d => {
-          const b = d.data();
-          const matchedRoute = routesList.find(r => r.routeId === b.routeId || r.id === b.routeId);
+        const [routesRes, busesRes] = await Promise.all([
+          fetch('/api/routes', { headers: { 'Authorization': `Bearer ${authToken}` } }),
+          fetch('/api/buses', { headers: { 'Authorization': `Bearer ${authToken}` } })
+        ]);
+        const routesJson = await routesRes.json();
+        const routesList = Array.isArray(routesJson) ? routesJson : (routesJson.routes || []);
+        const busesJson = await busesRes.json();
+        const busesList = busesJson.buses || [];
+        rpBuses = busesList.map((b: any) => {
+          const matchedRoute = routesList.find((r: any) => r.routeId === b.routeId || r.id === b.routeId);
           const rawStops = matchedRoute?.stops || b.route?.stops || b.stops || [];
           const stops = rawStops.map((s: any) => ({
             id: s.id || s.stopId || s.name || '',
@@ -220,8 +218,8 @@ export default function AdminApplicationDetailPage() {
             sequence: s.sequence ?? 0,
           }));
           return {
-            id: d.id,
-            busNumber: b.busNumber || d.id || '',
+            id: b.id || '',
+            busNumber: b.busNumber || b.id || '',
             routeId: b.routeId,
             routeName: b.routeName || matchedRoute?.routeName || (b.route?.routeName) || '',
             currentMembers: b.currentMembers || 0,
@@ -473,14 +471,17 @@ export default function AdminApplicationDetailPage() {
         // Prefetch buses and routes for capacity check
         const loadBusesAndRoutes = async () => {
           try {
-            const [busesSnap, routesSnap] = await Promise.all([
-              getDocs(collection(db, 'buses')),
-              getDocs(collection(db, 'routes'))
+            const authToken = await currentUser?.getIdToken();
+            const [busesRes, routesRes] = await Promise.all([
+              fetch('/api/buses', { headers: { 'Authorization': `Bearer ${authToken}` } }),
+              fetch('/api/routes', { headers: { 'Authorization': `Bearer ${authToken}` } })
             ]);
-            const routesList = routesSnap.docs.map(rd => ({ id: rd.id, ...rd.data() as any }));
-            const rpBuses: RPBusData[] = busesSnap.docs.map(d => {
-              const bdata = d.data() as any;
-              const route = routesList.find(r => r.id === bdata.routeId);
+            const busesJson = await busesRes.json();
+            const routesJson = await routesRes.json();
+            const busesList = busesJson.buses || [];
+            const routesList = Array.isArray(routesJson) ? routesJson : (routesJson.routes || []);
+            const rpBuses: RPBusData[] = busesList.map((bdata: any) => {
+              const route = routesList.find((r: any) => r.id === bdata.routeId);
               const rawStops = route?.stops || bdata.route?.stops || bdata.stops || [];
               const stops = rawStops.map((s: any) => ({
                 id: s.id || s.stopId || s.name || '',
@@ -488,8 +489,8 @@ export default function AdminApplicationDetailPage() {
                 sequence: s.sequence ?? 0,
               }));
               return {
-                id: d.id,
-                busNumber: bdata.busNumber || d.id || '',
+                id: bdata.id || '',
+                busNumber: bdata.busNumber || bdata.id || '',
                 routeId: bdata.routeId || '',
                 routeName: bdata.routeName || route?.routeName || route?.name || '',
                 currentMembers: bdata.currentMembers || 0,

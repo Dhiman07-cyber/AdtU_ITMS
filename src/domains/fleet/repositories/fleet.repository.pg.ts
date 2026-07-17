@@ -53,6 +53,7 @@
 import { getSupabaseServer } from '@/lib/supabase-server';
 import type { Bus, Driver } from '@/lib/types';
 
+
 // ─── Bus Field Map ────────────────────────────────────────────────────────────
 
 const BUS_FIELD_MAP: Record<string, string> = {
@@ -69,6 +70,9 @@ const BUS_FIELD_MAP: Record<string, string> = {
   status: 'status',
   currentStudents: 'current_students',
   currentPassengerCount: 'current_passenger_count',
+  currentMembers: 'current_members',
+  morningLoad: 'morning_load',
+  eveningLoad: 'evening_load',
   lastStartedAt: 'last_started_at',
   lastEndedAt: 'last_ended_at',
   createdAt: 'created_at',
@@ -76,38 +80,6 @@ const BUS_FIELD_MAP: Record<string, string> = {
 };
 
 const KNOWN_BUS_FIELDS = new Set(Object.keys(BUS_FIELD_MAP));
-
-// ─── Driver Field Map ─────────────────────────────────────────────────────────
-
-const DRIVER_FIELD_MAP: Record<string, string> = {
-  uid: 'uid',
-  email: 'email',
-  fullName: 'full_name',
-  name: 'full_name',
-  phone: 'phone',
-  alternatePhone: 'alternate_phone',
-  licenseNumber: 'license_number',
-  aadharNumber: 'aadhar_number',
-  employeeId: 'employee_id',
-  address: 'address',
-  profilePhotoUrl: 'profile_photo_url',
-  assignedBusId: 'assigned_bus_id',
-  assignedRouteId: 'assigned_route_id',
-  busId: 'bus_id',
-  routeId: 'route_id',
-  busAssigned: 'bus_assigned',
-  driverId: 'driver_id',
-  joiningDate: 'joining_date',
-  shift: 'shift',
-  status: 'status',
-  tripActive: 'trip_active',
-  activeTripId: 'active_trip_id',
-  isReserved: 'is_reserved',
-  createdAt: 'created_at',
-  updatedAt: 'updated_at',
-};
-
-const KNOWN_DRIVER_FIELDS = new Set(Object.keys(DRIVER_FIELD_MAP));
 
 // ─── Timestamp helper ─────────────────────────────────────────────────────────
 
@@ -156,6 +128,9 @@ function pgRowToBus(row: Record<string, any>): Bus {
     status: row.status || 'inactive',
     currentStudents: row.current_students,
     currentPassengerCount: row.current_passenger_count,
+    currentMembers: row.current_members ?? row.current_passenger_count ?? 0,
+    morningLoad: row.morning_load ?? 0,
+    eveningLoad: row.evening_load ?? 0,
     lastStartedAt: row.last_started_at,
     lastEndedAt: row.last_ended_at,
     createdAt: row.created_at,
@@ -167,64 +142,6 @@ function pgRowToBus(row: Record<string, any>): Bus {
   }
 
   return bus;
-}
-
-// ─── Driver Mappers ───────────────────────────────────────────────────────────
-
-function driverDomainToRow(data: Partial<Driver>): Record<string, any> {
-  const row: Record<string, any> = {};
-  const extras: Record<string, any> = {};
-
-  for (const [key, value] of Object.entries(data)) {
-    if (key === 'id') {
-      row['uid'] = value;
-      continue;
-    }
-    const pgCol = DRIVER_FIELD_MAP[key];
-    if (pgCol) {
-      row[pgCol] = value;
-    } else if (!KNOWN_DRIVER_FIELDS.has(key)) {
-      extras[key] = value;
-    }
-  }
-
-  if (Object.keys(extras).length > 0) {
-    row.extras = extras;
-  }
-  return row;
-}
-
-function pgRowToDriver(row: Record<string, any>): Driver {
-  const driver: Driver = {
-    id: row.uid,
-    uid: row.uid,
-    name: row.full_name || '',
-    fullName: row.full_name || '',
-    email: row.email || '',
-    phone: row.phone,
-    alternatePhone: row.alternate_phone,
-    licenseNumber: row.license_number,
-    assignedBusId: row.assigned_bus_id,
-    assignedRouteId: row.assigned_route_id,
-    busId: row.bus_id,
-    routeId: row.route_id,
-    busAssigned: row.bus_assigned,
-    driverId: row.driver_id,
-    joiningDate: row.joining_date,
-    shift: row.shift,
-    status: row.status,
-    profilePhotoUrl: row.profile_photo_url,
-    tripActive: row.trip_active,
-    activeTripId: row.active_trip_id,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
-
-  if (row.extras && typeof row.extras === 'object') {
-    Object.assign(driver, row.extras);
-  }
-
-  return driver;
 }
 
 // ─── Bus Public API ───────────────────────────────────────────────────────────
@@ -300,64 +217,96 @@ export async function pgCountBuses(): Promise<number> {
   return count || 0;
 }
 
-// ─── Driver Public API ────────────────────────────────────────────────────────
+// ─── Capacity Operations ────────────────────────────────────────────────────
 
-export async function pgFindAllDrivers(): Promise<Driver[]> {
-  const db = getSupabaseServer();
-  const { data, error } = await db.from('driver_profiles').select('*');
-  if (error) throw new Error(`FleetRepository (PG) findAllDrivers failed: ${error.message}`);
-  return (data || []).map(pgRowToDriver);
+export interface CapacityCheckResult {
+  busId: string;
+  capacity: number;
+  morningLoad: number;
+  eveningLoad: number;
+  currentMembers: number;
+  shiftLoad: number;
+  available: boolean;
 }
 
-export async function pgFindDriverById(id: string): Promise<Driver | null> {
-  const db = getSupabaseServer();
-  const { data, error } = await db.from('driver_profiles').select('*').eq('uid', id).maybeSingle();
-  if (error) throw new Error(`FleetRepository (PG) findDriverById failed: ${error.message}`);
-  if (!data) return null;
-  return pgRowToDriver(data);
+export interface CapacityMutationResult {
+  busId: string;
+  capacity: number;
+  morningLoad: number;
+  eveningLoad: number;
+  currentMembers: number;
+  oldShiftLoad: number;
+  newShiftLoad: number;
+  shift: string;
+  success: boolean;
+  error?: string;
 }
 
-export async function pgUpdateDriver(id: string, data: Partial<Driver>): Promise<void> {
+export async function pgCheckBusCapacity(busId: string, shift?: string): Promise<CapacityCheckResult> {
   const db = getSupabaseServer();
-  const row = driverDomainToRow(data);
-  delete row.uid;
-  row.updated_at = new Date().toISOString();
-
-  if (row.extras) {
-    const { data: current, error: readError } = await db
-      .from('driver_profiles')
-      .select('extras')
-      .eq('uid', id)
-      .maybeSingle();
-    if (!readError && current) {
-      row.extras = { ...(current.extras || {}), ...row.extras };
-    }
-  }
-
-  const { error } = await db.from('driver_profiles').update(row).eq('uid', id);
-  if (error) throw new Error(`FleetRepository (PG) updateDriver failed: ${error.message}`);
+  const { data, error } = await db.rpc('bus_check_capacity', {
+    p_bus_id: busId,
+    p_shift: shift || 'Morning',
+  });
+  if (error) throw new Error(`FleetRepository (PG) checkBusCapacity failed: ${error.message}`);
+  if (!data) throw new Error(`Bus ${busId} not found`);
+  if (data.error) throw new Error(data.error);
+  return data as CapacityCheckResult;
 }
 
-export async function pgRemoveDriver(id: string): Promise<void> {
+export async function pgIncrementBusCapacity(busId: string, shift?: string): Promise<CapacityMutationResult> {
   const db = getSupabaseServer();
-  const { error } = await db.from('driver_profiles').delete().eq('uid', id);
-  if (error) throw new Error(`FleetRepository (PG) removeDriver failed: ${error.message}`);
+  const { data, error } = await db.rpc('bus_increment_capacity', {
+    p_bus_id: busId,
+    p_shift: shift || 'Morning',
+  });
+  if (error) throw new Error(`FleetRepository (PG) incrementBusCapacity failed: ${error.message}`);
+  if (!data) throw new Error(`Bus ${busId} not found`);
+  if (data.error) throw new Error(data.error);
+  return data as CapacityMutationResult;
 }
 
-export async function pgUpsertDriver(driver: Partial<Driver> & { uid: string }): Promise<void> {
+export async function pgDecrementBusCapacity(busId: string, shift?: string): Promise<CapacityMutationResult> {
   const db = getSupabaseServer();
-  const row = driverDomainToRow(driver);
-  if (!row.uid) throw new Error('FleetRepository (PG) upsertDriver requires uid');
-  if (!row.created_at) row.created_at = new Date().toISOString();
-  row.updated_at = new Date().toISOString();
-
-  const { error } = await db.from('driver_profiles').upsert(row, { onConflict: 'uid' });
-  if (error) throw new Error(`FleetRepository (PG) upsertDriver failed: ${error.message}`);
+  const { data, error } = await db.rpc('bus_decrement_capacity', {
+    p_bus_id: busId,
+    p_shift: shift || 'Morning',
+  });
+  if (error) throw new Error(`FleetRepository (PG) decrementBusCapacity failed: ${error.message}`);
+  if (!data) throw new Error(`Bus ${busId} not found`);
+  if (data.error) throw new Error(data.error);
+  return data as CapacityMutationResult;
 }
 
-export async function pgCountDrivers(): Promise<number> {
+/**
+ * Find buses with available capacity for a given shift.
+ *
+ * NOTE: JavaScript filtering is used here because Supabase/PostgREST doesn't
+ * support column-to-column comparisons in the query builder (e.g., WHERE morning_load < capacity).
+ *
+ * OPTIMIZATION OPPORTUNITY (Bucket 5):
+ * For large fleets (>1000 buses), create a materialized view or RPC:
+ *   CREATE VIEW buses_with_capacity AS
+ *   SELECT *,
+ *     CASE WHEN morning_load < capacity THEN true ELSE false END AS has_morning_capacity,
+ *     CASE WHEN evening_load < capacity THEN true ELSE false END AS has_evening_capacity
+ *   FROM buses;
+ *
+ * Current implementation is acceptable for small-to-medium fleets (<1000 buses).
+ */
+export async function pgFindBusesWithAvailableCapacity(shift?: string): Promise<Bus[]> {
   const db = getSupabaseServer();
-  const { count, error } = await db.from('driver_profiles').select('*', { count: 'exact', head: true });
-  if (error) throw new Error(`FleetRepository (PG) countDrivers failed: ${error.message}`);
-  return count || 0;
+  const { data, error } = await db.from('buses').select('*');
+  if (error) throw new Error(`FleetRepository (PG) findBusesWithAvailableCapacity failed: ${error.message}`);
+  const buses = (data || []).map(pgRowToBus);
+  if (!shift) return buses;
+  const normalized = shift.toLowerCase().trim();
+  return buses.filter(bus => {
+    const load = normalized === 'evening'
+      ? (bus.eveningLoad ?? 0)
+      : (bus.morningLoad ?? 0);
+    return load < bus.capacity;
+  });
 }
+
+

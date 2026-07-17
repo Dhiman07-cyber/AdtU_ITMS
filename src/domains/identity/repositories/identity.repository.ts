@@ -20,6 +20,9 @@ import {
   pgRemoveUser,
   pgFindStudentById,
   pgFindStudentsByStatus,
+  pgFindStudentsByStatuses,
+  pgFindSeatOccupyingStudents,
+  pgGetBusOccupancyStats,
   pgFindStudentsByShift,
   pgFindStudentsByBusId,
   pgFindStudentsByBusIds,
@@ -31,9 +34,12 @@ import {
   pgFindAllStudents,
   pgFindDriverById,
   pgFindDriversByStatus,
+  pgFindAllDrivers,
   pgInsertDriver,
+  pgUpsertDriver,
   pgUpdateDriver,
   pgRemoveDriver,
+  pgFindDriversByBusId,
   pgFindModeratorById,
   pgFindModeratorsByStatus,
   pgInsertModerator,
@@ -48,6 +54,7 @@ import {
   pgInsertUnauthUser,
   pgUpdateUnauthUser,
   pgRemoveUnauthUser,
+  pgFindAllUnauthUsers,
   type IdentityUser,
 } from './identity.repository.pg';
 import type { UserRole } from '@/lib/user-service';
@@ -97,6 +104,21 @@ export async function findStudentsByStatus(status: string): Promise<Record<strin
   return pgFindStudentsByStatus(status);
 }
 
+export async function findStudentsByStatuses(statuses: string[]): Promise<Record<string, any>[]> {
+  return pgFindStudentsByStatuses(statuses);
+}
+
+export async function findSeatOccupyingStudents(): Promise<Record<string, any>[]> {
+  return pgFindSeatOccupyingStudents();
+}
+
+export async function getBusOccupancyStats(): Promise<{
+  occupancy: Record<string, { total: number; morning: number; evening: number }>;
+  stops: Record<string, Record<string, number>>;
+}> {
+  return pgGetBusOccupancyStats();
+}
+
 export async function findStudentsByShift(shift: string): Promise<Record<string, any>[]> {
   return pgFindStudentsByShift(shift);
 }
@@ -135,8 +157,16 @@ export async function findDriversByStatus(status: string): Promise<Record<string
   return pgFindDriversByStatus(status);
 }
 
+export async function findAllDrivers(): Promise<Record<string, any>[]> {
+  return pgFindAllDrivers();
+}
+
 export async function insertDriver(driver: Record<string, any>): Promise<void> {
   return pgInsertDriver(driver);
+}
+
+export async function upsertDriver(driver: Record<string, any>): Promise<void> {
+  return pgUpsertDriver(driver);
 }
 
 export async function updateDriver(uid: string, data: Record<string, any>): Promise<void> {
@@ -145,6 +175,10 @@ export async function updateDriver(uid: string, data: Record<string, any>): Prom
 
 export async function removeDriver(uid: string): Promise<void> {
   return pgRemoveDriver(uid);
+}
+
+export async function findDriversByBusId(busId: string): Promise<Record<string, any>[]> {
+  return pgFindDriversByBusId(busId);
 }
 
 // ─── Moderator Profiles ─────────────────────────────────────────────────────
@@ -211,4 +245,8 @@ export async function updateUnauthUser(uid: string, data: Record<string, any>): 
 
 export async function removeUnauthUser(uid: string): Promise<void> {
   return pgRemoveUnauthUser(uid);
+}
+
+export async function findAllUnauthUsers(): Promise<Record<string, any>[]> {
+  return pgFindAllUnauthUsers();
 }

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { adminAuth, adminDb } from '@/lib/firebase-admin';
+import { adminAuth } from '@/lib/firebase-admin';
+import { resolveUserRole } from '@/lib/security/role-cache';
 import { getAll } from '@/domains/application';
 
 export async function GET(request: NextRequest) {
@@ -12,9 +13,8 @@ export async function GET(request: NextRequest) {
     const decodedToken = await adminAuth.verifyIdToken(token);
     const uid = decodedToken.uid;
 
-    const adminDoc = await adminDb.collection('admins').doc(uid).get();
-    const modDoc = await adminDb.collection('moderators').doc(uid).get();
-    if (!adminDoc.exists && !modDoc.exists) {
+    const userRole = await resolveUserRole(uid);
+    if (userRole.role !== 'admin' && userRole.role !== 'moderator') {
       return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 });
     }
 

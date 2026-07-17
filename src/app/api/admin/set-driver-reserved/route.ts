@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db as adminDb } from '@/lib/firebase-admin';
 import { verifyApiAuth } from '@/lib/security/api-auth';
 import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
+import { getAllBuses, updateBus } from '@/domains/fleet';
+import { getDriverById } from '@/domains/identity';
 
 /**
  * Set a driver as "Reserved" (not assigned to any bus)
@@ -25,71 +26,43 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Get driver document
-    const driverDoc = await adminDb.collection('drivers').doc(driverUID).get();
+    // Get driver from PostgreSQL (canonical source of truth)
+    const driverData = await getDriverById(driverUID);
     
-    if (!driverDoc.exists) {
+    if (!driverData) {
       return NextResponse.json(
         { success: false, error: 'Driver not found' },
         { status: 404 }
       );
     }
 
-    const driverData = driverDoc.data();
-    const oldBusId = driverData?.assignedBusId || driverData?.busId;
+    const oldBusId = driverData.assignedBusId || driverData.busId;
 
     console.log(`🔄 Setting driver ${driverUID.substring(0,8)}... as Reserved`);
     console.log(`   Old bus: ${oldBusId}`);
 
-    // Remove driver from ALL buses that reference them
-    // Check both assignedDriverId and activeDriverId
-    const [assignedBuses, activeBuses] = await Promise.all([
-      adminDb.collection('buses').where('assignedDriverId', '==', driverUID).get(),
-      adminDb.collection('buses').where('activeDriverId', '==', driverUID).get()
-    ]);
+    // Remove driver from ALL buses that reference them (from PG)
+    const allBuses = await getAllBuses();
+    const busesToClean = allBuses.filter(b =>
+      (b as any).assignedDriverId === driverUID || (b as any).activeDriverId === driverUID
+    );
 
-    console.log(`   Found ${assignedBuses.size} buses with assignedDriverId`);
-    console.log(`   Found ${activeBuses.size} buses with activeDriverId`);
+    console.log(`   Found ${busesToClean.length} buses with driver assignment`);
 
-    const batch = adminDb.batch();
+    // ponytail: Combine dual updates and update each bus sequentially to ensure transactional correctness
     const updatedBuses: string[] = [];
+    for (const bus of busesToClean) {
+      const busId = bus.busId || bus.id || '';
+      const updateData: Record<string, any> = { driverUID: null };
+      if ((bus as any).assignedDriverId === driverUID) updateData.assignedDriverId = null;
+      if ((bus as any).activeDriverId === driverUID) updateData.activeDriverId = null;
 
-    // Include driver doc update in the same batch for atomicity
-    batch.update(driverDoc.ref, {
-      assignedBusId: null,
-      busId: null,
-      assignedRouteId: null,
-      routeId: null,
-      status: 'active'
-    });
+      await updateBus(busId, updateData as any);
+      updatedBuses.push(bus.busNumber || busId);
+      console.log(`   🔄 Removed from bus ${bus.busNumber || busId}`);
+    }
 
-    // Remove from assignedDriverId buses
-    assignedBuses.docs.forEach((doc: any) => {
-      const data = doc.data();
-      batch.update(doc.ref, {
-        assignedDriverId: null,
-        activeDriverId: null
-      });
-      updatedBuses.push(data.busNumber || doc.id);
-      console.log(`   🔄 Removing from bus ${data.busNumber} (assignedDriverId)`);
-    });
-
-    // Remove from activeDriverId buses (if not already handled)
-    const processedBusIds = new Set(assignedBuses.docs.map((d: any) => d.id));
-    activeBuses.docs.forEach((doc: any) => {
-      if (!processedBusIds.has(doc.id)) {
-        const data = doc.data();
-        batch.update(doc.ref, {
-          activeDriverId: null
-        });
-        updatedBuses.push(data.busNumber || doc.id);
-        console.log(`   🔄 Removing from bus ${data.busNumber} (activeDriverId)`);
-      }
-    });
-
-    await batch.commit();
     console.log(`   ✅ Removed driver from ${updatedBuses.length} bus(es): ${updatedBuses.join(', ')}`);
-
     console.log(`✅ Driver ${driverUID.substring(0,8)}... is now Reserved`);
 
     return NextResponse.json({

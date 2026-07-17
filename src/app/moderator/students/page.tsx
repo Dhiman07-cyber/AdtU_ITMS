@@ -52,8 +52,8 @@ import { deleteStudent } from '@/lib/dataService';
 import { useToast } from '@/contexts/toast-context';
 import { safeImageSrc } from "@/lib/security/url-sanitizer";
 import Avatar from '@/components/Avatar';
-// SPARK PLAN SAFETY: Event-driven refresh - only fetches when mutations occur
-import { usePaginatedCollection, invalidateCollectionCache } from '@/hooks/usePaginatedCollection';
+// Migrated: Server-side API → PostgreSQL (no Firestore client reads)
+import { useApiCollection, invalidateCollectionCache } from '@/hooks/useApiCollection';
 import { useEventDrivenRefresh } from '@/hooks/useEventDrivenRefresh';
 import { useModeratorPermissions } from '@/hooks/useModeratorPermissions';
 import { PermissionDeniedCard } from '@/components/PermissionDeniedCard';
@@ -64,18 +64,18 @@ export default function AdminStudents() {
     const { canStudentView, canStudentAdd, canStudentEdit, canStudentDelete, canStudentReassign, loading: permsLoading } = useModeratorPermissions();
     const router = useRouter();
 
-    // SPARK PLAN SAFETY: Event-driven refresh - only fetches when mutations occur
+    // Server-side API reads from PostgreSQL — no Firestore client reads
     const {
         data: students,
         loading: loadingStudents,
         refresh: refreshStudents,
         fetchNextPage: fetchMoreStudents,
         hasMore: hasMoreStudents
-    } = usePaginatedCollection('students', {
+    } = useApiCollection('students', {
         pageSize: 50, orderByField: 'updatedAt', orderDirection: 'desc',
         autoRefresh: false, // EVENT-DRIVEN: Only refresh when mutations occur
     });
-    const { data: buses, loading: loadingBuses, refresh: refreshBuses } = usePaginatedCollection('buses', {
+    const { data: buses, loading: loadingBuses, refresh: refreshBuses } = useApiCollection('buses', {
         pageSize: 50, orderByField: 'busNumber', orderDirection: 'asc',
         autoRefresh: false,
     });
@@ -133,40 +133,12 @@ export default function AdminStudents() {
             setIsSearching(true);
             try {
                 const term = debouncedSearchTerm.trim();
-                const termLower = term.toLowerCase();
-
-                // Dynamic import to avoid top-level SSR issues with firebase/firestore if not already imported
-                const { collection, query, where, getDocs, limit } = await import('firebase/firestore');
-                const { db } = await import('@/lib/firebase');
-
-                const studentsRef = collection(db, 'students');
-                const capitalizedTerm = term.charAt(0).toUpperCase() + term.slice(1).toLowerCase();
-
-                // Perform multiple queries to find matches across different fields
-                const queries = [
-                    // Name prefix match (Capitalized)
-                    query(studentsRef, where('name', '>=', capitalizedTerm), where('name', '<=', capitalizedTerm + '\uf8ff'), limit(20)),
-                    // FullName prefix match (Capitalized)
-                    query(studentsRef, where('fullName', '>=', capitalizedTerm), where('fullName', '<=', capitalizedTerm + '\uf8ff'), limit(20)),
-                    // Email exact match
-                    query(studentsRef, where('email', '==', termLower), limit(1)),
-                    // Enrollment ID exact match
-                    query(studentsRef, where('enrollmentId', '==', term), limit(1)),
-                    query(studentsRef, where('enrollmentId', '==', term.toUpperCase()), limit(1))
-                ];
-
-                const snapshots = await Promise.all(queries.map(q => getDocs(q)));
-
-                // Deduplicate results
-                const resultsMap = new Map();
-                snapshots.forEach(snap => {
-                    snap.docs.forEach(doc => {
-                        resultsMap.set(doc.id, { id: doc.id, ...doc.data() });
-                    });
+                const token = await currentUser?.getIdToken();
+                const res = await fetch('/api/students?q=' + encodeURIComponent(term), {
+                    headers: token ? { Authorization: 'Bearer ' + token } : {},
                 });
-
-                const results = Array.from(resultsMap.values());
-                setSearchResults(results);
+                const data = await res.json();
+                setSearchResults(data.students || []);
 
             } catch (error) {
                 console.error("Search failed:", error);
@@ -177,7 +149,7 @@ export default function AdminStudents() {
         }
 
         performSearch();
-    }, [debouncedSearchTerm, addToast]);
+    }, [debouncedSearchTerm, addToast, currentUser]);
 
 
 

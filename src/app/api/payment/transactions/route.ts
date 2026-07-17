@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { verifyToken, adminDb } from '@/lib/firebase-admin';
+import { verifyToken } from '@/lib/firebase-admin';
 import { getAllPayments, getPaymentsByStudent } from '@/lib/payment/payment.service';
 import { getByUid as getStudentByUid } from '@/domains/student';
 import { getUserById, getUserByEmail } from '@/domains/identity';

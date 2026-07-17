@@ -3,9 +3,8 @@
  * Fetches and normalizes user profile data with reference resolution
  */
 
-import { doc, getDoc, collection, getDocs, query, where, Timestamp } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
 import { getRouteById } from '@/lib/dataService';
+import { getAdminById } from '@/domains/identity';
 
 export type UserRole = 'student' | 'driver' | 'moderator' | 'admin';
 
@@ -182,19 +181,21 @@ async function resolveBus(busId: string): Promise<any | null> {
       cleanBusId = `Bus-${number}`;
     }
     
-    // Try to fetch the bus document
-    const busDoc = await getDoc(doc(db, 'buses', cleanBusId));
-    if (busDoc.exists()) {
-      const result = { id: busDoc.id, ...busDoc.data() };
+    // Try to fetch the bus via API
+    const res = await fetch(`/api/buses/${encodeURIComponent(cleanBusId)}`);
+    if (res.ok) {
+      const busData = await res.json();
+      const result = { id: busData.id || cleanBusId, ...busData };
       busCache.set(busId, { data: result, timestamp: now });
       return result;
     }
     
     // If not found, try with the original busId
     if (cleanBusId !== busId) {
-      const originalDoc = await getDoc(doc(db, 'buses', busId));
-      if (originalDoc.exists()) {
-        const result = { id: originalDoc.id, ...originalDoc.data() };
+      const originalRes = await fetch(`/api/buses/${encodeURIComponent(busId)}`);
+      if (originalRes.ok) {
+        const busData = await originalRes.json();
+        const result = { id: busData.id || busId, ...busData };
         busCache.set(busId, { data: result, timestamp: now });
         return result;
       }
@@ -380,13 +381,14 @@ async function fetchStudentProfile(uid: string): Promise<StudentProfile | null> 
  */
 async function fetchDriverProfile(uid: string): Promise<DriverProfile | null> {
   try {
-    const userDoc = await getDoc(doc(db, 'drivers', uid));
-    if (!userDoc.exists()) return null;
+    const res = await fetch(`/api/drivers/${uid}`);
+    if (!res.ok) return null;
 
-    const data = userDoc.data();
+    const { driver: data } = await res.json();
+    if (!data) return null;
     
     // Debug log to see what data is being fetched
-    console.log('Driver profile data from Firestore:', data);
+    console.log('Driver profile data from API:', data);
     console.log('Approved by field:', data.approvedBy);
 
     // Resolve bus references - handle multiple fields but deduplicate
@@ -508,10 +510,11 @@ async function fetchDriverProfile(uid: string): Promise<DriverProfile | null> {
  */
 async function fetchModeratorProfile(uid: string): Promise<ModeratorProfile | null> {
   try {
-    const userDoc = await getDoc(doc(db, 'moderators', uid));
-    if (!userDoc.exists()) return null;
+    const res = await fetch(`/api/moderators/${uid}`);
+    if (!res.ok) return null;
 
-    const data = userDoc.data();
+    const data = await res.json();
+    if (!data) return null;
     const joiningDate = toDate(data.joiningDate);
     const yearsOfService = calculateYearsOfService(joiningDate);
     const recentActions = await getRecentActions(uid);
@@ -544,10 +547,8 @@ async function fetchModeratorProfile(uid: string): Promise<ModeratorProfile | nu
  */
 async function fetchAdminProfile(uid: string): Promise<AdminProfile | null> {
   try {
-    const userDoc = await getDoc(doc(db, 'admins', uid));
-    if (!userDoc.exists()) return null;
-
-    const data = userDoc.data();
+    const data = await getAdminById(uid);
+    if (!data) return null;
     const joiningDate = toDate(data.joiningDate);
     const yearsOfService = calculateYearsOfService(joiningDate);
     const recentActions = await getRecentActions(uid);

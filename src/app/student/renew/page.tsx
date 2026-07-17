@@ -44,12 +44,10 @@ import {
   clearPaymentSession,
   hasCompletedPayment
 } from '@/lib/payment/application-payment.service';
-import { db } from '@/lib/firebase';
-import { doc, getDoc } from 'firebase/firestore';
 import Link from 'next/link';
 import { parseFirestoreDate, formatDate, daysUntil, isDateExpired } from '@/lib/utils/date-utils';
-// SPARK PLAN SAFETY: Migrated to usePaginatedCollection
-import { usePaginatedCollection } from '@/hooks/usePaginatedCollection';
+// Migrated: Server-side API → PostgreSQL (no Firestore client reads)
+import { useApiCollection } from '@/hooks/useApiCollection';
 import { safeImageSrc } from '@/lib/security/url-sanitizer';
 import ErrorBoundary from '@/components/ErrorBoundary';
 
@@ -103,8 +101,8 @@ export default function StudentRenewalPage() {
     fetchDeadlineConfig();
   }, []);
 
-  // Fetch buses data
-  const { data: buses, refresh: refreshBuses } = usePaginatedCollection('buses', {
+  // Fetch buses data from PostgreSQL via API
+  const { data: buses, refresh: refreshBuses } = useApiCollection('buses', {
     pageSize: 50, orderByField: 'busNumber', orderDirection: 'asc', autoRefresh: false,
   });
 

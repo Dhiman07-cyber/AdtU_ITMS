@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { adminDb } from '@/lib/firebase-admin';
+import { resolveUserRole } from '@/lib/security/role-cache';
 import { getCurrentBusFee, updateBusFee } from '@/lib/bus-fee-service';
 import { withSecurity } from '@/lib/security/api-security';
 import { BusFeeQuerySchema, BusFeeUpdateSchema } from '@/lib/security/validation-schemas';
@@ -43,8 +44,8 @@ export const POST = withSecurity(
         // Optimized Broadcast Notification (Non-blocking)
         (async () => {
             try {
-                const adminSnap = await adminDb.collection('users').doc(auth.uid).get();
-                const adminName = adminSnap.data()?.name || 'Admin';
+                const userRole = await resolveUserRole(auth.uid);
+                const adminName = userRole.name || 'Admin';
 
                 await notifyAllUsers({
                     title: '🚌 Bus Fee Updated',

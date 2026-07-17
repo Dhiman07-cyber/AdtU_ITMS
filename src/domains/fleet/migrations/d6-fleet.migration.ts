@@ -30,12 +30,14 @@ import type { MigrationDefinition, MigrationResult, ValidationResult } from '@/i
 import { adminDb } from '@/lib/firebase-admin';
 import {
   pgUpsertBus,
-  pgUpsertDriver,
   pgFindBusById,
-  pgFindDriverById,
   pgCountBuses,
-  pgCountDrivers,
 } from '@/domains/fleet/repositories/fleet.repository.pg';
+import {
+  pgUpsertDriver,
+  pgFindDriverById,
+  pgCountDrivers,
+} from '@/domains/identity/repositories/identity.repository.pg';
 
 // ─── Collection constants ─────────────────────────────────────────────────────
 const BUSES_COLLECTION   = 'buses';

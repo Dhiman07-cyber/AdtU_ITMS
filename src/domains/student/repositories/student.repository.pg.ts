@@ -88,6 +88,7 @@ const STUDENT_FIELD_MAP: Record<string, string> = {
   approvedBy: 'approved_by',
   approvedAt: 'approved_at',
   lastProcessedApplicationId: 'last_processed_application_id',
+  seatReleasedAt: 'seat_released_at',
   createdAt: 'created_at',
   updatedAt: 'updated_at',
 };
@@ -155,6 +156,7 @@ function pgRowToStudent(row: Record<string, any>): Student {
     hardBlock: row.hard_block,
     approvedBy: row.approved_by,
     approvedAt: row.approved_at,
+    seatReleasedAt: row.seat_released_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -215,57 +217,24 @@ export async function pgFindAll(): Promise<Student[]> {
 }
 
 /**
- * Find students by bus ID (checks both bus_id and assigned_bus_id).
+ * Find students by bus ID (delegates to plural query helper)
  */
 export async function pgFindByBusId(busId: string): Promise<Student[]> {
-  const db = getSupabaseServer();
-
-  const { data, error } = await db
-    .from('student_profiles')
-    .select('*')
-    .or(`bus_id.eq.${busId},assigned_bus_id.eq.${busId}`);
-
-  if (error) {
-    throw new Error(`StudentRepository (PG) findByBusId failed: ${error.message}`);
-  }
-
-  return (data || []).map(row => pgRowToStudent(row));
+  return pgFindByBusIds([busId]);
 }
 
 /**
- * Find students by route ID (checks both route_id and assigned_route_id).
+ * Find students by route ID (delegates to plural query helper)
  */
 export async function pgFindByRouteId(routeId: string): Promise<Student[]> {
-  const db = getSupabaseServer();
-
-  const { data, error } = await db
-    .from('student_profiles')
-    .select('*')
-    .or(`route_id.eq.${routeId},assigned_route_id.eq.${routeId}`);
-
-  if (error) {
-    throw new Error(`StudentRepository (PG) findByRouteId failed: ${error.message}`);
-  }
-
-  return (data || []).map(row => pgRowToStudent(row));
+  return pgFindByRouteIds([routeId]);
 }
 
 /**
- * Find students by status.
+ * Find students by status (delegates to plural query helper)
  */
 export async function pgFindByStatus(status: string): Promise<Student[]> {
-  const db = getSupabaseServer();
-
-  const { data, error } = await db
-    .from('student_profiles')
-    .select('*')
-    .eq('status', status);
-
-  if (error) {
-    throw new Error(`StudentRepository (PG) findByStatus failed: ${error.message}`);
-  }
-
-  return (data || []).map(row => pgRowToStudent(row));
+  return pgFindByStatuses([status]);
 }
 
 /**
@@ -329,6 +298,7 @@ export async function pgInsert(student: Partial<Student>): Promise<void> {
 
 /**
  * Update a student profile (partial update).
+ * FIXED: Uses atomic merge_student_extras RPC instead of unsafe read-before-write pattern.
  */
 export async function pgUpdate(uid: string, data: Partial<Student>): Promise<void> {
   const db = getSupabaseServer();
@@ -338,19 +308,11 @@ export async function pgUpdate(uid: string, data: Partial<Student>): Promise<voi
   delete row.uid;
   row.updated_at = new Date().toISOString();
 
-  // If there are new extras being updated, read the existing extras from DB first and merge
-  if (row.extras) {
-    const { data: current, error: readError } = await db
-      .from('student_profiles')
-      .select('extras')
-      .eq('uid', uid)
-      .maybeSingle();
+  // Extract extras for atomic merge (if any)
+  const extrasToMerge = row.extras;
+  delete row.extras; // Don't include in the UPDATE
 
-    if (!readError && current) {
-      row.extras = { ...(current.extras || {}), ...row.extras };
-    }
-  }
-
+  // Update core fields
   const { error } = await db
     .from('student_profiles')
     .update(row)
@@ -358,6 +320,17 @@ export async function pgUpdate(uid: string, data: Partial<Student>): Promise<voi
 
   if (error) {
     throw new Error(`StudentRepository (PG) update failed: ${error.message}`);
+  }
+
+  // Atomically merge extras using RPC (prevents race condition)
+  if (extrasToMerge && Object.keys(extrasToMerge).length > 0) {
+    const { error: rpcError } = await db.rpc('merge_student_extras', {
+      p_uid: uid,
+      p_extras: extrasToMerge,
+    });
+    if (rpcError) {
+      throw new Error(`StudentRepository (PG) extras merge failed: ${rpcError.message}`);
+    }
   }
 }
 
@@ -447,9 +420,109 @@ export async function pgUnassignRoute(routeId: string): Promise<void> {
       updated_at: new Date().toISOString(),
     })
     .or(`route_id.eq.${routeId},assigned_route_id.eq.${routeId}`);
+  if (error) throw new Error(`StudentRepository (PG) pgUnassignRoute failed: ${error.message}`);
+}
 
-  if (error) {
-    throw new Error(`StudentRepository (PG) pgUnassignRoute failed: ${error.message}`);
+/**
+ * Find students by multiple bus IDs.
+ * ponytail: moved from identity.repository.pg.ts to eliminate duplicate student_profiles queries.
+ */
+export async function pgFindByBusIds(busIds: string[]): Promise<Student[]> {
+  if (busIds.length === 0) return [];
+  const db = getSupabaseServer();
+  const { data, error } = await db
+    .from('student_profiles')
+    .select('*')
+    .or(busIds.map(id => `(bus_id.eq.${id},assigned_bus_id.eq.${id})`).join(','));
+  if (error) throw new Error(`StudentRepository (PG) findByBusIds failed: ${error.message}`);
+  return (data || []).map(pgRowToStudent);
+}
+
+/**
+ * Find students by multiple route IDs.
+ */
+export async function pgFindByRouteIds(routeIds: string[]): Promise<Student[]> {
+  if (routeIds.length === 0) return [];
+  const db = getSupabaseServer();
+  const { data, error } = await db
+    .from('student_profiles')
+    .select('*')
+    .or(routeIds.map(id => `(route_id.eq.${id},assigned_route_id.eq.${id})`).join(','));
+  if (error) throw new Error(`StudentRepository (PG) findByRouteIds failed: ${error.message}`);
+  return (data || []).map(pgRowToStudent);
+}
+
+/**
+ * Find students matching any of the given statuses.
+ */
+export async function pgFindByStatuses(statuses: string[]): Promise<Student[]> {
+  if (statuses.length === 0) return [];
+  const db = getSupabaseServer();
+  const { data, error } = await db
+    .from('student_profiles')
+    .select('*')
+    .in('status', statuses);
+  if (error) throw new Error(`StudentRepository (PG) findByStatuses failed: ${error.message}`);
+  return (data || []).map(pgRowToStudent);
+}
+
+/**
+ * Find students who currently occupy a seat (for capacity sync).
+ * Returns a lightweight projection — not a full Student object.
+ */
+export async function pgFindSeatOccupying(): Promise<Array<{
+  uid: string; busId: string; shift: string; status: string;
+  seatReleasedAt: string | null; stopId: string | null;
+}>> {
+  const db = getSupabaseServer();
+  const { data, error } = await db
+    .from('student_profiles')
+    .select('uid, assigned_bus_id, bus_id, shift, status, seat_released_at, stop_id')
+    .or('status.eq.active,status.eq.soft_blocked,status.eq.pending_deletion')
+    .not('assigned_bus_id', 'is', null);
+  if (error) throw new Error(`StudentRepository (PG) findSeatOccupying failed: ${error.message}`);
+  return (data || []).map(row => ({
+    uid: row.uid,
+    busId: row.assigned_bus_id || row.bus_id,
+    shift: row.shift,
+    status: row.status,
+    seatReleasedAt: row.seat_released_at,
+    stopId: row.stop_id,
+  }));
+}
+
+/**
+ * Get bus occupancy stats via the two PostgreSQL views.
+ * Views: bus_occupancy_counts_view, bus_stop_counts_view.
+ */
+export async function pgGetBusOccupancyStats(): Promise<{
+  occupancy: Record<string, { total: number; morning: number; evening: number }>;
+  stops: Record<string, Record<string, number>>;
+}> {
+  const db = getSupabaseServer();
+  const [occRes, stopRes] = await Promise.all([
+    db.from('bus_occupancy_counts_view').select('*'),
+    db.from('bus_stop_counts_view').select('*'),
+  ]);
+  if (occRes.error) throw new Error(`StudentRepository (PG) occupancyStats occupancy: ${occRes.error.message}`);
+  if (stopRes.error) throw new Error(`StudentRepository (PG) occupancyStats stops: ${stopRes.error.message}`);
+
+  const occupancy: Record<string, { total: number; morning: number; evening: number }> = {};
+  const stops: Record<string, Record<string, number>> = {};
+
+  for (const row of occRes.data || []) {
+    if (row.bus_id) occupancy[row.bus_id] = {
+      total: Number(row.total_count || 0),
+      morning: Number(row.morning_count || 0),
+      evening: Number(row.evening_count || 0),
+    };
   }
+  for (const row of stopRes.data || []) {
+    if (row.bus_id && row.stop_id) {
+      if (!stops[row.bus_id]) stops[row.bus_id] = {};
+      stops[row.bus_id][row.stop_id] = Number(row.stop_count || 0);
+    }
+  }
+  return { occupancy, stops };
 }
 

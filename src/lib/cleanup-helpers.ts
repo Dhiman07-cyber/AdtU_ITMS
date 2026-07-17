@@ -8,7 +8,7 @@ import { pgDeleteNotificationsByUser } from '@/domains/notification/repositories
 import { decrementBusCapacity } from './busCapacityService';
 import { extractPublicId, deleteAsset } from './cloudinary-server';
 import { wasSeatReleased } from './config/capacity-flags';
-import { deleteUser, deleteStudent, deleteDriver, deleteModerator } from '@/domains/identity';
+import { deleteUser, deleteStudent, deleteDriver, deleteModerator, updateStudent, updateDriver, getAllDrivers, getStudentsByBusIds, getStudentById, getDriverById, getModeratorById } from '@/domains/identity';
 import * as fleetService from '@/domains/fleet';
 import * as studentService from '@/domains/student';
 import * as routeService from '@/domains/route';
@@ -57,14 +57,20 @@ export async function deleteUserAndData(
     console.log(`Deleting ${userType} with ID:`, userId.substring(0,8)+'...');
 
     // Get user data first to retrieve profile image URL and Firebase Auth UID
-    const userDoc = await adminDb.collection(`${userType}s`).doc(userId).get();
+    let userData: Record<string, any> | null = null;
+    if (userType === 'student') {
+      userData = await getStudentById(userId);
+    } else if (userType === 'driver') {
+      userData = await getDriverById(userId);
+    } else if (userType === 'moderator') {
+      userData = await getModeratorById(userId);
+    }
 
-    if (!userDoc.exists) {
+    if (!userData) {
       return { success: false, error: 'User not found' };
     }
 
-    const userData = userDoc.data();
-    const profileImageUrl = userData?.profilePhotoUrl || userData?.photoURL || userData?.avatar;
+    const profileImageUrl = userData?.profilePhotoUrl;
     const firebaseAuthUid = userData?.uid || userId; // Use uid field if available, fallback to userId
 
     // Step 1: Delete profile image from Cloudinary if exists
@@ -174,18 +180,6 @@ export async function deleteUserAndData(
     } else if (userType === 'moderator') {
       // Delete moderator's notifications
       await deleteUserNotifications(userId);
-    }
-
-    // Step 3: Delete user document from Firestore
-    await adminDb.collection(`${userType}s`).doc(userId).delete();
-    console.log(`Deleted ${userType} document from Firestore:`, userId.substring(0,8)+'...');
-
-    // Also delete from users collection if it exists
-    try {
-      await adminDb.collection('users').doc(userId).delete();
-      console.log(`Deleted user document from users collection:`, userId.substring(0,8)+'...');
-    } catch (userDeleteError) {
-      console.log(`User with ID ${userId.substring(0,8)}... not found in users collection or already deleted`);
     }
 
     // Delete from PostgreSQL (canonical source of truth)
@@ -316,56 +310,51 @@ export async function deleteBusAndData(
     console.log('Deleting bus with ID:', busId);
 
     // Get bus data
-    const busDoc = await adminDb.collection('buses').doc(busId).get();
+    const busData = await fleetService.getBusById(busId);
 
-    if (!busDoc.exists) {
+    if (!busData) {
       return { success: false, error: 'Bus not found' };
     }
 
-    // Clean student references before deleting the bus
-    const studentsQuery = await adminDb.collection('students')
-      .where('busId', '==', busId)
-      .limit(400)
-      .get();
-
-    if (studentsQuery.size > 0) {
-      const batch = adminDb.batch();
-      studentsQuery.docs.forEach(doc => {
-        batch.update(doc.ref, { busId: null, routeId: null, stopId: null, updatedAt: new Date().toISOString() });
-      });
-      await batch.commit();
-      console.log(`Cleared busId/routeId/stopId from ${studentsQuery.size} students for bus:`, busId);
+    // 1. Clean student references in PostgreSQL
+    try {
+      const students = await getStudentsByBusIds([busId]);
+      for (const student of students) {
+        await updateStudent(student.uid, {
+          busId: null,
+          assignedBusId: null,
+          routeId: null,
+          assignedRouteId: null,
+          stopId: null
+        });
+      }
+      console.log(`Cleared busId/routeId/stopId from ${students.length} students in PostgreSQL`);
+    } catch (pgStudErr) {
+      console.error('Error clearing student bus assignments in PostgreSQL:', pgStudErr);
     }
 
-    // Delete bus document
-    await adminDb.collection('buses').doc(busId).delete();
-    console.log('Deleted bus document:', busId);
+    // 2. Unassign bus from drivers in PostgreSQL
+    try {
+      const drivers = await getAllDrivers();
+      const assignedDrivers = drivers.filter(d => d.assignedBusId === busId || d.busId === busId);
+      for (const driver of assignedDrivers) {
+        await updateDriver(driver.uid, {
+          busId: null,
+          assignedBusId: null
+        });
+      }
+      console.log(`Unassigned bus ${busId} from ${assignedDrivers.length} drivers in PostgreSQL`);
+    } catch (pgDriverErr) {
+      console.error('Error unassigning bus from drivers in PostgreSQL:', pgDriverErr);
+    }
 
-    // Unassign bus from drivers
-    const driversQuery = await adminDb.collection('drivers')
-      .where('busId', '==', busId)
-      .limit(400)
-      .get();
-
-    const batch1 = adminDb.batch();
-    driversQuery.docs.forEach(doc => {
-      batch1.update(doc.ref, { busId: null, updatedAt: new Date().toISOString() });
-    });
-    await batch1.commit();
-    console.log(`Unassigned bus from ${driversQuery.size} drivers`);
-
-    // Delete bus trip logs
-    const tripsQuery = await adminDb.collection('trip_logs')
-      .where('busId', '==', busId)
-      .limit(400)
-      .get();
-
-    const batch2 = adminDb.batch();
-    tripsQuery.docs.forEach(doc => {
-      batch2.delete(doc.ref);
-    });
-    await batch2.commit();
-    console.log(`Deleted ${tripsQuery.size} trip logs for bus:`, busId);
+    // 3. Delete bus from PostgreSQL
+    try {
+      await fleetService.removeBus(busId);
+      console.log('Deleted bus from PostgreSQL:', busId);
+    } catch (pgBusErr) {
+      console.error('Error deleting bus from PostgreSQL:', pgBusErr);
+    }
 
     return { success: true };
   } catch (error: any) {

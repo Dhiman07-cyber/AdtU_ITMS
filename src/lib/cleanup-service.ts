@@ -1,5 +1,6 @@
 import { db as adminDb, FieldValue } from './firebase-admin';
 import { pgInsertNotification } from '@/domains/notification/repositories/notification.repository.pg';
+import { getUsersByRole, getDriverById, getStudentsByBusIds } from '@/domains/identity';
 
 /**
  * Event-Driven Cleanup Service
@@ -229,22 +230,18 @@ export class CleanupService {
   private static async notifySwapReverted(busId: string, originalDriverId: string): Promise<void> {
     try {
       // Get bus and driver details
-      const [busDoc, driverDoc] = await Promise.all([
+      const [busDoc, driverData] = await Promise.all([
         adminDb.collection('buses').doc(busId).get(),
-        adminDb.collection('drivers').doc(originalDriverId).get()
+        getDriverById(originalDriverId)
       ]);
 
       const busNumber = busDoc.data()?.busNumber || busId;
-      const driverName = driverDoc.data()?.fullName || 'the original driver';
+      const driverName = driverData?.fullName || 'the original driver';
 
       // Notify students
-      const studentsSnapshot = await adminDb
-        .collection('students')
-        .where('busId', '==', busId)
-        .get();
-
-      const studentUIDs = studentsSnapshot.docs
-        .map((doc: any) => doc.data().uid)
+      const pgStudents = await getStudentsByBusIds([busId]);
+      const studentUIDs = pgStudents
+        .map((s: any) => s.uid)
         .filter((uid: any) => uid);
 
       if (studentUIDs.length > 0) {
@@ -274,13 +271,13 @@ export class CleanupService {
       }
 
       // Notify moderators and admins
-      const [moderatorsSnapshot, adminsSnapshot] = await Promise.all([
-        adminDb.collection('moderators').get(),
-        adminDb.collection('admins').get()
+      const [moderatorUsers, adminUsers] = await Promise.all([
+        getUsersByRole('moderator'),
+        getUsersByRole('admin')
       ]);
 
-      const moderatorUIDs = moderatorsSnapshot.docs.map((doc: any) => doc.data().uid).filter((uid: any) => uid);
-      const adminUIDs = adminsSnapshot.docs.map((doc: any) => doc.data().uid).filter((uid: any) => uid);
+      const moderatorUIDs = moderatorUsers.map((u: any) => u.uid).filter((uid: any) => uid);
+      const adminUIDs = adminUsers.map((u: any) => u.uid).filter((uid: any) => uid);
       const managementUIDs = [...moderatorUIDs, ...adminUIDs];
 
       if (managementUIDs.length > 0) {

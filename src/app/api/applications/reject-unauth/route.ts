@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { adminAuth, adminDb } from '@/lib/firebase-admin';
 import { rejectUnauth } from '@/domains/application';
 import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
+import { resolveUserRole } from '@/lib/security/role-cache';
+import { getUpdaterInfo } from '@/lib/utils/updatedBy';
 
 export async function POST(request: NextRequest) {
   try {
@@ -19,20 +21,18 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
-    const moderatorDoc = await adminDb.collection('moderators').doc(moderatorUid).get();
-    const adminDoc = await adminDb.collection('admins').doc(moderatorUid).get();
-
-    if (!moderatorDoc.exists && !adminDoc.exists) {
+    const userRole = await resolveUserRole(moderatorUid);
+    if (!userRole.role) {
       return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 });
     }
+    const updaterInfo = await getUpdaterInfo(adminDb, moderatorUid);
 
-    const moderatorData = moderatorDoc.exists ? moderatorDoc.data() : adminDoc.data();
     const permissionDenied = await requireModeratorPermission(
       {
         uid: moderatorUid,
         email: decodedToken.email || '',
-        role: adminDoc.exists ? 'admin' : 'moderator',
-        name: moderatorData?.fullName || moderatorData?.name || '',
+        role: userRole.role,
+        name: updaterInfo.name,
       },
       'applications',
       'canReject'
@@ -43,8 +43,8 @@ export async function POST(request: NextRequest) {
       studentUid,
       {
         uid: moderatorUid,
-        name: moderatorData?.fullName || moderatorData?.name || 'Moderator',
-        role: adminDoc.exists ? 'admin' : 'moderator',
+        name: updaterInfo.name || 'Moderator',
+        role: userRole.role,
       },
       reason
     );

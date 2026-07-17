@@ -9,7 +9,7 @@
  * moved to Supabase. Student queries moved to Supabase.
  */
 
-import { db as adminDb, messaging, FieldValue } from '@/lib/firebase-admin';
+import { messaging } from '@/lib/firebase-admin';
 import { getSupabaseServer } from '@/lib/supabase-server';
 
 export type TripEventType = 'TRIP_STARTED' | 'TRIP_ENDED';
@@ -23,33 +23,6 @@ export interface NotifyRouteResult {
   batchCount: number;
   invalidTokensRemoved: number;
   error?: string;
-}
-
-async function updateStudentNotifications(
-  studentIds: Set<string>,
-  payload: { body: string; type: TripEventType; timestamp: string }
-): Promise<void> {
-  if (!adminDb || studentIds.size === 0) return;
-
-  const ids = Array.from(studentIds);
-  for (let i = 0; i < ids.length; i += 400) {
-    const batch = adminDb.batch();
-
-    ids.slice(i, i + 400).forEach(id => {
-      batch.update(adminDb.collection('students').doc(id), {
-        fcmMessage: {
-          ...payload,
-          receivedAt: FieldValue.serverTimestamp(),
-        },
-      });
-    });
-
-    try {
-      await batch.commit();
-    } catch (error) {
-      console.warn('Non-critical student notification status update failed:', error);
-    }
-  }
 }
 
 async function acquireNotificationLock(busId: string, tripId: string, eventType: TripEventType): Promise<void> {
@@ -142,34 +115,7 @@ export async function notifyRoute(params: {
 
   const topicResult = await notifyRouteTopic({ routeId, tripId, routeName, busId, eventType });
 
-  void (async () => {
-    try {
-      // D9: Query Supabase student_profiles instead of Firestore students
-      const supabase = getSupabaseServer();
-      const { data: students } = await supabase
-        .from('student_profiles')
-        .select('uid')
-        .eq('route_id', routeId)
-        .eq('status', 'active')
-        .limit(100);
 
-      if (!students || students.length === 0) return;
-
-      const isStart = eventType === 'TRIP_STARTED';
-      await updateStudentNotifications(
-        new Set<string>(students.map(s => s.uid)),
-        {
-          body: isStart
-            ? `Bus for ${routeName} has started.`
-            : `Bus trip for ${routeName} has ended.`,
-          type: eventType,
-          timestamp: new Date().toISOString(),
-        }
-      );
-    } catch (error) {
-      console.warn('Background student status update failed:', error);
-    }
-  })();
 
   return {
     success: topicResult.success,

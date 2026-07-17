@@ -2,8 +2,8 @@
 
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { db } from "@/lib/firebase";
-import { collection } from "firebase/firestore";
+
+
 import { useAuth } from "@/contexts/auth-context";
 import { toast } from "react-hot-toast";
 import { trackEvent } from "@/components/Analytics";
@@ -45,7 +45,6 @@ import {
 } from "@/lib/services/assignment-service";
 import {
     computeNetAssignments,
-    commitNetChanges,
     validateStagingPreCheck,
     type StagedOperation,
     type DbSnapshot,
@@ -236,16 +235,20 @@ export default function SmartDriverAssignmentPage() {
 
         setLoading(true);
         try {
-            const { getDocs } = await import("firebase/firestore");
-            const [driversSnap, busesSnap, routesSnap] = await Promise.all([
-                getDocs(collection(db, "drivers")),
-                getDocs(collection(db, "buses")),
-                getDocs(collection(db, "routes")),
+
+
+            const [driversRes, busesRes, routesRes] = await Promise.all([
+                fetch('/api/drivers'),
+                fetch('/api/buses'),
+                fetch('/api/routes'),
             ]);
 
-            const driversData = driversSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })) as DriverData[];
-            const busesData = busesSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })) as BusData[];
-            const routesData = routesSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })) as RouteData[];
+            const driversJson = await driversRes.json();
+            const driversData = (Array.isArray(driversJson) ? driversJson : driversJson.drivers || []).map((d: any) => ({ id: d.id || d.uid, ...d })) as DriverData[];
+            const busesJson = await busesRes.json();
+            const busesData = (busesJson.buses || []).map((b: any) => ({ ...b, id: b.busId || b.id })) as BusData[];
+            const routesJson = await routesRes.json();
+            const routesData = (Array.isArray(routesJson) ? routesJson : routesJson.routes || []).map((r: any) => ({ id: r.id || r.routeId, ...r })) as RouteData[];
 
             setDrivers(driversData);
             setBuses(busesData);
@@ -668,13 +671,22 @@ export default function SmartDriverAssignmentPage() {
             });
 
             const adminName = userData?.fullName || userData?.name || "Admin";
-            const result = await commitNetChanges(
-                netAssignmentResult.netChanges,
-                netAssignmentResult.driverFinalState,
-                stagedOps,
-                currentUser.uid,
-                { name: adminName, role: "admin", label: `${adminName} (Admin)` }
-            );
+            const token = await currentUser.getIdToken();
+            const response = await fetch('/api/fleet/assign-drivers', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    netChanges: Array.from(netAssignmentResult.netChanges.values()),
+                    driverFinalState: Array.from(netAssignmentResult.driverFinalState.values()),
+                    stagingSnapshot: stagedOps,
+                    actorInfo: { name: adminName, role: "admin", label: `${adminName} (Admin)` },
+                }),
+            });
+
+            const result = await response.json();
 
             if (result.success) {
                 trackEvent('driver_reassignment');

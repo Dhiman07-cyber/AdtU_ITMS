@@ -128,6 +128,9 @@ export interface Bus {
   status: 'active' | 'inactive' | 'maintenance' | 'enroute' | 'idle' | 'Active' | 'Inactive' | 'Maintenance';
   currentStudents?: string[];
   currentPassengerCount?: number;
+  currentMembers?: number;
+  morningLoad?: number;
+  eveningLoad?: number;
   lastStartedAt?: Timestamp | string;
   lastEndedAt?: Timestamp | string;
   createdAt?: Timestamp | string;

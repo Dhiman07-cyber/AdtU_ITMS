@@ -314,19 +314,12 @@ export async function pgUpdate(applicationId: string, data: Partial<Application>
   delete row.application_id;
   row.updated_at = new Date().toISOString();
 
-  // If there are new extras being updated, read the existing extras first and merge
-  if (row.extras) {
-    const { data: current, error: readError } = await db
-      .from('applications')
-      .select('extras')
-      .eq('application_id', applicationId)
-      .maybeSingle();
+  // Extract extras for atomic merge (if any)
+  // FIXED: was unsafe read-before-write (TOCTOU). Now uses merge_application_extras RPC.
+  const extrasToMerge = row.extras;
+  delete row.extras; // Don't include in the UPDATE
 
-    if (!readError && current) {
-      row.extras = { ...(current.extras || {}), ...row.extras };
-    }
-  }
-
+  // Update core fields
   const { error } = await db
     .from('applications')
     .update(row)
@@ -334,6 +327,17 @@ export async function pgUpdate(applicationId: string, data: Partial<Application>
 
   if (error) {
     throw new Error(`ApplicationRepository (PG) update failed: ${error.message}`);
+  }
+
+  // Atomically merge extras using RPC (prevents TOCTOU race condition)
+  if (extrasToMerge && Object.keys(extrasToMerge).length > 0) {
+    const { error: rpcError } = await db.rpc('merge_application_extras', {
+      p_application_id: applicationId,
+      p_extras: extrasToMerge,
+    });
+    if (rpcError) {
+      throw new Error(`ApplicationRepository (PG) extras merge failed: ${rpcError.message}`);
+    }
   }
 }
 

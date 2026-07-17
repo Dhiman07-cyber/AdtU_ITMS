@@ -113,6 +113,7 @@ export interface ReassignmentResult {
   fromBusId: string;
   fromBusNumber: string;
   assignments: ReassignmentAssignment[];
+  operationId: string;
 }
 
 // Internal types for the algorithm
@@ -479,6 +480,7 @@ export default function ReassignmentPanel({
         fromBusId: currentBus.id,
         fromBusNumber: currentBus.busNumber,
         assignments: finalAssignments,
+        operationId: result.operationId,
       });
       onClose();
 

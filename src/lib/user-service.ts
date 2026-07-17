@@ -1,23 +1,12 @@
-import { auth, db } from '@/lib/firebase';
+import { auth } from '@/lib/firebase';
 import {
   signOut,
   User as FirebaseUser,
   GoogleAuthProvider,
   signInWithPopup
 } from 'firebase/auth';
-import {
-  doc,
-  setDoc,
-  getDoc,
-  collection,
-  query,
-  where,
-  getDocs,
-  updateDoc,
-  Timestamp,
-  deleteDoc
-} from 'firebase/firestore';
 import { User, Student, Driver, Moderator } from '@/lib/types';
+import { getUserById, getUserByEmail, updateUser } from '@/domains/identity';
 
 // Export types from the new types file
 export type { User, Student, Driver, Moderator } from '@/lib/types';
@@ -30,101 +19,23 @@ export async function signInWithGoogle() {
     const result = await signInWithPopup(auth, provider);
     const user = result.user;
 
-    // Step 1: TRY to find directly by UID (Fastest, securest, always allowed)
-    const directDocRef = doc(db, 'users', user.uid);
-    let userData = null;
-    let userDocFound = null;
+    // Look up user in PostgreSQL via Identity domain
+    let userData = await getUserById(user.uid);
 
-    try {
-      const directSnap = await getDoc(directDocRef);
-      if (directSnap.exists()) {
-        userDocFound = directSnap;
-        userData = directSnap.data();
-      }
-    } catch (e) {
-      console.warn('⚠️ Direct UID lookup failed, will attempt email search:', e);
+    // Fallback to email search if UID not found (for pre-created accounts)
+    if (!userData && user.email) {
+      userData = await getUserByEmail(user.email);
     }
 
-    // Step 2: FALLBACK to email search if UID lookup failed (Used for pre-created accounts)
-    if (!userDocFound) {
-      try {
-        const usersRef = collection(db, 'users');
-        const emailToFind = user.email || '';
-        if (emailToFind) {
-          const q = query(usersRef, where('email', '==', emailToFind));
-          const querySnapshot = await getDocs(q);
-
-          if (!querySnapshot.empty) {
-            userDocFound = querySnapshot.docs[0];
-            userData = userDocFound.data();
-          }
-        }
-      } catch (e: any) {
-        // If query fails, it's expected if they haven't applied yet (due to list rules)
-        if (e.code !== 'permission-denied' && !e.message?.includes('permission')) {
-          console.error('❌ Email search query failed:', e);
-        }
-      }
-    }
-
-    // Step 3: PROCESS found user
-    if (userDocFound && userData) {
-      const oldDocId = userDocFound.id;
-
-      // Update their uid and lastLoginAt
-      const updatedData = {
-        ...userData,
-        uid: user.uid,
-        lastLoginAt: Timestamp.now()
-      };
-
-      // If the document ID is not the Firebase Auth UID (e.g. Doc ID was email), migrate it
-      if (oldDocId !== user.uid) {
-
-        // Create new document with Firebase Auth UID
-        const newUserDocRef = doc(db, 'users', user.uid);
-        await setDoc(newUserDocRef, updatedData);
-
-        // Delete old document
-        const oldUserDocRef = doc(db, 'users', oldDocId);
-        await deleteDoc(oldUserDocRef);
-
-        // Also update the role-specific document if it exists
-        if (userData.role) {
-          try {
-            const roleCollection = userData.role + 's'; // students, drivers, moderators
-            const oldRoleDocRef = doc(db, roleCollection, oldDocId);
-            const roleDoc = await getDoc(oldRoleDocRef);
-
-            if (roleDoc.exists()) {
-              // Create new role document with Firebase Auth UID
-              const newRoleDocRef = doc(db, roleCollection, user.uid);
-              const roleData = {
-                ...roleDoc.data(),
-                uid: user.uid
-              };
-              await setDoc(newRoleDocRef, roleData);
-
-              // Delete old role document
-              await deleteDoc(oldRoleDocRef);
-            }
-          } catch (migrateError) {
-            console.warn('⚠️ Role-doc migration skipped or failed:', migrateError);
-          }
-        }
-      } else {
-        // Document ID already matches Firebase Auth UID, just update lastLoginAt
-        const userDocRef = doc(db, 'users', user.uid);
-        await updateDoc(userDocRef, {
-          lastLoginAt: Timestamp.now()
-        });
-      }
-
+    // If user found, update lastLoginAt and return success
+    if (userData) {
+      await updateUser(user.uid, {
+        lastLoginAt: new Date().toISOString()
+      });
       return { success: true, user };
     }
 
-    // User not found in users collection
-    // Create an entry in unauthUsers collection for tracking
+    // User not found in PostgreSQL - create unauthUser entry for tracking
     try {
       const token = await user.getIdToken();
 
@@ -136,10 +47,7 @@ export async function signInWithGoogle() {
         }
       });
 
-
-      if (response.ok) {
-        const data = await response.json();
-      } else {
+      if (!response.ok) {
         const errorData = await response.json();
         console.error('❌ Failed to create unauthUser entry:', errorData);
         console.error('Response status:', response.status);
@@ -155,7 +63,7 @@ export async function signInWithGoogle() {
       });
     }
 
-    // Instead of showing an error, we'll indicate that the user needs to apply
+    // Indicate that the user needs to apply for service
     return { success: true, user, needsApplication: true };
   } catch (error: any) {
     // List of error codes that are expected user behavior (not actual errors)
@@ -206,89 +114,6 @@ export async function signOutUser() {
     return { success: true };
   } catch (error) {
     console.error('Error signing out:', error);
-    return { success: false, error: (error as Error).message };
-  }
-}
-
-// Function to get user data from Firestore
-export async function getUserData(uid: string): Promise<User | null> {
-  try {
-    const userDocRef = doc(db, 'users', uid);
-    const userDoc = await getDoc(userDocRef);
-
-    if (userDoc.exists()) {
-      return userDoc.data() as User;
-    }
-
-    // If user document doesn't exist, this might be a newly created user
-    // Return null to indicate no user data found
-    return null;
-  } catch (error: any) {
-    // Handle permission errors silently - these are EXPECTED for new users
-    if (error.code === 'permission-denied' ||
-      error.message?.includes("Missing or insufficient permissions") ||
-      error.message?.includes("permission")) {
-      // This is normal for new users who haven't been approved yet
-      // Return null without logging to avoid confusion
-      return null;
-    }
-
-    // Only log truly unexpected errors
-    console.error('Unexpected error fetching user data:', error);
-    return null;
-  }
-}
-
-// Function to get all users of a specific role
-export async function getUsersByRole(role: UserRole): Promise<User[]> {
-  try {
-    const usersRef = collection(db, 'users');
-    const q = query(usersRef, where('role', '==', role));
-    const querySnapshot = await getDocs(q);
-
-    return querySnapshot.docs.map(doc => doc.data() as User);
-  } catch (error) {
-    console.error(`Error fetching ${role}s:`, error);
-    return [];
-  }
-}
-
-// Function to update user data
-export async function updateUserData(uid: string, data: Partial<User>) {
-  try {
-    const userDocRef = doc(db, 'users', uid);
-    await setDoc(userDocRef, data, { merge: true });
-    return { success: true };
-  } catch (error) {
-    console.error('Error updating user data:', error);
-    return { success: false, error: (error as Error).message };
-  }
-}
-
-// Function to delete a user from Firebase Authentication and Firestore
-export async function deleteUser(uid: string) {
-  try {
-    const response = await fetch('/api/delete-user', {
-      method: 'DELETE',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ uid }),
-    });
-
-    const data = await response.json();
-
-    if (!response.ok) {
-      throw new Error(data.error || 'Failed to delete user');
-    }
-
-    if (!data.success) {
-      throw new Error(data.error || 'Failed to delete user');
-    }
-
-    return { success: true };
-  } catch (error) {
-    console.error('Error deleting user:', error);
     return { success: false, error: (error as Error).message };
   }
 }

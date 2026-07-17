@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { verifyApiAuth } from '@/lib/security/api-auth';
 import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
-import { getDriverById, updateDriver, removeDriver } from '@/domains/fleet/services/fleet.service';
+import { getDriverById, updateDriver, deleteDriver as removeDriver } from '@/domains/identity';
 
 // D6 Fleet — Driver CRUD API. Runtime owner: PostgreSQL (driver_profiles table).
 
@@ -38,8 +38,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     if (!id) return NextResponse.json({ error: 'Driver ID is required' }, { status: 400 });
 
     const data = await request.json();
-    const ok = await updateDriver(id, data);
-    if (!ok) return NextResponse.json({ error: 'Failed to update driver' }, { status: 500 });
+    await updateDriver(id, data);
 
     const updated = await getDriverById(id);
     return NextResponse.json({ driver: updated });
@@ -60,8 +59,7 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
     const { id } = await params;
     if (!id) return NextResponse.json({ error: 'Driver ID is required' }, { status: 400 });
 
-    const ok = await removeDriver(id);
-    if (!ok) return NextResponse.json({ error: 'Failed to delete driver' }, { status: 500 });
+    await removeDriver(id);
 
     return NextResponse.json({ success: true, message: 'Driver deleted successfully' });
   } catch (error) {

@@ -11,8 +11,9 @@
  */
 
 import { NextResponse } from 'next/server';
-import { auth, db as adminDb } from '@/lib/firebase-admin';
+import { auth } from '@/lib/firebase-admin';
 import { missedBusService } from '@/lib/services/missed-bus-service';
+import { getDriverById } from '@/domains/identity';
 
 export async function POST(request: Request) {
     const startTime = Date.now();
@@ -49,8 +50,8 @@ export async function POST(request: Request) {
         const driverId = decodedToken.uid;
 
         // SECURITY: Verify the caller is actually a driver.
-        const driverDoc = await adminDb.collection('drivers').doc(driverId).get();
-        if (!driverDoc.exists) {
+        const driverData = await getDriverById(driverId);
+        if (!driverData) {
             return NextResponse.json(
                 { success: false, error: 'Only drivers can respond to missed-bus requests' },
                 { status: 403 }

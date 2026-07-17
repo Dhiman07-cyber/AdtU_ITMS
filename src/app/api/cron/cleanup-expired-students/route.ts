@@ -4,7 +4,6 @@ import crypto from 'crypto';
 import { shouldBlockAccessFromStoredDates, shouldHardDeleteFromStoredDates } from '@/lib/utils/renewal-utils';
 import { computeBlockDatesFromValidUntil } from '@/lib/utils/deadline-computation';
 import { v2 as cloudinary } from 'cloudinary';
-import { buildCapacityDelta } from '@/lib/busCapacityService';
 import { getDeadlineConfig } from '@/lib/deadline-config-service';
 import { isSeatReleaseAtSoftBlockEnabled, wasSeatReleased } from '@/lib/config/capacity-flags';
 import { adminReconcileBusLoads } from '@/lib/services/admin-reconcile-bus-loads';
@@ -13,6 +12,8 @@ import { getCurrentSessionStartYear } from '@/lib/services/session-activation.se
 import { getSupabaseServer } from '@/lib/supabase-server';
 import * as Notification from '@/domains/notification';
 import { upsertMarker } from '@/domains/admin';
+import * as fleetService from '@/domains/fleet/services/fleet.service';
+import { getStudentById, updateStudent, deleteStudent, deleteUser, getStudentsByStatuses } from '@/domains/identity';
 
 // Configure Cloudinary
 if (process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME) {
@@ -63,10 +64,7 @@ export async function GET(request: NextRequest) {
         console.log(`   Config: SoftBlock=${softBlockStr}, HardDelete=${hardDeleteStr}`);
         console.log(`   Using PRE-STORED softBlock/hardBlock dates from student documents`);
 
-        // 2. Paginate through all students to avoid loading entire collection into memory
-        const PAGE_SIZE = 500;
-        let lastDoc: FirebaseFirestore.QueryDocumentSnapshot | null = null;
-        let hasMore = true;
+        // 2. Query target students from PostgreSQL (canonical source) via Domain
         const results = {
             totalChecked: 0,
             softBlocked: 0,
@@ -75,18 +73,11 @@ export async function GET(request: NextRequest) {
             errors: [] as string[]
         };
 
-        // 3. Paginate through students and Apply Logic
-        while (hasMore) {
-            let query = adminDb.collection('students').orderBy('__name__').limit(PAGE_SIZE) as any;
-            if (lastDoc) query = query.startAfter(lastDoc);
-            const studentsSnapshot = await query.get();
-            results.totalChecked += studentsSnapshot.size;
-            if (studentsSnapshot.empty || studentsSnapshot.size < PAGE_SIZE) hasMore = false;
-            if (studentsSnapshot.docs.length > 0) lastDoc = studentsSnapshot.docs[studentsSnapshot.docs.length - 1];
+        const students = await getStudentsByStatuses(['active', 'soft_blocked', 'pending_deletion']);
+        results.totalChecked = students.length;
 
-        for (const doc of studentsSnapshot.docs) {
-            const studentData = doc.data();
-            const uid = doc.id;
+        for (const studentData of students) {
+            const uid = studentData.uid;
 
             try {
                 // Parse validUntil
@@ -117,8 +108,8 @@ export async function GET(request: NextRequest) {
                     // Compute from validUntil date (the single source of truth) with dynamic configuration
                     const blockDates = computeBlockDatesFromValidUntil(validUntilStr, config);
 
-                    // Update student document with computed block dates
-                    await adminDb.collection('students').doc(uid).update({
+                    // Update student document with computed block dates in PostgreSQL
+                    await updateStudent(uid, {
                         softBlock: blockDates.softBlock,
                         hardBlock: blockDates.hardBlock,
                         blockDatesComputedAt: new Date().toISOString()
@@ -253,65 +244,75 @@ export async function GET(request: NextRequest) {
                         }
                     }
 
-                    // 7. Tier A — ATOMIC hard delete: bus seat decrement + student/user
-                    //    doc deletion commit together. A student can never be
-                    //    hard-deleted without a reconstructible record of what was
-                    //    destroyed. DEDUP GUARD: skip the decrement if the seat
-                    //    was already released at soft block (seatReleasedAt marker).
-                    //    FRESH READ: busId and shift are re-read inside the transaction
-                    //    so capacity always decrements on the correct bus.
-                    const studentRef = adminDb.collection('students').doc(uid);
-                    const userRef = adminDb.collection('users').doc(uid);
+                    // 7. Tier A — hard delete: decrement bus seat via PG, then
+                    //    delete student/user from PG and Firestore mirror.
                     let seatDecremented = false;
                     let auditEvent: AuditEventInsert | null = null;
+                    let freshBusId: string | null = null;
+                    let freshShift: string | null = null;
+                    let freshShouldDecrement = false;
+                    let fullName = '';
 
-                    await adminDb.runTransaction(async (transaction) => {
-                        const freshSnap = await transaction.get(studentRef);
-                        if (!freshSnap.exists) return;
-                        const freshData = freshSnap.data()!;
-                        const freshBusId = freshData.busId || freshData.currentBusId || freshData.assignedBusId;
-                        const freshShift = freshData.shift;
-                        const freshShouldDecrement = !!freshBusId && !wasSeatReleased(freshData);
-                        const busRef = freshShouldDecrement ? adminDb.collection('buses').doc(freshBusId) : null;
-                        const busSnap = busRef ? await transaction.get(busRef) : null;
-                        transaction.delete(studentRef);
-                        transaction.delete(userRef);
-                        if (busRef && busSnap?.exists) {
-                            const delta = buildCapacityDelta(busSnap.data(), freshShift, -1);
-                            transaction.update(busRef, delta.updates);
-                            seatDecremented = true;
+                    try {
+                        // Read fresh student data from PG via Domain for capacity decrement
+                        const freshStudent = await getStudentById(uid);
+
+                        if (freshStudent) {
+                            freshBusId = freshStudent.busId || freshStudent.assignedBusId;
+                            freshShift = freshStudent.shift;
+                            freshShouldDecrement = !!freshBusId && !wasSeatReleased(freshStudent);
+                            fullName = freshStudent.fullName || '';
+
+                            if (freshShouldDecrement) {
+                                try {
+                                    const decResult = await fleetService.decrementBusCapacity(freshBusId, freshShift);
+                                    seatDecremented = decResult.success;
+                                } catch (decErr: any) {
+                                    console.warn(`   ⚠️ Bus capacity decrement failed for ${uid}:`, decErr.message);
+                                }
+                            }
                         }
-                        const fullName = freshData.fullName || '';
-                        auditEvent = {
-                            action: 'student_hard_deleted',
-                            actor_id: SYSTEM_ACTOR.id,
-                            actor_name: SYSTEM_ACTOR.name,
-                            actor_role: SYSTEM_ACTOR.role,
-                            target_id: uid,
-                            target_type: 'student',
-                            target_name: fullName,
-                            category: 'system',
-                            summary: 'Student hard-deleted: ' + fullName,
-                            severity: 'high',
-                            metadata: {
-                                before: {
-                                    enrollmentId: freshData.enrollmentId || null,
-                                    busId: freshBusId || null,
-                                    shift: freshShift || null,
-                                    status: freshData.status || null,
-                                    validUntil: validUntilStr,
-                                    sessionEndYear: freshData.sessionEndYear || null,
-                                    hardBlock: hardBlockStr || null,
-                                    seatReleasedAt: freshData.seatReleasedAt || null,
-                                },
-                                after: { deleted: true },
-                                seatDecremented: freshShouldDecrement,
+                    } catch (readErr: any) {
+                        console.warn(`   ⚠️ Failed to read student for capacity decrement:`, readErr.message);
+                    }
+
+                    // Delete student/user from PostgreSQL (canonical datastore)
+                    try {
+                        await deleteStudent(uid);
+                        await deleteUser(uid);
+                    } catch (pgDelErr: any) {
+                        console.warn(`   ⚠️ PostgreSQL delete warning for ${uid}:`, pgDelErr.message);
+                    }
+
+                    auditEvent = {
+                        action: 'student_hard_deleted',
+                        actor_id: SYSTEM_ACTOR.id,
+                        actor_name: SYSTEM_ACTOR.name,
+                        actor_role: SYSTEM_ACTOR.role,
+                        target_id: uid,
+                        target_type: 'student',
+                        target_name: fullName,
+                        category: 'system',
+                        summary: 'Student hard-deleted: ' + fullName,
+                        severity: 'high',
+                        metadata: {
+                            before: {
+                                enrollmentId: null,
                                 busId: freshBusId || null,
-                                reason: 'lifecycle_hard_delete_expired',
-                                correlationId: uid,
+                                shift: freshShift || null,
+                                status: null,
+                                validUntil: validUntilStr,
+                                sessionEndYear: null,
+                                hardBlock: hardBlockStr || null,
+                                seatReleasedAt: null,
                             },
-                        };
-                    });
+                            after: { deleted: true },
+                            seatDecremented: freshShouldDecrement,
+                            busId: freshBusId || null,
+                            reason: 'lifecycle_hard_delete_expired',
+                            correlationId: uid,
+                        },
+                    };
 
                     if (auditEvent) void createAuditEvent(auditEvent);
 
@@ -331,42 +332,39 @@ export async function GET(request: NextRequest) {
 
                     const releaseSeat = isSeatReleaseAtSoftBlockEnabled();
                     const nowIso = new Date().toISOString();
-                    const sbStudentRef = adminDb.collection('students').doc(uid);
 
-                    // Tier A — ATOMIC soft block: the status transition, the seatReleasedAt
-                    //   marker, and the bus seat decrement commit together or not at all.
-                    //   If the bus read fails, the whole soft block is retried on the next
-                    //   run — no half-state. Re-reads status AND current busId/shift inside
-                    //   the transaction for idempotency.
                     let didBlock = false;
                     let auditEvent: AuditEventInsert | null = null;
                     try {
-                        await adminDb.runTransaction(async (transaction) => {
-                            const freshStudent = await transaction.get(sbStudentRef);
-                            if (!freshStudent.exists || freshStudent.data()?.status !== 'active') {
-                                didBlock = false;
-                                return; // already processed → idempotent no-op
-                            }
-                            const freshData = freshStudent.data()!;
-                            const sbBusId = (releaseSeat ? (freshData.busId || freshData.currentBusId || freshData.assignedBusId || null) : null);
-                            const sbShift = freshData.shift;
-                            const sbBusRef = sbBusId ? adminDb.collection('buses').doc(sbBusId) : null;
-                            const sbBusSnap = sbBusRef ? await transaction.get(sbBusRef) : null;
+                        // Read fresh student data from PG via Domain
+                        const freshStudent = await getStudentById(uid);
 
-                            transaction.update(sbStudentRef, {
+                        const currentStatus = freshStudent?.status || studentData.status;
+                        if (currentStatus !== 'active') {
+                            didBlock = false;
+                        } else {
+                            const sbBusId = releaseSeat ? (freshStudent?.busId || freshStudent?.assignedBusId || studentData.busId || null) : null;
+                            const sbShift = freshStudent?.shift || studentData.shift;
+                            const sbFullName = freshStudent?.fullName || studentData.fullName || '';
+
+                            // Decrement bus capacity via PG if releasing seat
+                            let decremented = false;
+                            if (releaseSeat && sbBusId) {
+                                try {
+                                    const decResult = await fleetService.decrementBusCapacity(sbBusId, sbShift);
+                                    decremented = decResult.success;
+                                } catch (decErr: any) {
+                                    console.warn(`   ⚠️ Bus capacity decrement failed for soft block ${uid}:`, decErr.message);
+                                }
+                            }
+
+                            // Update student status in PG via Domain (canonical)
+                            await updateStudent(uid, {
                                 status: 'soft_blocked',
                                 softBlockedAt: nowIso,
                                 ...(releaseSeat ? { seatReleasedAt: nowIso } : {})
                             });
 
-                            let decremented = false;
-                            if (sbBusRef && sbBusSnap?.exists) {
-                                const delta = buildCapacityDelta(sbBusSnap.data(), sbShift, -1);
-                                transaction.update(sbBusRef, delta.updates);
-                                decremented = true;
-                            }
-
-                            const fullName = freshData.fullName || '';
                             auditEvent = {
                                 action: releaseSeat ? 'student_soft_blocked_seat_released' : 'student_soft_blocked',
                                 actor_id: SYSTEM_ACTOR.id,
@@ -374,9 +372,9 @@ export async function GET(request: NextRequest) {
                                 actor_role: SYSTEM_ACTOR.role,
                                 target_id: uid,
                                 target_type: 'student',
-                                target_name: fullName,
+                                target_name: sbFullName,
                                 category: 'system',
-                                summary: (releaseSeat ? 'Student soft-blocked (seat released): ' : 'Student soft-blocked: ') + fullName,
+                                summary: (releaseSeat ? 'Student soft-blocked (seat released): ' : 'Student soft-blocked: ') + sbFullName,
                                 severity: 'high',
                                 metadata: {
                                     before: { status: 'active', busId: sbBusId, shift: sbShift || null },
@@ -388,14 +386,14 @@ export async function GET(request: NextRequest) {
                                 },
                             };
                             didBlock = true;
-                        });
+                        }
                         if (didBlock) {
                             if (auditEvent) void createAuditEvent(auditEvent);
                             results.softBlocked++;
                             console.log(`   ✅ Soft-blocked ${uid}${releaseSeat ? ' (seat released)' : ''}`);
                         }
                     } catch (sbErr) {
-                        console.warn(`   ⚠️ Soft-block transaction failed for ${uid} — will retry next run:`, sbErr);
+                        console.warn(`   ⚠️ Soft-block failed for ${uid} — will retry next run:`, sbErr);
                         results.errors.push(`Soft-block failed for ${uid}`);
                     }
                 }
@@ -405,7 +403,6 @@ export async function GET(request: NextRequest) {
                 results.errors.push(`Error processing student ${uid}`);
             }
         }
-        } // end while (hasMore)
 
         // ── UPCOMING (future-session) APPLICATIONS PASS ──────────────────────
         //   Independent of the June renewal calendar. For applications with

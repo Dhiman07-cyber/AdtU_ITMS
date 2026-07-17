@@ -50,8 +50,8 @@ import { deleteDriver } from '@/lib/dataService';
 import { useToast } from '@/contexts/toast-context';
 import { safeImageSrc } from "@/lib/security/url-sanitizer";
 import Avatar from '@/components/Avatar';
-// SPARK PLAN SAFETY: Event-driven refresh - only fetches when mutations occur
-import { usePaginatedCollection, invalidateCollectionCache } from '@/hooks/usePaginatedCollection';
+// Migrated: Server-side API → PostgreSQL (no Firestore client reads)
+import { useApiCollection, invalidateCollectionCache } from '@/hooks/useApiCollection';
 import { useEventDrivenRefresh } from '@/hooks/useEventDrivenRefresh';
 import { exportToExcel } from '@/lib/export-helpers';
 import { ExportButton } from '@/components/ExportButton';
@@ -65,12 +65,12 @@ export default function AdminDrivers() {
   const { canDriverView, canDriverAdd, canDriverEdit, canDriverDelete, canDriverReassign, loading: permsLoading } = useModeratorPermissions();
   const router = useRouter();
 
-  // SPARK PLAN SAFETY: Event-driven refresh - only fetches when mutations occur
-  const { data: drivers, loading: loadingDrivers, refresh: refreshDrivers } = usePaginatedCollection('drivers', {
+  // Server-side API reads from PostgreSQL — no Firestore client reads
+  const { data: drivers, loading: loadingDrivers, refresh: refreshDrivers } = useApiCollection('drivers', {
     pageSize: 50, orderByField: 'updatedAt', orderDirection: 'desc',
     autoRefresh: false, // EVENT-DRIVEN: Only refresh when mutations occur
   });
-  const { data: buses, loading: loadingBuses, refresh: refreshBuses } = usePaginatedCollection('buses', {
+  const { data: buses, loading: loadingBuses, refresh: refreshBuses } = useApiCollection('buses', {
     pageSize: 50, orderByField: 'busNumber', orderDirection: 'asc',
     autoRefresh: false,
   });

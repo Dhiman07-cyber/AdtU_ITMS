@@ -12,6 +12,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { adminAuth, adminDb } from '@/lib/firebase-admin';
 import { saveToken, isValidTokenFormat } from '@/lib/services/fcm-token-service';
+import { resolveUserRole } from '@/lib/security/role-cache';
 
 export async function POST(request: NextRequest) {
   try {
@@ -63,17 +64,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 4. Determine user collection
-    const collectionsToCheck = ['students', 'drivers', 'moderators', 'admins'];
-    let targetCollection: string | null = null;
-
-    for (const col of collectionsToCheck) {
-      const doc = await adminDb.collection(col).doc(uid).get();
-      if (doc.exists) {
-        targetCollection = col;
-        break;
-      }
-    }
+    // 4. Determine user collection from role
+    const roleData = await resolveUserRole(uid);
+    const roleToCollection: Record<string, string> = {
+      student: 'students',
+      driver: 'drivers',
+      moderator: 'moderators',
+      admin: 'admins',
+    };
+    const targetCollection = roleToCollection[roleData.role] || null;
 
     if (!targetCollection) {
       return NextResponse.json(

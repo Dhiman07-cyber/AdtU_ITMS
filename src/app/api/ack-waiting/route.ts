@@ -4,6 +4,7 @@ import { getSupabaseServer } from '@/lib/supabase-server';
 import { withSecurity } from '@/lib/security/api-security';
 import { AckWaitingSchema } from '@/lib/security/validation-schemas';
 import { RateLimits } from '@/lib/security/rate-limiter';
+import { getDriverById } from '@/domains/identity';
 
 // Initialize Supabase client
 const supabase = getSupabaseServer();
@@ -14,14 +15,13 @@ export const POST = withSecurity(
     const driverUid = auth.uid;
 
     try {
-      // 1. Verify that the driver exists in Firestore and get their assigned bus
-      const driverDoc = await adminDb.collection('drivers').doc(driverUid).get();
-      if (!driverDoc.exists) {
+      // 1. Verify that the driver exists in PostgreSQL and get their assigned bus
+      const driverData = await getDriverById(driverUid);
+      if (!driverData) {
         return NextResponse.json({ success: false, error: 'Driver not found', requestId }, { status: 404 });
       }
 
-      const driverData = driverDoc.data();
-      const driverBusId = driverData?.assignedBusId;
+      const driverBusId = driverData.assignedBusId;
 
       // 2. Get the waiting flag from Supabase
       const { data: waitingFlag, error: selectError } = await supabase
@@ -84,7 +84,7 @@ export const POST = withSecurity(
             const message = {
               notification: {
                 title: 'Bus Acknowledged 🚌',
-                body: `Driver ${driverData?.fullName || 'the bus driver'} has acknowledged your waiting request. Get ready!`
+                body: `Driver ${driverData.fullName || 'the bus driver'} has acknowledged your waiting request. Get ready!`
               },
               tokens: studentTokens,
               data: {

@@ -5,8 +5,6 @@
  * Designed for fraud prevention through identity-based accountability.
  */
 
-import { Timestamp, DocumentReference } from 'firebase/firestore';
-
 // ============================================================================
 // ENUMS & CONSTANTS
 // ============================================================================

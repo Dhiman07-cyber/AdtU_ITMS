@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/firebase-admin';
+import { resolveUserRole } from '@/lib/security/role-cache';
 import { readFeedback, updateFeedback } from '@/lib/feedback-utils';
 
 /**
@@ -39,12 +40,9 @@ export async function PATCH(
 
         const userId = decodedToken.uid;
 
-        // Get user role from Firestore
-        const { db } = await import('@/lib/firebase-admin');
-        const adminDoc = await db.collection('admins').doc(userId).get();
-        const moderatorDoc = await db.collection('moderators').doc(userId).get();
-
-        if (!adminDoc.exists && !moderatorDoc.exists) {
+        // Get user role
+        const userRole = await resolveUserRole(userId);
+        if (userRole.role !== 'admin' && userRole.role !== 'moderator') {
             return NextResponse.json(
                 { error: 'Access denied. Admin or Moderator role required.' },
                 { status: 403 }

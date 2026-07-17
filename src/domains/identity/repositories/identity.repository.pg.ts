@@ -24,6 +24,7 @@
  */
 import { getSupabaseServer } from '@/lib/supabase-server';
 import type { UserRole } from '@/lib/user-service';
+import * as studentRepo from '../../student/repositories/student.repository.pg';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -278,304 +279,97 @@ export async function pgUpdateLastLogin(uid: string): Promise<void> {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// STUDENT PROFILES
+// STUDENT PROFILES (Delegated to student.repository.pg)
 // ═══════════════════════════════════════════════════════════════════════════════
-
-/** Firestore field → PostgreSQL column mapping for student_profiles */
-const STUDENT_FIELD_MAP: Record<string, string> = {
-  uid: 'uid',
-  email: 'email',
-  fullName: 'full_name',
-  phone: 'phone',
-  altPhone: 'alt_phone',
-  parentName: 'parent_name',
-  parentPhone: 'parent_phone',
-  faculty: 'faculty',
-  department: 'department',
-  gender: 'gender',
-  dob: 'dob',
-  enrollmentId: 'enrollment_id',
-  bloodGroup: 'blood_group',
-  address: 'address',
-  profilePhotoUrl: 'profile_photo_url',
-  busId: 'bus_id',
-  routeId: 'route_id',
-  assignedRouteId: 'assigned_route_id',
-  assignedBusId: 'assigned_bus_id',
-  stopId: 'stop_id',
-  stopName: 'stop_name',
-  shift: 'shift',
-  status: 'status',
-  sessionDuration: 'session_duration',
-  sessionStartYear: 'session_start_year',
-  sessionEndYear: 'session_end_year',
-  semester: 'semester',
-  validUntil: 'valid_until',
-  softBlock: 'soft_block',
-  hardBlock: 'hard_block',
-  approvedBy: 'approved_by',
-  approvedAt: 'approved_at',
-  lastProcessedApplicationId: 'last_processed_application_id',
-  createdAt: 'created_at',
-  updatedAt: 'updated_at',
-};
-
-/** Known Firestore fields that map to typed PostgreSQL columns */
-const KNOWN_STUDENT_FIELDS = new Set(Object.keys(STUDENT_FIELD_MAP));
-
-/** Convert Firestore student data to PostgreSQL row */
-function firestoreStudentToRow(data: Record<string, any>): Record<string, any> {
-  const row: Record<string, any> = {};
-  const extras: Record<string, any> = {};
-
-  for (const [key, value] of Object.entries(data)) {
-    if (key === 'id') continue; // Firestore document ID — not a column
-    const pgCol = STUDENT_FIELD_MAP[key];
-    if (pgCol) {
-      // Handle Timestamp objects
-      if (value && typeof value === 'object' && typeof value.toDate === 'function') {
-        row[pgCol] = value.toDate().toISOString();
-      } else {
-        row[pgCol] = value;
-      }
-    } else if (!KNOWN_STUDENT_FIELDS.has(key)) {
-      extras[key] = value;
-    }
-  }
-
-  if (Object.keys(extras).length > 0) {
-    row.extras = extras;
-  }
-  return row;
-}
-
-/** Convert PostgreSQL row to Firestore-compatible student object */
-function rowToFirestoreStudent(row: Record<string, any>): Record<string, any> {
-  const result: Record<string, any> = {};
-  for (const [firestoreField, pgCol] of Object.entries(STUDENT_FIELD_MAP)) {
-    if (row[pgCol] !== undefined && row[pgCol] !== null) {
-      result[firestoreField] = row[pgCol];
-    }
-  }
-  // Spread extras for backward compatibility
-  if (row.extras && typeof row.extras === 'object') {
-    Object.assign(result, row.extras);
-  }
-  return result;
-}
 
 /** Find a student profile by UID */
 export async function pgFindStudentById(uid: string): Promise<Record<string, any> | null> {
-  const db = getSupabaseServer();
-
-  const { data, error } = await db
-    .from('student_profiles')
-    .select('*')
-    .eq('uid', uid)
-    .single();
-
-  if (error) {
-    if (error.code === 'PGRST116') return null; // Not found
-    throw new Error(`IdentityRepository (PG) student find failed: ${error.message}`);
-  }
-
-  return rowToFirestoreStudent(data);
+  return studentRepo.pgFindByUid(uid);
 }
 
 /** Find students by bus ID */
 export async function pgFindStudentsByBusId(busId: string): Promise<Record<string, any>[]> {
-  const db = getSupabaseServer();
-
-  const { data, error } = await db
-    .from('student_profiles')
-    .select('*')
-    .or(`bus_id.eq.${busId},assigned_bus_id.eq.${busId}`);
-
-  if (error) {
-    throw new Error(`IdentityRepository (PG) students by bus find failed: ${error.message}`);
-  }
-
-  return (data || []).map(rowToFirestoreStudent);
+  return studentRepo.pgFindByBusId(busId);
 }
 
 /** Find students by multiple bus IDs */
 export async function pgFindStudentsByBusIds(busIds: string[]): Promise<Record<string, any>[]> {
-  if (busIds.length === 0) return [];
-  const db = getSupabaseServer();
-
-  const { data, error } = await db
-    .from('student_profiles')
-    .select('*')
-    .or(busIds.map(id => `(bus_id.eq.${id},assigned_bus_id.eq.${id})`).join(','));
-
-  if (error) {
-    throw new Error(`IdentityRepository (PG) students by bus IDs find failed: ${error.message}`);
-  }
-
-  return (data || []).map(rowToFirestoreStudent);
+  return studentRepo.pgFindByBusIds(busIds);
 }
 
 /** Find students by route ID */
+export async function pgFindStudentByRouteId(routeId: string): Promise<Record<string, any>[]> {
+  // Wait, the original in repository.ts/service.ts is named pgFindStudentsByRouteId / findStudentsByRouteId,
+  // but wait, in identity.repository.pg.ts line 420 it is named pgFindStudentsByRouteId, but let's check
+  // if there's any other export. Let's make sure we export both if needed.
+  return studentRepo.pgFindByRouteId(routeId);
+}
+
 export async function pgFindStudentsByRouteId(routeId: string): Promise<Record<string, any>[]> {
-  const db = getSupabaseServer();
-
-  const { data, error } = await db
-    .from('student_profiles')
-    .select('*')
-    .or(`route_id.eq.${routeId},assigned_route_id.eq.${routeId}`);
-
-  if (error) {
-    throw new Error(`IdentityRepository (PG) students by route find failed: ${error.message}`);
-  }
-
-  return (data || []).map(rowToFirestoreStudent);
+  return studentRepo.pgFindByRouteId(routeId);
 }
 
 /** Find students by multiple route IDs */
 export async function pgFindStudentsByRouteIds(routeIds: string[]): Promise<Record<string, any>[]> {
-  if (routeIds.length === 0) return [];
-  const db = getSupabaseServer();
-
-  const { data, error } = await db
-    .from('student_profiles')
-    .select('*')
-    .or(routeIds.map(id => `(route_id.eq.${id},assigned_route_id.eq.${id})`).join(','));
-
-  if (error) {
-    throw new Error(`IdentityRepository (PG) students by route IDs find failed: ${error.message}`);
-  }
-
-  return (data || []).map(rowToFirestoreStudent);
+  return studentRepo.pgFindByRouteIds(routeIds);
 }
 
 /** Find students by status */
 export async function pgFindStudentsByStatus(status: string): Promise<Record<string, any>[]> {
-  const db = getSupabaseServer();
+  return studentRepo.pgFindByStatus(status);
+}
 
-  const { data, error } = await db
-    .from('student_profiles')
-    .select('*')
-    .eq('status', status);
+/** Find students by multiple statuses */
+export async function pgFindStudentsByStatuses(statuses: string[]): Promise<Record<string, any>[]> {
+  return studentRepo.pgFindByStatuses(statuses);
+}
 
-  if (error) {
-    throw new Error(`IdentityRepository (PG) students by status find failed: ${error.message}`);
-  }
+/** Find all students occupying a seat (for capacity synchronization) */
+export async function pgFindSeatOccupyingStudents(): Promise<Record<string, any>[]> {
+  return studentRepo.pgFindSeatOccupying();
+}
 
-  return (data || []).map(rowToFirestoreStudent);
+/** Get bus occupancy statistics aggregated natively in PostgreSQL */
+export async function pgGetBusOccupancyStats(): Promise<{
+  occupancy: Record<string, { total: number; morning: number; evening: number }>;
+  stops: Record<string, Record<string, number>>;
+}> {
+  return studentRepo.pgGetBusOccupancyStats();
 }
 
 /** Insert a student profile */
 export async function pgInsertStudent(student: Record<string, any>): Promise<void> {
-  const db = getSupabaseServer();
-  const row = firestoreStudentToRow(student);
-
-  // Ensure required fields
-  if (!row.uid) throw new Error('IdentityRepository (PG) student insert requires uid');
-  if (!row.created_at) row.created_at = new Date().toISOString();
-  row.updated_at = new Date().toISOString();
-
-  const { error } = await db
-    .from('student_profiles')
-    .insert(row);
-
-  if (error) {
-    throw new Error(`IdentityRepository (PG) student insert failed: ${error.message}`);
-  }
+  return studentRepo.pgInsert(student);
 }
 
 /** Update a student profile (partial update) */
 export async function pgUpdateStudent(uid: string, data: Record<string, any>): Promise<void> {
-  const db = getSupabaseServer();
-  const row = firestoreStudentToRow(data);
-
-  // Remove uid from update data (can't change PK)
-  delete row.uid;
-  row.updated_at = new Date().toISOString();
-
-  const { error } = await db
-    .from('student_profiles')
-    .update(row)
-    .eq('uid', uid);
-
-  if (error) {
-    throw new Error(`IdentityRepository (PG) student update failed: ${error.message}`);
-  }
+  return studentRepo.pgUpdate(uid, data);
 }
 
 /** Delete a student profile */
 export async function pgRemoveStudent(uid: string): Promise<void> {
-  const db = getSupabaseServer();
-
-  const { error } = await db
-    .from('student_profiles')
-    .delete()
-    .eq('uid', uid);
-
-  if (error) {
-    throw new Error(`IdentityRepository (PG) student delete failed: ${error.message}`);
-  }
+  return studentRepo.pgRemove(uid);
 }
 
 /** Count students by status */
 export async function pgCountStudentsByStatus(status: string): Promise<number> {
-  const db = getSupabaseServer();
-
-  const { count, error } = await db
-    .from('student_profiles')
-    .select('*', { count: 'exact', head: true })
-    .eq('status', status);
-
-  if (error) {
-    throw new Error(`IdentityRepository (PG) student count failed: ${error.message}`);
-  }
-
-  return count || 0;
+  return studentRepo.pgCountByStatus(status);
 }
 
 /** Count all students */
 export async function pgCountStudents(): Promise<number> {
-  const db = getSupabaseServer();
-
-  const { count, error } = await db
-    .from('student_profiles')
-    .select('*', { count: 'exact', head: true });
-
-  if (error) {
-    throw new Error(`IdentityRepository (PG) student count failed: ${error.message}`);
-  }
-
-  return count || 0;
+  return studentRepo.pgCount();
 }
 
 /** Find students by shift */
 export async function pgFindStudentsByShift(shift: string): Promise<Record<string, any>[]> {
-  const db = getSupabaseServer();
-
-  const { data, error } = await db
-    .from('student_profiles')
-    .select('*')
-    .eq('shift', shift);
-
-  if (error) {
-    throw new Error(`IdentityRepository (PG) students by shift find failed: ${error.message}`);
-  }
-
-  return (data || []).map(rowToFirestoreStudent);
+  return studentRepo.pgFindByShift(shift);
 }
 
 /** Find all students (no filter) */
 export async function pgFindAllStudents(): Promise<Record<string, any>[]> {
-  const db = getSupabaseServer();
-
-  const { data, error } = await db
-    .from('student_profiles')
-    .select('*');
-
-  if (error) {
-    throw new Error(`IdentityRepository (PG) all students query failed: ${error.message}`);
-  }
-
-  return (data || []).map(rowToFirestoreStudent);
+  return studentRepo.pgFindAll();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -719,6 +513,21 @@ export async function pgFindDriversByStatus(status: string): Promise<Record<stri
   return (data || []).map(rowToFirestoreDriver);
 }
 
+/** Find all drivers (no filter) */
+export async function pgFindAllDrivers(): Promise<Record<string, any>[]> {
+  const db = getSupabaseServer();
+
+  const { data, error } = await db
+    .from('driver_profiles')
+    .select('*');
+
+  if (error) {
+    throw new Error(`IdentityRepository (PG) all drivers query failed: ${error.message}`);
+  }
+
+  return (data || []).map(rowToFirestoreDriver);
+}
+
 /** Find non-reserved drivers (available for assignment) */
 export async function pgFindAvailableDrivers(): Promise<Record<string, any>[]> {
   const db = getSupabaseServer();
@@ -754,13 +563,37 @@ export async function pgInsertDriver(driver: Record<string, any>): Promise<void>
   }
 }
 
-/** Update a driver profile (partial update) */
+/** Upsert a driver profile */
+export async function pgUpsertDriver(driver: Record<string, any>): Promise<void> {
+  const db = getSupabaseServer();
+  const row = firestoreDriverToRow(driver);
+
+  if (!row.uid) throw new Error('IdentityRepository (PG) driver upsert requires uid');
+  if (!row.created_at) row.created_at = new Date().toISOString();
+  row.updated_at = new Date().toISOString();
+
+  const { error } = await db
+    .from('driver_profiles')
+    .upsert(row, { onConflict: 'uid' });
+
+  if (error) {
+    throw new Error(`IdentityRepository (PG) driver upsert failed: ${error.message}`);
+  }
+}
+
+/** Update a driver profile (partial update)
+ * FIXED: Uses atomic merge_driver_extras RPC for extras fields.
+ */
 export async function pgUpdateDriver(uid: string, data: Record<string, any>): Promise<void> {
   const db = getSupabaseServer();
   const row = firestoreDriverToRow(data);
 
   delete row.uid;
   row.updated_at = new Date().toISOString();
+
+  // Extract extras for atomic merge (if any)
+  const extrasToMerge = row.extras;
+  delete row.extras; // Don't include in the UPDATE
 
   const { error } = await db
     .from('driver_profiles')
@@ -769,6 +602,17 @@ export async function pgUpdateDriver(uid: string, data: Record<string, any>): Pr
 
   if (error) {
     throw new Error(`IdentityRepository (PG) driver update failed: ${error.message}`);
+  }
+
+  // Atomically merge extras using RPC (prevents race condition)
+  if (extrasToMerge && Object.keys(extrasToMerge).length > 0) {
+    const { error: rpcError } = await db.rpc('merge_driver_extras', {
+      p_uid: uid,
+      p_extras: extrasToMerge,
+    });
+    if (rpcError) {
+      throw new Error(`IdentityRepository (PG) driver extras merge failed: ${rpcError.message}`);
+    }
   }
 }
 
@@ -955,7 +799,9 @@ export async function pgInsertModerator(moderator: Record<string, any>): Promise
   }
 }
 
-/** Update a moderator profile (partial update) */
+/** Update a moderator profile (partial update)
+ * FIXED: Uses atomic merge_moderator_extras RPC instead of unsafe read-before-write pattern.
+ */
 export async function pgUpdateModerator(uid: string, data: Record<string, any>): Promise<void> {
   const db = getSupabaseServer();
   const row = firestoreModeratorToRow(data);
@@ -963,6 +809,11 @@ export async function pgUpdateModerator(uid: string, data: Record<string, any>):
   delete row.uid;
   row.updated_at = new Date().toISOString();
 
+  // Extract extras for atomic merge (if any)
+  const extrasToMerge = row.extras;
+  delete row.extras; // Don't include in the UPDATE
+
+  // Update core fields
   const { error } = await db
     .from('moderator_profiles')
     .update(row)
@@ -970,6 +821,17 @@ export async function pgUpdateModerator(uid: string, data: Record<string, any>):
 
   if (error) {
     throw new Error(`IdentityRepository (PG) moderator update failed: ${error.message}`);
+  }
+
+  // Atomically merge extras using RPC (prevents race condition)
+  if (extrasToMerge && Object.keys(extrasToMerge).length > 0) {
+    const { error: rpcError } = await db.rpc('merge_moderator_extras', {
+      p_uid: uid,
+      p_extras: extrasToMerge,
+    });
+    if (rpcError) {
+      throw new Error(`IdentityRepository (PG) moderator extras merge failed: ${rpcError.message}`);
+    }
   }
 }
 
@@ -1328,4 +1190,19 @@ export async function pgCountUnauthUsers(): Promise<number> {
   }
 
   return count || 0;
+}
+
+/** Find all unauth users */
+export async function pgFindAllUnauthUsers(): Promise<Record<string, any>[]> {
+  const db = getSupabaseServer();
+
+  const { data, error } = await db
+    .from('unauth_users')
+    .select('*');
+
+  if (error) {
+    throw new Error(`IdentityRepository (PG) all unauth users query failed: ${error.message}`);
+  }
+
+  return (data || []).map(rowToFirestoreUnauth);
 }

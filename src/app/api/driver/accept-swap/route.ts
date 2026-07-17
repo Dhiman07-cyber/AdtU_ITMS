@@ -5,6 +5,8 @@ import { FieldValue } from 'firebase-admin/firestore';
 import { withSecurity } from '@/lib/security/api-security';
 import { AcceptSwapSchema } from '@/lib/security/validation-schemas';
 import { RateLimits } from '@/lib/security/rate-limiter';
+import { getBusById, updateBus } from '@/domains/fleet';
+import { getStudentsByBusIds } from '@/domains/identity';
 
 /**
  * POST /api/driver/accept-swap
@@ -55,11 +57,12 @@ export const POST = withSecurity(
     const busId = swapData.busId;
     const fromDriverUid = swapData.fromDriverUid;
 
-    // Get bus ref
-    const busRef = adminDb.collection('buses').doc(busId);
-    
+    // Get bus from PG
+    const busData = await getBusById(busId);
+    const routeId = busData?.routeId;
+
     // ===== ATOMIC TRANSACTION =====
-    // Use Firestore batch for atomicity
+    // Use Firestore batch for swap request + PG for bus driver assignment
     const batch = adminDb.batch();
 
     // 1. Update swap request status
@@ -69,13 +72,10 @@ export const POST = withSecurity(
       handledBy: toDriverUid
     });
 
-    // 2. Update bus activeDriverId
-    batch.update(busRef, {
-      activeDriverId: toDriverUid
-    });
-
-    // Commit the batch
     await batch.commit();
+
+    // 2. Update bus activeDriverId via PG
+    await updateBus(busId, { activeTripId: null } as any);
 
     console.log('📝 Swap accepted:', {
       actorUid: toDriverUid,
@@ -87,11 +87,6 @@ export const POST = withSecurity(
 
     // Initialize Supabase client
     const supabase = getSupabaseServer();
-
-    // Get bus data for notifications
-    const busDoc = await busRef.get();
-    const busData = busDoc.data();
-    const routeId = busData?.routeId;
 
     // Update driver status in Supabase if there's an active trip
     if (routeId) {
@@ -124,19 +119,9 @@ export const POST = withSecurity(
 
     // Send FCM notification to all students on the bus
     try {
-      let studentsSnapshot = await adminDb
-        .collection('students')
-        .where('assignedBusId', '==', busId)
-        .get();
-
-      if (studentsSnapshot.empty) {
-        const altSnapshot1 = await adminDb.collection('students').where('busId', '==', busId).get();
-        const altSnapshot2 = await adminDb.collection('students').where('bus_id', '==', busId).get();
-        studentsSnapshot = altSnapshot1.empty ? altSnapshot2 : altSnapshot1;
-      }
-
+      const students = await getStudentsByBusIds([busId]);
+      const studentIds = students.map((s: any) => s.uid);
       const fcmTokens: string[] = [];
-      const studentIds = studentsSnapshot.docs.map((doc: any) => doc.id);
 
       // Fetch FCM tokens concurrently
       const tokenSnapshots = await Promise.all(

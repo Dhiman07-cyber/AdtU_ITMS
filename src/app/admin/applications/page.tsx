@@ -8,8 +8,8 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
-// SPARK PLAN SAFETY: Manual refresh only for applications page
-import { usePaginatedCollection, invalidateCollectionCache } from '@/hooks/usePaginatedCollection';
+// Migrated: Server-side API → PostgreSQL (no Firestore client reads)
+import { useApiCollection, invalidateCollectionCache } from '@/hooks/useApiCollection';
 import {
   FileText, Shield, Eye, Check, X, Loader2, Search, Filter,
   SlidersHorizontal, User, Phone, Calendar, Clock, Bus as BusIcon,
@@ -32,8 +32,6 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { PremiumPageLoader } from '@/components/LoadingSpinner';
-import { collection, query, where, getDocs } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
 import { supabase } from '@/lib/supabase-client';
 import { useToast } from '@/contexts/toast-context';
 import AlternativeBusPicker from '@/components/smart-allocation/AlternativeBusPicker';
@@ -43,16 +41,16 @@ export default function AdminApplicationsPage() {
   const { currentUser, userData } = useAuth();
   const router = useRouter();
 
-  // SPARK PLAN SAFETY: Manual refresh only - no auto-polling to conserve quota
-  const { data: pendingApplications, loading, refresh: refreshApplications } = usePaginatedCollection('applications', {
+  // Server-side API reads from PostgreSQL — no Firestore client reads
+  const { data: pendingApplications, loading, refresh: refreshApplications } = useApiCollection('applications', {
     pageSize: 50, orderByField: 'createdAt', orderDirection: 'desc',
     autoRefresh: false, // MANUAL REFRESH ONLY
   });
-  const { data: routes, loading: routesLoading, refresh: refreshRoutes } = usePaginatedCollection('routes', {
+  const { data: routes, loading: routesLoading, refresh: refreshRoutes } = useApiCollection('routes', {
     pageSize: 50, orderByField: 'routeName', orderDirection: 'asc',
     autoRefresh: false,
   });
-  const { data: buses, loading: busesLoading, refresh: refreshBuses } = usePaginatedCollection('buses', {
+  const { data: buses, loading: busesLoading, refresh: refreshBuses } = useApiCollection('buses', {
     pageSize: 50, orderByField: 'busNumber', orderDirection: 'asc',
     autoRefresh: false,
   });

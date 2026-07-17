@@ -31,8 +31,7 @@ import jsQR from 'jsqr';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'sonner';
 import { APP_NAME } from '@/config/runtime';
-import { auth, db } from '@/lib/firebase';
-import { doc, getDoc } from 'firebase/firestore';
+import { auth } from '@/lib/firebase';
 import { safeImageSrc } from '@/lib/security/url-sanitizer';
 
 // Verified student data interface
@@ -389,24 +388,19 @@ export default function DriverScanPassPage() {
       const result = await response.json();
       let sData = result.studentData;
 
-      // Fetch profile photo from Firestore if missing from API
+      // Fetch profile photo from API if missing from API
       if (sData?.uid && (!sData.profilePhotoUrl || sData.profilePhotoUrl === '')) {
         try {
-          // Check students collection first
-          let snap = await getDoc(doc(db, 'students', sData.uid));
-          if (!snap.exists()) {
-            snap = await getDoc(doc(db, 'users', sData.uid));
-          }
-
-          if (snap.exists()) {
-            const uData = snap.data();
+          const studentRes = await fetch(`/api/students/${sData.uid}`);
+          if (studentRes.ok) {
+            const studentDoc = await studentRes.json();
             sData = {
               ...sData,
-              profilePhotoUrl: uData.profilePhotoUrl || uData.profileImage || uData.photoURL
+              profilePhotoUrl: studentDoc.profilePhotoUrl || studentDoc.profileImage || studentDoc.photoURL
             };
           }
         } catch (e) {
-          console.error('Firestore image fetch error:', e);
+          console.error('Student image fetch error:', e);
         }
       }
 

@@ -60,8 +60,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { deleteBus } from "@/lib/dataService";
-// SPARK PLAN SAFETY: Replaced useRealtimeCollection with usePaginatedCollection
-import { usePaginatedCollection, invalidateCollectionCache } from '@/hooks/usePaginatedCollection';
+// Migrated: Server-side API → PostgreSQL (no Firestore client reads)
+import { useApiCollection, invalidateCollectionCache } from '@/hooks/useApiCollection';
 import { useEventDrivenRefresh } from '@/hooks/useEventDrivenRefresh';
 import { useAuth } from '@/contexts/auth-context';
 import { RefreshCw } from "lucide-react";
@@ -129,17 +129,17 @@ export default function BusesPage() {
   const { currentUser, userData, loading: authLoading } = useAuth();
   const { canBusView, canBusAdd, canBusEdit, canBusDelete, canBusReassign, loading: permsLoading } = useModeratorPermissions();
 
-  // SPARK PLAN SAFETY: Using paginated queries instead of real-time listeners
-  const { data: buses, loading: loadingBuses, refresh: refreshBuses } = usePaginatedCollection('buses', {
+  // Server-side API reads from PostgreSQL — no Firestore client reads
+  const { data: buses, loading: loadingBuses, refresh: refreshBuses } = useApiCollection('buses', {
     pageSize: 50, orderByField: 'busNumber', orderDirection: 'asc', autoRefresh: false,
   });
-  const { data: drivers, loading: loadingDrivers, refresh: refreshDrivers } = usePaginatedCollection('drivers', {
+  const { data: drivers, loading: loadingDrivers, refresh: refreshDrivers } = useApiCollection('drivers', {
     pageSize: 50, orderByField: 'updatedAt', orderDirection: 'desc', autoRefresh: false,
   });
-  const { data: routes, loading: loadingRoutes } = usePaginatedCollection('routes', {
+  const { data: routes, loading: loadingRoutes } = useApiCollection('routes', {
     pageSize: 50, orderByField: 'routeName', orderDirection: 'asc', autoRefresh: false,
   });
-  const { data: students, loading: loadingStudents } = usePaginatedCollection('students', {
+  const { data: students, loading: loadingStudents } = useApiCollection('students', {
     pageSize: 50, orderByField: 'updatedAt', orderDirection: 'desc', autoRefresh: false,
   });
 

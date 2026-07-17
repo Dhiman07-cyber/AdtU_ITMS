@@ -85,21 +85,15 @@ export async function getDashboardCounts() {
   let highLoadBusCount = 0;
   let activeDrivers = 0;
 
-  raw.busesSnapshot.forEach(doc => {
-    const d = doc.data();
-    if (d.driverUID || d.assignedDriverId || d.activeDriverId) activeDrivers++;
-    const currentMembers = d.currentMembers || 0;
-    let capacity = 55;
-    if (d.totalCapacity) capacity = d.totalCapacity;
-    else if (d.capacity) {
-      if (typeof d.capacity === 'string' && d.capacity.includes('/')) capacity = parseInt(d.capacity.split('/')[1]) || 55;
-      else if (typeof d.capacity === 'number') capacity = d.capacity;
-    }
+  for (const bus of raw.buses) {
+    if (bus.driverUID || (bus as any).assignedDriverId || (bus as any).activeDriverId) activeDrivers++;
+    const currentMembers = bus.currentMembers || 0;
+    const capacity = bus.capacity || 55;
     const usagePct = capacity > 0 ? Math.round((currentMembers / capacity) * 100) : 0;
-    if (!['inactive', 'under-maintenance', 'maintenance'].includes((d.status || '').toLowerCase())) operationalBuses++;
+    if (!['inactive', 'under-maintenance', 'maintenance'].includes((bus.status || '').toLowerCase())) operationalBuses++;
     if (usagePct >= 80) highLoadBusCount++;
-    allBuses.push({ ...d, id: doc.id, busId: doc.id, currentMembers, totalCapacity: capacity, usagePct });
-  });
+    allBuses.push({ ...bus, currentMembers, totalCapacity: capacity, usagePct });
+  }
 
   const activeTripData = raw.driverStatusData.map((status: any) => {
     const bus = allBuses.find(b => b.busId === status.bus_id);
@@ -137,7 +131,7 @@ export async function getDashboardCounts() {
     expiredStudents: raw.expiredStudentsCount,
     totalDrivers: raw.driversCount,
     activeDrivers,
-    totalBuses: raw.busesSnapshot.size,
+    totalBuses: raw.buses.length,
     operationalBuses,
     activeBuses: raw.driverStatusData.length,
     enrouteBuses: raw.driverStatusData.length,

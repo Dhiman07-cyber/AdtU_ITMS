@@ -4,6 +4,7 @@ import { saveToken, isValidTokenFormat, subscribeToTopic } from '@/lib/services/
 import { withSecurity } from '@/lib/security/api-security';
 import { SaveFCMTokenSchema } from '@/lib/security/validation-schemas';
 import { RateLimits } from '@/lib/security/rate-limiter';
+import { getStudentById } from '@/domains/identity';
 
 /**
  * POST /api/save-fcm-token
@@ -53,10 +54,10 @@ export const POST = withSecurity(
     // 4. Use students collection explicitly
     const targetCollection = 'students';
 
-    // 5. Validate user exists in students collection before saving token
-    const userDoc = await adminDb.collection(targetCollection).doc(uid).get();
-    if (!userDoc.exists) {
-      console.warn(`[${requestId}] User ${uid} does not exist in ${targetCollection} collection`);
+    // 5. Validate user exists in students database in PostgreSQL (canonical source of truth) before saving token
+    const userData = await getStudentById(uid);
+    if (!userData) {
+      console.warn(`[${requestId}] User ${uid} does not exist in PostgreSQL student_profiles`);
       return NextResponse.json({
         success: false,
         error: 'User account not found. Please contact support.',
@@ -65,8 +66,7 @@ export const POST = withSecurity(
     }
 
     // 6. Additional validation: Only allow active student accounts
-    const userData = userDoc.data();
-    if (!userData || userData.status === 'inactive' || userData.status === 'suspended') {
+    if (userData.status === 'inactive' || userData.status === 'suspended') {
       console.warn(`[${requestId}] Student ${uid} account is not active`);
       return NextResponse.json({
         success: false,
@@ -98,15 +98,17 @@ export const POST = withSecurity(
     }
 
     // 9. Legacy field sync (backward compatibility with older notification queries)
-    try {
-      await adminDb.collection(targetCollection).doc(uid).set({
-        fcmToken: token,
-        fcmPlatform: platform || 'web',
-        fcmUpdatedAt: new Date().toISOString(),
-      }, { merge: true });
-    } catch (err) {
-      // Non-critical: subcollection is the source of truth
-      console.warn(`[${requestId}] Legacy FCM sync failed (non-critical):`, err);
+    if (adminDb) {
+      try {
+        await adminDb.collection(targetCollection).doc(uid).set({
+          fcmToken: token,
+          fcmPlatform: platform || 'web',
+          fcmUpdatedAt: new Date().toISOString(),
+        }, { merge: true });
+      } catch (err) {
+        // Non-critical: subcollection is the source of truth
+        console.warn(`[${requestId}] Legacy FCM sync failed (non-critical):`, err);
+      }
     }
 
     return NextResponse.json({

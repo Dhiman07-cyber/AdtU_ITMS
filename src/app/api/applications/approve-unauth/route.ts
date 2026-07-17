@@ -3,6 +3,8 @@ import { adminAuth, adminDb } from '@/lib/firebase-admin';
 import { approveUnauth } from '@/domains/application';
 import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
 import { safeErrorMessage } from '@/lib/security/safe-error';
+import { resolveUserRole } from '@/lib/security/role-cache';
+import { getUpdaterInfo } from '@/lib/utils/updatedBy';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -28,23 +30,18 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Missing student UID' }, { status: 400 });
     }
 
-    const [moderatorDoc, adminDoc] = await Promise.all([
-      adminDb.collection('moderators').doc(moderatorUid).get(),
-      adminDb.collection('admins').doc(moderatorUid).get(),
-    ]);
-
-    if (!moderatorDoc.exists && !adminDoc.exists) {
+    const userRole = await resolveUserRole(moderatorUid);
+    if (!userRole.role) {
       return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 });
     }
+    const updaterInfo = await getUpdaterInfo(adminDb, moderatorUid);
 
-    const moderatorData = moderatorDoc.exists ? moderatorDoc.data() : adminDoc.data();
-    const approverRole = adminDoc.exists ? 'admin' : 'moderator';
     const permissionDenied = await requireModeratorPermission(
       {
         uid: moderatorUid,
         email: decodedToken.email || '',
-        role: approverRole,
-        name: moderatorData?.fullName || moderatorData?.name || '',
+        role: userRole.role,
+        name: updaterInfo.name,
       },
       'applications',
       'canApprove'
@@ -55,8 +52,8 @@ export async function POST(request: NextRequest) {
       studentUid,
       {
         uid: moderatorUid,
-        name: moderatorData?.name || moderatorData?.fullName || 'Approver',
-        role: approverRole,
+        name: updaterInfo.name || 'Approver',
+        role: userRole.role,
       },
       {
         busId: body.overrideBusId ? asString(body.overrideBusId) : undefined,

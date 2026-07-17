@@ -48,8 +48,7 @@ import {
   Copy
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { collection, query, where, getDocs, orderBy, limit } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+
 import { supabase } from '@/lib/supabase-client';
 import Image from 'next/image';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -391,12 +390,15 @@ export default function AdminRenewalServicePage() {
         const requestsWithStudentData = await Promise.all(
           requests.map(async (request) => {
             try {
-              const studentDoc = await getDocs(
-                query(collection(db, 'students'), where('enrollmentId', '==', request.enrollmentId), limit(1))
-              );
-              if (!studentDoc.empty) {
-                const studentData = studentDoc.docs[0].data() as StudentData;
-                return { ...request, studentData };
+              const token = await currentUser!.getIdToken();
+              const res = await fetch(`/api/students?enrollmentId=${encodeURIComponent(request.enrollmentId)}`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+              });
+              if (res.ok) {
+                const students = await res.json();
+                if (Array.isArray(students) && students.length > 0) {
+                  return { ...request, studentData: students[0] as StudentData };
+                }
               }
               return request;
             } catch (error) {
@@ -450,17 +452,18 @@ export default function AdminRenewalServicePage() {
           const enriched = await Promise.all(
             rawTransactions.map(async (transaction: any) => {
               try {
-                const studentsRef = collection(db, 'students');
-                const q = query(studentsRef, where('enrollmentId', '==', transaction.studentId), limit(1));
-                const snapshot = await getDocs(q);
+                const res = await fetch(`/api/students?enrollmentId=${encodeURIComponent(transaction.studentId)}`, {
+                  headers: { 'Authorization': `Bearer ${token}` }
+                });
 
-                if (!snapshot.empty) {
-                  const studentDoc = snapshot.docs[0];
-                  // We only need the ID for navigation
-                  return {
-                    ...transaction,
-                    userId: studentDoc.id
-                  };
+                if (res.ok) {
+                  const students = await res.json();
+                  if (Array.isArray(students) && students.length > 0) {
+                    return {
+                      ...transaction,
+                      userId: students[0].id
+                    };
+                  }
                 }
                 return transaction;
               } catch (error) {
@@ -482,17 +485,17 @@ export default function AdminRenewalServicePage() {
     fetchTransactions();
   }, [currentUser, activeTab, currentPage, searchTrigger]);
 
-  // Fetch buses data
+  // Fetch buses data via API (PostgreSQL)
   useEffect(() => {
     const fetchBuses = async () => {
       if (!currentUser) return;
 
       try {
-        const busesRef = collection(db, 'buses');
-        const snapshot = await getDocs(busesRef);
-        const busesData = snapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
+        const res = await fetch('/api/buses');
+        const json = await res.json();
+        const busesData = (json.buses || []).map((b: any) => ({
+          id: b.busId || b.id,
+          ...b
         }));
         setBuses(busesData);
       } catch (error) {

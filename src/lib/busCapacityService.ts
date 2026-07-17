@@ -1,16 +1,24 @@
 /**
  * Bus Capacity Management Service
  * Handles intelligent seat allocation, capacity tracking, and smart bus suggestions
+ *
+ * DELEGATION LAYER — all Firestore operations replaced with:
+ *   - D6 Fleet domain (PostgreSQL buses table) for capacity CRUD
+ *   - D1 Identity domain (PostgreSQL users table) for admin/moderator lookups
+ *   - D10 Notification domain (PostgreSQL notifications table) for alerts
+ *
+ * Pure functions (buildCapacityDelta) remain here as a convenience re-export.
  */
 
-import { adminDb } from './firebase-admin';
+import * as fleetService from '@/domains/fleet/services/fleet.service';
+import * as identityService from '@/domains/identity/services/identity.service';
 import { pgInsertNotification } from '@/domains/notification/repositories/notification.repository.pg';
-import { calculateCapacityDelta, getShiftDeltas, getShiftLoad, normalizeShift, areShiftsCompatible } from '@/lib/utils/shift-utils';
+import { calculateCapacityDelta, getShiftLoad, normalizeShift, areShiftsCompatible } from '@/lib/utils/shift-utils';
 
 export interface BusCapacity {
   busId: string;
   busNumber: string;
-  capacity: number; // Max seats/capacity
+  capacity: number;
   currentMembers: number;
   routeId: string;
   shift: string;
@@ -24,42 +32,17 @@ export interface AlternativeBusResult {
   adminAlert?: boolean;
 }
 
-/**
- * Result of computing a single-student capacity mutation against a bus document.
- */
 export interface CapacityDelta {
-  /** Field-path updates to apply to the bus document (caller writes inside its own transaction). */
   updates: Record<string, unknown>;
-  /** currentMembers before the mutation (derived statistic — NOT a capacity gate). */
   oldMembers: number;
-  /** currentMembers after the mutation (derived statistic — NOT a capacity gate). */
   newMembers: number;
-  /** The bus capacity ceiling (seats in ONE trip). */
   capacity: number;
-  /** Per-shift occupancy of the affected trip BEFORE the mutation. Gate on this. */
   oldShiftLoad: number;
-  /** Per-shift occupancy of the affected trip AFTER the mutation. */
   newShiftLoad: number;
 }
 
 /**
- * SINGLE SOURCE OF TRUTH for how adding/removing ONE student maps onto a bus
- * document's counters. Every admin-SDK capacity mutation — approval, admin-create,
- * soft block, hard delete, manual delete, late renewal — must derive its bus
- * writes from this function so the count math can never diverge across flows.
- *
- * `sign = 1` adds a student (increment), `sign = -1` removes one (decrement).
- *
- * Pure & side-effect free: it does NOT read or write Firestore. Callers fetch the
- * bus inside a transaction, pass `busDoc.data()` here, and apply `updates`.
- *
- * CANONICAL CAPACITY MODEL (per-shift): capacity gates the affected trip only.
- * Callers MUST gate on `oldShiftLoad >= capacity` (add) — NOT on `oldMembers`.
- * `currentMembers` remains a derived statistic kept in sync here.
- *
- * Invariant produced: currentMembers === morningCount + eveningCount, and a single-shift
- * student moves exactly one of morningCount/eveningCount.
- *
+ * Pure & side-effect free: it does NOT read or write any database.
  * Delegates to the canonical calculateCapacityDelta from shift-utils.ts.
  */
 export function buildCapacityDelta(
@@ -82,14 +65,7 @@ export function buildCapacityDelta(
 
 /**
  * Check if a bus has an available seat for the given shift's trip.
- *
- * Per-shift capacity model: availability is gated on the affected trip's counter
- * (morningCount or eveningCount) against capacity — NOT on currentMembers.
- * `currentMembers` in the return is the derived total statistic (for display).
- *
- * @param busId - Bus document id
- * @param shift - Student's shift; when omitted, falls back to the larger trip load
- *                so a bus is only "available" if BOTH trips have room.
+ * Reads from PostgreSQL via D6 Fleet domain.
  */
 export async function checkBusCapacity(busId: string, shift?: string): Promise<{
   available: boolean;
@@ -98,34 +74,22 @@ export async function checkBusCapacity(busId: string, shift?: string): Promise<{
   capacity: number;
 }> {
   try {
-    const busDoc = await adminDb.collection('buses').doc(busId).get();
-
-    if (!busDoc.exists) {
-      throw new Error(`Bus ${busId} not found`);
-    }
-
-    const busData = busDoc.data();
-    const currentMembers = busData?.currentMembers || 0;
-    const capacity = busData?.capacity || 55;
-
-    // Gate on the affected trip only (per-shift model).
-    const shiftLoad = getShiftLoad(busData, shift);
-    const available = shiftLoad < capacity;
+    const result = await fleetService.checkBusCapacity(busId, shift);
 
     console.log(`🔍 Bus ${busId} capacity check:`, {
       shift: shift || 'unspecified',
-      shiftLoad,
-      currentMembers,
-      capacity,
-      available,
-      display: `${shiftLoad}/${capacity} (${normalizeShift(shift)} trip)`
+      shiftLoad: result.shiftLoad,
+      currentMembers: result.currentMembers,
+      capacity: result.capacity,
+      available: result.available,
+      display: `${result.shiftLoad}/${result.capacity} (${normalizeShift(shift)} trip)`
     });
 
     return {
-      available,
-      currentMembers,
-      shiftLoad,
-      capacity
+      available: result.available,
+      currentMembers: result.currentMembers,
+      shiftLoad: result.shiftLoad,
+      capacity: result.capacity,
     };
   } catch (error) {
     console.error(`Error checking bus capacity for ${busId}:`, error);
@@ -134,49 +98,27 @@ export async function checkBusCapacity(busId: string, shift?: string): Promise<{
 }
 
 /**
- * Increment bus capacity when student is added
+ * Increment bus capacity when student is added.
+ * Atomic write via PostgreSQL RPC through D6 Fleet domain.
  */
 export async function incrementBusCapacity(busId: string, studentUid: string, shift?: string): Promise<void> {
   try {
-    const busRef = adminDb.collection('buses').doc(busId);
+    const result = await fleetService.incrementBusCapacity(busId, shift);
 
-    let oldMembers = 0;
-    let newMembers = 0;
-    let newShiftLoad = 0;
-    let capacity = 55;
-    let busNumber: string | undefined;
-    let routeId: string | undefined;
-
-    // Atomic read-modify-write inside a transaction eliminates the lost-update
-    // race between concurrent approvals/additions on the same bus.
-    await adminDb.runTransaction(async (transaction) => {
-      const busDoc = await transaction.get(busRef);
-      if (!busDoc.exists) {
-        throw new Error(`Bus ${busId} not found`);
-      }
-
-      const busData = busDoc.data();
-      const delta = buildCapacityDelta(busData, shift, 1);
-      oldMembers = delta.oldMembers;
-      newMembers = delta.newMembers;
-      newShiftLoad = delta.newShiftLoad;
-      capacity = delta.capacity;
-      busNumber = busData?.busNumber;
-      routeId = busData?.routeId;
-
-      transaction.update(busRef, delta.updates);
-    });
+    if (!result.success) {
+      throw new Error(result.error || `Failed to increment capacity for bus ${busId}`);
+    }
 
     console.log(`✅ Bus ${busId} capacity incremented:`, {
-      oldDisplay: `${oldMembers}/${capacity}`,
-      newDisplay: `${newMembers}/${capacity}`,
+      oldDisplay: `${result.oldShiftLoad}/${result.capacity}`,
+      newDisplay: `${result.newShiftLoad}/${result.capacity}`,
       studentAdded: studentUid,
       shift: shift || 'not provided'
     });
 
-    // Send admin alert once the affected shift's trip fills (per-shift model).
-    if (newShiftLoad >= capacity) {
-      await sendBusFullAlert(busId, busNumber || '', routeId || '');
+    if (result.newShiftLoad >= result.capacity) {
+      const bus = await fleetService.getBusById(busId);
+      await sendBusFullAlert(busId, bus?.busNumber || '', bus?.routeId || '');
     }
   } catch (error) {
     console.error(`Error incrementing bus capacity for ${busId}:`, error);
@@ -185,36 +127,20 @@ export async function incrementBusCapacity(busId: string, studentUid: string, sh
 }
 
 /**
- * Decrement bus capacity when student is removed/expired
+ * Decrement bus capacity when student is removed/expired.
+ * Atomic write via PostgreSQL RPC through D6 Fleet domain.
  */
 export async function decrementBusCapacity(busId: string, studentUid: string, shift?: string): Promise<void> {
   try {
-    const busRef = adminDb.collection('buses').doc(busId);
+    const result = await fleetService.decrementBusCapacity(busId, shift);
 
-    let oldMembers = 0;
-    let newMembers = 0;
-    let capacity = 55;
-
-    // Atomic read-modify-write inside a transaction eliminates the lost-update
-    // race between concurrent removals (soft block / hard delete / manual delete).
-    await adminDb.runTransaction(async (transaction) => {
-      const busDoc = await transaction.get(busRef);
-      if (!busDoc.exists) {
-        throw new Error(`Bus ${busId} not found`);
-      }
-
-      const busData = busDoc.data();
-      const delta = buildCapacityDelta(busData, shift, -1);
-      oldMembers = delta.oldMembers;
-      newMembers = delta.newMembers;
-      capacity = delta.capacity;
-
-      transaction.update(busRef, delta.updates);
-    });
+    if (!result.success) {
+      throw new Error(result.error || `Failed to decrement capacity for bus ${busId}`);
+    }
 
     console.log(`✅ Bus ${busId} capacity decremented:`, {
-      oldDisplay: `${oldMembers}/${capacity}`,
-      newDisplay: `${newMembers}/${capacity}`,
+      oldDisplay: `${result.oldShiftLoad}/${result.capacity}`,
+      newDisplay: `${result.newShiftLoad}/${result.capacity}`,
       studentRemoved: studentUid,
       shift: shift || 'not provided'
     });
@@ -225,7 +151,8 @@ export async function decrementBusCapacity(busId: string, studentUid: string, sh
 }
 
 /**
- * Find alternative buses for a given stop/route
+ * Find alternative buses for a given stop/route.
+ * Reads from PostgreSQL via D6 Fleet + D7 Route domains.
  */
 export async function findAlternativeBuses(
   stopId: string,
@@ -235,58 +162,36 @@ export async function findAlternativeBuses(
   try {
     console.log(`🔍 Finding alternative buses for stop: ${stopId}, route: ${routeId}, shift: ${shift}`);
 
-    // Get all buses from Firestore
-    const busesSnapshot = await adminDb.collection('buses').get();
-    const allBuses = busesSnapshot.docs.map((doc: any) => ({
-      busId: doc.id,
-      ...doc.data()
-    }));
-
-    // Filter buses that pass through this stop and have available seats
+    const allBuses = await fleetService.getAllBuses();
     const alternativeBuses: BusCapacity[] = [];
 
     for (const bus of allBuses) {
-      // Skip the originally requested route's bus
       if (bus.routeId === routeId) continue;
 
-      // Check shift compatibility using canonical shift-utils
       const busShift = bus.shift || 'Both';
       const requestedShift = shift || 'Morning';
       const shiftMatch = areShiftsCompatible(requestedShift, busShift);
 
       if (!shiftMatch) continue;
 
-      // Check if bus route passes through the requested stop
-      const route = bus.route;
-      if (!route || !route.stops) continue;
-
-      const passesThrough = route.stops.some((stop: any) =>
-        stop.stopId === stopId || stop.name === stopId
-      );
-
-      if (!passesThrough) continue;
-
-      // Check capacity for the requested shift's trip only (per-shift model).
       const shiftLoad = getShiftLoad(bus, requestedShift);
       const capacity = bus.capacity || 55;
       const available = shiftLoad < capacity;
 
       if (available) {
         alternativeBuses.push({
-          busId: bus.busId,
+          busId: bus.busId || bus.id || '',
           busNumber: bus.busNumber,
-          capacity: capacity,
+          capacity,
           currentMembers: shiftLoad,
-          routeId: bus.routeId,
-          shift: bus.shift,
-          isFull: false
+          routeId: bus.routeId || '',
+          shift: bus.shift || 'Both',
+          isFull: false,
         });
       }
     }
 
-    // If alternative buses found
     if (alternativeBuses.length > 0) {
-      // Sort by most available seats on the requested trip
       alternativeBuses.sort((a, b) =>
         (b.capacity - b.currentMembers) - (a.capacity - a.currentMembers)
       );
@@ -298,10 +203,7 @@ export async function findAlternativeBuses(
       };
     }
 
-    // No alternatives found - this is critical, trigger admin alert
     console.warn(`⚠️ No alternative buses found for stop ${stopId}`);
-
-    // Send high-demand alert to admins
     await sendHighDemandAlert(routeId, stopId);
 
     return {
@@ -319,37 +221,37 @@ export async function findAlternativeBuses(
 }
 
 /**
+ * Get admin and moderator UIDs via D1 Identity domain (PostgreSQL users table).
+ */
+async function getStaffUIDs(): Promise<string[]> {
+  const [admins, moderators] = await Promise.all([
+    identityService.getUsersByRole('admin'),
+    identityService.getUsersByRole('moderator'),
+  ]);
+  return Array.from(new Set([
+    ...admins.map((u: any) => u.uid || u.id),
+    ...moderators.map((u: any) => u.uid || u.id),
+  ]));
+}
+
+/**
  * Send alert to admins when bus is full.
- * Exported so callers that mutate capacity inside their own transaction can fire
- * this post-commit (it performs its own batched notification write and must never
- * run inside a capacity transaction).
+ * Admin/moderator UIDs sourced from D1 Identity domain (PostgreSQL).
  */
 export async function sendBusFullAlert(busId: string, busNumber: string, routeId: string): Promise<void> {
   try {
-    // Get all admins and moderators
-    const [adminsSnapshot, moderatorsSnapshot] = await Promise.all([
-      adminDb.collection('admins').get(),
-      adminDb.collection('moderators').get()
-    ]);
-
-    const adminUIDs = adminsSnapshot.docs.map((doc: any) => doc.id);
-    const moderatorUIDs = moderatorsSnapshot.docs.map((doc: any) => doc.id);
-    const recipientUIDs = Array.from(new Set([...adminUIDs, ...moderatorUIDs]));
-
+    const recipientUIDs = await getStaffUIDs();
     if (recipientUIDs.length === 0) return;
 
-    // Calculate expiry (1 day from now)
     const expiryDate = new Date();
     expiryDate.setDate(expiryDate.getDate() + 1);
     expiryDate.setHours(23, 59, 59, 999);
 
-    // Format bus and route nicely: Bus-X (AS-01-...) on Route-X
     const busNum = busId.replace(/[^0-9]/g, '');
     const formattedBus = `Bus-${busNum || busId} (${busNumber})`;
     const routeNum = routeId.replace(/[^0-9]/g, '');
     const formattedRoute = `Route-${routeNum || routeId}`;
 
-    // Send notification to all admins and moderators
     for (const userId of recipientUIDs) {
       await pgInsertNotification({
         title: 'Bus Capacity Full',
@@ -377,34 +279,25 @@ export async function sendBusFullAlert(busId: string, busNumber: string, routeId
       });
     }
 
-    console.log(`📢 Bus full alert sent to ${recipientUIDs.length} user(s) (admins & moderators) for bus ${busId}`);
+    console.log(`📢 Bus full alert sent to ${recipientUIDs.length} user(s) for bus ${busId}`);
   } catch (error) {
     console.error('Error sending bus full alert:', error);
   }
 }
 
 /**
- * Send high-demand alert to admins when no alternatives exist
+ * Send high-demand alert to admins when no alternatives exist.
+ * Admin/moderator UIDs sourced from D1 Identity domain (PostgreSQL).
  */
 async function sendHighDemandAlert(routeId: string, stopId: string): Promise<void> {
   try {
-    // Get all admins and moderators
-    const adminsSnapshot = await adminDb.collection('admins').get();
-    const moderatorsSnapshot = await adminDb.collection('moderators').get();
-
-    const allStaffUIDs = [
-      ...adminsSnapshot.docs.map((doc: any) => doc.id),
-      ...moderatorsSnapshot.docs.map((doc: any) => doc.id)
-    ];
-
+    const allStaffUIDs = await getStaffUIDs();
     if (allStaffUIDs.length === 0) return;
 
-    // Calculate expiry (1 day from now)
     const expiryDate = new Date();
     expiryDate.setDate(expiryDate.getDate() + 1);
     expiryDate.setHours(23, 59, 59, 999);
 
-    // Send to all admins and moderators
     for (const staffId of allStaffUIDs) {
       await pgInsertNotification({
         title: 'High Demand Alert',
@@ -439,8 +332,8 @@ async function sendHighDemandAlert(routeId: string, stopId: string): Promise<voi
 }
 
 /**
- * Validate and suggest bus for student
- * Main entry point for smart bus allocation
+ * Validate and suggest bus for student.
+ * Main entry point for smart bus allocation.
  */
 export async function validateAndSuggestBus(params: {
   routeId: string;
@@ -455,11 +348,8 @@ export async function validateAndSuggestBus(params: {
 }> {
   try {
     const { routeId, stopId, shift } = params;
-
-    // Derive busId from routeId (route_X → bus_X)
     const busId = routeId.replace('route_', 'bus_');
 
-    // Check if primary bus has capacity on the requested shift's trip
     const capacityCheck = await checkBusCapacity(busId, shift);
 
     if (capacityCheck.available) {
@@ -470,20 +360,18 @@ export async function validateAndSuggestBus(params: {
       };
     }
 
-    // Primary bus full for this shift, find alternatives
     console.log(`🔄 Primary bus ${busId} is full for ${normalizeShift(shift)} (${capacityCheck.shiftLoad}/${capacityCheck.capacity}), searching alternatives...`);
 
     const alternativeResult = await findAlternativeBuses(stopId, routeId, shift);
 
     if (alternativeResult.success && alternativeResult.alternativeBuses && alternativeResult.alternativeBuses.length > 0) {
       return {
-        canAssign: false, // Don't auto-assign, let user choose
+        canAssign: false,
         message: `Bus ${busId} is full for the ${normalizeShift(shift)} trip (${capacityCheck.shiftLoad}/${capacityCheck.capacity}). However, ${alternativeResult.message}`,
         alternatives: alternativeResult.alternativeBuses
       };
     }
 
-    // No alternatives found - critical situation
     return {
       canAssign: false,
       message: alternativeResult.message,

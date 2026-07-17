@@ -50,7 +50,8 @@ import {
 import { PremiumPageLoader } from '@/components/LoadingSpinner';
 import { MoreHorizontal, Eye, Edit, Trash2, Search, Plus, Filter, RefreshCw, Shield } from "lucide-react";
 import { deleteModerator } from '@/lib/dataService';
-import { usePaginatedCollection, invalidateCollectionCache } from '@/hooks/usePaginatedCollection';
+// Migrated: Server-side API → PostgreSQL (no Firestore client reads)
+import { useApiCollection, invalidateCollectionCache } from '@/hooks/useApiCollection';
 import { safeImageSrc } from "@/lib/security/url-sanitizer";
 import { useEventDrivenRefresh } from '@/hooks/useEventDrivenRefresh';
 import Avatar from '@/components/Avatar';
@@ -177,8 +178,8 @@ export default function AdminModerators() {
   const { addToast } = useToast();
   const router = useRouter();
 
-  // Real-time data listeners
-  const { data: moderators, loading: loadingModerators, refresh: refreshModerators } = usePaginatedCollection('moderators', {
+  // Server-side API reads from PostgreSQL — no Firestore client reads
+  const { data: moderators, loading: loadingModerators, refresh: refreshModerators } = useApiCollection('moderators', {
     pageSize: 50, orderByField: 'updatedAt', orderDirection: 'desc', autoRefresh: false,
   });
 

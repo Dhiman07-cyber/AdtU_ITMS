@@ -36,20 +36,24 @@
  *   6. Failure-isolated. One application's failure never stops the rest.
  */
 
-import { adminDb } from '@/lib/firebase-admin';
 import { Application } from '@/lib/types/application';
+import type { Bus } from '@/lib/types';
 import { getDeadlineConfig } from '@/lib/deadline-config-service';
 import { DeadlineConfig } from '@/lib/types/deadline-config';
-import { buildCapacityDelta, sendBusFullAlert } from '@/lib/busCapacityService';
+import { sendBusFullAlert } from '@/lib/busCapacityService';
 import { computeBlockDatesFromValidUntil } from '@/lib/utils/deadline-computation';
 import { createAuditEvent, SYSTEM_ACTOR } from '@/domains/audit';
 import { CapacityFullError } from '@/lib/errors/sentinel-errors';
 import { normalizeShift, areShiftsCompatible, getShiftLoad } from '@/lib/utils/shift-utils';
 import { createUser, createStudent } from '@/domains/identity';
 import { getAllByState } from '@/domains/application';
+import * as applicationRepo from '@/domains/application/repositories/application.repository';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import { findMarker, upsertMarker } from '@/domains/admin';
 import * as Notification from '@/domains/notification';
+import * as fleetService from '@/domains/fleet/services/fleet.service';
+import * as routeService from '@/domains/route';
+import { findAlternatives } from '@/domains/seat/repositories/seat.repository';
 
 // Page size for paginating verified_upcoming applications.
 const PAGE_SIZE = 200;
@@ -106,69 +110,33 @@ export function getCurrentSessionStartYear(config: DeadlineConfig, now: Date = n
 async function findDeterministicAlternativeBuses(
   stopId: string,
   requestedRouteId: string,
-  requestedShift: string
+  requestedShift: string,
+  preFetchedBuses?: Bus[],
+  preFetchedRoutes?: any[]
 ): Promise<Array<{ busId: string; routeId: string; shift: string; currentMembers: number; capacity: number }>> {
-  const busesSnapshot = await adminDb.collection('buses').get();
-  const alternatives: Array<{ busId: string; routeId: string; shift: string; currentMembers: number; capacity: number }> = [];
+  // ponytail: delegate core stop-matching and route-filtering to seatRepository
+  const res = await findAlternatives(stopId, requestedRouteId, requestedShift, preFetchedBuses, preFetchedRoutes);
+  if (!res.success || !res.alternativeBuses) return [];
 
-  for (const doc of busesSnapshot.docs) {
-    const bus = doc.data();
-    const busId = doc.id;
-    const busRouteId = bus.routeId || '';
+  const alternatives = res.alternativeBuses.map(b => ({
+    busId: b.busId,
+    routeId: b.routeId,
+    shift: b.shift,
+    currentMembers: b.currentMembers,
+    capacity: b.capacity
+  }));
 
-    // Check shift compatibility using canonical shift-utils
-    const busShift = bus.shift || 'Both';
-    const shiftCompatible = areShiftsCompatible(requestedShift, busShift);
-    if (!shiftCompatible) continue;
-
-    // Check if route passes through the stop
-    const route = bus.route || {};
-    const stops = route.stops || [];
-    const passesThrough = stops.some((stop: any) =>
-      String(stop.stopId || '').toLowerCase().trim() === String(stopId).toLowerCase().trim() ||
-      String(stop.name || '').toLowerCase().trim() === String(stopId).toLowerCase().trim()
-    );
-    if (!passesThrough) continue;
-
-    // CANONICAL PER-SHIFT CAPACITY GATE.
-    // A student's capacity eligibility is gated ONLY against their shift's trip counter
-    // (morningCount or eveningCount), never against the combined total currentMembers.
-    // currentMembers = morningCount + eveningCount is a derived statistic for display.
-    const shiftLoad = getShiftLoad(bus, requestedShift);
-    const capacity = Number(bus.capacity || 55);
-    if (shiftLoad >= capacity) continue;
-
-    alternatives.push({
-      busId,
-      routeId: busRouteId,
-      shift: bus.shift || 'Both',
-      currentMembers: shiftLoad, // per-shift load for correct sort (not total currentMembers)
-      capacity
-    });
-  }
-
-  // Sort deterministically:
   alternatives.sort((a, b) => {
-    // 1. Same requested route
     const aSameRoute = a.routeId === requestedRouteId ? 1 : 0;
     const bSameRoute = b.routeId === requestedRouteId ? 1 : 0;
-    if (aSameRoute !== bSameRoute) {
-      return bSameRoute - aSameRoute;
-    }
+    if (aSameRoute !== bSameRoute) return bSameRoute - aSameRoute;
 
-    // 2. Same shift (exact shift match)
     const aExactShift = a.shift.toLowerCase() === requestedShift.toLowerCase() ? 1 : 0;
     const bExactShift = b.shift.toLowerCase() === requestedShift.toLowerCase() ? 1 : 0;
-    if (aExactShift !== bExactShift) {
-      return bExactShift - aExactShift;
-    }
+    if (aExactShift !== bExactShift) return bExactShift - aExactShift;
 
-    // 3. Lowest current occupancy
-    if (a.currentMembers !== b.currentMembers) {
-      return a.currentMembers - b.currentMembers;
-    }
+    if (a.currentMembers !== b.currentMembers) return a.currentMembers - b.currentMembers;
 
-    // 4. Lowest document ID
     return a.busId.localeCompare(b.busId);
   });
 
@@ -185,7 +153,9 @@ async function findDeterministicAlternativeBuses(
 async function activateOne(
   app: Application,
   config: DeadlineConfig,
-  trigger: 'cron' | 'admin'
+  trigger: 'cron' | 'admin',
+  preFetchedBuses?: Bus[],
+  preFetchedRoutes?: any[]
 ): Promise<'activated' | 'pending' | 'skipped' | { failed: string }> {
   const appId = app.applicationId;
   const formData = app.formData || ({} as any);
@@ -213,23 +183,10 @@ async function activateOne(
   const validUntil = validUntilDate.toISOString();
   const blockDates = computeBlockDatesFromValidUntil(validUntil, config);
 
-  const appRef = adminDb.collection('applications').doc(appId);
-  const studentRef = adminDb.collection('students').doc(app.applicantUid);
-
   const nowIso = new Date().toISOString();
 
-  // Write user to PostgreSQL (canonical source of truth) — before transaction
-  await createUser({
-    uid: app.applicantUid,
-    email: (app as any).email || formData.email,
-    name: formData.fullName,
-    role: 'student',
-    createdAt: nowIso,
-  });
-
-  // Reusable transaction builder for activation.
+  // Reusable activation helper for a target bus.
   const attemptActivationWithBus = async (targetBusId: string, targetRouteId: string, isAlternative: boolean) => {
-    const busRef = adminDb.collection('buses').doc(targetBusId);
     const studentDoc = {
       address: formData.address,
       alternatePhone: formData.alternatePhone || '',
@@ -267,50 +224,58 @@ async function activateOne(
       paid_on: nowIso,
     };
 
-    // Write student to PostgreSQL (canonical source of truth) — before transaction
-    await createStudent({
-      ...studentDoc,
-      uid: app.applicantUid,
-      createdAt: nowIso,
-      updatedAt: nowIso,
-    });
-
     let postCommitFullAlert: { busNumber: string; routeId: string } | null = null;
 
-    await adminDb.runTransaction(async (transaction) => {
-      // 1. Re-read application — must still be verified_upcoming.
-      const freshApp = await transaction.get(appRef);
-      if (!freshApp.exists) throw new StateChangedError();
-      const freshState = (freshApp.data() as Application).state;
-      if (freshState !== 'verified_upcoming' && freshState !== 'pending_seat_allocation') {
-        throw new StateChangedError();
-      }
+    // 1. Re-read application from PG — must still be verified_upcoming or pending_seat_allocation.
+    const freshApp = await applicationRepo.findByApplicationId(appId);
+    if (!freshApp) throw new StateChangedError();
+    if (freshApp.state !== 'verified_upcoming' && freshApp.state !== 'pending_seat_allocation') {
+      throw new StateChangedError();
+    }
 
-      // 2. Read the bus — capacity gate is atomic.
-      const busSnap = await transaction.get(busRef);
-      if (!busSnap.exists) {
-        throw new Error(`Bus ${targetBusId} not found`);
-      }
-      const busData = busSnap.data();
-      const delta = buildCapacityDelta(busData, shift, 1);
-      // CANONICAL PER-SHIFT CAPACITY GATE: gate on the student's own trip counter,
-      // never on the combined currentMembers total.
-      if (delta.oldShiftLoad >= delta.capacity) {
-        throw new CapacityFullError();
-      }
+    // 2. Check capacity via Fleet PG (atomic RPC).
+    const capacityCheck = await fleetService.checkBusCapacity(targetBusId, shift);
+    if (!capacityCheck.available) {
+      throw new CapacityFullError();
+    }
 
-      // 3. Commit
-      transaction.set(studentRef, studentDoc);
-      transaction.update(busRef, delta.updates);
-      transaction.delete(appRef);
+    // 3. Increment capacity via Fleet PG (atomic RPC).
+    const capacityResult = await fleetService.incrementBusCapacity(targetBusId, shift);
+    if (!capacityResult.success) {
+      throw new Error(capacityResult.error || `Failed to increment capacity for bus ${targetBusId}`);
+    }
+    // 4. Secure the user and student_profiles records in database (atomic post-capacity-increment write)
+    try {
+      await createUser({
+        uid: app.applicantUid,
+        email: (app as any).email || formData.email,
+        name: formData.fullName,
+        role: 'student',
+        createdAt: nowIso,
+      });
 
-      if (delta.newShiftLoad >= delta.capacity) {
-        postCommitFullAlert = {
-          busNumber: busData?.busNumber || '',
-          routeId: busData?.routeId || '',
-        };
-      }
-    });
+      await createStudent({
+        ...studentDoc,
+        uid: app.applicantUid,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      });
+    } catch (writeErr) {
+      // rollback the capacity increment on write failure
+      await fleetService.decrementBusCapacity(targetBusId, shift).catch(() => {});
+      throw writeErr;
+    }
+
+    // 5. Delete application from PG (activation = consume the application).
+    await applicationRepo.remove(appId);
+
+    if (capacityResult.newShiftLoad >= capacityResult.capacity) {
+      const bus = await fleetService.getBusById(targetBusId);
+      postCommitFullAlert = {
+        busNumber: bus?.busNumber || '',
+        routeId: bus?.routeId || '',
+      };
+    }
 
     void createAuditEvent({
       action: 'application_session_activated',
@@ -344,14 +309,6 @@ async function activateOne(
       },
     });
 
-    // Delete application from PG after successful transaction
-    try {
-      const db = getSupabaseServer();
-      await db.from('applications').delete().eq('application_id', appId);
-    } catch (pgErr) {
-      console.error('[session-activation] PG application delete failed:', pgErr);
-    }
-
     return { postCommitFullAlert };
   };
 
@@ -374,7 +331,7 @@ async function activateOne(
     if (err instanceof CapacityFullError) {
       // Case B: Search for compatible alternative buses serving the same stop with deterministically sorted priority
       try {
-        const alternatives = await findDeterministicAlternativeBuses(finalStopId, requestedRouteId, shift);
+        const alternatives = await findDeterministicAlternativeBuses(finalStopId, requestedRouteId, shift, preFetchedBuses, preFetchedRoutes);
         for (const altBus of alternatives) {
           try {
             const { postCommitFullAlert } = await attemptActivationWithBus(altBus.busId, altBus.routeId, true);
@@ -400,14 +357,10 @@ async function activateOne(
       // Case C: Selected Bus Full and no compatible alternatives available. Move to pending_seat_allocation.
       try {
         // Update application state in PG
-        const db = getSupabaseServer();
-        const { error: pgErr } = await db
-          .from('applications')
-          .update({ state: 'pending_seat_allocation', updated_at: nowIso })
-          .eq('application_id', appId)
-          .eq('state', 'verified_upcoming');
-
-        if (pgErr) throw new StateChangedError();
+        await applicationRepo.update(appId, {
+          state: 'pending_seat_allocation',
+          updatedAt: nowIso
+        });
 
         void createAuditEvent({
           action: 'application_pending_seat_allocation',
@@ -464,14 +417,14 @@ async function notifyPendingSeatAllocation(appId: string, app: Application, form
     { statusPage: `/apply/status/${appId}` }
   );
 
-  // Notify admins and moderators
-  const [adminsSnap, modsSnap] = await Promise.all([
-    adminDb.collection('admins').get(),
-    adminDb.collection('moderators').get(),
+  // Notify admins and moderators via D1 Identity domain (PostgreSQL)
+  const [admins, moderators] = await Promise.all([
+    (await import('@/domains/identity')).getUsersByRole('admin'),
+    (await import('@/domains/identity')).getUsersByRole('moderator'),
   ]);
   const recipients = [
-    ...adminsSnap.docs.map((d: any) => d.id),
-    ...modsSnap.docs.map((d: any) => d.id),
+    ...admins.map((u: any) => u.uid || u.id),
+    ...moderators.map((u: any) => u.uid || u.id),
   ];
   if (recipients.length === 0) return;
 
@@ -617,21 +570,29 @@ export async function activateUpcomingSessionApplications(opts: {
     return targetStartYear === currentSessionStartYear;
   });
 
-  for (const app of eligibleApps) {
-    summary.scanned++;
-    try {
-      const outcome = await activateOne(app, config, opts.trigger);
-      if (outcome === 'activated') summary.activated++;
-      else if (outcome === 'pending') summary.pendingSeatAllocation++;
-      else if (outcome === 'skipped') summary.skipped++;
-      else {
+  const allBuses = await fleetService.getAllBuses();
+  const allRoutes = await routeService.getAll();
+
+  // ponytail: Process in batches of 10 concurrently to avoid serial N+1 network latency
+  const batchSize = 10;
+  for (let i = 0; i < eligibleApps.length; i += batchSize) {
+    const chunk = eligibleApps.slice(i, i + batchSize);
+    await Promise.all(chunk.map(async (app) => {
+      summary.scanned++;
+      try {
+        const outcome = await activateOne(app, config, opts.trigger, allBuses, allRoutes);
+        if (outcome === 'activated') summary.activated++;
+        else if (outcome === 'pending') summary.pendingSeatAllocation++;
+        else if (outcome === 'skipped') summary.skipped++;
+        else {
+          summary.failed++;
+          summary.errors.push({ applicationId: app.applicationId, error: outcome.failed });
+        }
+      } catch (err: any) {
         summary.failed++;
-        summary.errors.push({ applicationId: app.applicationId, error: outcome.failed });
+        summary.errors.push({ applicationId: app.applicationId, error: err?.message || String(err) });
       }
-    } catch (err: any) {
-      summary.failed++;
-      summary.errors.push({ applicationId: app.applicationId, error: err?.message || String(err) });
-    }
+    }));
   }
 
   // Check remaining verified_upcoming applications for the current session

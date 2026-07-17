@@ -1,5 +1,6 @@
-import { adminDb } from '@/lib/firebase-admin';
-import { getSupabaseServer } from '@/lib/supabase-server';
+import { getAllStudents } from '@/domains/identity';
+import { getAllBuses } from '@/domains/fleet';
+import * as applicationService from '@/domains/application';
 import { wasSeatReleased } from '@/lib/config/capacity-flags';
 
 /**
@@ -61,22 +62,19 @@ function sessionKey(targetSession: any): string {
  * scale target (≈1000 students) — a handful of full-collection reads.
  */
 export async function runIntegrityScan(): Promise<IntegrityReport> {
-  const supabase = getSupabaseServer();
-  const [studentsSnap, busesSnap, renewalsResult, applicationsSnap] = await Promise.all([
-    adminDb.collection('students').get(),
-    adminDb.collection('buses').get(),
-    supabase.from('applications').select('*').in('application_type', ['renewal', 'renewal_after_soft_block']),
-    adminDb.collection('applications').get(),
+  const [students, buses, allApps] = await Promise.all([
+    getAllStudents(),
+    getAllBuses(),
+    applicationService.getAll(),
   ]);
 
-  const busIds = new Set<string>(busesSnap.docs.map((d: any) => d.id));
-  const studentIds = new Set<string>(studentsSnap.docs.map((d: any) => d.id));
+  const busIds = new Set<string>(buses.map((d: any) => d.busId || d.id));
+  const studentIds = new Set<string>(students.map((d: any) => d.uid));
   const findings: IntegrityFinding[] = [];
 
   // 1–3. Student-level invariants.
-  for (const doc of studentsSnap.docs) {
-    const s = doc.data();
-    const uid = doc.id;
+  for (const s of students) {
+    const uid = s.uid;
     const busId = busIdOf(s);
     const status = s.status;
 
@@ -112,23 +110,26 @@ export async function runIntegrityScan(): Promise<IntegrityReport> {
   }
 
   // 4–5. Renewal-request invariants (D8: now from PostgreSQL applications table).
-  const renewalsRows = (renewalsResult.data || []) as any[];
+  const renewalsRows = allApps.filter(
+    (a) => a.applicationType === 'renewal' || a.applicationType === 'renewal_after_soft_block'
+  );
   const pendingByStudent = new Map<string, string[]>();
+
   for (const r of renewalsRows) {
-    const studentId = r.applicant_uid;
+    const studentId = r.applicantUid;
     const status = r.state;
     if (studentId && !studentIds.has(studentId)) {
       findings.push({
         type: 'orphan_renewal_request',
         severity: 'medium',
-        entity: `applications/${r.application_id}`,
+        entity: `applications/${r.applicationId}`,
         detail: `Renewal application references student '${studentId}' which does not exist`,
-        data: { requestId: r.application_id, studentId, status },
+        data: { requestId: r.applicationId, studentId, status },
       });
     }
     if (studentId && status === 'submitted') {
       const arr = pendingByStudent.get(studentId) || [];
-      arr.push(r.application_id);
+      arr.push(r.applicationId);
       pendingByStudent.set(studentId, arr);
     }
   }
@@ -146,13 +147,12 @@ export async function runIntegrityScan(): Promise<IntegrityReport> {
 
   // 6. Duplicate live applications for the same applicant + target session.
   const liveByKey = new Map<string, string[]>();
-  for (const doc of applicationsSnap.docs) {
-    const a = doc.data();
+  for (const a of allApps) {
     if (!LIVE_APPLICATION_STATES.has(a.state)) continue;
-    const applicant = a.applicantUid || doc.id;
+    const applicant = a.applicantUid || a.applicationId;
     const key = `${applicant}::${sessionKey(a.targetSession)}`;
     const arr = liveByKey.get(key) || [];
-    arr.push(doc.id);
+    arr.push(a.applicationId);
     liveByKey.set(key, arr);
   }
   for (const [key, ids] of liveByKey.entries()) {
@@ -178,10 +178,10 @@ export async function runIntegrityScan(): Promise<IntegrityReport> {
   return {
     scannedAt: new Date().toISOString(),
     counts: {
-      students: studentsSnap.size,
-      buses: busesSnap.size,
+      students: students.length,
+      buses: buses.length,
       renewalRequests: renewalsRows.length,
-      applications: applicationsSnap.size,
+      applications: allApps.length,
     },
     totalFindings: findings.length,
     bySeverity,

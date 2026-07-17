@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server';
 import { CleanupService } from '@/lib/cleanup-service';
-import { db as adminDb } from '@/lib/firebase-admin';
 import { withSecurity } from '@/lib/security/api-security';
 import { EmptySchema } from '@/lib/security/validation-schemas';
 import { RateLimits } from '@/lib/security/rate-limiter';
+import { getAllBuses } from '@/domains/fleet';
 
 /**
  * Check driver's swap status and trigger cleanup
@@ -12,30 +12,26 @@ import { RateLimits } from '@/lib/security/rate-limiter';
 const checkSwapStatusHandler = async (request: Request, { auth }: { auth: any }) => {
   const driverUid = auth.uid;
 
-  // Find driver's assigned bus(es)
-  const busesSnapshot = await adminDb
-    .collection('buses')
-    .where('assignedDriverId', '==', driverUid)
-    .get();
+  // Find driver's assigned bus(es) from PG
+  const allBuses = await getAllBuses();
+  const assignedBuses = allBuses.filter(b => (b as any).assignedDriverId === driverUid || (b as any).driverUID === driverUid);
+  const activeBuses = allBuses.filter(b => (b as any).activeDriverId === driverUid);
 
   let swapsChecked = 0;
   let swapsReverted = 0;
 
   // Check each bus for expired swaps
-  for (const busDoc of busesSnapshot.docs) {
-    const reverted = await CleanupService.checkAndRevertExpiredSwap(busDoc.id);
+  for (const bus of assignedBuses) {
+    const busId = bus.busId || bus.id || '';
+    const reverted = await CleanupService.checkAndRevertExpiredSwap(busId);
     swapsChecked++;
     if (reverted) swapsReverted++;
   }
 
   // Also check if driver is activeDriverId (temporary swap)
-  const activeBusesSnapshot = await adminDb
-    .collection('buses')
-    .where('activeDriverId', '==', driverUid)
-    .get();
-
-  for (const busDoc of activeBusesSnapshot.docs) {
-    const reverted = await CleanupService.checkAndRevertExpiredSwap(busDoc.id);
+  for (const bus of activeBuses) {
+    const busId = bus.busId || bus.id || '';
+    const reverted = await CleanupService.checkAndRevertExpiredSwap(busId);
     swapsChecked++;
     if (reverted) swapsReverted++;
   }

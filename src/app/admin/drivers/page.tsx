@@ -52,8 +52,8 @@ import { MoreHorizontal, Eye, Edit, Trash2, Search, Loader2, Plus, Filter, Arrow
 import { deleteDriver } from '@/lib/dataService';
 import Avatar from '@/components/Avatar';
 import { safeImageSrc } from "@/lib/security/url-sanitizer";
-// SPARK PLAN SAFETY: Replaced useRealtimeCollection with usePaginatedCollection
-import { usePaginatedCollection, invalidateCollectionCache } from '@/hooks/usePaginatedCollection';
+// Migrated: Server-side API → PostgreSQL (no Firestore client reads)
+import { useApiCollection, invalidateCollectionCache } from '@/hooks/useApiCollection';
 import { useEventDrivenRefresh } from '@/hooks/useEventDrivenRefresh';
 import { useTheme } from '@/components/theme-provider';
 import { cn } from '@/lib/utils';
@@ -193,12 +193,12 @@ export default function AdminDrivers() {
   const router = useRouter();
   const { theme } = useTheme();
 
-  // SPARK PLAN SAFETY: Event-driven refresh - only fetches when mutations occur
-  const { data: drivers, loading: loadingDrivers, refresh: refreshDrivers } = usePaginatedCollection('drivers', {
+  // Server-side API reads from PostgreSQL — no Firestore client reads
+  const { data: drivers, loading: loadingDrivers, refresh: refreshDrivers } = useApiCollection('drivers', {
     pageSize: 50, orderByField: 'updatedAt', orderDirection: 'desc',
     autoRefresh: false, // EVENT-DRIVEN: Only refresh when mutations occur
   });
-  const { data: buses, loading: loadingBuses, refresh: refreshBuses } = usePaginatedCollection('buses', {
+  const { data: buses, loading: loadingBuses, refresh: refreshBuses } = useApiCollection('buses', {
     pageSize: 50, orderByField: 'busNumber', orderDirection: 'asc',
     autoRefresh: false,
   });

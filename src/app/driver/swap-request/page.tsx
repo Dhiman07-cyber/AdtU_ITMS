@@ -16,8 +16,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { CheckCircle, XCircle, Clock, User, Calendar, Plus, Bus, AlertCircle, Search, Filter, UserCheck, ArrowRight, Sparkles, Zap, StopCircle, RefreshCw, ShieldCheck, Lock } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { db } from '@/lib/firebase';
-import { collection, getDocs, doc, getDoc } from 'firebase/firestore';
 import { supabase } from '@/lib/supabase-client';
 import { format, addHours, addDays } from 'date-fns';
 import { formatDateFlexible } from '@/lib/utils/date-utils';
@@ -300,16 +298,16 @@ function SwapRequestPageContent() {
     try {
       console.log('🔍 Fetching bus data for driver:', currentUser.uid);
 
-      // First get driver's assigned bus from drivers collection
-      const driverDoc = await getDoc(doc(db, 'drivers', currentUser.uid));
+      // First get driver's assigned bus via API
+      const driverRes = await fetch(`/api/drivers/${currentUser.uid}`);
 
-      if (!driverDoc.exists()) {
-        console.error('❌ Driver document not found');
+      if (!driverRes.ok) {
+        console.error('❌ Driver not found via API');
         setMyBusData(null);
         return;
       }
 
-      const driverData = driverDoc.data();
+      const { driver: driverData } = await driverRes.json();
       let driverBusId = driverData.assignedBusId || driverData.busId;
 
       console.log('👤 Driver data:', { assignedBusId: driverData.assignedBusId, busId: driverData.busId });
@@ -320,11 +318,11 @@ function SwapRequestPageContent() {
         return;
       }
 
-      // Now fetch the bus details
-      const busDoc = await getDoc(doc(db, 'buses', driverBusId));
+      // Now fetch the bus details via API
+      const busRes = await fetch(`/api/buses/${encodeURIComponent(driverBusId)}`);
 
-      if (!busDoc.exists()) {
-        console.error('❌ Bus document not found:', driverBusId);
+      if (!busRes.ok) {
+        console.error('❌ Bus not found via API:', driverBusId);
         // Even if the document is missing, we can try to format the ID if it looks like a bus ID
         if (typeof driverBusId === 'string' && driverBusId.toLowerCase().startsWith('bus')) {
           const formattedBusNumber = driverBusId.replace(/^bus[_-]/i, 'Bus-').replace(/^bus/i, 'Bus-');
@@ -347,11 +345,11 @@ function SwapRequestPageContent() {
         return;
       }
 
-      const busDetails = busDoc.data();
+      const busDetails = await busRes.json();
       const finalBusDisplay = formatBusDisplay(driverBusId, busDetails.busNumber);
 
       const busData: BusData = {
-        busId: busDoc.id,
+        busId: busDetails.id || driverBusId,
         busNumber: finalBusDisplay,
         routeId: busDetails.routeId || 'N/A',
         routeName: busDetails.route?.routeName || busDetails.routeName || 'N/A',
@@ -372,18 +370,21 @@ function SwapRequestPageContent() {
     if (!currentUser) return;
 
     try {
-      // Fetch all buses first to have a mapping for fallback bus numbers
-      const busesSnapshot = await getDocs(collection(db, 'buses'));
+      // Fetch all buses via API (PostgreSQL) for bus number mapping
+      const busesRes = await fetch('/api/buses');
+      const busesJson = await busesRes.json();
+      const busesRaw = busesJson.buses || [];
       const busMapping: Record<string, string> = {};
-      busesSnapshot.forEach(doc => {
-        busMapping[doc.id] = doc.data().busNumber || 'N/A';
-      });
+      for (const b of busesRaw) {
+        busMapping[b.busId || b.id] = b.busNumber || 'N/A';
+      }
 
-      const driversSnapshot = await getDocs(collection(db, 'drivers'));
+      const driversRes = await fetch('/api/drivers');
+      const driversJson = await driversRes.json();
+      const driversRaw = Array.isArray(driversJson) ? driversJson : driversJson.drivers || [];
       const driversList: Driver[] = [];
 
-      driversSnapshot.forEach((doc) => {
-        const data = doc.data();
+      for (const data of driversRaw) {
         // Exclude current user
         if (data.uid !== currentUser.uid) {
           let busId = data.assignedBusId || data.busId;
@@ -420,7 +421,7 @@ function SwapRequestPageContent() {
             busNumber: finalBusNumber
           });
         }
-      });
+      }
 
       setDrivers(driversList);
       setFilteredDrivers(driversList);
