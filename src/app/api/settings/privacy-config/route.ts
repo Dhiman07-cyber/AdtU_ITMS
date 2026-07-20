@@ -8,7 +8,7 @@ export async function GET(req: NextRequest) {
     try {
         const privacyConfigResult = await getLegalConfig('privacy');
         let config = privacyConfigResult.data;
-        let source = 'postgresql';
+        let source = 'firestore';
 
         // Inject App Name dynamically
         try {

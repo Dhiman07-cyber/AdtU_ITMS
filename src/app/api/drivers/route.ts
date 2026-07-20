@@ -5,6 +5,7 @@ import { handleApiError } from '@/lib/security/safe-error';
 import { getAllDrivers } from '@/domains/identity';
 
 // D6 Fleet — Drivers list API. Runtime owner: PostgreSQL (driver_profiles table).
+// Ponytail: drivers are a finite staff set — no pagination needed.
 
 export async function GET(request: NextRequest) {
   try {

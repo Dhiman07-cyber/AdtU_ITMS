@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { adminAuth, adminDb } from '@/lib/firebase-admin';
+import { adminAuth } from '@/lib/firebase-admin';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import { withSecurity } from '@/lib/security/api-security';
 import { AckWaitingSchema } from '@/lib/security/validation-schemas';
 import { RateLimits } from '@/lib/security/rate-limiter';
-import { getDriverById } from '@/domains/identity';
+import { getDriverById, getValidFcmTokensForUsers } from '@/domains/identity';
 
 // Initialize Supabase client
 const supabase = getSupabaseServer();
@@ -35,13 +35,13 @@ export const POST = withSecurity(
         return NextResponse.json({ success: false, error: 'Waiting flag not found', requestId }, { status: 404 });
       }
 
-      // 3. Authorization check: Is this the driver for this bus?
-      // Check both assigned bus and any temporary assignments if necessary
-      // For now, matching the original logic: driverData.assignedBusId === waitingFlag.bus_id
-      if (driverBusId !== waitingFlag.bus_id) {
-        console.warn(`[${requestId}] Driver ${driverUid} unauthorized for flag on bus ${waitingFlag.bus_id} (assigned to ${driverBusId})`);
-        return NextResponse.json({ success: false, error: 'Authorization failed: Driver-bus mismatch', requestId }, { status: 403 });
-      }
+       // 3. Authorization check: Is this the driver for this bus?
+       // Check both assigned bus and any temporary assignments if necessary
+       // For now, matching the original logic: driverData.assignedBusId === waitingFlag.bus_id
+       if (driverBusId !== waitingFlag.bus_id || !waitingFlag.bus_id) {
+         console.warn(`[${requestId}] Driver ${driverUid} unauthorized for flag on bus ${waitingFlag.bus_id || 'NULL'} (assigned to ${driverBusId})`);
+         return NextResponse.json({ success: false, error: 'Authorization failed: Driver-bus mismatch', requestId }, { status: 403 });
+       }
 
       // 4. Check for idempotency and update waiting flag status to acknowledged atomically
       if (waitingFlag.status === 'acknowledged') {
@@ -70,20 +70,14 @@ export const POST = withSecurity(
       // 5. Asynchronous FCM notification to student (don't block the response)
       const notifyStudent = async () => {
         try {
-          // Get FCM tokens for this student
-          const tokensSnapshot = await adminDb
-            .collection('fcm_tokens')
-            .where('userUid', '==', waitingFlag.student_uid)
-            .get();
-
-          const studentTokens = tokensSnapshot.docs
-            .map((doc: any) => doc.data().deviceToken)
-            .filter((token: string) => token);
+          // Get FCM tokens for this student from PostgreSQL
+          const tokenRecords = await getValidFcmTokensForUsers([waitingFlag.student_uid]);
+          const studentTokens = tokenRecords.map(t => t.token);
 
           if (studentTokens.length > 0) {
             const message = {
               notification: {
-                title: 'Bus Acknowledged 🚌',
+                title: 'Bus Acknowledged',
                 body: `Driver ${driverData.fullName || 'the bus driver'} has acknowledged your waiting request. Get ready!`
               },
               tokens: studentTokens,

@@ -5,7 +5,7 @@
  *
  * The single authoritative reconciliation for bus capacity counters. Recounts the
  * actual seat-owning students per bus and rewrites ALL FOUR counters consistently in PG:
- *   currentMembers, load.morningCount, load.eveningCount.
+ *   currentMembers, morningLoad, eveningLoad.
  *
  * SEAT-OWNERSHIP DEFINITION (marker-aware, mode-independent):
  *   A student occupies a seat iff their seat has NOT been released:
@@ -134,8 +134,8 @@ export async function adminReconcileBusLoads(options: ReconcileOptions = {}): Pr
 
     const before: BusCounterSnapshot = {
       currentMembers: busData.currentMembers || 0,
-      morningCount: busData.load?.morningCount || 0,
-      eveningCount: busData.load?.eveningCount || 0,
+      morningCount: busData.morningLoad || 0,
+      eveningCount: busData.eveningLoad || 0,
     };
     const after: BusCounterSnapshot = {
       currentMembers: c.currentMembers,
@@ -157,10 +157,8 @@ export async function adminReconcileBusLoads(options: ReconcileOptions = {}): Pr
         await updateBus(busId, {
           // currentMembers removed: current_members is now GENERATED ALWAYS AS (morning_load + evening_load) STORED.
           // PostgreSQL enforces the invariant atomically. Only the source columns need to be corrected.
-          load: {
-            morningCount: after.morningCount,
-            eveningCount: after.eveningCount,
-          },
+          morningLoad: after.morningCount,
+          eveningLoad: after.eveningCount,
         });
 
         corrected = true;
@@ -189,9 +187,8 @@ export async function adminReconcileBusLoads(options: ReconcileOptions = {}): Pr
     try {
       const admins = await getUsersByRole('admin');
       const content = `Bus load reconciliation found large discrepancies on ${largeDeltaBuses.length} bus(es): ${largeDeltaBuses.join(', ')}. Counts were corrected to the recounted values; investigate the systemic cause.`;
-      for (const admin of admins) {
-        const adminId = admin.uid;
-        await pgInsertNotification({
+      await Promise.all(admins.map(admin =>
+        pgInsertNotification({
           title: 'Bus Load Reconciliation — Large Delta',
           content,
           type: 'emergency',
@@ -202,16 +199,16 @@ export async function adminReconcileBusLoads(options: ReconcileOptions = {}): Pr
           },
           target: {
             type: 'specific_users',
-            specificUserIds: [adminId]
+            specificUserIds: [admin.uid]
           },
-          recipientIds: [adminId],
+          recipientIds: [admin.uid],
           autoInjectedRecipientIds: [],
           readByUserIds: [],
           metadata: {
             priority: 'high'
           }
-        });
-      }
+        })
+      ));
     } catch (e) {
       console.error('Reconciliation large-delta alert failed:', e);
     }

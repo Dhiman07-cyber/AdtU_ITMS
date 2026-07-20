@@ -73,21 +73,47 @@ export async function pgFindActiveConfig(): Promise<DeadlineConfig> {
     throw new Error(`CalendarRepository (PG) read failed: ${error.message}`);
   }
 
-  if (!data) {
-    throw new Error('Deadline configuration missing in database');
+  let activeConfig = data;
+
+  if (!activeConfig) {
+    const defaultRecord = {
+      is_active: true,
+      session_start_month: 6,
+      session_start_day: 1,
+      urgent_warning_days: 15,
+      soft_block_warning_text: 'Your bus service has expired. Please renew.',
+      hard_delete_critical_text: 'Warning: Account will be permanently deleted.',
+      config_version: '1.0.0',
+      description: 'Default Academic Calendar Configuration',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      updated_by: 'system'
+    };
+
+    const { data: inserted, error: insertError } = await db
+      .from('academic_calendar_config')
+      .insert(defaultRecord)
+      .select('*')
+      .single();
+
+    if (insertError) {
+      activeConfig = defaultRecord as any;
+    } else {
+      activeConfig = inserted;
+    }
   }
 
-  const startMonth: number = data.session_start_month ?? 6; // default July
-  const startDay:   number = data.session_start_day   ?? 1;
+  const startMonth: number = activeConfig.session_start_month ?? 6; // default July
+  const startDay:   number = activeConfig.session_start_day   ?? 1;
 
   // Derive all lifecycle milestones (pure computation — no I/O)
   const lifecycle = deriveAcademicLifecycle(startMonth, startDay, REFERENCE_YEAR);
 
   const populated: DeadlineConfig = {
-    description: data.description ?? '',
-    version:     data.config_version ?? '1.0.0',
-    lastUpdated: data.updated_at ?? new Date().toISOString(),
-    lastUpdatedBy: data.updated_by ?? 'system',
+    description: activeConfig.description ?? '',
+    version:     activeConfig.config_version ?? '1.0.0',
+    lastUpdated: activeConfig.updated_at ?? new Date().toISOString(),
+    lastUpdatedBy: activeConfig.updated_by ?? 'system',
 
     academicSessionStart: { month: startMonth, day: startDay },
 

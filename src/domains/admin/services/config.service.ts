@@ -1,19 +1,12 @@
 /**
  * D11 Config Service — business logic for system configuration and markers.
  *
- * All persistence delegated to config.repository.pg.
- * Validation and cleaning logic migrated from system-config-service.ts.
- *
+ * All persistence handled directly in Firestore (`settings` and `system_markers` collections).
  * Config keys: 'config', 'landing', 'ui', 'privacy', 'terms'
  * Marker keys: 'activation_{year}', 'soft_block_completed_{year}'
  */
+import { adminDb } from '@/lib/firebase-admin';
 import { stripUnsafeObjectKeys } from '@/lib/security/object-safety';
-import {
-  pgFindConfig,
-  pgUpsertConfig,
-  pgFindMarker,
-  pgUpsertMarker,
-} from '../repositories/config.repository.pg';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -80,7 +73,16 @@ const DEFAULT_LANDING: LandingConfig = {
   email: 'support@adtu.in',
 };
 
-// ─── Config Cleaning (migrated from system-config-service.ts) ────────────────
+const DEFAULT_SYSTEM_CONFIG: SystemConfig = {
+  appName: 'AdtU ITMS',
+  busFee: {
+    amount: 10000,
+    version: 1,
+    history: [{ amount: 10000, updatedAt: new Date().toISOString(), updatedBy: 'system' }]
+  }
+};
+
+// ─── Config Cleaning ─────────────────────────────────────────────────────────
 
 const UI_FIELDS_TO_STRIP = ['icon', 'gradient', 'color', 'description', 'label'];
 
@@ -107,14 +109,20 @@ function cleanConfigForStorage(config: Record<string, unknown>): Record<string, 
 // ─── System Config ───────────────────────────────────────────────────────────
 
 export async function getSystemConfig(): Promise<ConfigResult<SystemConfig>> {
-  const row = await pgFindConfig('config');
-  if (!row) {
-    throw new Error('System configuration missing in database');
+  if (!adminDb) {
+    return { data: DEFAULT_SYSTEM_CONFIG, updatedAt: null, updatedByUid: null };
   }
+
+  const doc = await adminDb.collection('settings').doc('config').get();
+  if (!doc.exists) {
+    return { data: DEFAULT_SYSTEM_CONFIG, updatedAt: null, updatedByUid: null };
+  }
+
+  const data = doc.data() as SystemConfig;
   return {
-    data: row.config_data as SystemConfig,
-    updatedAt: row.updated_at,
-    updatedByUid: row.updated_by_uid,
+    data: { ...DEFAULT_SYSTEM_CONFIG, ...data },
+    updatedAt: data.lastUpdated || data.updatedAt || null,
+    updatedByUid: data.updatedBy || null,
   };
 }
 
@@ -122,31 +130,43 @@ export async function updateSystemConfig(
   data: Partial<SystemConfig>,
   updatedByUid: string,
 ): Promise<SystemConfig> {
-  const existing = await pgFindConfig('config');
-  const previous = existing ? (existing.config_data as SystemConfig) : {} as SystemConfig;
+  if (!adminDb) {
+    throw new Error('Firebase Admin SDK is not initialized.');
+  }
+
+  const doc = await adminDb.collection('settings').doc('config').get();
+  const previous = doc.exists ? (doc.data() as SystemConfig) : DEFAULT_SYSTEM_CONFIG;
 
   const merged = { ...previous, ...data };
   const cleaned = cleanConfigForStorage(merged as Record<string, unknown>);
+  cleaned.lastUpdated = new Date().toISOString();
+  cleaned.updatedBy = updatedByUid;
 
-  await pgUpsertConfig('config', cleaned, updatedByUid);
+  await adminDb.collection('settings').doc('config').set(cleaned, { merge: true });
   return cleaned as SystemConfig;
 }
 
 // ─── Landing Config ──────────────────────────────────────────────────────────
 
 export async function getLandingConfig(): Promise<ConfigResult<LandingConfig>> {
-  const row = await pgFindConfig('landing');
-  if (!row) {
+  if (!adminDb) {
+    return { data: { ...DEFAULT_LANDING }, updatedAt: null, updatedByUid: null };
+  }
+
+  const doc = await adminDb.collection('settings').doc('landing').get();
+  if (!doc.exists) {
     return {
       data: { ...DEFAULT_LANDING },
       updatedAt: null,
       updatedByUid: null,
     };
   }
+
+  const data = doc.data() as LandingConfig;
   return {
-    data: { ...DEFAULT_LANDING, ...row.config_data } as LandingConfig,
-    updatedAt: row.updated_at,
-    updatedByUid: row.updated_by_uid,
+    data: { ...DEFAULT_LANDING, ...data },
+    updatedAt: data.updatedAt || data.lastUpdated || null,
+    updatedByUid: data.updatedBy || null,
   };
 }
 
@@ -154,26 +174,30 @@ export async function updateLandingConfig(
   data: Partial<LandingConfig>,
   updatedByUid: string,
 ): Promise<void> {
-  const existing = await pgFindConfig('landing');
-  const previous = existing
-    ? { ...DEFAULT_LANDING, ...(existing.config_data as LandingConfig) }
-    : { ...DEFAULT_LANDING };
+  if (!adminDb) {
+    throw new Error('Firebase Admin SDK is not initialized.');
+  }
 
-  const merged = { ...previous, ...data };
-  await pgUpsertConfig('landing', merged as Record<string, unknown>, updatedByUid);
+  const doc = await adminDb.collection('settings').doc('landing').get();
+  const previous = doc.exists ? (doc.data() as LandingConfig) : DEFAULT_LANDING;
+
+  const merged = { ...previous, ...data, updatedAt: new Date().toISOString(), updatedBy: updatedByUid };
+  await adminDb.collection('settings').doc('landing').set(merged, { merge: true });
 }
 
 // ─── UI Config ───────────────────────────────────────────────────────────────
 
 export async function getUiConfig(): Promise<ConfigResult<UiConfig> | null> {
-  const row = await pgFindConfig('ui');
-  if (!row) {
-    return null;
-  }
+  if (!adminDb) return null;
+
+  const doc = await adminDb.collection('settings').doc('ui').get();
+  if (!doc.exists) return null;
+
+  const data = doc.data() as UiConfig;
   return {
-    data: row.config_data as UiConfig,
-    updatedAt: row.updated_at,
-    updatedByUid: row.updated_by_uid,
+    data,
+    updatedAt: data.updatedAt || data.lastUpdated || null,
+    updatedByUid: data.updatedBy || null,
   };
 }
 
@@ -181,29 +205,39 @@ export async function updateUiConfig(
   data: Partial<UiConfig>,
   updatedByUid: string,
 ): Promise<void> {
-  const existing = await pgFindConfig('ui');
-  const previous = existing ? (existing.config_data as UiConfig) : {} as UiConfig;
+  if (!adminDb) {
+    throw new Error('Firebase Admin SDK is not initialized.');
+  }
 
-  const merged = { ...previous, ...data };
-  await pgUpsertConfig('ui', merged as Record<string, unknown>, updatedByUid);
+  const doc = await adminDb.collection('settings').doc('ui').get();
+  const previous = doc.exists ? (doc.data() as UiConfig) : {};
+
+  const merged = { ...previous, ...data, updatedAt: new Date().toISOString(), updatedBy: updatedByUid };
+  await adminDb.collection('settings').doc('ui').set(merged, { merge: true });
 }
 
 // ─── Legal Config (Privacy / Terms) ──────────────────────────────────────────
 
 export async function getLegalConfig(type: 'privacy' | 'terms'): Promise<ConfigResult<LegalConfig>> {
-  const row = await pgFindConfig(type);
-  if (!row) {
-    const fallbackTitle = type === 'privacy' ? 'Privacy Policy' : 'Terms & Conditions';
+  const fallbackTitle = type === 'privacy' ? 'Privacy Policy' : 'Terms & Conditions';
+  if (!adminDb) {
+    return { data: { title: fallbackTitle, sections: [] }, updatedAt: null, updatedByUid: null };
+  }
+
+  const doc = await adminDb.collection('settings').doc(type).get();
+  if (!doc.exists) {
     return {
       data: { title: fallbackTitle, sections: [] },
       updatedAt: null,
       updatedByUid: null,
     };
   }
+
+  const data = doc.data() as LegalConfig;
   return {
-    data: row.config_data as unknown as LegalConfig,
-    updatedAt: row.updated_at,
-    updatedByUid: row.updated_by_uid,
+    data: { title: data.title || fallbackTitle, sections: data.sections || [] },
+    updatedAt: (data as any).updatedAt || (data as any).lastUpdated || null,
+    updatedByUid: (data as any).updatedBy || null,
   };
 }
 
@@ -212,29 +246,36 @@ export async function updateLegalConfig(
   data: Partial<LegalConfig>,
   updatedByUid: string,
 ): Promise<void> {
-  const existing = await pgFindConfig(type);
-  const fallbackTitle = type === 'privacy' ? 'Privacy Policy' : 'Terms & Conditions';
-  const previous: LegalConfig = existing
-    ? (existing.config_data as unknown as LegalConfig)
-    : { title: fallbackTitle, sections: [] };
+  if (!adminDb) {
+    throw new Error('Firebase Admin SDK is not initialized.');
+  }
 
-  const merged = { ...previous, ...data };
-  await pgUpsertConfig(type, merged as Record<string, unknown>, updatedByUid);
+  const doc = await adminDb.collection('settings').doc(type).get();
+  const fallbackTitle = type === 'privacy' ? 'Privacy Policy' : 'Terms & Conditions';
+  const previous = doc.exists ? (doc.data() as LegalConfig) : { title: fallbackTitle, sections: [] };
+
+  const merged = { ...previous, ...data, updatedAt: new Date().toISOString(), updatedBy: updatedByUid };
+  await adminDb.collection('settings').doc(type).set(merged, { merge: true });
 }
 
 // ─── System Markers ──────────────────────────────────────────────────────────
 
 export async function findMarker(key: string): Promise<Record<string, unknown> | null> {
-  const row = await pgFindMarker(key);
-  if (!row) {
-    return null;
-  }
-  return row.marker_data;
+  if (!adminDb) return null;
+  const doc = await adminDb.collection('system_markers').doc(key).get();
+  if (!doc.exists) return null;
+  return doc.data() || null;
 }
 
 export async function upsertMarker(
   key: string,
   data: Record<string, unknown>,
 ): Promise<void> {
-  await pgUpsertMarker(key, data);
+  if (!adminDb) {
+    throw new Error('Firebase Admin SDK is not initialized.');
+  }
+  await adminDb.collection('system_markers').doc(key).set({
+    ...data,
+    updatedAt: new Date().toISOString()
+  }, { merge: true });
 }

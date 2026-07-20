@@ -39,6 +39,10 @@ export async function getAll(): Promise<Application[]> {
   return repository.findAll();
 }
 
+export async function getAllPaginated(limit: number, offset: number): Promise<Application[]> {
+  return repository.findAllPaginated(limit, offset);
+}
+
 export async function getById(id: string): Promise<Application | null> {
   return repository.findByApplicationId(id);
 }
@@ -229,14 +233,87 @@ export async function approve(
   try {
     let studentData: Record<string, any> | null = null;
     let studentDataForRpc: Record<string, any> | null = null;
+    let renewalAlreadyFinalized = false;
 
     if (isRenewal) {
       // ── RENEWAL PATH ──────────────────────────────────────────────
-      // C3: approveRenewal computes values and handles seats, but does NOT
-      // write to student_profiles. The RPC handles the atomic commit.
-      const renewalResult = await approveRenewal(app, approverData, overrides);
-      studentData = renewalResult.studentData;
-      studentDataForRpc = renewalResult.studentDataForRpc;
+      // Use new atomic RPC: approve_renewal_with_seat handles capacity check +
+      // seat increment + student update + application finalization in one TX.
+      // Fixes race condition where concurrent renewals could over-allocate.
+      const student = await Student.getByUid(app.applicant_uid);
+      if (!student) throw new Error('Student not found for renewal');
+
+      const fd = app.form_data || {};
+      const durationYears = Number(fd.durationYears || fd.targetSession?.durationYears || 1);
+      const now = new Date();
+      const deadlineConfig = await getDeadlineConfig();
+
+      // Compute renewal validity (max-of-old-and-new invariant)
+      const existingValidUntil = (student as any).validUntil
+        ? new Date((student as any).validUntil)
+        : null;
+      let baseYear = now.getUTCFullYear();
+      if (existingValidUntil && existingValidUntil > now) {
+        baseYear = (student as any).sessionEndYear || existingValidUntil.getUTCFullYear();
+      }
+      const newValidUntil = calculateValidUntilDate(baseYear, durationYears, deadlineConfig);
+      const finalValidUntil = (existingValidUntil && existingValidUntil > newValidUntil)
+        ? existingValidUntil
+        : newValidUntil;
+      const newSessionEndYear = baseYear + durationYears;
+const finalSessionEndYear = ((student as any).sessionEndYear && (student as any).sessionEndYear > newSessionEndYear)
+        ? (student as any).sessionEndYear
+        : newSessionEndYear;
+      const originalStartYear = (student as any).sessionStartYear || baseYear;
+      const totalDuration = Math.max(finalSessionEndYear - originalStartYear, (student as any).durationYears || 0);
+      const blockDates: { softBlock: string; hardBlock: string } = computeBlockDatesFromValidUntil(finalValidUntil, deadlineConfig);
+
+      const seatWasReleased = !!(student as any).seatReleasedAt;
+      const renewalBusId = overrides?.busId || (student as any).busId || (student as any).currentBusId || (student as any).assignedBusId || null;
+      const studentShift = (student as any).shift || 'Morning';
+
+      let studentDataForRenewalRpc: Record<string, any> | null = null;
+
+      if (app.application_type === 'renewal_after_soft_block' && seatWasReleased && renewalBusId) {
+        // Atomic RPC: capacity check + increment + student update + app finalize
+        const { data: rpcResult, error: rpcError } = await db.rpc('approve_renewal_with_seat', {
+          p_application_id: applicationId,
+          p_approver_uid: approverData.uid,
+          p_student_uid: app.applicant_uid,
+          p_bus_id: renewalBusId,
+          p_shift: studentShift,
+          p_valid_until: finalValidUntil.toISOString(),
+          p_session_end_year: finalSessionEndYear,
+          p_session_duration: String(totalDuration),
+          p_soft_block: (typeof blockDates.softBlock === 'string' ? blockDates.softBlock : (blockDates.softBlock as Date)?.toISOString()) || null,
+          p_hard_block: (typeof blockDates.hardBlock === 'string' ? blockDates.hardBlock : (blockDates.hardBlock as Date)?.toISOString()) || null,
+        });
+
+        if (rpcError || !rpcResult?.success) {
+          throw new Error(rpcResult?.error || rpcError?.message || 'Renewal with seat assignment failed');
+        }
+        // RPC succeeded — student updated, capacity incremented, application finalized
+        // No need to call finalize_application_approval separately
+        studentDataForRpc = null; // Mark as already finalized
+        renewalAlreadyFinalized = true; // Track that finalize_application_approval should be skipped
+      } else {
+        // Standard renewal (no seat reclamation): just finalize application
+        studentDataForRenewalRpc = {
+          valid_until: finalValidUntil.toISOString(),
+          status: 'active',
+          session_end_year: finalSessionEndYear,
+          session_duration: String(totalDuration),
+          soft_block: (typeof blockDates.softBlock === 'string' ? blockDates.softBlock : (blockDates.softBlock as Date)?.toISOString()) || null,
+          hard_block: (typeof blockDates.hardBlock === 'string' ? blockDates.hardBlock : (blockDates.hardBlock as Date)?.toISOString()) || null,
+        };
+      }
+
+      studentData = {
+        validUntil: finalValidUntil.toISOString(),
+        sessionStartYear: (student as any).sessionStartYear || baseYear,
+        sessionEndYear: finalSessionEndYear,
+        durationYears: totalDuration,
+      };
     } else {
       // ── FRESH APPLICATION PATH ────────────────────────────────────
       studentData = buildStudentData(app, approverData, overrides);
@@ -266,19 +343,22 @@ export async function approve(
     // C3: For renewals, student update + idempotency marker + application
     // finalization happen in a single RPC (single DB transaction).
     // For fresh: deletes application. Identity already activated above.
-    const { data: finalizeResult, error: finalizeError } = await db.rpc('finalize_application_approval', {
-      p_application_id: applicationId,
-      p_approver_uid: approverData.uid,
-      ...(studentDataForRpc ? { p_student_data: studentDataForRpc } : {}),
-    });
+    // Skip if renewal was already finalized by approve_renewal_with_seat RPC
+    if (!renewalAlreadyFinalized) {
+      const { data: finalizeResult, error: finalizeError } = await db.rpc('finalize_application_approval', {
+        p_application_id: applicationId,
+        p_approver_uid: approverData.uid,
+        ...(studentDataForRpc ? { p_student_data: studentDataForRpc } : {}),
+      });
 
-    if (finalizeError) {
-      console.error('finalize_application_approval RPC error:', finalizeError);
-      throw new Error(`Application finalization failed: ${finalizeError.message || finalizeError.code}`);
-    }
+      if (finalizeError) {
+        console.error('finalize_application_approval RPC error:', finalizeError);
+        throw new Error(`Application finalization failed: ${finalizeError.message || finalizeError.code}`);
+      }
 
-    if (!finalizeResult?.success) {
-      throw new Error('Application finalization failed');
+      if (!finalizeResult?.success) {
+        throw new Error('Application finalization failed');
+      }
     }
 
     // ── Step 3: Side effects — AFTER finalize (non-critical) ───────

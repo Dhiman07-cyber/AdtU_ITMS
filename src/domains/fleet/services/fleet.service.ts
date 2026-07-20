@@ -58,8 +58,23 @@ export async function decrementBusCapacity(busId: string, shift?: string) {
   return fleetRepository.decrementBusCapacity(busId, shift);
 }
 
-export async function findBusesWithAvailableCapacity(shift?: string) {
-  return fleetRepository.findBusesWithAvailableCapacity(shift);
+export async function onStudentDeleted(event: {
+  studentUid: string;
+  busId: string;
+  shift?: string;
+}): Promise<void> {
+  // Encapsulate capacity update within the Fleet domain
+  await decrementBusCapacity(event.busId, event.shift);
+}
+
+export async function reassignStudentsAtomically(plans: Array<{
+  studentId: string;
+  fromBusId: string;
+  toBusId: string;
+  studentShift?: string;
+}>) {
+  return fleetRepository.reassignStudentsAtomically(plans);
 }
 
 export type { Bus, Driver };
+

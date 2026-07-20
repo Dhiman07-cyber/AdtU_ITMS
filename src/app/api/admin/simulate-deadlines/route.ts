@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { adminAuth, adminDb } from '@/lib/firebase-admin';
 import { v2 as cloudinary } from 'cloudinary';
 import { decrementBusCapacity } from '@/lib/busCapacityService';
+import { getSupabaseServer } from '@/lib/supabase-server';
 import { getDeadlineConfig } from '@/lib/deadline-config-service';
 import { isSeatReleaseAtSoftBlockEnabled, wasSeatReleased } from '@/lib/config/capacity-flags';
 import { withSecurity } from '@/lib/security/api-security';
@@ -9,7 +10,7 @@ import { SimulateDeadlinesSchema } from '@/lib/security/validation-schemas';
 import { RateLimits } from '@/lib/security/rate-limiter';
 import { deriveAcademicLifecycle } from '@/lib/utils/deadline-computation';
 import { createAuditEvent } from '@/domains/audit';
-import { getAllStudents, getStudentById, updateStudent, deleteStudent, deleteUser } from '@/domains/identity';
+import { getAllStudents, getStudentById, updateStudent, deleteStudent, deleteUser, deleteFcmToken, hashFcmToken } from '@/domains/identity';
 
 if (process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME) {
     cloudinary.config({
@@ -106,42 +107,46 @@ export const POST = withSecurity(
                     if (sbData.status !== 'active') { continue; }
 
                     const nowIso = new Date().toISOString();
-                    
-                    // Update status in PostgreSQL
-                    await updateStudent(student.uid, {
-                        status: 'soft_blocked',
-                        softBlockedAt: nowIso,
-                        ...(releaseSeatAtSoftBlock ? { seatReleasedAt: nowIso } : {})
+                    const sbBusId = sbData.busId || sbData.assignedBusId;
+                    const sbShift = sbData.shift;
+
+                    // Call the atomic RPC to soft-block and release the seat
+                    const supabase = getSupabaseServer();
+                    const { data: rpcResult, error: rpcError } = await supabase.rpc('soft_block_student_with_seat_release', {
+                        p_student_uid: student.uid,
+                        p_bus_id: releaseSeatAtSoftBlock ? sbBusId : null,
+                        p_shift: sbShift,
+                        p_release_seat: releaseSeatAtSoftBlock,
+                        p_soft_blocked_at: nowIso,
+                        p_seat_released_at: nowIso
                     });
 
-                    executionResults.softBlocked++;
+                    if (rpcError) {
+                        executionResults.errors.push(`Soft block failed for ${student.uid}: ${rpcError.message}`);
+                    } else if (!rpcResult || !rpcResult.success) {
+                        executionResults.errors.push(`Soft block failed for ${student.uid}: ${rpcResult?.error || 'Unknown RPC warning'}`);
+                    } else {
+                        executionResults.softBlocked++;
 
-                    if (releaseSeatAtSoftBlock) {
-                        const sbBusId = sbData.busId || sbData.assignedBusId;
-                        if (sbBusId) {
-                            try {
-                                await decrementBusCapacity(sbBusId, student.uid, sbData.shift);
-                                void createAuditEvent({
-                                    action: 'seat_released',
-                                    actor_id: 'system',
-                                    actor_name: 'System (Simulation)',
-                                    actor_role: 'admin',
-                                    target_id: student.uid,
-                                    target_type: 'student',
-                                    target_name: sbData.fullName || '',
-                                    category: 'system',
-                                    summary: 'Seat released during simulation',
-                                    severity: 'low',
-                                    metadata: {
-                                        reason: 'soft_block_simulation',
-                                        busId: sbBusId,
-                                        shift: sbData.shift || null,
-                                        at: nowIso,
-                                    },
-                                });
-                            } catch (e: any) {
-                                executionResults.errors.push(`Soft-block decrement failed for ${student.uid}: ${e.message}`);
-                            }
+                        if (releaseSeatAtSoftBlock && sbBusId) {
+                            void createAuditEvent({
+                                action: 'seat_released',
+                                actor_id: 'system',
+                                actor_name: 'System (Simulation)',
+                                actor_role: 'admin',
+                                target_id: student.uid,
+                                target_type: 'student',
+                                target_name: sbData.fullName || '',
+                                category: 'system',
+                                summary: 'Seat released during simulation',
+                                severity: 'low',
+                                metadata: {
+                                    reason: 'soft_block_simulation',
+                                    busId: sbBusId,
+                                    shift: sbData.shift || null,
+                                    at: nowIso,
+                                },
+                            });
                         }
                     }
                 } catch (err: any) { executionResults.errors.push(`Soft block failed for ${student.uid}: ${err.message}`); }
@@ -167,8 +172,9 @@ export const POST = withSecurity(
                         } catch (e) {}
                     }
 
-                    const fcmTokens = await adminDb.collection('fcm_tokens').where('userUid', '==', student.uid).limit(400).get();
-                    if (!fcmTokens.empty) { const b = adminDb.batch(); fcmTokens.docs.forEach((d: any) => b.delete(d.ref)); await b.commit(); }
+                    // Delete FCM tokens from PostgreSQL
+                    const { deleteUserTokens } = await import('@/lib/services/fcm-token-service');
+                    await deleteUserTokens(student.uid);
 
                     const waitingFlags = await adminDb.collection('waiting_flags').where('student_uid', '==', student.uid).limit(400).get();
                     if (!waitingFlags.empty) { const b = adminDb.batch(); waitingFlags.docs.forEach((d: any) => b.delete(d.ref)); await b.commit(); }

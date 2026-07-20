@@ -8,7 +8,6 @@
  */
 
 import { NextResponse } from 'next/server';
-import { adminDb } from '@/lib/firebase-admin';
 import { withSecurity } from '@/lib/security/api-security';
 import { RateLimits } from '@/lib/security/rate-limiter';
 import { createAuditEvent, type AuditActorRole } from '@/domains/audit';
@@ -71,11 +70,66 @@ const RollbackSchema = z.object({
 });
 
 // ============================================================================
-// SUPABASE CLIENT (via canonical singleton)
+// SUPABASE CLIENT & MAPPERS
 // ============================================================================
 
 function getSupabase() {
     return getSupabaseServer();
+}
+
+/**
+ * Retrieve the current PostgreSQL/Supabase state of an entity.
+ * Maps columns back to client-expected keys (busId, studentName, shift, etc.).
+ */
+async function getCurrentPostgresState(collection: string, docId: string): Promise<Record<string, any> | null> {
+    const supabase = getSupabase();
+    if (!supabase) {
+        throw new Error('Supabase client not initialized');
+    }
+
+    if (collection === 'students') {
+        const { data, error } = await supabase
+            .from('student_profiles')
+            .select('bus_id, full_name, shift')
+            .eq('uid', docId)
+            .maybeSingle();
+
+        if (error || !data) return null;
+        return {
+            busId: data.bus_id,
+            studentName: data.full_name,
+            shift: data.shift
+        };
+    } else if (collection === 'buses') {
+        const { data, error } = await supabase
+            .from('buses')
+            .select('morning_load, evening_load, driver_uid, route_id, route_name')
+            .eq('id', docId)
+            .maybeSingle();
+
+        if (error || !data) return null;
+        return {
+            morningLoad: data.morning_load,
+            eveningLoad: data.evening_load,
+            currentMembers: (data.morning_load || 0) + (data.evening_load || 0),
+            driver_uid: data.driver_uid,
+            route_id: data.route_id,
+            route_name: data.route_name
+        };
+    } else if (collection === 'drivers') {
+        const { data, error } = await supabase
+            .from('driver_profiles')
+            .select('assigned_bus_id, is_reserved')
+            .eq('uid', docId)
+            .maybeSingle();
+
+        if (error || !data) return null;
+        return {
+            assigned_bus_id: data.assigned_bus_id,
+            is_reserved: data.is_reserved
+        };
+    }
+    return null;
 }
 
 // ============================================================================
@@ -126,20 +180,17 @@ export const GET = withSecurity(
             if (!change.after || !change.collection || !change.docId) continue;
 
             try {
-                const docRef = adminDb.collection(change.collection).doc(change.docId);
-                const docSnap = await docRef.get();
+                const currentState = await getCurrentPostgresState(change.collection, change.docId);
 
-                if (!docSnap.exists) {
+                if (!currentState) {
                     conflicts.push(`Document ${change.docPath} no longer exists`);
                     continue;
                 }
 
-                const currentData = docSnap.data();
-
-                // Compare relevant fields
+                // Compare only the fields originally modified by the reassignment operation
                 for (const key of Object.keys(change.after)) {
                     const expected = JSON.stringify(change.after[key]);
-                    const actual = JSON.stringify(currentData?.[key]);
+                    const actual = JSON.stringify(currentState[key]);
 
                     if (expected !== actual) {
                         conflicts.push(
@@ -209,7 +260,7 @@ export const POST = withSecurity(
         const changes = typedOriginalLog.changes;
         const rollbackOpId = `rollback_${Date.now()}_${crypto.randomUUID()}`;
 
-        // Create pending rollback log
+        // Create pending rollback log in PostgreSQL
         await supabase
             .from('reassignment_logs')
             .insert([{
@@ -228,51 +279,33 @@ export const POST = withSecurity(
         const revertedDocs: string[] = [];
         const rollbackChanges: ChangeRecord[] = [];
 
-        // ── ATOMIC rollback: every 'before' snapshot is re-applied in ONE Firestore
-        //    transaction, so a partial failure can no longer leave a broken rollback
-        //    chain (the former loop applied doc-by-doc and could stop half-way). Each
-        //    target doc is re-read inside the transaction; a missing doc OR a state
-        //    that no longer matches the recorded 'after' aborts the WHOLE rollback
-        //    (409) instead of clobbering a newer reassignment. A durable Tier A audit
-        //    row commits atomically with the revert.
+        // Execute rollback transactionally on PostgreSQL via custom execute_reassignment_rollback RPC
         try {
-            await adminDb.runTransaction(async (transaction) => {
-                const refs = reverts.map((c) => adminDb.collection(c.collection).doc(c.docId));
-                const snaps = await Promise.all(refs.map((r) => transaction.get(r)));
-
-                // Validate ALL preconditions before writing anything.
-                snaps.forEach((snap, i) => {
-                    const change = reverts[i];
-                    if (!snap.exists) {
-                        throw new RollbackConflictError(`Document ${change.docPath} no longer exists`);
-                    }
-                    const currentData = snap.data() || {};
-                    for (const key of Object.keys(change.after || {})) {
-                        const expected = JSON.stringify((change.after as Record<string, unknown>)[key]);
-                        const actual = JSON.stringify(getByPath(currentData, key));
-                        if (expected !== actual) {
-                            throw new RollbackConflictError(
-                                `${change.docPath}.${key} changed since the operation (expected ${expected}, found ${actual}); rollback aborted`,
-                            );
-                        }
-                    }
-                });
-
-                // All preconditions satisfied → apply the reverts atomically.
-                snaps.forEach((snap, i) => {
-                    const change = reverts[i];
-                    transaction.update(refs[i], change.before as Record<string, unknown>);
-                    revertedDocs.push(change.docPath);
-                    rollbackChanges.push({ ...change, before: change.after, after: change.before });
-                });
-
-
+            const { data: rpcResult, error: rpcError } = await supabase.rpc('execute_reassignment_rollback', {
+                p_operation_id: operationId,
+                p_actor_id: auth.uid,
+                p_actor_label: actorLabel,
+                p_changes: JSON.stringify(reverts)
             });
+
+            if (rpcError) {
+                throw new RollbackConflictError(rpcError.message);
+            }
+
+            if (!rpcResult || !rpcResult.success) {
+                throw new RollbackConflictError(rpcResult?.error || 'Rollback failed precondition checks');
+            }
+
+            revertedDocs.push(...(rpcResult.reverted_docs || []));
+            for (const change of reverts) {
+                rollbackChanges.push({ ...change, before: change.after, after: change.before });
+            }
         } catch (err: unknown) {
             const message = err instanceof RollbackConflictError
                 ? err.message
                 : (err instanceof Error ? err.message : 'unknown error');
-            // Nothing was reverted (atomic). Mark the pending rollback log failed.
+
+            // Nothing was reverted (atomic transaction rollback). Mark the pending rollback log failed in PostgreSQL.
             await supabase
                 .from('reassignment_logs')
                 .update({
@@ -280,6 +313,7 @@ export const POST = withSecurity(
                     meta: { rollbackOf: operationId, error: message, failedAt: new Date().toISOString() },
                 })
                 .eq('operation_id', rollbackOpId);
+
             return NextResponse.json({
                 success: false,
                 error: `Rollback aborted: ${message}`,
@@ -307,8 +341,7 @@ export const POST = withSecurity(
             },
         });
 
-        // Firestore rollback committed atomically. Finalize the
-        // Supabase audit logs best-effort — failures here do NOT undo the rollback.
+        // Finalize the Supabase reassignment logs
         const postErrors: string[] = [];
 
         const { error: updateRollbackError } = await supabase
@@ -319,6 +352,7 @@ export const POST = withSecurity(
                 meta: { rollbackOf: operationId, revertedDocs, completedAt: new Date().toISOString() },
             })
             .eq('operation_id', rollbackOpId);
+
         if (updateRollbackError) {
             console.error('Failed to update rollback log:', updateRollbackError);
             postErrors.push(`Failed to finalize rollback audit log (${updateRollbackError.message})`);
@@ -331,6 +365,7 @@ export const POST = withSecurity(
                 meta: { ...typedOriginalLog.meta, rolledBackBy: rollbackOpId, rolledBackAt: new Date().toISOString() },
             })
             .eq('operation_id', operationId);
+
         if (updateOriginalError) {
             console.error('Failed to update original log status:', updateOriginalError);
             postErrors.push(`Rollback succeeded but original log status could not be updated (${updateOriginalError.message})`);
@@ -340,7 +375,7 @@ export const POST = withSecurity(
             success: true,
             message: postErrors.length === 0
                 ? 'Rollback completed successfully'
-                : 'Rollback committed (Firestore + durable audit); Supabase log update had errors',
+                : 'Rollback committed; Supabase log update had errors',
             rollbackOperationId: rollbackOpId,
             revertedDocs,
             errors: postErrors.length > 0 ? postErrors : undefined,

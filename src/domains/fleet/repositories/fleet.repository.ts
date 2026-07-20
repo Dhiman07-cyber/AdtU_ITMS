@@ -25,7 +25,7 @@ import {
   pgCheckBusCapacity,
   pgIncrementBusCapacity,
   pgDecrementBusCapacity,
-  pgFindBusesWithAvailableCapacity,
+  pgReassignStudentsAtomically,
 } from './fleet.repository.pg';
 import type { Bus, Driver } from '@/lib/types';
 
@@ -91,8 +91,13 @@ export async function decrementBusCapacity(busId: string, shift?: string) {
   return pgDecrementBusCapacity(busId, shift);
 }
 
-export async function findBusesWithAvailableCapacity(shift?: string) {
-  return pgFindBusesWithAvailableCapacity(shift);
+export async function reassignStudentsAtomically(plans: Array<{
+  studentId: string;
+  fromBusId: string;
+  toBusId: string;
+  studentShift?: string;
+}>) {
+  return pgReassignStudentsAtomically(plans);
 }
 
 export type { Bus, Driver };

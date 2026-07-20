@@ -291,11 +291,10 @@ describe('pgBulkDeleteNotifications', () => {
 describe('pgDeleteNotificationsByUser', () => {
   beforeEach(() => { vi.clearAllMocks(); _mockResult = { data: null, error: null }; });
 
-  it('returns total count from both recipient and sender deletions', async () => {
+  it('returns total count from single combined deletion', async () => {
     _mockResult = { error: null, count: 5 };
     const count = await pgDeleteNotificationsByUser('user-1');
-    // Mock returns count:5 for both queries (recipient + sender), sum = 10
-    expect(count).toBe(10);
+    expect(count).toBe(5);
   });
 
   it('returns 0 when no notifications match', async () => {

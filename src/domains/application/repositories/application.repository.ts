@@ -12,6 +12,7 @@ import {
   pgFindByApplicationId,
   pgFindByApplicantUid,
   pgFindAll,
+  pgFindAllPaginated,
   pgFindAllByState,
   pgFindAllByStateAndType,
   pgInsert,
@@ -32,6 +33,10 @@ export async function findByApplicantUid(applicantUid: string): Promise<Applicat
 
 export async function findAll(): Promise<Application[]> {
   return pgFindAll();
+}
+
+export async function findAllPaginated(limit: number, offset: number): Promise<Application[]> {
+  return pgFindAllPaginated(limit, offset);
 }
 
 export async function findAllByState(state: ApplicationState): Promise<Application[]> {

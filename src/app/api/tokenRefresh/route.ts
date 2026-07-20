@@ -64,17 +64,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 4. Determine user collection from role
+    // 4. Determine user role
     const roleData = await resolveUserRole(uid);
-    const roleToCollection: Record<string, string> = {
-      student: 'students',
-      driver: 'drivers',
-      moderator: 'moderators',
-      admin: 'admins',
-    };
-    const targetCollection = roleToCollection[roleData.role] || null;
 
-    if (!targetCollection) {
+    if (!roleData.role) {
       return NextResponse.json(
         { success: false, error: 'User not found' },
         { status: 404 }
@@ -82,7 +75,7 @@ export async function POST(request: NextRequest) {
     }
 
     // 5. Save refreshed token
-    const result = await saveToken(uid, targetCollection, token, platform || 'web');
+    const result = await saveToken(uid, 'students', token, platform || 'web');
 
     if (!result.success) {
       return NextResponse.json(
@@ -91,7 +84,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    console.log(`🔄 FCM token refreshed for ${targetCollection}/${uid}`);
+    console.log(`FCM token refreshed for ${uid}`);
     return NextResponse.json({ success: true });
 
   } catch (error: any) {

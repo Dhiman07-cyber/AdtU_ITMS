@@ -283,9 +283,7 @@ export function isNotificationVisibleToUser(
 
   if (notification.expiryAt) {
     let expiryMillis = 0;
-    if (typeof notification.expiryAt?.toMillis === 'function') {
-      expiryMillis = notification.expiryAt.toMillis();
-    } else if (typeof notification.expiryAt === 'number') {
+    if (typeof notification.expiryAt === 'number') {
       expiryMillis = notification.expiryAt;
     } else if (typeof notification.expiryAt === 'string') {
       expiryMillis = new Date(notification.expiryAt).getTime();

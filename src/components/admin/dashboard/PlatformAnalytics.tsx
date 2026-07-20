@@ -36,6 +36,11 @@ export default function PlatformAnalytics() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isMounted, setIsMounted] = useState(false);
+
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
 
   const fetchAnalytics = async (manual = false) => {
     if (manual) setIsRefreshing(true);
@@ -225,50 +230,52 @@ export default function PlatformAnalytics() {
             </div>
           </div>
           
-          <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
-            <LineChart data={data?.chartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#ffffff03" vertical={false} />
-              <XAxis 
-                dataKey="date" 
-                axisLine={false}
-                tickLine={false}
-                tick={{ fill: '#64748b', fontSize: 9, fontWeight: 700 }}
-                dy={8}
-              />
-              <YAxis hide domain={['auto', 'auto']} />
-              <Tooltip 
-                contentStyle={{ 
-                  backgroundColor: '#0c0e1a', 
-                  border: '1px solid rgba(255,255,255,0.1)', 
-                  borderRadius: '12px', 
-                  fontSize: '10px',
-                  boxShadow: '0 10px 15px -3px rgba(0,0,0,0.5)'
-                }}
-                itemStyle={{ padding: '0px' }}
-                cursor={{ stroke: 'rgba(255,255,255,0.05)', strokeWidth: 1 }}
-              />
-              <Line 
-                type="monotone" 
-                dataKey="users" 
-                name="Active Users"
-                stroke="#3b82f6" 
-                strokeWidth={3} 
-                dot={{ fill: '#3b82f6', r: 3, strokeWidth: 0 }}
-                activeDot={{ r: 5, stroke: '#3b82f6', strokeWidth: 2, fill: '#fff' }}
-                animationDuration={1500} 
-              />
-              <Line 
-                type="monotone" 
-                dataKey="sessions" 
-                name="Sessions"
-                stroke="#a855f7" 
-                strokeWidth={3} 
-                dot={{ fill: '#a855f7', r: 3, strokeWidth: 0 }}
-                activeDot={{ r: 5, stroke: '#a855f7', strokeWidth: 2, fill: '#fff' }}
-                animationDuration={1800} 
-              />
-            </LineChart>
-          </ResponsiveContainer>
+          {isMounted && (
+            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+              <LineChart data={data?.chartData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#ffffff03" vertical={false} />
+                <XAxis 
+                  dataKey="date" 
+                  axisLine={false}
+                  tickLine={false}
+                  tick={{ fill: '#64748b', fontSize: 9, fontWeight: 700 }}
+                  dy={8}
+                />
+                <YAxis hide domain={['auto', 'auto']} />
+                <Tooltip 
+                  contentStyle={{ 
+                    backgroundColor: '#0c0e1a', 
+                    border: '1px solid rgba(255,255,255,0.1)', 
+                    borderRadius: '12px', 
+                    fontSize: '10px',
+                    boxShadow: '0 10px 15px -3px rgba(0,0,0,0.5)'
+                  }}
+                  itemStyle={{ padding: '0px' }}
+                  cursor={{ stroke: 'rgba(255,255,255,0.05)', strokeWidth: 1 }}
+                />
+                <Line 
+                  type="monotone" 
+                  dataKey="users" 
+                  name="Active Users"
+                  stroke="#3b82f6" 
+                  strokeWidth={3} 
+                  dot={{ fill: '#3b82f6', r: 3, strokeWidth: 0 }}
+                  activeDot={{ r: 5, stroke: '#3b82f6', strokeWidth: 2, fill: '#fff' }}
+                  animationDuration={1500} 
+                />
+                <Line 
+                  type="monotone" 
+                  dataKey="sessions" 
+                  name="Sessions"
+                  stroke="#a855f7" 
+                  strokeWidth={3} 
+                  dot={{ fill: '#a855f7', r: 3, strokeWidth: 0 }}
+                  activeDot={{ r: 5, stroke: '#a855f7', strokeWidth: 2, fill: '#fff' }}
+                  animationDuration={1800} 
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          )}
         </div>
 
         <div className="flex items-center justify-center gap-2 text-[8px] text-slate-700 font-bold uppercase tracking-[0.2em]">

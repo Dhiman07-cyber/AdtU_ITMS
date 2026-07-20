@@ -193,14 +193,13 @@ export default function EditRoutePage({ params }: { params: Promise<{ id: string
 
     try {
       const idToken = await currentUser?.getIdToken();
-      const response = await fetch('/api/routes/update', {
+      const response = await fetch(`/api/routes/${id}/update`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${idToken}`
         },
         body: JSON.stringify({
-          routeId: routeData.routeId.match(/^\d+$/) ? `route_${routeData.routeId}` : routeData.routeId,
           routeName: routeData.routeName,
           stops: stops,
           status: routeData.status

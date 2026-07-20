@@ -6,6 +6,7 @@ import { getDriverById } from '@/domains/identity';
 import { getBusById } from '@/domains/fleet';
 import {
   readFeedback,
+  readFeedbackPaginated,
   addFeedback, // Changed from writeFeedback
   cleanupOldFeedback,
   generateFeedbackId,
@@ -217,15 +218,6 @@ export async function GET(request: NextRequest) {
     }
 
     // Read feedback from Firestore
-    let entries = await readFeedback();
-
-    // Trigger cleanup of expired feedback (lazy cleanup)
-    // Only updates DB, returns filtered list if needed, but readFeedback() already returns all currently in DB.
-    // If cleanup runs, next read will be cleaner.
-    // For consistency, we can filter the returned list too based on cleanup logic response.
-    entries = await cleanupOldFeedback(entries);
-
-    // Parse query parameters
     const { searchParams } = new URL(request.url);
     const page = parseInt(searchParams.get('page') || '1');
     const limit = parseInt(searchParams.get('limit') || '25');
@@ -233,10 +225,27 @@ export async function GET(request: NextRequest) {
     const from = searchParams.get('from');
     const to = searchParams.get('to');
 
-    // Filter by search query (in-memory since we fetched all)
-    // For production, use Algolia or Typesense or separate collection
-    // Filter by search query (in-memory since we fetched all)
-    // For production, use Algolia or Typesense or separate collection
+    // Use server-side pagination when no search/date filters
+    // This avoids loading all entries into memory
+    let entries: FeedbackEntry[];
+    let total: number;
+
+    if (!query && !from && !to) {
+      // Server-side pagination - efficient for large datasets
+      const result = await readFeedbackPaginated(page, limit);
+      entries = result.entries;
+      total = result.total;
+    } else {
+      // Filters present - fetch all and filter in memory
+      // (Firestore doesn't support full-text search or complex range filters easily)
+      entries = await readFeedback();
+      total = entries.length;
+    }
+
+    // Trigger cleanup of expired feedback (lazy cleanup)
+    entries = await cleanupOldFeedback(entries);
+
+    // Filter by search query (in-memory since we may have fetched all)
     let filtered = entries;
     if (query) {
       const lowerQuery = query.toLowerCase();
@@ -264,15 +273,16 @@ export async function GET(request: NextRequest) {
       new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
     );
 
-    // Paginate
-    const total = filtered.length;
+    // Paginate (if we used server-side pagination, this is a no-op for first page)
+    // But needed for filtered results
+    const filteredTotal = filtered.length;
     const startIndex = (page - 1) * limit;
     const endIndex = startIndex + limit;
     const paginatedEntries = filtered.slice(startIndex, endIndex);
 
     return NextResponse.json({
       success: true,
-      total,
+      total: query || from || to ? filteredTotal : total,
       page,
       limit,
       items: paginatedEntries

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { adminAuth, adminDb, messaging } from '@/lib/firebase-admin';
-import { getDriverById, getUsersByRole } from '@/domains/identity';
+import { getDriverById, getUsersByRole, getValidFcmTokensForUsers } from '@/domains/identity';
 
 export async function POST(request: Request) {
   try {
@@ -41,18 +41,9 @@ export async function POST(request: Request) {
       const moderatorIds = moderators.map((m) => m.uid);
 
       if (moderatorIds.length > 0) {
-        const moderatorTokens: string[] = [];
-
-        // Fetch tokens from Firestore fcm_tokens collection (infrastructure concern)
-        const tokenSnapshots = await Promise.all(
-          moderatorIds.map((uid: string) => adminDb.collection('fcm_tokens').where('userUid', '==', uid).get())
-        );
-
-        for (const snapshot of tokenSnapshots) {
-          snapshot.docs.forEach((tokenDoc: any) => {
-            moderatorTokens.push(tokenDoc.data().deviceToken);
-          });
-        }
+        // Fetch tokens from PostgreSQL
+        const tokenRecords = await getValidFcmTokensForUsers(moderatorIds);
+        const moderatorTokens = tokenRecords.map(t => t.token);
 
         // Send FCM notification
         if (moderatorTokens.length > 0) {

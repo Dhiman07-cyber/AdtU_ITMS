@@ -14,6 +14,9 @@
 -- Enable extensions
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
+-- Restrict default execution privileges on new functions
+ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
+
 -- =====================================================
 -- SECTION 1: CORE TABLES
 -- =====================================================
@@ -36,7 +39,7 @@ CREATE TABLE IF NOT EXISTS bus_locations (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_bus_locations_bus_id ON bus_locations(bus_id);
+-- idx_bus_locations_bus_id removed: bus_id is the leading column in composite index idx_bus_locations_timestamp_desc(bus_id, timestamp DESC)
 CREATE INDEX IF NOT EXISTS idx_bus_locations_route_id ON bus_locations(route_id);
 CREATE INDEX IF NOT EXISTS idx_bus_locations_timestamp ON bus_locations(timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_bus_locations_trip ON bus_locations(trip_id);
@@ -224,6 +227,7 @@ CREATE INDEX IF NOT EXISTS idx_temp_assignments_bus ON temporary_assignments(bus
 CREATE INDEX IF NOT EXISTS idx_temp_assignments_current_driver ON temporary_assignments(current_driver_uid);
 CREATE INDEX IF NOT EXISTS idx_temp_assignments_active ON temporary_assignments(active) WHERE active = true;
 CREATE INDEX IF NOT EXISTS idx_temp_assignments_expires ON temporary_assignments(ends_at) WHERE active = true;
+CREATE INDEX IF NOT EXISTS idx_temp_assignments_source_request ON temporary_assignments(source_request_id);
 
 -- =====================================================
 -- SECTION 3: REASSIGNMENT LOGS TABLE
@@ -591,7 +595,7 @@ CREATE POLICY "bus_locations_select_anon" ON bus_locations
 
 DROP POLICY IF EXISTS "bus_locations_insert_service" ON bus_locations;
 CREATE POLICY "bus_locations_insert_service" ON bus_locations
-  FOR INSERT WITH CHECK (auth.role() = 'service_role');
+  FOR INSERT TO service_role WITH CHECK (true);
 
 DROP POLICY IF EXISTS "drivers_can_insert_own_location" ON bus_locations;
 CREATE POLICY "drivers_can_insert_own_location" ON bus_locations
@@ -600,11 +604,11 @@ CREATE POLICY "drivers_can_insert_own_location" ON bus_locations
 
 DROP POLICY IF EXISTS "bus_locations_update_service" ON bus_locations;
 CREATE POLICY "bus_locations_update_service" ON bus_locations
-  FOR UPDATE USING (auth.role() = 'service_role');
+  FOR UPDATE TO service_role USING (true);
 
 DROP POLICY IF EXISTS "bus_locations_delete_service" ON bus_locations;
 CREATE POLICY "bus_locations_delete_service" ON bus_locations
-  FOR DELETE USING (auth.role() = 'service_role');
+  FOR DELETE TO service_role USING (true);
 
 -- ========== driver_status policies ==========
 DROP POLICY IF EXISTS "driver_status_select_all" ON driver_status;
@@ -615,7 +619,7 @@ CREATE POLICY "driver_status_select_anon" ON driver_status
 
 DROP POLICY IF EXISTS "driver_status_insert_service" ON driver_status;
 CREATE POLICY "driver_status_insert_service" ON driver_status
-  FOR INSERT WITH CHECK (auth.role() = 'service_role');
+  FOR INSERT TO service_role WITH CHECK (true);
 
 DROP POLICY IF EXISTS "drivers_can_upsert_own_status" ON driver_status;
 CREATE POLICY "drivers_can_upsert_own_status" ON driver_status
@@ -624,7 +628,7 @@ CREATE POLICY "drivers_can_upsert_own_status" ON driver_status
 
 DROP POLICY IF EXISTS "driver_status_update_service" ON driver_status;
 CREATE POLICY "driver_status_update_service" ON driver_status
-  FOR UPDATE USING (auth.role() = 'service_role');
+  FOR UPDATE TO service_role USING (true);
 
 DROP POLICY IF EXISTS "drivers_can_update_own_status" ON driver_status;
 CREATE POLICY "drivers_can_update_own_status" ON driver_status
@@ -633,7 +637,7 @@ CREATE POLICY "drivers_can_update_own_status" ON driver_status
 
 DROP POLICY IF EXISTS "driver_status_delete_service" ON driver_status;
 CREATE POLICY "driver_status_delete_service" ON driver_status
-  FOR DELETE USING (auth.role() = 'service_role');
+  FOR DELETE TO service_role USING (true);
 
 -- Add index on bus_id and driver_uid for faster lookups
 CREATE INDEX IF NOT EXISTS idx_driver_status_bus_id ON driver_status(bus_id);
@@ -659,33 +663,33 @@ WITH CHECK (student_uid = auth.uid()::text);
 
 DROP POLICY IF EXISTS "waiting_flags_update_service" ON waiting_flags;
 DROP POLICY IF EXISTS "Students can update their own waiting flags" ON waiting_flags;
-CREATE POLICY "Students can update their own waiting flags" 
+DROP POLICY IF EXISTS "Drivers can update waiting flags for their bus" ON waiting_flags;
+DROP POLICY IF EXISTS "waiting_flags_update_authenticated" ON waiting_flags;
+CREATE POLICY "waiting_flags_update_authenticated" 
 ON waiting_flags FOR UPDATE TO authenticated 
-USING (student_uid = auth.uid()::text);
+USING (
+  student_uid = auth.uid()::text
+  OR EXISTS (
+    SELECT 1 FROM driver_status 
+    WHERE driver_status.driver_uid = auth.uid()::text
+    AND driver_status.bus_id = waiting_flags.bus_id
+  )
+);
 
 DROP POLICY IF EXISTS "waiting_flags_delete_service" ON waiting_flags;
 DROP POLICY IF EXISTS "Students can delete their own waiting flags" ON waiting_flags;
-CREATE POLICY "Students can delete their own waiting flags" 
-ON waiting_flags FOR DELETE TO authenticated 
-USING (student_uid = auth.uid()::text);
-
-DROP POLICY IF EXISTS "Drivers can update waiting flags for their bus" ON waiting_flags;
-CREATE POLICY "Drivers can update waiting flags for their bus" 
-ON waiting_flags FOR UPDATE TO authenticated 
-USING (EXISTS (
-  SELECT 1 FROM driver_status 
-  WHERE driver_status.driver_uid = auth.uid()::text
-  AND driver_status.bus_id = waiting_flags.bus_id
-));
-
 DROP POLICY IF EXISTS "Drivers can delete waiting flags for their bus" ON waiting_flags;
-CREATE POLICY "Drivers can delete waiting flags for their bus" 
+DROP POLICY IF EXISTS "waiting_flags_delete_authenticated" ON waiting_flags;
+CREATE POLICY "waiting_flags_delete_authenticated" 
 ON waiting_flags FOR DELETE TO authenticated 
-USING (EXISTS (
-  SELECT 1 FROM driver_status 
-  WHERE driver_status.driver_uid = auth.uid()::text
-  AND driver_status.bus_id = waiting_flags.bus_id
-));
+USING (
+  student_uid = auth.uid()::text
+  OR EXISTS (
+    SELECT 1 FROM driver_status 
+    WHERE driver_status.driver_uid = auth.uid()::text
+    AND driver_status.bus_id = waiting_flags.bus_id
+  )
+);
 
 -- ========== driver_location_updates policies (SECURED) ==========
 DROP POLICY IF EXISTS "driver_location_updates_select_all" ON driver_location_updates;
@@ -696,7 +700,7 @@ CREATE POLICY "driver_location_updates_select_restricted" ON driver_location_upd
 
 DROP POLICY IF EXISTS "driver_location_updates_insert_service" ON driver_location_updates;
 CREATE POLICY "driver_location_updates_insert_service" ON driver_location_updates
-  FOR INSERT WITH CHECK (auth.role() = 'service_role');
+  FOR INSERT TO service_role WITH CHECK (true);
 
 DROP POLICY IF EXISTS "drivers_can_insert_own_updates" ON driver_location_updates;
 CREATE POLICY "drivers_can_insert_own_updates" ON driver_location_updates
@@ -705,7 +709,7 @@ CREATE POLICY "drivers_can_insert_own_updates" ON driver_location_updates
 
 DROP POLICY IF EXISTS "driver_location_updates_delete_service" ON driver_location_updates;
 CREATE POLICY "driver_location_updates_delete_service" ON driver_location_updates
-  FOR DELETE USING (auth.role() = 'service_role');
+  FOR DELETE TO service_role USING (true);
 
 
 -- ========== route_cache policies ==========
@@ -716,11 +720,11 @@ CREATE POLICY "route_cache_select_anon" ON route_cache
 
 DROP POLICY IF EXISTS "route_cache_insert_service" ON route_cache;
 CREATE POLICY "route_cache_insert_service" ON route_cache
-  FOR INSERT WITH CHECK (auth.role() = 'service_role');
+  FOR INSERT TO service_role WITH CHECK (true);
 
 DROP POLICY IF EXISTS "route_cache_update_service" ON route_cache;
 CREATE POLICY "route_cache_update_service" ON route_cache
-  FOR UPDATE USING (auth.role() = 'service_role');
+  FOR UPDATE TO service_role USING (true);
 
 -- ========== driver_swap_requests policies (SECURED) ==========
 DROP POLICY IF EXISTS "Drivers can read their swap requests" ON driver_swap_requests;
@@ -757,33 +761,33 @@ CREATE POLICY "temporary_assignments_select_involved" ON temporary_assignments
 
 DROP POLICY IF EXISTS "temporary_assignments_insert_service" ON temporary_assignments;
 CREATE POLICY "temporary_assignments_insert_service" ON temporary_assignments
-  FOR INSERT WITH CHECK (auth.role() = 'service_role');
+  FOR INSERT TO service_role WITH CHECK (true);
 
 DROP POLICY IF EXISTS "temporary_assignments_update_service" ON temporary_assignments;
 CREATE POLICY "temporary_assignments_update_service" ON temporary_assignments
-  FOR UPDATE USING (auth.role() = 'service_role');
+  FOR UPDATE TO service_role USING (true);
 
 DROP POLICY IF EXISTS "temporary_assignments_delete_service" ON temporary_assignments;
 CREATE POLICY "temporary_assignments_delete_service" ON temporary_assignments
-  FOR DELETE USING (auth.role() = 'service_role');
+  FOR DELETE TO service_role USING (true);
 
 -- ========== reassignment_logs policies (SECURED) ==========
 DROP POLICY IF EXISTS "reassignment_logs_select_all" ON public.reassignment_logs;
 DROP POLICY IF EXISTS "reassignment_logs_select_service" ON public.reassignment_logs;
 CREATE POLICY "reassignment_logs_select_service" ON public.reassignment_logs
-  FOR SELECT USING (auth.role() = 'service_role');
+  FOR SELECT TO service_role USING (true);
 
 DROP POLICY IF EXISTS "reassignment_logs_insert_service" ON public.reassignment_logs;
 CREATE POLICY "reassignment_logs_insert_service" ON public.reassignment_logs
-  FOR INSERT WITH CHECK (auth.role() = 'service_role');
+  FOR INSERT TO service_role WITH CHECK (true);
 
 DROP POLICY IF EXISTS "reassignment_logs_update_service" ON public.reassignment_logs;
 CREATE POLICY "reassignment_logs_update_service" ON public.reassignment_logs
-  FOR UPDATE USING (auth.role() = 'service_role');
+  FOR UPDATE TO service_role USING (true);
 
 DROP POLICY IF EXISTS "reassignment_logs_delete_service" ON public.reassignment_logs;
 CREATE POLICY "reassignment_logs_delete_service" ON public.reassignment_logs
-  FOR DELETE USING (auth.role() = 'service_role');
+  FOR DELETE TO service_role USING (true);
 
 -- ========== payments policies (SECURED) ==========
 DROP POLICY IF EXISTS "payments_select_all" ON public.payments;
@@ -794,18 +798,18 @@ CREATE POLICY "payments_select_own" ON public.payments
 
 DROP POLICY IF EXISTS "payments_insert_service" ON public.payments;
 CREATE POLICY "payments_insert_service" ON public.payments
-  FOR INSERT WITH CHECK (auth.role() = 'service_role');
+  FOR INSERT TO service_role WITH CHECK (true);
 
 DROP POLICY IF EXISTS "payments_update_service" ON public.payments;
 CREATE POLICY "payments_update_service" ON public.payments
-  FOR UPDATE USING (auth.role() = 'service_role');
+  FOR UPDATE TO service_role USING (true);
 
 -- ⚠️ PAYMENTS ARE IMMUTABLE - NO DELETIONS ALLOWED (not even service_role)
 DROP POLICY IF EXISTS "payments_delete_service" ON public.payments;
 DROP POLICY IF EXISTS "payments_delete_blocked" ON public.payments;
 DROP POLICY IF EXISTS "payments_no_delete" ON public.payments;
 CREATE POLICY "payments_no_delete" ON public.payments
-  FOR DELETE USING (false); -- BLOCKED: Payments are permanent financial records
+  FOR DELETE TO PUBLIC USING (false); -- BLOCKED: Payments are permanent financial records
 
 
 
@@ -814,9 +818,17 @@ CREATE POLICY "payments_no_delete" ON public.payments
 -- =====================================================
 
 -- 1. Tighten default access
-REVOKE ALL ON ALL TABLES IN SCHEMA public FROM anon;
-REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM anon;
-REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM anon;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
+
+REVOKE ALL ON ALL TABLES IN SCHEMA public FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM PUBLIC, anon, authenticated;
+
+REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO service_role;
+
+GRANT EXECUTE ON FUNCTION public.check_bus_lock(TEXT) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.get_effective_driver(TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.get_pending_missed_bus_requests_for_trip(UUID) TO authenticated;
 
 -- 2. Explicitly allow anon/authenticated read access to tracking tables
 GRANT SELECT ON public.waiting_flags TO anon, authenticated;
@@ -925,19 +937,20 @@ CREATE POLICY "active_trips_select_anon" ON public.active_trips
 
 DROP POLICY IF EXISTS "active_trips_insert_service" ON public.active_trips;
 CREATE POLICY "active_trips_insert_service" ON public.active_trips
-  FOR INSERT WITH CHECK (auth.role() = 'service_role');
+  FOR INSERT TO service_role WITH CHECK (true);
 
 DROP POLICY IF EXISTS "active_trips_update_service" ON public.active_trips;
 CREATE POLICY "active_trips_update_service" ON public.active_trips
-  FOR UPDATE USING (auth.role() = 'service_role');
+  FOR UPDATE TO service_role USING (true);
 
 DROP POLICY IF EXISTS "active_trips_delete_service" ON public.active_trips;
 CREATE POLICY "active_trips_delete_service" ON public.active_trips
-  FOR DELETE USING (auth.role() = 'service_role');
+  FOR DELETE TO service_role USING (true);
 
 GRANT SELECT ON public.active_trips TO authenticated;
 
 -- Function to check if a bus is locked
+DROP FUNCTION IF EXISTS public.check_bus_lock(TEXT);
 CREATE OR REPLACE FUNCTION check_bus_lock(p_bus_id TEXT)
 RETURNS TABLE(
   is_locked BOOLEAN,
@@ -1052,15 +1065,15 @@ CREATE POLICY "missed_bus_requests_select_anon" ON public.missed_bus_requests
 
 DROP POLICY IF EXISTS "missed_bus_requests_insert_service" ON public.missed_bus_requests;
 CREATE POLICY "missed_bus_requests_insert_service" ON public.missed_bus_requests
-  FOR INSERT WITH CHECK (auth.role() = 'service_role');
+  FOR INSERT TO service_role WITH CHECK (true);
 
 DROP POLICY IF EXISTS "missed_bus_requests_update_service" ON public.missed_bus_requests;
 CREATE POLICY "missed_bus_requests_update_service" ON public.missed_bus_requests
-  FOR UPDATE USING (auth.role() = 'service_role');
+  FOR UPDATE TO service_role USING (true);
 
 DROP POLICY IF EXISTS "missed_bus_requests_delete_service" ON public.missed_bus_requests;
 CREATE POLICY "missed_bus_requests_delete_service" ON public.missed_bus_requests
-  FOR DELETE USING (auth.role() = 'service_role');
+  FOR DELETE TO service_role USING (true);
 
 GRANT SELECT ON public.missed_bus_requests TO authenticated;
 

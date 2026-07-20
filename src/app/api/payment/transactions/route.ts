@@ -134,7 +134,7 @@ export async function GET(request: NextRequest) {
         }
       }
 
-      const payments = await getPaymentsByStudent(userId, enrollmentId);
+      const { payments, total } = await getPaymentsByStudent(userId, enrollmentId, page, limit);
 
       // D8: Fetch pending renewal application from PostgreSQL instead of Firestore
       const pendingRenewalApp = await import('@/domains/application').then(m => m.getByApplicantUid(userId));
@@ -168,7 +168,9 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({
         success: true,
         transactions,
-        total: transactions.length
+        total: total + pendingRequests.length,
+        page,
+        limit
       });
     }
 

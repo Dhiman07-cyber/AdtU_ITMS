@@ -13,7 +13,7 @@ import {
   Cell,
   ResponsiveContainer
 } from 'recharts';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { cn } from '@/lib/utils';
 import { ShiftDistributionData } from './types';
 import { Badge } from '@/components/ui/badge';
@@ -31,6 +31,11 @@ export default function StudentDistribution({ distribution, totalStudents }: Stu
   const eveningPercent = totalStudents > 0 ? Math.round((eveningData.value / totalStudents) * 100) : 0;
 
   const [activeIndex, setActiveIndex] = useState(-1);
+  const [isMounted, setIsMounted] = useState(false);
+
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
 
   const activeData = activeIndex !== -1 ? distribution[activeIndex] : null;
 
@@ -80,52 +85,54 @@ export default function StudentDistribution({ distribution, totalStudents }: Stu
             
             <div className="absolute inset-0 rounded-full border border-indigo-500/10 pointer-events-none scale-105 group-hover:scale-110 transition-transform duration-1000 z-10" />
 
-            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
-              <PieChart>
-                <Pie
-                  data={distribution}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={68}
-                  outerRadius={88}
-                  paddingAngle={8}
-                  cornerRadius={10}
-                  stroke="none"
-                  dataKey="value"
-                  onMouseEnter={onPieEnter}
-                  onMouseLeave={onPieLeave}
-                  activeShape={false}
-                  isAnimationActive={true}
-                  animationBegin={0}
-                  animationDuration={1500}
-                >
-                  {distribution.map((entry, index) => (
-                    <Cell 
-                      key={`cell-${index}`} 
-                      fill={entry.name === 'Morning' ? 'url(#morningGradient)' : 'url(#eveningGradient)'} 
-                      stroke="none"
-                      style={{ 
-                        outline: 'none',
-                        cursor: 'pointer',
-                        filter: activeIndex === index ? 'saturate(1.2) brightness(1.1)' : 'none',
-                        opacity: activeIndex === -1 || activeIndex === index ? 1 : 0.4
-                      }}
-                      className="transition-all duration-300"
-                    />
-                  ))}
-                </Pie>
-                <defs>
-                   <linearGradient id="morningGradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#fbbf24" />
-                      <stop offset="100%" stopColor="#f59e0b" />
-                   </linearGradient>
-                   <linearGradient id="eveningGradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#6366f1" />
-                      <stop offset="100%" stopColor="#4f46e5" />
-                   </linearGradient>
-                </defs>
-              </PieChart>
-            </ResponsiveContainer>
+            {isMounted && (
+              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+                <PieChart>
+                  <Pie
+                    data={distribution}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={68}
+                    outerRadius={88}
+                    paddingAngle={8}
+                    cornerRadius={10}
+                    stroke="none"
+                    dataKey="value"
+                    onMouseEnter={onPieEnter}
+                    onMouseLeave={onPieLeave}
+                    activeShape={false}
+                    isAnimationActive={true}
+                    animationBegin={0}
+                    animationDuration={1500}
+                  >
+                    {distribution.map((entry, index) => (
+                      <Cell
+                        key={`cell-${index}`}
+                        fill={entry.name === 'Morning' ? 'url(#morningGradient)' : 'url(#eveningGradient)'}
+                        stroke="none"
+                        style={{
+                          outline: 'none',
+                          cursor: 'pointer',
+                          filter: activeIndex === index ? 'saturate(1.2) brightness(1.1)' : 'none',
+                          opacity: activeIndex === -1 || activeIndex === index ? 1 : 0.4
+                        }}
+                        className="transition-all duration-300"
+                      />
+                    ))}
+                  </Pie>
+                  <defs>
+                     <linearGradient id="morningGradient" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#fbbf24" />
+                        <stop offset="100%" stopColor="#f59e0b" />
+                     </linearGradient>
+                     <linearGradient id="eveningGradient" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#6366f1" />
+                        <stop offset="100%" stopColor="#4f46e5" />
+                     </linearGradient>
+                  </defs>
+                </PieChart>
+              </ResponsiveContainer>
+            )}
           </div>
 
           {/* Shift Details: Premium Horizontal Stack */}
@@ -171,7 +178,7 @@ export default function StudentDistribution({ distribution, totalStudents }: Stu
                 "w-11 h-11 rounded-2xl border flex items-center justify-center mr-4 transition-all",
                 activeData?.name === 'Evening' ? "bg-indigo-500/20 border-indigo-500/40" : "bg-indigo-500/10 border-indigo-500/20"
               )}>
-                <Moon className="w-5 h-5 text-indigo-400" />
+                <Moon className="w-5 h-5 text-indigo-500" />
               </div>
               <div className="flex flex-col">
                 <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-0.5">Evening Batch</span>
@@ -182,25 +189,6 @@ export default function StudentDistribution({ distribution, totalStudents }: Stu
               </div>
             </motion.div>
           </div>
-        </div>
-
-        {/* New Premium Footer Section */}
-        <div className="mt-4 pt-4 border-t border-white/5 flex items-center justify-between">
-           <div className="flex items-center gap-4">
-              <div className="flex -space-x-2">
-                 {[1, 2, 3].map((i) => (
-                    <div key={i} className="w-6 h-6 rounded-full border-2 border-slate-900 bg-slate-800 flex items-center justify-center overflow-hidden">
-                       <Users className="w-3 h-3 text-slate-500" />
-                    </div>
-                 ))}
-              </div>
-              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-tight">Active Fleet Sync</span>
-           </div>
-           <div className="flex items-center gap-2">
-              <div className="px-2 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-500/20">
-                 <span className="text-[9px] font-black text-emerald-500 uppercase tracking-widest">LIVE DATA</span>
-              </div>
-           </div>
         </div>
       </CardContent>
     </Card>

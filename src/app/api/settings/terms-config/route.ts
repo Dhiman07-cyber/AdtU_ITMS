@@ -12,7 +12,7 @@ export async function GET(req: NextRequest) {
     try {
         const termsConfigResult = await getLegalConfig('terms');
         let config = termsConfigResult.data;
-        let source = 'postgresql';
+        let source = 'firestore';
 
         // Inject App Name dynamically
         try {

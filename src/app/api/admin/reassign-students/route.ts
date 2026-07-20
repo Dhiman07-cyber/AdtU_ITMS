@@ -4,10 +4,10 @@ import { getSupabaseServer } from '@/lib/supabase-server';
 import { withSecurity } from '@/lib/security/api-security';
 import { ReassignStudentsSchema } from '@/lib/security/validation-schemas';
 import { RateLimits } from '@/lib/security/rate-limiter';
-import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
+import { requireModeratorPermission, requireAdminPermission } from '@/lib/security/moderator-permissions';
 import { createAuditEvent, type AuditActorRole } from '@/domains/audit';
 import { normalizeShift, getShiftDeltas } from '@/lib/utils/shift-utils';
-import { decrementBusCapacity, incrementBusCapacity, getAllBuses, getBusById } from '@/domains/fleet';
+import { getAllBuses, getBusById, reassignStudentsAtomically } from '@/domains/fleet';
 import crypto from 'crypto';
 import { getStudentById, updateStudent } from '@/domains/identity';
 import { getUpdaterInfo } from '@/lib/utils/updatedBy';
@@ -26,6 +26,7 @@ type ReassignmentAssignment = {
 type ReassignStudentsBody = {
     assignments: ReassignmentAssignment[];
     sourceBusId: string;
+    opId?: string; // client-provided idempotency key
 };
 
 type BusLoadDeltas = { morningDelta: number; eveningDelta: number };
@@ -43,13 +44,31 @@ export const POST = withSecurity<ReassignStudentsBody>(
     async (_request, { auth, body }) => {
         const currentUserUid = auth.uid;
         const currentUserRole = auth.role;
-        const { assignments, sourceBusId } = body;
+        const { assignments, sourceBusId, opId } = body;
 
-        const permissionDenied = await requireModeratorPermission(auth, 'students', 'canReassign');
+        const permissionDenied = await requireAdminPermission(auth);
         if (permissionDenied) return permissionDenied;
 
         if (!assignments || assignments.length === 0) {
             return NextResponse.json({ success: false, error: 'No assignments provided' }, { status: 400 });
+        }
+
+        // Idempotency key (opId) — allows safe retry on network failure
+        if (opId) {
+            const supabase = getSupabaseServer();
+            const { data: existingOp } = await supabase
+                .from('audit_events')
+                .select('id')
+                .eq('metadata->>operationId', opId)
+                .maybeSingle();
+            if (existingOp) {
+                return NextResponse.json({
+                    success: true,
+                    message: 'Operation already processed (idempotent)',
+                    idempotent: true,
+                    operationId: opId,
+                });
+            }
         }
 
         // 1. Parallel Initial Data Fetching
@@ -76,7 +95,7 @@ export const POST = withSecurity<ReassignStudentsBody>(
         const busPgData = new Map<string, any>();
         const busLoadChanges = new Map<string, BusLoadDeltas>();
         const effectiveAssignments: ReassignmentAssignment[] = [];
-        const operationId = `student_reassignment_${Date.now()}_${crypto.randomUUID()}`;
+        const operationId = opId || `student_reassignment_${Date.now()}_${crypto.randomUUID()}`;
 
         try {
             // ── Phase 1: Read student docs from PostgreSQL + bus docs from PG ──
@@ -182,36 +201,19 @@ export const POST = withSecurity<ReassignStudentsBody>(
                 }
             }
 
-            // ── Phase 3: PG capacity mutations (source of truth) ──
-            const pgCompensations: Array<() => Promise<any>> = [];
+            // ── Phase 3: Atomic reassignment via RPC (replaces sequential mutations) ──
+            const rpcPlans = effectiveAssignments.map(a => ({
+                studentId: a.studentId,
+                fromBusId: a.fromBusId,
+                toBusId: a.toBusId,
+                studentShift: a.shift,
+            }));
 
-            for (const a of effectiveAssignments) {
-                const anyA = a as any;
-                const originalShift = anyA._originalShift;
-                const currentBusId = (studentRecords.get(a.studentId) || {}).busId || (studentRecords.get(a.studentId) || {}).assignedBusId || '';
+            await reassignStudentsAtomically(rpcPlans);
 
-                if (currentBusId && currentBusId === a.fromBusId) {
-                    await decrementBusCapacity(a.fromBusId, originalShift);
-                    pgCompensations.push(() => incrementBusCapacity(a.fromBusId, originalShift));
-                }
-
-                await incrementBusCapacity(a.toBusId, a.shift);
-                pgCompensations.push(() => decrementBusCapacity(a.toBusId, a.shift));
-            }
-
-            // ── Phase 4: PostgreSQL updates ──
-            try {
-                for (const a of effectiveAssignments) {
-                    const anyA = a as any;
-                    await updateStudent(a.studentId, anyA._studentUpdateData);
-                }
-            } catch (updErr) {
-                // Compensate all PG capacity mutations
-                for (const comp of pgCompensations.reverse()) {
-                    await comp().catch(() => {});
-                }
-                throw updErr;
-            }
+            // ── Phase 4: PostgreSQL student profile updates (now handled by RPC) ──
+            // The RPC already updated student_profiles (bus_id, route_id, shift).
+            // No further student updates needed here.
 
         } catch (error) {
             if (error instanceof ReassignmentValidationError) {
@@ -295,7 +297,7 @@ export const POST = withSecurity<ReassignStudentsBody>(
                         status: 'committed',
                         summary: `Reassigned ${effectiveAssignments.length} student(s) from ${sourceLabel} to ${destLabels}`,
                         changes: changes,
-                        meta: { studentCount: effectiveAssignments.length, sourceBusId, targetBuses, busLoadChanges: Object.fromEntries(busLoadChanges) },
+                        meta: { studentCount: effectiveAssignments.length, sourceBusId, targetBuses, busLoadChanges: Object.fromEntries(busLoadChanges), idempotencyKey: opId || null },
                     }]);
                     auditWritten = true;
                     break;

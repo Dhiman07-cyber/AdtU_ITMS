@@ -14,6 +14,7 @@ import * as Notification from '@/domains/notification';
 import { upsertMarker } from '@/domains/admin';
 import * as fleetService from '@/domains/fleet/services/fleet.service';
 import { getStudentById, updateStudent, deleteStudent, deleteUser, getStudentsByStatuses } from '@/domains/identity';
+import { deleteUserAndData } from '@/lib/cleanup-helpers';
 
 // Configure Cloudinary
 if (process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME) {
@@ -140,7 +141,6 @@ export async function GET(request: NextRequest) {
                 // Check using optimized stored-date functions with dynamic config override
                 const needsSoftBlock = shouldBlockAccessFromStoredDates(studentCheckData, null, config);
                 const needsHardDelete = shouldHardDeleteFromStoredDates(studentCheckData, null, config);
-
                 // --- HARD DELETE EXECUTION ---
                 if (needsHardDelete) {
                     // SAFETY CHECK: Log before deletion
@@ -170,121 +170,22 @@ export async function GET(request: NextRequest) {
                         }
                     }
 
-                    // 1. Delete profile photo from Cloudinary
-                    const profilePhotoUrl = studentData.profilePhotoUrl || studentData.profileImage || studentData.photoUrl || studentData.imageUrl;
-                    if (profilePhotoUrl && cloudinary.config().api_key) {
-                        try {
-                            const url = new URL(profilePhotoUrl);
-                            const pathParts = url.pathname.split('/');
-                            const uploadIndex = pathParts.findIndex(part => part === 'upload');
-                            if (uploadIndex !== -1) {
-                                const afterUpload = pathParts.slice(uploadIndex + 1);
-                                const fileName = afterUpload[afterUpload.length - 1];
-                                if (fileName) {
-                                    const publicIdParts = afterUpload.filter(part => !part.startsWith('v') || isNaN(Number(part.substring(1))));
-                                    const lastPart = publicIdParts[publicIdParts.length - 1];
-                                    const nameWithoutExtension = lastPart.split('.').slice(0, -1).join('.');
-                                    publicIdParts[publicIdParts.length - 1] = nameWithoutExtension;
-                                    const publicId = publicIdParts.join('/');
-                                    await cloudinary.uploader.destroy(publicId);
-                                    console.log(`   ✅ Deleted Cloudinary image: ${publicId}`);
-                                }
-                            }
-                        } catch (cloudErr) {
-                            console.warn(`   ⚠️ Cloudinary delete warning for ${uid}:`, cloudErr);
-                        }
+                    const freshBusId = studentData.busId || studentData.assignedBusId || null;
+                    const freshShift = studentData.shift || null;
+                    const freshShouldDecrement = !!freshBusId && !wasSeatReleased(studentData);
+                    const fullName = studentData.fullName || studentData.name || '';
+
+                    // Call the consolidated canonical deletion flow
+                    const result = await deleteUserAndData(uid, 'student');
+
+                    if (!result.success) {
+                        console.error(`❌ Automated hard delete failed for student ${uid}:`, result.error);
+                        results.errors.push(`Hard delete failed for student ${uid}`);
+                        continue;
                     }
 
-                    // 2. Delete FCM tokens
-                    const fcmSnapshot = await adminDb.collection('fcm_tokens').where('userUid', '==', uid).limit(400).get();
-                    if (!fcmSnapshot.empty) {
-                        const batch = adminDb.batch();
-                        fcmSnapshot.docs.forEach((d: any) => batch.delete(d.ref));
-                        await batch.commit();
-                        console.log(`   ✅ Deleted ${fcmSnapshot.size} FCM tokens`);
-                    }
-
-                    // 3. Delete waiting flags
-                    const waitingSnapshot = await adminDb.collection('waiting_flags').where('student_uid', '==', uid).limit(400).get();
-                    if (!waitingSnapshot.empty) {
-                        const batch = adminDb.batch();
-                        waitingSnapshot.docs.forEach((d: any) => batch.delete(d.ref));
-                        await batch.commit();
-                        console.log(`   ✅ Deleted ${waitingSnapshot.size} waiting flags`);
-                    }
-
-                    // 4. Delete profile update requests
-                    const profileRequestsSnapshot = await adminDb.collection('profile_update_requests').where('studentUid', '==', uid).limit(400).get();
-                    if (!profileRequestsSnapshot.empty) {
-                        const batch = adminDb.batch();
-                        profileRequestsSnapshot.docs.forEach((d: any) => batch.delete(d.ref));
-                        await batch.commit();
-                        console.log(`   ✅ Deleted ${profileRequestsSnapshot.size} profile update requests`);
-                    }
-
-                    // 6. Delete from Firebase Auth (best-effort, pre-transaction).
-                    //    External system; cannot be part of the Firestore transaction.
-                    try {
-                        try {
-                            const userRecord = await adminAuth.getUser(uid);
-                            const hasGoogleProvider = userRecord.providerData.some((provider: any) => provider.providerId === 'google.com');
-
-                            if (hasGoogleProvider) {
-                                await adminAuth.updateUser(uid, { providerToDelete: 'google.com' });
-                                console.log(`   ℹ️ Disconnected Google provider`);
-                            }
-                        } catch (getUserErr) {
-                            // User might not exist
-                        }
-                        await adminAuth.deleteUser(uid);
-                        console.log(`   ✅ Deleted Auth user`);
-                    } catch (authErr: any) {
-                        if (!authErr.message?.includes('no user record') && !authErr.code?.includes('user-not-found')) {
-                            console.warn(`   ⚠️ Auth delete warning:`, authErr.message);
-                        }
-                    }
-
-                    // 7. Tier A — hard delete: decrement bus seat via PG, then
-                    //    delete student/user from PG and Firestore mirror.
-                    let seatDecremented = false;
-                    let auditEvent: AuditEventInsert | null = null;
-                    let freshBusId: string | null = null;
-                    let freshShift: string | null = null;
-                    let freshShouldDecrement = false;
-                    let fullName = '';
-
-                    try {
-                        // Read fresh student data from PG via Domain for capacity decrement
-                        const freshStudent = await getStudentById(uid);
-
-                        if (freshStudent) {
-                            freshBusId = freshStudent.busId || freshStudent.assignedBusId;
-                            freshShift = freshStudent.shift;
-                            freshShouldDecrement = !!freshBusId && !wasSeatReleased(freshStudent);
-                            fullName = freshStudent.fullName || '';
-
-                            if (freshShouldDecrement) {
-                                try {
-                                    const decResult = await fleetService.decrementBusCapacity(freshBusId, freshShift);
-                                    seatDecremented = decResult.success;
-                                } catch (decErr: any) {
-                                    console.warn(`   ⚠️ Bus capacity decrement failed for ${uid}:`, decErr.message);
-                                }
-                            }
-                        }
-                    } catch (readErr: any) {
-                        console.warn(`   ⚠️ Failed to read student for capacity decrement:`, readErr.message);
-                    }
-
-                    // Delete student/user from PostgreSQL (canonical datastore)
-                    try {
-                        await deleteStudent(uid);
-                        await deleteUser(uid);
-                    } catch (pgDelErr: any) {
-                        console.warn(`   ⚠️ PostgreSQL delete warning for ${uid}:`, pgDelErr.message);
-                    }
-
-                    auditEvent = {
+                    // Emit audit event only after successful completion of the entire deletion workflow
+                    const auditEvent: AuditEventInsert = {
                         action: 'student_hard_deleted',
                         actor_id: SYSTEM_ACTOR.id,
                         actor_name: SYSTEM_ACTOR.name,
@@ -297,14 +198,14 @@ export async function GET(request: NextRequest) {
                         severity: 'high',
                         metadata: {
                             before: {
-                                enrollmentId: null,
+                                enrollmentId: studentData.enrollmentId || null,
                                 busId: freshBusId || null,
                                 shift: freshShift || null,
-                                status: null,
+                                status: studentData.status || null,
                                 validUntil: validUntilStr,
-                                sessionEndYear: null,
+                                sessionEndYear: studentData.sessionEndYear || null,
                                 hardBlock: hardBlockStr || null,
-                                seatReleasedAt: null,
+                                seatReleasedAt: studentData.seatReleasedAt || null,
                             },
                             after: { deleted: true },
                             seatDecremented: freshShouldDecrement,
@@ -314,10 +215,9 @@ export async function GET(request: NextRequest) {
                         },
                     };
 
-                    if (auditEvent) void createAuditEvent(auditEvent);
+                    void createAuditEvent(auditEvent);
 
-                    console.log(`   ✅ Hard-deleted student ${uid} (seatDecremented=${seatDecremented})`);
-
+                    console.log(`   ✅ Hard-deleted student ${uid} successfully`);
                     results.hardDeleted++;
                     continue; // Skip soft block check since user is gone
                 }
@@ -343,49 +243,50 @@ export async function GET(request: NextRequest) {
                         if (currentStatus !== 'active') {
                             didBlock = false;
                         } else {
-                            const sbBusId = releaseSeat ? (freshStudent?.busId || freshStudent?.assignedBusId || studentData.busId || null) : null;
+                            const sbBusId = freshStudent?.busId || freshStudent?.assignedBusId || studentData.busId || null;
                             const sbShift = freshStudent?.shift || studentData.shift;
                             const sbFullName = freshStudent?.fullName || studentData.fullName || '';
 
-                            // Decrement bus capacity via PG if releasing seat
-                            let decremented = false;
-                            if (releaseSeat && sbBusId) {
-                                try {
-                                    const decResult = await fleetService.decrementBusCapacity(sbBusId, sbShift);
-                                    decremented = decResult.success;
-                                } catch (decErr: any) {
-                                    console.warn(`   ⚠️ Bus capacity decrement failed for soft block ${uid}:`, decErr.message);
-                                }
-                            }
-
-                            // Update student status in PG via Domain (canonical)
-                            await updateStudent(uid, {
-                                status: 'soft_blocked',
-                                softBlockedAt: nowIso,
-                                ...(releaseSeat ? { seatReleasedAt: nowIso } : {})
+                            // Call the atomic RPC to soft-block and release the seat
+                            const supabase = getSupabaseServer();
+                            const { data: rpcResult, error: rpcError } = await supabase.rpc('soft_block_student_with_seat_release', {
+                                p_student_uid: uid,
+                                p_bus_id: releaseSeat ? sbBusId : null,
+                                p_shift: sbShift,
+                                p_release_seat: releaseSeat,
+                                p_soft_blocked_at: nowIso,
+                                p_seat_released_at: nowIso
                             });
 
-                            auditEvent = {
-                                action: releaseSeat ? 'student_soft_blocked_seat_released' : 'student_soft_blocked',
-                                actor_id: SYSTEM_ACTOR.id,
-                                actor_name: SYSTEM_ACTOR.name,
-                                actor_role: SYSTEM_ACTOR.role,
-                                target_id: uid,
-                                target_type: 'student',
-                                target_name: sbFullName,
-                                category: 'system',
-                                summary: (releaseSeat ? 'Student soft-blocked (seat released): ' : 'Student soft-blocked: ') + sbFullName,
-                                severity: 'high',
-                                metadata: {
-                                    before: { status: 'active', busId: sbBusId, shift: sbShift || null },
-                                    after: { status: 'soft_blocked', seatReleased: releaseSeat, seatDecremented: decremented },
-                                    busId: sbBusId,
-                                    at: nowIso,
-                                    reason: 'soft_block',
-                                    correlationId: uid,
-                                },
-                            };
-                            didBlock = true;
+                            if (rpcError) {
+                                console.error(`   ❌ Atomic soft-block RPC failed for student ${uid}:`, rpcError.message);
+                                didBlock = false;
+                            } else if (!rpcResult || !rpcResult.success) {
+                                console.warn(`   ⚠️ Atomic soft-block RPC warning for student ${uid}:`, rpcResult?.error || 'Unknown RPC warning');
+                                didBlock = false;
+                            } else {
+                                auditEvent = {
+                                    action: releaseSeat ? 'student_soft_blocked_seat_released' : 'student_soft_blocked',
+                                    actor_id: SYSTEM_ACTOR.id,
+                                    actor_name: SYSTEM_ACTOR.name,
+                                    actor_role: SYSTEM_ACTOR.role,
+                                    target_id: uid,
+                                    target_type: 'student',
+                                    target_name: sbFullName,
+                                    category: 'system',
+                                    summary: (releaseSeat ? 'Student soft-blocked (seat released): ' : 'Student soft-blocked: ') + sbFullName,
+                                    severity: 'high',
+                                    metadata: {
+                                        before: { status: 'active', busId: sbBusId, shift: sbShift || null },
+                                        after: { status: 'soft_blocked', seatReleased: releaseSeat, seatDecremented: releaseSeat && sbBusId !== null },
+                                        busId: sbBusId,
+                                        at: nowIso,
+                                        reason: 'soft_block',
+                                        correlationId: uid,
+                                    },
+                                };
+                                didBlock = true;
+                            }
                         }
                         if (didBlock) {
                             if (auditEvent) void createAuditEvent(auditEvent);

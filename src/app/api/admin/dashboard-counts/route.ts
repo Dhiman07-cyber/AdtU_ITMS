@@ -14,7 +14,7 @@ import * as routeService from '@/domains/route';
  * Optimized:
  * - Parallelized fetching across PostgreSQL and Firestore.
  * - Single pass processing of collection snapshots.
- * - Robust error handling with partial data fallback.
+ * - Robust error handling with safe fallbacks per query.
  */
 
 export const dynamic = 'force-dynamic';
@@ -25,6 +25,15 @@ export const GET = withSecurity(
       const supabase = getSupabaseServer();
       const sevenDaysAgo = new Date();
       sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+      const safeQuery = <T>(promise: PromiseLike<T>, fallback: T): Promise<T> =>
+        Promise.resolve(promise).then(
+          (res: any) => (res && res.error ? fallback : res),
+          () => fallback
+        );
+
+      const fallbackCount = { count: 0, data: null, error: null };
+      const fallbackList = { data: [], count: 0, error: null };
 
       // ── 1. Fire ALL distributed queries in parallel (PG + Firestore + Supabase) ──
       const [
@@ -45,22 +54,22 @@ export const GET = withSecurity(
         systemConfigResult,
         deadlineConfig
       ] = await Promise.all([
-        supabase.from('student_profiles').select('*', { count: 'exact', head: true }),
-        supabase.from('student_profiles').select('*', { count: 'exact', head: true }).eq('status', 'active'),
-        supabase.from('student_profiles').select('*', { count: 'exact', head: true }).eq('status', 'active').eq('shift', 'Morning'),
-        supabase.from('student_profiles').select('*', { count: 'exact', head: true }).eq('status', 'active').eq('shift', 'Evening'),
-        supabase.from('student_profiles').select('*', { count: 'exact', head: true }).eq('status', 'expired'),
-        supabase.from('driver_profiles').select('*', { count: 'exact', head: true }),
-        getAllBuses(),
-        routeService.getAll(),
-        supabase.from('applications').select('*', { count: 'exact', head: true }).eq('state', 'submitted'),
-        supabase.from('applications').select('*', { count: 'exact', head: true }).eq('state', 'awaiting_verification'),
-        supabase.from('applications').select('*', { count: 'exact', head: true }).eq('state', 'submitted').in('application_type', ['renewal', 'renewal_after_soft_block']),
-        adminDb ? adminDb.collection('feedbacks').where('createdAt', '>=', sevenDaysAgo).count().get().catch(() => ({ data: () => ({ count: 0 }) })) : Promise.resolve({ data: () => ({ count: 0 }) }),
-        supabase.from('driver_status').select('*').in('status', ['enroute', 'on_trip']),
-        supabase.from('payments').select('amount, method').or('status.eq.Completed,status.eq.completed'),
-        getSystemConfig().catch(() => null),
-        getDeadlineConfig()
+        safeQuery(supabase.from('student_profiles').select('*', { count: 'exact', head: true }), fallbackCount),
+        safeQuery(supabase.from('student_profiles').select('*', { count: 'exact', head: true }).eq('status', 'active'), fallbackCount),
+        safeQuery(supabase.from('student_profiles').select('*', { count: 'exact', head: true }).eq('status', 'active').eq('shift', 'Morning'), fallbackCount),
+        safeQuery(supabase.from('student_profiles').select('*', { count: 'exact', head: true }).eq('status', 'active').eq('shift', 'Evening'), fallbackCount),
+        safeQuery(supabase.from('student_profiles').select('*', { count: 'exact', head: true }).eq('status', 'expired'), fallbackCount),
+        safeQuery(supabase.from('driver_profiles').select('*', { count: 'exact', head: true }), fallbackCount),
+        safeQuery(getAllBuses(), []),
+        safeQuery(routeService.getAll(), []),
+        safeQuery(supabase.from('applications').select('*', { count: 'exact', head: true }).eq('state', 'submitted'), fallbackCount),
+        safeQuery(supabase.from('applications').select('*', { count: 'exact', head: true }).eq('state', 'awaiting_verification'), fallbackCount),
+        safeQuery(supabase.from('applications').select('*', { count: 'exact', head: true }).eq('state', 'submitted').in('application_type', ['renewal', 'renewal_after_soft_block']), fallbackCount),
+        adminDb ? safeQuery(adminDb.collection('feedbacks').where('createdAt', '>=', sevenDaysAgo).count().get().then(snap => ({ data: () => ({ count: snap.data().count }) })), { data: () => ({ count: 0 }) }) : Promise.resolve({ data: () => ({ count: 0 }) }),
+        safeQuery(supabase.from('driver_profiles').select('uid, assigned_bus_id, assigned_route_id, full_name, trip_active, active_trip_id').eq('trip_active', true), fallbackList),
+        safeQuery(supabase.from('processed_payments').select('amount, source'), fallbackList),
+        safeQuery(getSystemConfig(), null),
+        safeQuery<any>(getDeadlineConfig(), null)
       ]);
 
       // ── 2. Process Routes & Buses (from PG) ──
@@ -70,7 +79,8 @@ export const GET = withSecurity(
       let highLoadBusCount = 0;
       let activeDrivers = 0;
 
-      for (const bus of allBusesFromPg) {
+      const busesArray = Array.isArray(allBusesFromPg) ? allBusesFromPg : [];
+      for (const bus of busesArray) {
         if (bus.driverUID || (bus as any).assignedDriverId || (bus as any).activeDriverId) {
           activeDrivers++;
         }
@@ -91,37 +101,46 @@ export const GET = withSecurity(
       const expiredStudents = expiredStudentsSnap.count || 0;
 
       // ── 4. Process Active Trips (Supabase) ──
-      const activeTripData = (statusSnap.data || []).map(status => {
-        const bus = allBuses.find(b => b.busId === status.bus_id);
-        const route = allRoutes.find(r => r.routeId === status.route_id);
+      const activeTripData = (statusSnap.data || []).map((driver: any) => {
+        const bus = allBuses.find(b => b.id === driver.assigned_bus_id || b.busId === driver.assigned_bus_id);
+        const route = allRoutes.find((r: any) => r.id === driver.assigned_route_id || r.routeId === driver.assigned_route_id);
         return {
-          id: status.id, busId: bus?.busNumber || status.bus_id || '?',
-          routeName: route?.routeName || 'Tracking...', driverUid: status.driver_uid,
-          startTime: status.started_at || new Date().toISOString(),
-          studentCount: bus?.currentMembers || 0, status: 'In Motion',
+          id: driver.active_trip_id || driver.uid,
+          busId: bus?.bus_number || driver.assigned_bus_id || '?',
+          routeName: route?.route_name || route?.routeName || 'Tracking...',
+          driverUid: driver.uid,
+          startTime: new Date().toISOString(),
+          studentCount: bus?.currentMembers || 0,
+          status: 'In Motion',
         };
       });
 
-      // ── 5. Process Payments (Supabase) ──
+      // ── 5. Process Payments (Supabase processed_payments) ──
       let onlinePayments = 0, offlinePayments = 0, totalRevenue = 0;
-      (paymentsSnap.data || []).forEach(p => {
-        const method = (p.method || '').toLowerCase().trim();
-        if (method === 'online') onlinePayments++;
+      (paymentsSnap.data || []).forEach((p: any) => {
+        const source = (p.source || p.method || '').toLowerCase().trim();
+        if (source === 'online' || source === 'razorpay') onlinePayments++;
         else offlinePayments++;
         totalRevenue += Number(p.amount || 0);
       });
 
       // ── 6. Config Dates ──
       const configDates = {
-        academicYearEnd: `${new Date().getFullYear()}-${String(deadlineConfig.academicYear.anchorMonth + 1).padStart(2, '0')}-${String(deadlineConfig.academicYear.anchorDay).padStart(2, '0')}`,
-        softBlock: `${new Date().getFullYear()}-${String(deadlineConfig.softBlock.month + 1).padStart(2, '0')}-${String(deadlineConfig.softBlock.day).padStart(2, '0')}`,
-        hardBlock: `${new Date().getFullYear()}-${String(deadlineConfig.hardDelete.month + 1).padStart(2, '0')}-${String(deadlineConfig.hardDelete.day).padStart(2, '0')}`,
+        academicYearEnd: deadlineConfig?.academicYear
+          ? `${new Date().getFullYear()}-${String((deadlineConfig.academicYear.anchorMonth ?? 5) + 1).padStart(2, '0')}-${String(deadlineConfig.academicYear.anchorDay ?? 30).padStart(2, '0')}`
+          : `${new Date().getFullYear()}-06-30`,
+        softBlock: deadlineConfig?.softBlock
+          ? `${new Date().getFullYear()}-${String((deadlineConfig.softBlock.month ?? 6) + 1).padStart(2, '0')}-${String(deadlineConfig.softBlock.day ?? 15).padStart(2, '0')}`
+          : `${new Date().getFullYear()}-07-15`,
+        hardBlock: deadlineConfig?.hardDelete
+          ? `${new Date().getFullYear()}-${String((deadlineConfig.hardDelete.month ?? 7) + 1).padStart(2, '0')}-${String(deadlineConfig.hardDelete.day ?? 1).padStart(2, '0')}`
+          : `${new Date().getFullYear()}-08-01`,
         busFee: Number(systemConfigResult?.data?.busFee?.amount || 0)
       };
 
       const payload = {
         totalStudents, activeStudents, morningStudents, eveningStudents, expiredStudents,
-        totalDrivers: driversSnap.count || 0, activeDrivers, totalBuses: allBusesFromPg.length,
+        totalDrivers: driversSnap.count || 0, activeDrivers, totalBuses: busesArray.length,
         operationalBuses, activeBuses: statusSnap.data?.length || 0,
         enrouteBuses: statusSnap.data?.length || 0,
         pendingApplications: pendingAppsSnap.count || 0,

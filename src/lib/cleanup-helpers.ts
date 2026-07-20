@@ -5,11 +5,11 @@
 
 import { adminAuth, adminDb } from './firebase-admin';
 import { pgDeleteNotificationsByUser } from '@/domains/notification/repositories/notification.repository.pg';
-import { decrementBusCapacity } from './busCapacityService';
 import { extractPublicId, deleteAsset } from './cloudinary-server';
 import { wasSeatReleased } from './config/capacity-flags';
 import { deleteUser, deleteStudent, deleteDriver, deleteModerator, updateStudent, updateDriver, getAllDrivers, getStudentsByBusIds, getStudentById, getDriverById, getModeratorById } from '@/domains/identity';
 import * as fleetService from '@/domains/fleet';
+import { deleteUserTokens } from '@/lib/services/fcm-token-service';
 import * as studentService from '@/domains/student';
 import * as routeService from '@/domains/route';
 import { getSupabaseServer } from '@/lib/supabase-server';
@@ -56,7 +56,7 @@ export async function deleteUserAndData(
   try {
     console.log(`Deleting ${userType} with ID:`, userId.substring(0,8)+'...');
 
-    // Get user data first to retrieve profile image URL and Firebase Auth UID
+    // 1. Retrieve current state first (pre-commit lookup)
     let userData: Record<string, any> | null = null;
     if (userType === 'student') {
       userData = await getStudentById(userId);
@@ -71,190 +71,120 @@ export async function deleteUserAndData(
     }
 
     const profileImageUrl = userData?.profilePhotoUrl;
-    const firebaseAuthUid = userData?.uid || userId; // Use uid field if available, fallback to userId
+    const firebaseAuthUid = userData?.uid || userId;
+    const busId = userData?.busId || userData?.currentBusId || userData?.assignedBusId || null;
+    const shouldDecrement = !!busId && !wasSeatReleased(userData);
 
-    // Step 1: Delete profile image from Cloudinary if exists
-    if (profileImageUrl) {
-      console.log('Deleting Cloudinary image:', profileImageUrl);
-      const cloudinaryResult = await deleteCloudinaryImage(profileImageUrl);
-      if (cloudinaryResult) {
-        console.log('Successfully deleted Cloudinary image');
-      } else {
-        console.warn('Failed to delete Cloudinary image, continuing with other deletions');
+    // 2. PostgreSQL Transaction Commit Boundary (PG deletes first)
+    if (userType === 'student') {
+      const db = getSupabaseServer();
+      const { error: rpcError } = await db.rpc('delete_student_cascade_v1', {
+        p_student_uid: userId,
+      });
+      if (rpcError) {
+        throw new Error(`delete_student_cascade_v1 RPC failed: ${rpcError.message}`);
+      }
+      console.log(`✅ PostgreSQL database cascade transaction committed for student: ${userId.substring(0,8)}...`);
+    } else {
+      // Driver and Moderator - non-cascade deletes
+      try {
+        await deleteUser(userId);
+        console.log(`Deleted user from PostgreSQL:`, userId.substring(0,8)+'...');
+      } catch (pgDeleteError: any) {
+        console.warn(`User with ID ${userId.substring(0,8)}... user table delete warning:`, pgDeleteError.message);
+      }
+
+      if (userType === 'driver') {
+        try {
+          await deleteDriver(userId);
+          console.log(`Deleted driver profile from PostgreSQL:`, userId.substring(0,8)+'...');
+        } catch (pgDeleteError: any) {
+          console.warn(`Driver profile delete warning:`, pgDeleteError.message);
+        }
+      } else if (userType === 'moderator') {
+        try {
+          await deleteModerator(userId);
+          console.log(`Deleted moderator profile from PostgreSQL:`, userId.substring(0,8)+'...');
+        } catch (pgDeleteError: any) {
+          console.warn(`Moderator profile delete warning:`, pgDeleteError.message);
+        }
       }
     }
 
-    // Step 2: Delete related data based on user type
-    if (userType === 'student') {
-      // Get the student's busId before deleting to decrement capacity
-      const busId = userData?.busId || userData?.currentBusId || userData?.assignedBusId || null;
+    // 3. Firebase Auth User Deletion & JWT Revocation (Pre-commit / External)
+    try {
+      await adminAuth.revokeRefreshTokens(firebaseAuthUid);
+      await adminAuth.deleteUser(firebaseAuthUid);
+      console.log(`Successfully deleted user from Firebase Auth:`, firebaseAuthUid.substring(0,8)+'...');
+    } catch (authError: any) {
+      if (authError.code !== 'auth/user-not-found') {
+        console.warn('Firebase Auth deletion warning:', authError.message);
+      }
+    }
 
-      // Delete student's applications from PG
+    // 4. Firestore & Legacy Cleanup (External)
+    if (userType === 'student') {
+      // Delete FCM tokens from Firestore subcollection
       try {
-        const db = getSupabaseServer();
-        await db.from('applications').delete().eq('applicant_uid', userId);
-        console.log(`Deleted applications from PG for student:`, userId.substring(0,8)+'...');
-      } catch (pgErr) {
-        console.error('Error deleting applications from PG:', pgErr);
+        await deleteUserTokens(userId);
+      } catch (fcmErr: any) {
+        console.warn('Firestore tokens subcollection delete warning:', fcmErr.message);
       }
 
-      // Delete profile update requests for this student
+      // Delete profile update requests
       try {
         const profileRequestsSnapshot = await adminDb.collection('profile_update_requests')
           .where('studentUid', '==', userId)
           .limit(400)
           .get();
-        if (profileRequestsSnapshot.size > 0) {
+        if (!profileRequestsSnapshot.empty) {
           const batch = adminDb.batch();
-          profileRequestsSnapshot.docs.forEach(doc => {
-            batch.delete(doc.ref);
-          });
+          profileRequestsSnapshot.docs.forEach(doc => batch.delete(doc.ref));
           await batch.commit();
-          console.log(`Deleted ${profileRequestsSnapshot.size} profile update requests for student:`, userId.substring(0,8)+'...');
         }
-      } catch (requestsError) {
-        console.error('Error deleting profile update requests:', requestsError);
+      } catch (requestsError: any) {
+        console.warn('Firestore profile update requests delete warning:', requestsError.message);
       }
 
-      // Delete student's waiting flags
-      const waitingFlagsQuery = await adminDb.collection('waiting_flags')
-        .where('student_uid', '==', userId)
-        .limit(400)
-        .get();
+      // ponytail: Legacy Firestore fcm_tokens collection cleanup removed — PostgreSQL
+      // fcm_tokens table is the canonical store. Old Firestore collection is dead data.
 
-      if (waitingFlagsQuery.size > 0) {
-        const batch = adminDb.batch();
-        waitingFlagsQuery.docs.forEach(doc => {
-          batch.delete(doc.ref);
-        });
-        await batch.commit();
-        console.log(`Deleted ${waitingFlagsQuery.size} waiting flags for student:`, userId.substring(0,8)+'...');
-      }
-
-      // Delete any legacy fcm_tokens collection documents for this student
-      // (FCM token is now embedded in student doc, but clean up old data too)
-      try {
-        const fcmTokensQuery = await adminDb.collection('fcm_tokens')
-          .where('userUid', '==', userId)
-          .limit(400)
-          .get();
-
-        if (fcmTokensQuery.size > 0) {
-          const batch = adminDb.batch();
-          fcmTokensQuery.docs.forEach(doc => {
-            batch.delete(doc.ref);
-          });
-          await batch.commit();
-          console.log(`🧹 Deleted ${fcmTokensQuery.size} legacy FCM tokens for student:`, userId.substring(0,8)+'...');
-        }
-      } catch (fcmError) {
-        console.error('⚠️ Error cleaning up legacy FCM tokens:', fcmError);
-      }
-
-      // Decrement bus capacity if student was assigned to a bus.
-      // DEDUP GUARD: skip if the seat was already released at soft block.
-      // FIX: pass the student's shift so the per-shift counter is decremented too
-      // (previously omitted → currentMembers moved but morningCount/eveningCount did
-      // not, diverging the counters and violating currentMembers === morning+evening).
-      if (busId) {
-        if (wasSeatReleased(userData)) {
-          console.log(`⏭️ Skipping decrement for bus ${busId} — seat already released at soft block (student: ${userId})`);
-        } else {
-          try {
-            await decrementBusCapacity(busId, userId, userData?.shift);
-            console.log(`✅ Decremented bus capacity for bus ${busId}`);
-          } catch (busError) {
-            console.error(`⚠️ Error decrementing bus capacity for bus ${busId}:`, busError);
-          }
-        }
-      }
-
-      // Delete student's notifications
-      await deleteUserNotifications(userId);
+      // ponytail: Firestore waiting_flags cleanup removed — PostgreSQL
+      // delete_student_cascade_v1 RPC already deletes waiting_flags by student_uid.
     } else if (userType === 'driver') {
       // Delete driver's trip logs
       await deleteDriverTripLogs(userId);
+    }
 
-      // Delete driver's notifications
+    // Common non-student notifications delete (already handled in RPC for student)
+    if (userType !== 'student') {
       await deleteUserNotifications(userId);
-    } else if (userType === 'moderator') {
-      // Delete moderator's notifications
-      await deleteUserNotifications(userId);
     }
 
-    // Delete from PostgreSQL (canonical source of truth)
-    try {
-      await deleteUser(userId);
-      console.log(`Deleted user from PostgreSQL:`, userId.substring(0,8)+'...');
-    } catch (pgDeleteError) {
-      console.log(`User with ID ${userId.substring(0,8)}... not found in PostgreSQL or already deleted`);
-    }
-
-    // Delete student profile from PostgreSQL if applicable
-    if (userType === 'student') {
-      try {
-        await deleteStudent(userId);
-        console.log(`Deleted student profile from PostgreSQL:`, userId.substring(0,8)+'...');
-      } catch (pgDeleteError) {
-        console.log(`Student profile with ID ${userId.substring(0,8)}... not found in PostgreSQL or already deleted`);
-      }
-    }
-
-    // Delete driver profile from PostgreSQL if applicable
-    if (userType === 'driver') {
-      try {
-        await deleteDriver(userId);
-        console.log(`Deleted driver profile from PostgreSQL:`, userId.substring(0,8)+'...');
-      } catch (pgDeleteError) {
-        console.log(`Driver profile with ID ${userId.substring(0,8)}... not found in PostgreSQL or already deleted`);
-      }
-    }
-
-    // Delete moderator profile from PostgreSQL if applicable
-    if (userType === 'moderator') {
-      try {
-        await deleteModerator(userId);
-        console.log(`Deleted moderator profile from PostgreSQL:`, userId.substring(0,8)+'...');
-      } catch (pgDeleteError) {
-        console.log(`Moderator profile with ID ${userId.substring(0,8)}... not found in PostgreSQL or already deleted`);
-      }
-    }
-
-    // Step 4: Delete from Firebase Authentication with enhanced Google account handling
-    try {
-      // First, get the user record to check for Google provider
-      const userRecord = await adminAuth.getUser(firebaseAuthUid);
-      const hasGoogleProvider = userRecord.providerData.some(provider => provider.providerId === 'google.com');
-
-      if (hasGoogleProvider) {
-        console.log(`User ${firebaseAuthUid.substring(0,8)}... has Google provider - performing enhanced deletion`);
-
-        // Disconnect Google provider before deletion
+    // 5. Cloudinary Profile Image Deletion (External)
+    if (profileImageUrl) {
+      const publicId = extractPublicId(profileImageUrl);
+      if (publicId) {
         try {
-          await adminAuth.updateUser(firebaseAuthUid, {
-            providerToDelete: 'google.com'
-          });
-          console.log(`Successfully disconnected Google provider for user:`, firebaseAuthUid.substring(0,8)+'...');
-        } catch (disconnectError: any) {
-          console.log(`Could not disconnect Google provider (user may not have Google linked):`, disconnectError.message);
+          await deleteAsset(publicId);
+          console.log('Successfully deleted Cloudinary image:', publicId);
+        } catch (cloudErr: any) {
+          console.warn('Cloudinary delete warning:', cloudErr.message);
         }
       }
+    }
 
-      // Delete the user from Firebase Authentication
-      await adminAuth.deleteUser(firebaseAuthUid);
-      console.log(`Successfully deleted user from Firebase Auth:`, firebaseAuthUid.substring(0,8)+'...');
-
-      // Log additional information for audit
-      if (hasGoogleProvider) {
-        console.log(`User ${firebaseAuthUid.substring(0,8)}... was deleted with Google account disconnection`);
-      }
-
-    } catch (authError: any) {
-      if (authError.code === 'auth/user-not-found') {
-        console.log(`User with UID ${firebaseAuthUid.substring(0,8)}... not found in Firebase Auth`);
-      } else {
-        console.error('Error deleting user from Firebase Auth:', authError);
-        // Don't fail the entire operation if Firebase Auth deletion fails
+    // 6. Fleet Domain Delegation (Post-commit)
+    if (userType === 'student' && shouldDecrement && busId) {
+      try {
+        await fleetService.onStudentDeleted({
+          studentUid: userId,
+          busId,
+          shift: userData?.shift,
+        });
+        console.log(`✅ Fleet notified of student deletion (capacity update delegated)`);
+      } catch (fleetErr: any) {
+        console.error(`⚠️ Fleet capacity update delegation failed:`, fleetErr.message);
       }
     }
 
@@ -280,24 +210,13 @@ async function deleteUserNotifications(userId: string): Promise<void> {
 
 /**
  * Delete driver's trip logs
+ *
+ * ponytail: Firestore trip_logs cleanup removed — trip data lifecycle is
+ * managed by PostgreSQL: active_trips cleaned by cleanup-stale-locks cron,
+ * bus_locations/driver_location_updates cleaned by cleanup_old_* RPCs.
  */
-async function deleteDriverTripLogs(driverId: string): Promise<void> {
-  try {
-    // Delete from trip_logs or similar collection
-    const tripsQuery = await adminDb.collection('trip_logs')
-      .where('driverId', '==', driverId)
-      .limit(400)
-      .get();
-
-    const batch = adminDb.batch();
-    tripsQuery.docs.forEach(doc => {
-      batch.delete(doc.ref);
-    });
-    await batch.commit();
-    console.log(`Deleted ${tripsQuery.size} trip logs for driver:`, driverId.substring(0,8)+'...');
-  } catch (error) {
-    console.error('Error deleting driver trip logs:', error);
-  }
+async function deleteDriverTripLogs(_driverId: string): Promise<void> {
+  // No-op: PostgreSQL trip lifecycle manages this data.
 }
 
 /**
@@ -364,7 +283,7 @@ export async function deleteBusAndData(
 }
 
 /**
- * Delete route and associated data
+ * Delete route and associated data (atomic via PostgreSQL RPC)
  */
 export async function deleteRouteAndData(
   routeId: string
@@ -372,18 +291,15 @@ export async function deleteRouteAndData(
   try {
     console.log('Deleting route with ID:', routeId);
 
-    // 1. Bulk unassign route on buses in PG
-    await fleetService.unassignRoute(routeId);
-    console.log(`Unassigned route ${routeId} from buses in PG`);
+    const db = getSupabaseServer();
+    const { data, error } = await db.rpc('delete_route_cascade_v1', {
+      p_route_id: routeId,
+    });
 
-    // 2. Bulk unassign route on students in PG
-    await studentService.unassignRoute(routeId);
-    console.log(`Unassigned route ${routeId} from students in PG`);
+    if (error) throw new Error(error.message);
+    if (!data?.success) throw new Error('RPC returned failure');
 
-    // 3. Delete the route from PG
-    await routeService.remove(routeId);
-    console.log(`Deleted route ${routeId} from PG`);
-
+    console.log(`Route ${routeId} deleted: ${data.busesCleaned} buses, ${data.studentsCleaned} students cleaned`);
     return { success: true };
   } catch (error: any) {
     console.error('Error deleting route:', error);
@@ -392,91 +308,7 @@ export async function deleteRouteAndData(
 }
 
 
-/**
- * Clean up trip data when driver ends trip
- */
-export async function cleanupTripData(
-  tripId: string,
-  driverId: string
-): Promise<{ success: boolean; error?: string }> {
-  try {
-    console.log('Cleaning up trip data for trip ID:', tripId);
-
-    // Delete trip log from Firestore
-    await adminDb.collection('trip_logs').doc(tripId).delete();
-    console.log('Deleted trip log:', tripId);
-
-    // Delete real-time location data
-    const locationsQuery = await adminDb.collection('real_time_locations')
-      .where('tripId', '==', tripId)
-      .limit(400)
-      .get();
-
-    const batch1 = adminDb.batch();
-    locationsQuery.docs.forEach(doc => {
-      batch1.delete(doc.ref);
-    });
-    await batch1.commit();
-    console.log(`Deleted ${locationsQuery.size} location entries for trip:`, tripId);
-
-    // Delete waiting flags for this trip
-    const waitingFlagsQuery = await adminDb.collection('waiting_flags')
-      .where('tripId', '==', tripId)
-      .limit(400)
-      .get();
-
-    const batch2 = adminDb.batch();
-    waitingFlagsQuery.docs.forEach(doc => {
-      batch2.delete(doc.ref);
-    });
-    await batch2.commit();
-    console.log(`Deleted ${waitingFlagsQuery.size} waiting flags for trip:`, tripId);
-
-    // If using Supabase for real-time tracking, clean up there too
-    if (process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY) {
-      await cleanupSupabaseTripData(tripId, driverId);
-    }
-
-    return { success: true };
-  } catch (error: any) {
-    console.error('Error cleaning up trip data:', error);
-    return { success: false, error: error.message };
-  }
-}
-
-/**
- * Clean up trip data from Supabase
- */
-async function cleanupSupabaseTripData(tripId: string, driverId: string): Promise<void> {
-  try {
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-    if (!supabaseUrl || !supabaseKey) return;
-
-    // Delete from bus_locations table
-    await fetch(`${supabaseUrl}/rest/v1/bus_locations?trip_id=eq.${tripId}`, {
-      method: 'DELETE',
-      headers: {
-        'apikey': supabaseKey!,
-        'Authorization': `Bearer ${supabaseKey}`,
-        'Content-Type': 'application/json'
-      }
-    });
-
-    // Delete from waiting_flags table
-    await fetch(`${supabaseUrl}/rest/v1/waiting_flags?trip_id=eq.${tripId}`, {
-      method: 'DELETE',
-      headers: {
-        'apikey': supabaseKey!,
-        'Authorization': `Bearer ${supabaseKey}`,
-        'Content-Type': 'application/json'
-      }
-    });
-
-    console.log('Cleaned up Supabase trip data for trip:', tripId);
-  } catch (error) {
-    console.error('Error cleaning up Supabase data:', error);
-  }
-}
+// ponytail: cleanupTripData/cleanupSupabaseTripData removed — never called.
+// Trip data cleanup is handled by PostgreSQL cron: cleanup-stale-locks cleans
+// active_trips, bus_locations, driver_location_updates, waiting_flags by trip_id.
 

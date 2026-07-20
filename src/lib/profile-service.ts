@@ -215,6 +215,14 @@ async function resolveBus(busId: string): Promise<any | null> {
  */
 const routeCache = new Map<string, { data: any, timestamp: number }>();
 
+export function clearRouteCache(routeId?: string): void {
+  if (routeId) {
+    routeCache.delete(routeId);
+  } else {
+    routeCache.clear();
+  }
+}
+
 async function resolveRoute(routeId: string): Promise<any | null> {
   if (!routeId) return null;
 

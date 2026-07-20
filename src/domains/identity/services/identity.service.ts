@@ -34,6 +34,7 @@ import {
   findDriverById as repoFindDriverById,
   findDriversByStatus as repoFindDriversByStatus,
   findAllDrivers as repoFindAllDrivers,
+  findAllDriversPaginated as repoFindAllDriversPaginated,
   insertDriver as repoInsertDriver,
   updateDriver as repoUpdateDriver,
   removeDriver as repoRemoveDriver,
@@ -156,6 +157,10 @@ export async function getAllDrivers(): Promise<Record<string, any>[]> {
   return repoFindAllDrivers();
 }
 
+export async function getAllDriversPaginated(limit: number, offset: number): Promise<Record<string, any>[]> {
+  return repoFindAllDriversPaginated(limit, offset);
+}
+
 export async function createDriver(driver: Record<string, any>): Promise<void> {
   return repoInsertDriver(driver);
 }
@@ -246,6 +251,40 @@ export async function deleteUnauthUser(uid: string): Promise<void> {
 
 export async function getAllUnauthUsers(): Promise<Record<string, any>[]> {
   return repoFindAllUnauthUsers();
+}
+
+// ─── FCM Tokens ──────────────────────────────────────────────────────────────
+
+import {
+  upsertToken as repoUpsertToken,
+  deleteToken as repoDeleteToken,
+  getValidTokensForUsers as repoGetValidTokensForUsers,
+  cleanupStaleTokens as repoCleanupStaleTokens,
+  hashToken as repoHashToken,
+} from '../repositories/fcm-token.repository.pg';
+
+export async function saveFcmToken(
+  userId: string,
+  token: string,
+  platform: string = 'web'
+): Promise<{ success: boolean; error?: string }> {
+  return repoUpsertToken(userId, token, platform);
+}
+
+export async function deleteFcmToken(userId: string, tokenHash: string): Promise<void> {
+  return repoDeleteToken(userId, tokenHash);
+}
+
+export async function getValidFcmTokensForUsers(userIds: string[]) {
+  return repoGetValidTokensForUsers(userIds);
+}
+
+export async function cleanupStaleFcmTokens(maxAgeDays: number = 30) {
+  return repoCleanupStaleTokens(maxAgeDays);
+}
+
+export function hashFcmToken(token: string): string {
+  return repoHashToken(token);
 }
 
 // ─── Re-exports ─────────────────────────────────────────────────────────────

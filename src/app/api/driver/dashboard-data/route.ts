@@ -18,7 +18,7 @@ export const GET = withSecurity(
         // 1. D6: Fetch Driver Profile from driver_profiles
         const { data: driverProfile, error: driverError } = await supabase
             .from('driver_profiles')
-            .select('*')
+            .select('uid, full_name, shift, license_number, driver_id, employee_id, joining_date, assigned_bus_id, bus_id, assigned_route_id, route_id')
             .eq('uid', uid)
             .maybeSingle();
 
@@ -32,15 +32,15 @@ export const GET = withSecurity(
         // 2. Parallelize everything else
         const [busResult, routeResult, studentCountResult, tripStatus] = await Promise.all([
             busId
-                ? supabase.from('buses').select('*').eq('id', busId).maybeSingle()
+                ? supabase.from('buses').select('id, bus_number, color, status, current_members, capacity, route_id, driver_uid').eq('id', busId).maybeSingle()
                 : Promise.resolve({ data: null, error: null }),
             routeId
-                ? supabase.from('routes').select('*').eq('id', routeId).maybeSingle()
+                ? supabase.from('routes').select('id, route_name, stops, route_distance, distance, total_distance').eq('id', routeId).maybeSingle()
                 : Promise.resolve({ data: null, error: null }),
             busId
                 ? supabase.from('student_profiles').select('uid', { count: 'exact', head: true }).eq('bus_id', busId).eq('status', 'active')
                 : Promise.resolve({ count: 0, error: null }),
-            supabase.from('driver_status').select('*').eq('driver_uid', uid).maybeSingle()
+            supabase.from('driver_status').select('status').eq('driver_uid', uid).maybeSingle()
         ]);
 
         const bus = busResult.data || null;

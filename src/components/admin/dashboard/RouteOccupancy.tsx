@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
    Navigation,
@@ -38,6 +38,11 @@ export default function RouteOccupancy({ routeOccupancy, busUtilization = [] }: 
    const [viewMode, setViewMode] = useState<'leaderboard' | 'cluster'>('leaderboard');
    const [startIndex, setStartIndex] = useState(0);
    const [isExpanded, setIsExpanded] = useState(false);
+   const [isMounted, setIsMounted] = useState(false);
+
+   useEffect(() => {
+      setIsMounted(true);
+   }, []);
 
    const sortedRoutes = useMemo(() => {
       return [...routeOccupancy].sort((a, b) =>
@@ -211,42 +216,44 @@ export default function RouteOccupancy({ routeOccupancy, busUtilization = [] }: 
                         </div>
 
                         <div className="flex-1">
-                           <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
-                              <BarChart data={chartData}>
-                                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(255,255,255,0.03)" />
-                                 <XAxis
-                                    dataKey="name"
-                                    axisLine={false}
-                                    tickLine={false}
-                                    tick={{ fill: '#64748b', fontSize: 9, fontWeight: 900 }}
-                                 />
-                                 <YAxis
-                                    hide={true}
-                                    domain={[0, 100]}
-                                 />
-                                 <RechartsTooltip
-                                    cursor={{ fill: 'rgba(255,255,255,0.02)' }}
-                                    contentStyle={{
-                                       backgroundColor: '#0f172a',
-                                       border: '1px solid rgba(255,255,255,0.1)',
-                                       borderRadius: '12px',
-                                       fontSize: '10px',
-                                       fontWeight: '900',
-                                       padding: '12px'
-                                    }}
-                                    formatter={(value) => [`${value}% Load`]}
-                                 />
-                                 <Bar dataKey="occupancy" radius={[4, 4, 0, 0]} barSize={24}>
-                                    {chartData.map((entry, index) => (
-                                       <Cell
-                                          key={`cell-${index}`}
-                                          fill={entry.occupancy > 90 ? '#ef4444' : entry.occupancy > 70 ? '#f59e0b' : '#10b981'}
-                                          fillOpacity={0.6}
-                                       />
-                                    ))}
-                                 </Bar>
-                              </BarChart>
-                           </ResponsiveContainer>
+                           {isMounted && (
+                              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+                                 <BarChart data={chartData}>
+                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(255,255,255,0.03)" />
+                                    <XAxis
+                                       dataKey="name"
+                                       axisLine={false}
+                                       tickLine={false}
+                                       tick={{ fill: '#64748b', fontSize: 9, fontWeight: 900 }}
+                                    />
+                                    <YAxis
+                                       hide={true}
+                                       domain={[0, 100]}
+                                    />
+                                    <RechartsTooltip
+                                       cursor={{ fill: 'rgba(255,255,255,0.02)' }}
+                                       contentStyle={{
+                                          backgroundColor: '#0f172a',
+                                          border: '1px solid rgba(255,255,255,0.1)',
+                                          borderRadius: '12px',
+                                          fontSize: '10px',
+                                          fontWeight: '900',
+                                          padding: '12px'
+                                       }}
+                                       formatter={(value) => [`${value}% Load`]}
+                                    />
+                                    <Bar dataKey="occupancy" radius={[4, 4, 0, 0]} barSize={24}>
+                                       {chartData.map((entry, index) => (
+                                          <Cell
+                                             key={`cell-${index}`}
+                                             fill={entry.occupancy > 90 ? '#ef4444' : entry.occupancy > 70 ? '#f59e0b' : '#10b981'}
+                                             fillOpacity={0.6}
+                                          />
+                                       ))}
+                                    </Bar>
+                                 </BarChart>
+                              </ResponsiveContainer>
+                           )}
                         </div>
 
                         <div className="mt-4 flex items-center justify-between pt-4 border-t border-white/5">

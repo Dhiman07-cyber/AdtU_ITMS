@@ -821,13 +821,19 @@ export async function rejectOfflinePayment(
 /**
  * Get payments for a specific student from Supabase
  * Merges results from UID and Enrollment ID lookups
+ * Supports pagination for student-facing endpoints
  */
-export async function getPaymentsByStudent(studentUid: string, studentId?: string): Promise<PaymentDocument[]> {
+export async function getPaymentsByStudent(
+  studentUid: string,
+  studentId?: string,
+  page: number = 1,
+  pageSize: number = 20
+): Promise<{ payments: PaymentDocument[]; total: number }> {
     const allPayments: PaymentDocument[] = [];
     const fetchedPaymentIds = new Set<string>();
 
     // 1. Fetch by UID
-    const paymentsByUid = await paymentsSupabaseService.getPaymentsByStudentUid(studentUid);
+    const paymentsByUid = await paymentsSupabaseService.getPaymentsByStudentUid(studentUid, { limit: pageSize, offset: (page - 1) * pageSize });
     const mappedByUid = paymentsByUid.map(mapSupabaseToFirestoreFormat);
 
     for (const p of mappedByUid) {
@@ -850,7 +856,7 @@ export async function getPaymentsByStudent(studentUid: string, studentId?: strin
         }
 
         if (resolvedUid && resolvedUid !== studentUid) {
-            const paymentsById = await paymentsSupabaseService.getPaymentsByStudentUid(resolvedUid);
+            const paymentsById = await paymentsSupabaseService.getPaymentsByStudentUid(resolvedUid, { limit: pageSize, offset: (page - 1) * pageSize });
             const mappedById = paymentsById.map(mapSupabaseToFirestoreFormat);
 
             for (const p of mappedById) {
@@ -869,7 +875,12 @@ export async function getPaymentsByStudent(studentUid: string, studentId?: strin
         return timeB - timeA;
     });
 
-    return allPayments;
+    // Pagination
+    const total = allPayments.length;
+    const offset = (page - 1) * pageSize;
+    const paginatedPayments = allPayments.slice(offset, offset + pageSize);
+
+    return { payments: paginatedPayments, total };
 }
 
 /**

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { adminAuth } from '@/lib/firebase-admin';
 import { getLandingConfig, updateLandingConfig } from '@/domains/admin';
+import { getUserById } from '@/domains/identity';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,8 +30,8 @@ export async function POST(req: NextRequest) {
         const token = authHeader.split('Bearer ')[1];
         const decodedToken = await adminAuth.verifyIdToken(token);
 
-        const userDoc = await adminAuth.getUser(decodedToken.uid);
-        if (userDoc.customClaims?.role !== 'admin') {
+        const user = await getUserById(decodedToken.uid);
+        if (!user || user.role !== 'admin') {
             return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
         }
 

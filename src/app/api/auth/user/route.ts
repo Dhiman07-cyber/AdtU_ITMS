@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withSecurity } from '@/lib/security/api-security';
-import { getUserById } from '@/domains/identity';
+import { getUserById, updateUser } from '@/domains/identity';
 
 /**
  * GET /api/auth/user
  *
  * Returns the current user's data from PostgreSQL.
- * Replaces client-side Firestore reads in auth-context.tsx.
+ * Replaces client-side Firestore reads in auth-context.tsx and user-service.ts.
  */
 export const GET = withSecurity(
   async (request, { auth, requestId }) => {
@@ -22,6 +22,9 @@ export const GET = withSecurity(
           message: 'User not found',
         });
       }
+
+      // Update last_login_at in background asynchronously
+      updateUser(uid, { lastLoginAt: new Date().toISOString() }).catch(() => {});
 
       return NextResponse.json({
         success: true,

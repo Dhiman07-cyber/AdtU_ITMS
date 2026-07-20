@@ -129,6 +129,13 @@ export async function pgUpsert(data: Route): Promise<void> {
   if (error) throw new Error(`RouteRepository (PG) upsert failed: ${error.message}`);
 }
 
+export async function pgFindAllNames(): Promise<string[]> {
+  const db = getSupabaseServer();
+  const { data, error } = await db.from('routes').select('route_name');
+  if (error) throw new Error(`RouteRepository (PG) findAllNames failed: ${error.message}`);
+  return (data || []).map((r: any) => r.route_name);
+}
+
 export async function pgCount(): Promise<number> {
   const db = getSupabaseServer();
   const { count, error } = await db.from('routes').select('*', { count: 'exact', head: true });

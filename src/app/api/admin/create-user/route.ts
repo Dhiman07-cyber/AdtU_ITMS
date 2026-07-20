@@ -24,6 +24,8 @@ import { createAuditEvent } from '@/domains/audit';
 import { normalizeShift } from '@/lib/utils/shift-utils';
 import { createUser, createStudent, createDriver, getStudentById } from '@/domains/identity';
 import * as routeService from '@/domains/route';
+import { getSupabaseServer } from '@/lib/supabase-server';
+import crypto from 'crypto';
 
 type CreateUserBody = z.infer<typeof CreateUserSchema>;
 
@@ -110,6 +112,25 @@ export const POST = withSecurity<CreateUserBody>(
             if (permissionDenied) return permissionDenied;
         }
 
+        // Idempotency key (opId) — allows safe retry on network failure
+        const opId = (body as any).opId as string | undefined;
+        if (opId) {
+            const supabase = getSupabaseServer();
+            const { data: existingOp } = await supabase
+                .from('audit_events')
+                .select('id')
+                .eq('metadata->>operationId', opId)
+                .maybeSingle();
+            if (existingOp) {
+                return NextResponse.json({
+                    success: true,
+                    message: 'Operation already processed (idempotent)',
+                    idempotent: true,
+                    operationId: opId,
+                });
+            }
+        }
+
         const finalStopId = stopId || pickupPoint || '';
         const finalDuration = durationYears || (typeof sessionDuration === 'string' ? parseInt(sessionDuration) : sessionDuration) || 1;
 
@@ -185,6 +206,12 @@ export const POST = withSecurity<CreateUserBody>(
             //   exist, so a double-submit (same uid) can never double-allocate a seat.
             const assignedBusId = studentDoc.busId;
 
+            // ponytail: idempotency check MUST happen BEFORE createStudent, not after.
+            // If we create first and then check, alreadyExisted is always true and
+            // capacity is never incremented — a silent data-integrity bug.
+            const existingStudent = await getStudentById(uid);
+            const alreadyExisted = !!existingStudent;
+
             // Write user to PostgreSQL (canonical source of truth)
             await createUser({
                 uid,
@@ -194,7 +221,7 @@ export const POST = withSecurity<CreateUserBody>(
                 createdAt: now,
             });
 
-            // Write student to PostgreSQL (canonical source of truth) — before transaction
+            // Write student to PostgreSQL (canonical source of truth)
             await createStudent({
                 ...studentDoc,
                 uid,
@@ -208,10 +235,6 @@ export const POST = withSecurity<CreateUserBody>(
             let capAlreadyCounted = false;
             let capBusNumber = '';
             let capRouteId = '';
-
-            // Idempotency gate: PostgreSQL check via Domain determines if capacity should be allocated
-            const studentData = await getStudentById(uid);
-            const alreadyExisted = !!studentData;
 
             if (assignedBusId && !alreadyExisted) {
                 // Increment capacity in PG (source of truth) — admin-create intentionally
@@ -341,7 +364,8 @@ export const POST = withSecurity<CreateUserBody>(
 
         return NextResponse.json({
             success: true,
-            message: `${role.charAt(0).toUpperCase() + role.slice(1)} created successfully.`
+            message: `${role.charAt(0).toUpperCase() + role.slice(1)} created successfully.`,
+            operationId: opId,
         });
     },
     {

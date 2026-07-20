@@ -8,8 +8,7 @@ import { getStudentById } from '@/domains/identity';
 /**
  * POST /api/save-fcm-token
  * 
- * Saves FCM tokens into a subcollection model:
- *   {collection}/{userId}/tokens/{sha256(token)}
+ * Saves FCM tokens to PostgreSQL (fcm_tokens table).
  * 
  * Security:
  * - JWT-authenticated (via withSecurity)
@@ -50,10 +49,7 @@ export const POST = withSecurity(
       }, { status: 403 });
     }
 
-    // 4. Use students collection explicitly
-    const targetCollection = 'students';
-
-    // 5. Validate user exists in students database in PostgreSQL (canonical source of truth) before saving token
+    // 4. Validate user exists in students database in PostgreSQL (canonical source of truth) before saving token
     const userData = await getStudentById(uid);
     if (!userData) {
       console.warn(`[${requestId}] User ${uid} does not exist in PostgreSQL student_profiles`);
@@ -64,7 +60,7 @@ export const POST = withSecurity(
       }, { status: 404 });
     }
 
-    // 6. Additional validation: Only allow active student accounts
+    // 5. Additional validation: Only allow active student accounts
     if (userData.status === 'inactive' || userData.status === 'suspended') {
       console.warn(`[${requestId}] Student ${uid} account is not active`);
       return NextResponse.json({
@@ -74,8 +70,8 @@ export const POST = withSecurity(
       }, { status: 403 });
     }
 
-    // 7. Save token to subcollection (multi-device support)
-    const result = await saveToken(uid, targetCollection, token, platform || 'web');
+    // 6. Save token to PostgreSQL (multi-device support)
+    const result = await saveToken(uid, 'students', token, platform || 'web');
 
     if (!result.success) {
       console.error(`[${requestId}] FCM Token Service error:`, result.error);
@@ -85,7 +81,7 @@ export const POST = withSecurity(
       );
     }
 
-    // 8. Topic Subscription: Subscribe to route-specific topic for high-performance notifications
+    // 7. Topic Subscription: Subscribe to route-specific topic for high-performance notifications
     const routeId = userData.routeId || userData.route_id || userData.assignedRouteId;
     if (routeId) {
       try {
@@ -98,7 +94,6 @@ export const POST = withSecurity(
 
     return NextResponse.json({
       success: true,
-      collection: targetCollection,
       requestId,
     });
   },

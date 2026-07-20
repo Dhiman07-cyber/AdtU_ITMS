@@ -13,6 +13,7 @@ export {
   checkBusCapacity,
   incrementBusCapacity,
   decrementBusCapacity,
-  findBusesWithAvailableCapacity,
+  onStudentDeleted,
+  reassignStudentsAtomically,
 } from './services/fleet.service';
 export type { Bus, Driver } from './services/fleet.service';

@@ -3,6 +3,7 @@
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef, useMemo, ReactNode } from 'react';
 import { useAuth } from '@/contexts/auth-context';
 import { UserNotificationView } from '@/lib/notifications/types';
+import { authApiFetch } from '@/lib/secure-api-client';
 import {
     NOTIFICATION_POLLING_INTERVAL_MS
 } from '@/config/runtime';
@@ -39,14 +40,14 @@ const NotificationContext = createContext<NotificationContextType | undefined>(u
 export function NotificationProvider({ children }: { children: ReactNode }) {
     const { currentUser, userData } = useAuth();
     const [notifications, setNotifications] = useState<UserNotificationView[]>([]);
-    const [unreadCount, setUnreadCount] = useState(0);
-    const [loading, setLoading] = useState(true);
+    const [unreadCount, setUnreadCount] = useState<number>(0);
+    const [loading, setLoading] = useState<boolean>(true);
     const [error, setError] = useState<Error | null>(null);
-    const [refreshTrigger, setRefreshTrigger] = useState(0);
+    const [refreshTrigger, setRefreshTrigger] = useState<number>(0);
 
-    // Refs
     const isMountedRef = useRef(true);
     const abortControllerRef = useRef<AbortController | null>(null);
+
     const [isVisible, setIsVisible] = useState(true);
 
     // Track page visibility for polling efficiency
@@ -65,8 +66,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
         }
 
         try {
-            const res = await fetch(`/api/notifications?limit=${NOTIFICATION_LIMIT}`, {
-                credentials: 'include',
+            const res = await authApiFetch(currentUser, `/api/notifications?limit=${NOTIFICATION_LIMIT}`, {
                 signal,
             });
 
@@ -87,7 +87,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
         } finally {
             if (isMountedRef.current && !signal?.aborted) setLoading(false);
         }
-    }, [currentUser?.uid, userData?.role]);
+    }, [currentUser, userData?.role]);
 
     useEffect(() => {
         isMountedRef.current = true;
@@ -119,7 +119,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
             controller.abort();
             clearInterval(pollIntervalId);
         };
-    }, [currentUser?.uid, userData?.role, refreshTrigger, fetchNotifications, isVisible]);
+    }, [currentUser, userData?.role, refreshTrigger, fetchNotifications, isVisible]);
 
     useEffect(() => {
         return () => {
@@ -131,9 +131,8 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     const markAsRead = useCallback(async (notificationId: string) => {
         if (!currentUser) return;
         try {
-            const res = await fetch(`/api/notifications/${notificationId}/read`, {
+            const res = await authApiFetch(currentUser, `/api/notifications/${notificationId}/read`, {
                 method: 'POST',
-                credentials: 'include',
             });
             if (!res.ok) throw new Error('Failed to mark as read');
 
@@ -158,9 +157,8 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
             const adjustment = affectedNotifications.length;
 
             const promises = notificationIds.map(id =>
-                fetch(`/api/notifications/${id}/read`, {
+                authApiFetch(currentUser, `/api/notifications/${id}/read`, {
                     method: 'POST',
-                    credentials: 'include',
                 })
             );
             await Promise.all(promises);
@@ -175,9 +173,8 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     const deleteGlobally = useCallback(async (notificationId: string) => {
         if (!currentUser || !userData) return;
         try {
-            const res = await fetch(`/api/notifications/${notificationId}`, {
+            const res = await authApiFetch(currentUser, `/api/notifications/${notificationId}`, {
                 method: 'DELETE',
-                credentials: 'include',
             });
             if (!res.ok) throw new Error('Failed to delete notification');
 
@@ -191,10 +188,8 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     const editNotification = useCallback(async (notificationId: string, updates: { title?: string, content: string, metadata?: any }) => {
         if (!currentUser || !userData) return;
         try {
-            const res = await fetch(`/api/notifications/${notificationId}`, {
+            const res = await authApiFetch(currentUser, `/api/notifications/${notificationId}`, {
                 method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                credentials: 'include',
                 body: JSON.stringify(updates),
             });
             if (!res.ok) throw new Error('Failed to edit notification');
@@ -220,18 +215,8 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
         deleteGlobally,
         editNotification,
         refresh,
-        isRealtime: false
-    }), [
-        notifications,
-        unreadCount,
-        loading,
-        error,
-        markAsRead,
-        markAllAsRead,
-        deleteGlobally,
-        editNotification,
-        refresh,
-    ]);
+        isRealtime: false,
+    }), [notifications, unreadCount, loading, error, markAsRead, markAllAsRead, deleteGlobally, editNotification, refresh]);
 
     return (
         <NotificationContext.Provider value={value}>
@@ -244,7 +229,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
 // HOOK
 // ============================================================================
 
-export function useNotifications() {
+export function useNotifications(): NotificationContextType {
     const context = useContext(NotificationContext);
     if (context === undefined) {
         throw new Error('useNotifications must be used within a NotificationProvider');

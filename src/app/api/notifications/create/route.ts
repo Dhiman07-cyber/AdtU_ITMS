@@ -24,6 +24,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { withSecurity } from '@/lib/security/api-security';
 import { adminDb, adminMessaging } from '@/lib/firebase-admin';
 import { pgInsertNotification } from '@/domains/notification/repositories/notification.repository.pg';
+import { getValidFcmTokensForUsers } from '@/domains/identity';
 import { UserRole, TargetType, NotificationType } from '@/lib/notifications/types';
 import { safeErrorMessage } from '@/lib/security/safe-error';
 import { NotificationCreateSchema } from '@/lib/security/validation-schemas';
@@ -192,35 +193,17 @@ async function sendFCMNotifications(
   content: string,
   notificationId: string
 ): Promise<{ sent: number; failed: number }> {
-  if (!adminDb || !adminMessaging) {
+  if (!adminMessaging) {
     return { sent: 0, failed: 0 };
   }
 
   try {
-    // Collect FCM tokens for all recipients from canonical subcollection
-    const fcmTokens: string[] = [];
-
-    // Read from students/{id}/tokens subcollection (canonical)
-    for (const uid of recipientIds) {
-      try {
-        const tokensSnapshot = await adminDb!.collection('students').doc(uid).collection('tokens')
-          .where('valid', '==', true)
-          .limit(3)
-          .get();
-        
-        tokensSnapshot.docs.forEach(doc => {
-          const token = doc.data().token;
-          if (token && typeof token === 'string' && token.length > 10 && !fcmTokens.includes(token)) {
-            fcmTokens.push(token);
-          }
-        });
-      } catch {
-        // Non-critical — skip
-      }
-    }
+    // Get FCM tokens from PostgreSQL
+    const tokenRecords = await getValidFcmTokensForUsers(recipientIds);
+    const fcmTokens = tokenRecords.map(t => t.token);
 
     if (fcmTokens.length === 0) {
-      console.log('📱 No FCM tokens found for notification recipients');
+      console.log('No FCM tokens found for notification recipients');
       return { sent: 0, failed: 0 };
     }
 
@@ -251,15 +234,15 @@ async function sendFCMNotifications(
         totalSent += result.successCount;
         totalFailed += result.failureCount;
       } catch (err) {
-        console.error('❌ FCM batch send error:', err);
+        console.error('FCM batch send error:', err);
         totalFailed += chunk.length;
       }
     }
 
-    console.log(`📱 FCM: ${totalSent} sent, ${totalFailed} failed (${fcmTokens.length} tokens)`);
+    console.log(`FCM: ${totalSent} sent, ${totalFailed} failed (${fcmTokens.length} tokens)`);
     return { sent: totalSent, failed: totalFailed };
   } catch (error) {
-    console.error('❌ Error sending FCM notifications:', error);
+    console.error('Error sending FCM notifications:', error);
     return { sent: 0, failed: 0 };
   }
 }

@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { adminAuth } from '@/lib/firebase-admin';
 import { resolveUserRole } from '@/lib/security/role-cache';
-import { getAll } from '@/domains/application';
+import { getAllPaginated } from '@/domains/application';
+
+const DEFAULT_LIMIT = 50;
+const MAX_LIMIT = 200;
 
 export async function GET(request: NextRequest) {
   try {
@@ -18,7 +21,11 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 });
     }
 
-    const applications = await getAll();
+    const { searchParams } = new URL(request.url);
+    const limit = Math.min(parseInt(searchParams.get('limit') || String(DEFAULT_LIMIT), 10), MAX_LIMIT);
+    const offset = parseInt(searchParams.get('offset') || '0', 10);
+
+    const applications = await getAllPaginated(limit, offset);
 
     return NextResponse.json({ applications });
   } catch (error: any) {

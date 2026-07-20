@@ -17,6 +17,7 @@ import {
   pgRemove,
   pgInsert,
   pgUpsert,
+  pgFindAllNames,
   pgCount,
 } from './route.repository.pg';
 import type { Route } from '@/lib/types';
@@ -50,8 +51,7 @@ export async function count(): Promise<number> {
 }
 
 export async function findAllNames(): Promise<string[]> {
-  const routes = await pgFindAll();
-  return routes.map(r => r.routeName);
+  return pgFindAllNames();
 }
 
 export type { Route };

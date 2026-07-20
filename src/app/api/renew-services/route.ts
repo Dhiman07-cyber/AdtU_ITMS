@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { adminDb, adminAuth } from '@/lib/firebase-admin';
+import { adminAuth } from '@/lib/firebase-admin';
+import { getSupabaseServer } from '@/lib/supabase-server';
 import { calculateRenewalDate, formatRenewalDate } from '@/lib/utils/renewal-utils';
 import { computeBlockDatesFromValidUntil } from '@/lib/utils/deadline-computation';
 import { getDeadlineConfig } from '@/lib/deadline-config-service';
@@ -84,52 +85,84 @@ export async function POST(request: NextRequest) {
     }
 
     // ── Idempotency claim ────────────────────────────────────────────────────
+    const supabase = getSupabaseServer();
+    if (!supabase) {
+      return NextResponse.json({ success: false, error: 'Database connection failed' }, { status: 500 });
+    }
+
     const opKey = (body.idempotencyKey as string) || crypto
       .createHash('sha256')
       .update(JSON.stringify({ actor: decodedToken.uid, paymentMode, transactionId: transactionId || null, renewals }))
       .digest('hex');
 
-    const opRef = adminDb ? adminDb.collection('processed_operations').doc(`renew_${opKey}`) : null;
-    let claim = { duplicate: false, data: null as any };
+    const operationKey = `renew_${opKey}`;
 
-    if (opRef) {
-      claim = await adminDb.runTransaction(async (txn) => {
-        const snap = await txn.get(opRef);
-        if (snap.exists) return { duplicate: true, data: snap.data() as any };
-        txn.set(opRef, {
-          type: 'renew-services',
-          status: 'in_progress',
-          actorUid: decodedToken.uid,
-          renewalCount: renewals.length,
-          createdAt: new Date().toISOString(),
-        });
-        return { duplicate: false, data: null as any };
+    // Try to insert a new processed_operations record (atomically claim the lock)
+    let { error: insertError } = await supabase
+      .from('processed_operations')
+      .insert({
+        operation_key: operationKey,
+        type: 'renew-services',
+        status: 'in_progress',
+        actor_uid: decodedToken.uid,
+        renewal_count: renewals.length,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
       });
+
+    let isDuplicate = false;
+    let claimData: any = null;
+
+    if (insertError) {
+      isDuplicate = true;
+      // Fetch the existing record to see its status and timestamp
+      const { data: existing, error: fetchError } = await supabase
+        .from('processed_operations')
+        .select('*')
+        .eq('operation_key', operationKey)
+        .maybeSingle();
+
+      if (existing) {
+        claimData = existing;
+      } else {
+        return NextResponse.json(
+          { success: false, error: 'Idempotency verification error' },
+          { status: 500 }
+        );
+      }
     }
 
-    if (claim.duplicate) {
-      if (claim.data?.status === 'completed') {
-        return NextResponse.json({ success: true, replayed: true, results: claim.data.results, summary: claim.data.summary });
+    if (isDuplicate && claimData) {
+      if (claimData.status === 'completed') {
+        return NextResponse.json({
+          success: true,
+          replayed: true,
+          results: claimData.results,
+          summary: claimData.summary
+        });
       }
-      // Staleness check: if the in_progress record is older than 5 minutes, allow retry
-      const createdAt = claim.data?.createdAt ? new Date(claim.data.createdAt) : null;
+
+      // Staleness check: if the in_progress record is older than 5 minutes, delete and retry
+      const createdAt = claimData.created_at ? new Date(claimData.created_at) : null;
       const isStale = createdAt && (Date.now() - createdAt.getTime()) > 5 * 60 * 1000;
-      if (isStale && opRef) {
-        await opRef.delete().catch(() => {});
-        // Re-claim
-        const retryClaim = await adminDb.runTransaction(async (txn) => {
-          const snap = await txn.get(opRef);
-          if (snap.exists) return { duplicate: true, data: snap.data() as any };
-          txn.set(opRef, {
+
+      if (isStale) {
+        await supabase.from('processed_operations').delete().eq('operation_key', operationKey);
+        
+        // Re-try insert
+        const { error: retryError } = await supabase
+          .from('processed_operations')
+          .insert({
+            operation_key: operationKey,
             type: 'renew-services',
             status: 'in_progress',
-            actorUid: decodedToken.uid,
-            renewalCount: renewals.length,
-            createdAt: new Date().toISOString(),
+            actor_uid: decodedToken.uid,
+            renewal_count: renewals.length,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
           });
-          return { duplicate: false, data: null as any };
-        });
-        if (retryClaim.duplicate) {
+
+        if (retryError) {
           return NextResponse.json(
             { success: false, error: 'An identical renewal request is already being processed.' },
             { status: 409 }
@@ -254,7 +287,15 @@ export async function POST(request: NextRequest) {
         if (seatWasReleased && renewalBusId) {
           try {
             const shift = studentData.shift || 'Morning';
-            // Gate: check capacity in PG (source of truth)
+            // ponytail: checkBusCapacity is a fast-fail optimization (STABLE read, no lock).
+            // The real capacity guard is inside bus_increment_capacity (FOR UPDATE + re-check).
+            // This check avoids the heavier locked increment when the bus is clearly full.
+            // Note: there is a TOCTOU gap between check and increment — capacity could
+            // change between the two calls.  bus_increment_capacity handles this correctly
+            // by re-checking inside its FOR UPDATE lock.
+            // TODO: pgIncrementBusCapacity throws generic Error on capacity full, not
+            // CapacityFullError.  Fix fleet.repository.pg to throw CapacityFullError so
+            // the catch block below can distinguish capacity errors from other failures.
             const capCheck = await checkBusCapacity(renewalBusId, shift);
             if (!capCheck.available) {
               throw new CapacityFullError();
@@ -302,21 +343,28 @@ export async function POST(request: NextRequest) {
     const summary = { total: renewals.length, successful: successCount, failed: failCount };
 
     // Finalize the idempotency record
-    if (opRef) {
-      try {
-        await opRef.set(
-          { status: 'completed', completedAt: new Date().toISOString(), results, summary },
-          { merge: true }
-        );
-      } catch (finalErr) {
-        console.error('CRITICAL: Renewal idempotency finalization failed — renewals committed but record not finalized:', finalErr);
-        return NextResponse.json({
-          success: true,
-          warning: 'Renewals processed but operation record could not be finalized. Do NOT retry — contact administrator.',
+    try {
+      const { error: finalError } = await supabase
+        .from('processed_operations')
+        .update({
+          status: 'completed',
+          updated_at: new Date().toISOString(),
           results,
           summary
-        });
+        })
+        .eq('operation_key', operationKey);
+
+      if (finalError) {
+        throw finalError;
       }
+    } catch (finalErr: any) {
+      console.error('CRITICAL: Renewal idempotency finalization failed — renewals committed but record not finalized:', finalErr);
+      return NextResponse.json({
+        success: true,
+        warning: 'Renewals processed but operation record could not be finalized. Do NOT retry — contact administrator.',
+        results,
+        summary
+      });
     }
 
     return NextResponse.json({

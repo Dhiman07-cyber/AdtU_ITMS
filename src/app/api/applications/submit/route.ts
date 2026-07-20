@@ -15,6 +15,10 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { applicationId } = body;
 
+    if (!applicationId || typeof applicationId !== 'string') {
+      return NextResponse.json({ error: 'Invalid application ID' }, { status: 400 });
+    }
+
     if (!applicationId) {
       return NextResponse.json({ error: 'Application ID required' }, { status: 400 });
     }

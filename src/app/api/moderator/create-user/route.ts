@@ -266,17 +266,17 @@ export async function POST(request: Request) {
           // leaves an orphan student doc.
           const assignedBusId = studentDocData.busId;
 
-          // Write student to PostgreSQL (canonical source of truth) — before transaction
+          // ponytail: idempotency check MUST happen BEFORE createStudent, not after.
+          const existingStudent = await getStudentById(uid);
+          const alreadyExisted = !!existingStudent;
+
+          // Write student to PostgreSQL (canonical source of truth)
           await createStudent({
             ...studentDocData,
             uid,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
           });
-
-          // Idempotency gate: PostgreSQL check via Domain determines if capacity should be allocated
-          const studentData = await getStudentById(uid);
-          const alreadyExisted = !!studentData;
 
           // Increment capacity in PG (source of truth) only if student is new and bus assigned
           if (assignedBusId && !alreadyExisted) {
@@ -412,6 +412,10 @@ export async function POST(request: Request) {
           // Audit trail - who created/updated this document
         };
 
+        // ponytail: idempotency check BEFORE createStudent for fallback path
+        const existingStudentFallback = await getStudentById(userDocId);
+        const alreadyExistedFallback = !!existingStudentFallback;
+
         // Create role-specific document via PG
         await createStudent({
           ...studentDocData,
@@ -420,8 +424,8 @@ export async function POST(request: Request) {
           updatedAt: new Date().toISOString(),
         });
 
-        // Increment capacity in PG if bus assigned
-        if (busId) {
+        // Increment capacity in PG only if student is new and bus assigned
+        if (busId && !alreadyExistedFallback) {
           try {
             await incrementBusCapacity(busId, studentDocData.shift);
           } catch (pgErr) {

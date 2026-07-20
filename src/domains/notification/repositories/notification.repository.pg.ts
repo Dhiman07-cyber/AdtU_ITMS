@@ -383,25 +383,16 @@ export async function pgBulkDeleteNotifications(ids: string[]): Promise<number> 
  * Delete all notifications where user is recipient or sender.
  * Used by user deletion cleanup.
  *
- * BEST-EFFORT: Two independent DELETE operations. If the first succeeds
- * and the second fails, partial deletion may occur. This is acceptable
- * because this function is used by cleanup jobs, not critical paths.
- * The caller receives the total count of rows affected across both operations.
+ * Single atomic DELETE with OR condition — more efficient and atomic
+ * than the previous two-statement approach.
  */
 export async function pgDeleteNotificationsByUser(userId: string): Promise<number> {
   const db = getSupabaseServer();
 
-  // Delete where user is recipient
-  const { count: recipientCount } = await db
+  const { count } = await db
     .from('notifications')
     .delete()
-    .contains('recipient_ids', [userId]);
+    .or(`recipient_ids.cs.{${userId}},sender_user_id.eq.${userId}`);
 
-  // Delete where user is sender
-  const { count: senderCount } = await db
-    .from('notifications')
-    .delete()
-    .eq('sender_user_id', userId);
-
-  return (recipientCount || 0) + (senderCount || 0);
+  return count || 0;
 }

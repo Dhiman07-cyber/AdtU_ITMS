@@ -17,7 +17,6 @@
  */
 
 import { NextResponse } from 'next/server';
-import { db as adminDb } from '@/lib/firebase-admin';
 import * as routeService from '@/domains/route';
 import { tripLockService } from '@/lib/services/trip-lock-service';
 import { notifyRouteTopic, verifyDriverRouteBinding } from '@/lib/services/fcm-notification-service';

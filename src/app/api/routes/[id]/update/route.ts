@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { verifyApiAuth } from '@/lib/security/api-auth';
 import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
 import * as routeService from '@/domains/route';
+import { clearRouteCache } from '@/lib/profile-service';
 
 export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -28,8 +29,10 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     const success = await routeService.update(id, updated);
 
     if (!success) {
-      return NextResponse.json({ error: 'Route not found' }, { status: 404 });
+      return NextResponse.json({ error: 'Route not found or update failed' }, { status: 404 });
     }
+
+    clearRouteCache(id);
 
     return NextResponse.json(updated);
   } catch (error) {

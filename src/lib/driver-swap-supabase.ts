@@ -8,8 +8,8 @@
 import { RealtimeChannel } from '@supabase/supabase-js';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import { calculateNotificationExpiry } from './notification-expiry';
-import { db as adminDb } from './firebase-admin';
 import { pgInsertNotification } from '@/domains/notification/repositories/notification.repository.pg';
+import { getValidFcmTokensForUsers } from '@/domains/identity';
 
 // Default notification TTL: 1 day (24 hours)
 const NOTIFICATION_TTL_DAYS = 1;
@@ -1239,31 +1239,17 @@ export class DriverSwapSupabaseService {
                 .eq('status', 'active');
 
             if (!students || students.length === 0) {
-                console.log('ℹ️ No students found for this bus');
+                console.log('No students found for this bus');
                 return;
             }
 
-            // D10: FCM tokens are still in Firestore subcollections (students/{id}/tokens)
-            // This will be migrated in D10 when FCM token storage moves to Supabase
-            const tokens: string[] = [];
-            for (const student of students) {
-                try {
-                    const tokensSnap = await adminDb
-                        .collection('students')
-                        .doc(student.uid)
-                        .collection('tokens')
-                        .get();
-                    tokensSnap.docs.forEach((doc: any) => {
-                        const data = doc.data();
-                        if (data?.token) tokens.push(data.token);
-                    });
-                } catch {
-                    // Skip student if token fetch fails
-                }
-            }
+            // Get FCM tokens from PostgreSQL
+            const studentIds = students.map(s => s.uid);
+            const tokenRecords = await getValidFcmTokensForUsers(studentIds);
+            const tokens = tokenRecords.map(t => t.token);
 
             if (tokens.length === 0) {
-                console.log('ℹ️ No FCM tokens found for students');
+                console.log('No FCM tokens found for students');
                 return;
             }
 

@@ -8,7 +8,8 @@ import { getAllBuses, getBusesByRouteId, createBus } from '@/domains/fleet/servi
 
 export async function GET(request: NextRequest) {
   try {
-    const auth = await verifyApiAuth(request, ['admin', 'moderator', 'driver', 'student']);
+    // SECURITY: Require authentication (any logged-in user can view buses for application forms)
+    const auth = await verifyApiAuth(request);
     if (!auth.authenticated) return auth.response;
 
     const rl = await applyRateLimit(createRateLimitId(auth.uid, 'buses-list'), RateLimits.READ);

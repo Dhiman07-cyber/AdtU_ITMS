@@ -69,9 +69,7 @@ const BUS_FIELD_MAP: Record<string, string> = {
   routeId: 'route_id',
   routeName: 'route_name',
   status: 'status',
-  // currentPassengerCount removed — current_passenger_count column dropped; was always identical to current_members
-  // currentMembers removed — current_members is now GENERATED ALWAYS AS (morning_load + evening_load) STORED;
-  //   writing it explicitly causes a PostgreSQL error. It is READ ONLY.
+  currentMembers: 'current_members',
   morningLoad: 'morning_load',
   eveningLoad: 'evening_load',
   lastStartedAt: 'last_started_at',
@@ -80,7 +78,7 @@ const BUS_FIELD_MAP: Record<string, string> = {
   updatedAt: 'updated_at',
 };
 
-const VIRTUAL_BUS_FIELDS = new Set(['busId', 'currentPassengerCount', 'currentMembers', 'routeRef']);
+const VIRTUAL_BUS_FIELDS = new Set(['busId', 'currentPassengerCount', 'routeRef']);
 
 // ─── Timestamp helper ─────────────────────────────────────────────────────────
 
@@ -275,35 +273,18 @@ export async function pgDecrementBusCapacity(busId: string, shift?: string): Pro
   return data as CapacityMutationResult;
 }
 
-/**
- * Find buses with available capacity for a given shift.
- *
- * NOTE: JavaScript filtering is used here because Supabase/PostgREST doesn't
- * support column-to-column comparisons in the query builder (e.g., WHERE morning_load < capacity).
- *
- * OPTIMIZATION OPPORTUNITY (Bucket 5):
- * For large fleets (>1000 buses), create a materialized view or RPC:
- *   CREATE VIEW buses_with_capacity AS
- *   SELECT *,
- *     CASE WHEN morning_load < capacity THEN true ELSE false END AS has_morning_capacity,
- *     CASE WHEN evening_load < capacity THEN true ELSE false END AS has_evening_capacity
- *   FROM buses;
- *
- * Current implementation is acceptable for small-to-medium fleets (<1000 buses).
- */
-export async function pgFindBusesWithAvailableCapacity(shift?: string): Promise<Bus[]> {
+export async function pgReassignStudentsAtomically(plans: Array<{
+  studentId: string;
+  fromBusId: string;
+  toBusId: string;
+  studentShift?: string;
+}>): Promise<{ success: boolean; processed: number }> {
   const db = getSupabaseServer();
-  const { data, error } = await db.from('buses').select('*');
-  if (error) throw new Error(`FleetRepository (PG) findBusesWithAvailableCapacity failed: ${error.message}`);
-  const buses = (data || []).map(pgRowToBus);
-  if (!shift) return buses;
-  const normalized = shift.toLowerCase().trim();
-  return buses.filter(bus => {
-    const load = normalized === 'evening'
-      ? (bus.eveningLoad ?? 0)
-      : (bus.morningLoad ?? 0);
-    return load < bus.capacity;
+  const { data, error } = await db.rpc('reassign_students_atomically', {
+    p_plans: plans,
   });
+  if (error) throw new Error(`FleetRepository (PG) reassignStudentsAtomically failed: ${error.message}`);
+  if (data?.error) throw new Error(data.error);
+  return data as { success: boolean; processed: number };
 }
-
 

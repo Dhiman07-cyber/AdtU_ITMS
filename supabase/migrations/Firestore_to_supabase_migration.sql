@@ -24,18 +24,24 @@ DO $$
 DECLARE
     v_invalid_count INTEGER;
 BEGIN
-    -- Check for applications with invalid shift = 'Both'
-    SELECT COUNT(*) INTO v_invalid_count 
-    FROM public.applications 
-    WHERE shift = 'Both';
-    
-    IF v_invalid_count > 0 THEN
-        RAISE EXCEPTION 'Migration pre-check failed: Found % applications with invalid shift = ''Both''. Silently mapping business data is prohibited. Please inspect and clean up the applications table before running this migration.', v_invalid_count;
+    -- Only run check if the applications table already exists
+    IF to_regclass('public.applications') IS NOT NULL THEN
+        -- Check for applications with invalid shift = 'Both'
+        SELECT COUNT(*) INTO v_invalid_count 
+        FROM public.applications 
+        WHERE shift = 'Both';
+        
+        IF v_invalid_count > 0 THEN
+            RAISE EXCEPTION 'Migration pre-check failed: Found % applications with invalid shift = ''Both''. Silently mapping business data is prohibited. Please inspect and clean up the applications table before running this migration.', v_invalid_count;
+        END IF;
     END IF;
 END $$;
 
 -- ── 1. EXTENSIONS ────────────────────────────────────────────────────────────
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
+-- Restrict default execution privileges on new functions
+ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
 
 -- =============================================================================
 -- 2. TABLES
@@ -176,34 +182,10 @@ CREATE TABLE IF NOT EXISTS unauth_users (
     updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- ── 2.2 Calendar Domain ─────────────────────────────────────────────────────
+-- ── 2.2 Calendar & Settings Domains ──────────────────────────────────────────
+-- Note: Calendar & Settings domains (settings/config, settings/deadline, settings/privacy, settings/terms)
+-- remain exclusively in Firestore as per architectural requirements.
 
-CREATE TABLE IF NOT EXISTS academic_calendar_config (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    is_active BOOLEAN NOT NULL DEFAULT TRUE,
-    session_start_month SMALLINT NOT NULL
-        CONSTRAINT chk_session_start_month CHECK (session_start_month BETWEEN 0 AND 11),
-    session_start_day   SMALLINT NOT NULL
-        CONSTRAINT chk_session_start_day   CHECK (session_start_day   BETWEEN 1 AND 31),
-    urgent_warning_days SMALLINT NOT NULL DEFAULT 15
-        CONSTRAINT chk_urgent_warning_days CHECK (urgent_warning_days > 0),
-    soft_block_warning_text     TEXT NOT NULL DEFAULT 'Your bus service has expired. Please renew.',
-    hard_delete_critical_text   TEXT NOT NULL DEFAULT 'Warning: Account will be permanently deleted.',
-    contact_office_name         TEXT,
-    contact_phone               TEXT,
-    contact_email               TEXT,
-    contact_office_hours        TEXT,
-    contact_address             TEXT,
-    contact_visit_instructions  TEXT,
-    landing_page        JSONB,
-    application_process JSONB,
-    statistics          JSONB,
-    config_version      TEXT NOT NULL DEFAULT '1.0.0',
-    description         TEXT,
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_by          TEXT
-);
 
 CREATE TABLE IF NOT EXISTS migration_log (
     id           TEXT        PRIMARY KEY,
@@ -313,10 +295,7 @@ CREATE TABLE IF NOT EXISTS buses (
     -- current_passenger_count removed: was always identical to current_members (written simultaneously in every RPC)
     morning_load     INTEGER NOT NULL DEFAULT 0,
     evening_load     INTEGER NOT NULL DEFAULT 0,
-    -- current_members is a GENERATED column: always equals morning_load + evening_load.
-    -- This eliminates the drift that admin-reconcile-bus-loads.ts was created to correct.
-    -- The RPCs no longer need to write this column explicitly.
-    current_members  INTEGER GENERATED ALWAYS AS (morning_load + evening_load) STORED,
+    current_members  INTEGER NOT NULL DEFAULT 0,
     last_started_at  TIMESTAMPTZ,
     last_ended_at    TIMESTAMPTZ,
     created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -546,7 +525,7 @@ $$;
 CREATE OR REPLACE FUNCTION validate_application_for_approval(
     p_application_id TEXT, p_approver_uid TEXT, p_lease_minutes INTEGER DEFAULT 5
 )
-RETURNS JSONB LANGUAGE plpgsql AS $$
+RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE v_app JSONB;
 BEGIN
     UPDATE applications
@@ -563,7 +542,7 @@ $$;
 CREATE OR REPLACE FUNCTION validate_application_for_rejection(
     p_application_id TEXT, p_rejector_uid TEXT
 )
-RETURNS JSONB LANGUAGE plpgsql AS $$
+RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE
     v_app JSONB;
     v_rejectable_states TEXT[] := ARRAY['submitted','verified_upcoming','pending_seat_allocation'];
@@ -582,7 +561,7 @@ $$;
 CREATE OR REPLACE FUNCTION approve_application(
     p_application_id TEXT, p_approver_uid TEXT, p_lease_minutes INTEGER DEFAULT 5
 )
-RETURNS JSONB LANGUAGE plpgsql AS $$
+RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE v_app JSONB;
 BEGIN
     v_app := validate_application_for_approval(p_application_id, p_approver_uid, p_lease_minutes);
@@ -594,7 +573,7 @@ END;
 $$;
 
 CREATE OR REPLACE FUNCTION reject_application(p_application_id TEXT, p_rejector_uid TEXT)
-RETURNS JSONB LANGUAGE plpgsql AS $$
+RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE v_app JSONB;
 BEGIN
     v_app := validate_application_for_rejection(p_application_id, p_rejector_uid);
@@ -608,7 +587,7 @@ $$;
 CREATE OR REPLACE FUNCTION finalize_application_approval(
     p_application_id TEXT, p_approver_uid TEXT, p_student_data JSONB DEFAULT NULL
 )
-RETURNS JSONB LANGUAGE plpgsql AS $$
+RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE
     v_app RECORD;
     v_updated INTEGER;
@@ -678,7 +657,7 @@ END;
 $$;
 
 CREATE OR REPLACE FUNCTION finalize_application_rejection(p_application_id TEXT, p_rejector_uid TEXT)
-RETURNS JSONB LANGUAGE plpgsql AS $$
+RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE v_deleted INTEGER; v_exists BOOLEAN;
 BEGIN
     DELETE FROM applications WHERE application_id = p_application_id AND processing_lock = p_rejector_uid AND processing_lease_expires_at > NOW();
@@ -697,7 +676,7 @@ $$;
 CREATE OR REPLACE FUNCTION transition_application_state(
     p_application_id TEXT, p_new_state TEXT, p_actor_uid TEXT, p_additional_data JSONB DEFAULT '{}'::jsonb
 )
-RETURNS JSONB LANGUAGE plpgsql AS $$
+RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE
     v_app RECORD;
     v_valid_transitions JSONB := '{
@@ -733,7 +712,7 @@ END;
 $$;
 
 CREATE OR REPLACE FUNCTION release_application_lock(p_application_id TEXT)
-RETURNS JSONB LANGUAGE plpgsql AS $$
+RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 BEGIN
     UPDATE applications SET processing_lock = NULL, processing_started_at = NULL,
         processing_lease_expires_at = NULL, processing_result = NULL, processing_completed_at = NULL
@@ -743,7 +722,7 @@ END;
 $$;
 
 CREATE OR REPLACE FUNCTION cleanup_abandoned_application_locks()
-RETURNS JSONB LANGUAGE plpgsql AS $$
+RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE v_cleaned INTEGER;
 BEGIN
     UPDATE applications SET processing_lock = NULL, processing_started_at = NULL,
@@ -790,7 +769,7 @@ $$;
 -- ── 4.4 Fleet / Capacity RPCs ───────────────────────────────────────────────
 
 CREATE OR REPLACE FUNCTION bus_check_capacity(p_bus_id TEXT, p_shift TEXT DEFAULT 'Morning')
-RETURNS JSONB LANGUAGE sql STABLE AS $$
+RETURNS JSONB LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
   SELECT jsonb_build_object(
     'busId', b.id, 'capacity', b.capacity, 'morningLoad', b.morning_load,
     'eveningLoad', b.evening_load, 'currentMembers', b.current_members,
@@ -804,7 +783,7 @@ RETURNS JSONB LANGUAGE sql STABLE AS $$
 $$;
 
 CREATE OR REPLACE FUNCTION bus_increment_capacity(p_bus_id TEXT, p_shift TEXT DEFAULT 'Morning')
-RETURNS JSONB LANGUAGE plpgsql AS $$
+RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE
     v_normalized TEXT := LOWER(TRIM(COALESCE(p_shift, 'Morning')));
     v_bus RECORD; v_new_morning INTEGER; v_new_evening INTEGER;
@@ -827,7 +806,7 @@ END;
 $$;
 
 CREATE OR REPLACE FUNCTION bus_decrement_capacity(p_bus_id TEXT, p_shift TEXT DEFAULT 'Morning')
-RETURNS JSONB LANGUAGE plpgsql AS $$
+RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE
     v_normalized TEXT := LOWER(TRIM(COALESCE(p_shift, 'Morning')));
     v_bus RECORD; v_new_morning INTEGER; v_new_evening INTEGER;
@@ -850,11 +829,12 @@ BEGIN
         'shift', p_shift, 'success', true);
 END;
 $$;
-
 -- ── 4.5 Trip / Lock RPCs ────────────────────────────────────────────────────
 
+DROP FUNCTION IF EXISTS public.check_bus_lock(TEXT);
+
 CREATE OR REPLACE FUNCTION public.check_bus_lock(p_bus_id TEXT)
-RETURNS JSONB LANGUAGE plpgsql STABLE AS $$
+RETURNS JSONB LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
 DECLARE v_trip RECORD;
 BEGIN
     SELECT trip_id, driver_id, shift, status, start_time, last_heartbeat, expires_at,
@@ -870,7 +850,7 @@ $$;
 CREATE OR REPLACE FUNCTION public.acquire_trip_lock(
     p_trip_id TEXT, p_bus_id TEXT, p_driver_id TEXT, p_route_id TEXT, p_shift TEXT, p_ttl_seconds INTEGER DEFAULT 600
 )
-RETURNS JSONB LANGUAGE plpgsql AS $$
+RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE
     v_now TIMESTAMPTZ := NOW();
     v_expires_at TIMESTAMPTZ := NOW() + (p_ttl_seconds || ' seconds')::INTERVAL;
@@ -901,7 +881,7 @@ $$;
 CREATE OR REPLACE FUNCTION public.extend_trip_lock(
     p_trip_id TEXT, p_driver_id TEXT, p_bus_id TEXT, p_ttl_seconds INTEGER DEFAULT 600
 )
-RETURNS JSONB LANGUAGE plpgsql AS $$
+RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE v_expires_at TIMESTAMPTZ := NOW() + (p_ttl_seconds || ' seconds')::INTERVAL; v_updated INTEGER;
 BEGIN
     UPDATE active_trips SET last_heartbeat = NOW(), expires_at = v_expires_at
@@ -913,7 +893,7 @@ END;
 $$;
 
 CREATE OR REPLACE FUNCTION public.release_trip_lock(p_trip_id TEXT, p_bus_id TEXT, p_driver_id TEXT)
-RETURNS JSONB LANGUAGE plpgsql AS $$
+RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE v_updated INTEGER;
 BEGIN
     UPDATE active_trips SET status = 'ended', end_time = NOW()
@@ -924,7 +904,7 @@ END;
 $$;
 
 CREATE OR REPLACE FUNCTION public.acquire_fcm_lock(p_trip_id TEXT, p_bus_id TEXT, p_lock_type TEXT)
-RETURNS JSONB LANGUAGE plpgsql AS $$
+RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE v_column TEXT; v_updated INTEGER;
 BEGIN
     IF p_lock_type = 'start' THEN v_column := 'fcm_start_sent';
@@ -949,7 +929,7 @@ $$;
 CREATE OR REPLACE FUNCTION assign_drivers_atomically(
     p_bus_updates JSONB, p_driver_updates JSONB
 )
-RETURNS JSONB LANGUAGE plpgsql AS $$
+RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE
     v_bus_rec JSONB; v_driver_rec JSONB; v_current TEXT; v_is_reserved BOOLEAN;
     v_updated_buses TEXT[] := '{}'; v_updated_drivers TEXT[] := '{}';
@@ -986,7 +966,7 @@ END;
 $$;
 
 CREATE OR REPLACE FUNCTION assign_routes_atomically(p_bus_updates JSONB)
-RETURNS JSONB LANGUAGE plpgsql AS $$
+RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE v_bus_rec JSONB; v_current TEXT; v_updated_buses TEXT[] := '{}';
 BEGIN
     FOR v_bus_rec IN SELECT * FROM jsonb_array_elements(p_bus_updates) LOOP
@@ -1077,6 +1057,12 @@ WHERE ((status = 'active')
   AND stop_id IS NOT NULL
 GROUP BY assigned_bus_id, stop_id;
 
+-- ── 5.1 Restrict View Access to Service Role ──────────────────────────────────
+REVOKE ALL ON public.bus_occupancy_counts_view FROM public, anon, authenticated;
+REVOKE ALL ON public.bus_stop_counts_view FROM public, anon, authenticated;
+GRANT SELECT ON public.bus_occupancy_counts_view TO service_role;
+GRANT SELECT ON public.bus_stop_counts_view TO service_role;
+
 -- =============================================================================
 -- 6. INDEXES
 -- =============================================================================
@@ -1159,6 +1145,7 @@ CREATE INDEX IF NOT EXISTS idx_buses_evening_load ON buses(evening_load);
 CREATE INDEX IF NOT EXISTS idx_routes_status ON routes(status);
 
 -- Indexes for active_trips, bus_locations, driver_status, waiting_flags, driver_location_updates, route_cache, driver_swap_requests, temporary_assignments, missed_bus_requests, device_sessions, reassignment_logs, and payments are defined in COMPLETE_SCHEMA.sql.
+CREATE INDEX IF NOT EXISTS idx_temp_assignments_source_request ON temporary_assignments(source_request_id);
 
 -- Processed payments
 CREATE INDEX IF NOT EXISTS idx_processed_payments_expires_at ON processed_payments(expires_at);
@@ -1200,6 +1187,90 @@ $$;
 REVOKE ALL ON FUNCTION public.user_has_role(TEXT, TEXT) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.user_has_role(TEXT, TEXT) TO authenticated;
 
+-- ── 7.1.1 Explicit Revokes & Grants on RPC Functions ─────────────────────────
+
+-- Defense-in-depth: revoke execute privilege on all public schema functions by default
+REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA public FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO service_role;
+
+REVOKE EXECUTE ON FUNCTION public.trg_set_updated_at() FROM PUBLIC, anon, authenticated;
+REVOKE EXECUTE ON FUNCTION public.update_updated_at_column() FROM PUBLIC, anon, authenticated;
+
+REVOKE ALL ON FUNCTION public.identity_activate_student(TEXT, TEXT, TEXT, JSONB) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.identity_activate_student(TEXT, TEXT, TEXT, JSONB) TO service_role;
+
+REVOKE ALL ON FUNCTION public.validate_application_for_approval(TEXT, TEXT, INTEGER) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.validate_application_for_approval(TEXT, TEXT, INTEGER) TO service_role;
+
+REVOKE ALL ON FUNCTION public.validate_application_for_rejection(TEXT, TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.validate_application_for_rejection(TEXT, TEXT) TO service_role;
+
+REVOKE ALL ON FUNCTION public.approve_application(TEXT, TEXT, INTEGER) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.approve_application(TEXT, TEXT, INTEGER) TO service_role;
+
+REVOKE ALL ON FUNCTION public.reject_application(TEXT, TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.reject_application(TEXT, TEXT) TO service_role;
+
+REVOKE ALL ON FUNCTION public.finalize_application_approval(TEXT, TEXT, JSONB) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.finalize_application_approval(TEXT, TEXT, JSONB) TO service_role;
+
+REVOKE ALL ON FUNCTION public.finalize_application_rejection(TEXT, TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.finalize_application_rejection(TEXT, TEXT) TO service_role;
+
+REVOKE ALL ON FUNCTION public.transition_application_state(TEXT, TEXT, TEXT, JSONB) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.transition_application_state(TEXT, TEXT, TEXT, JSONB) TO service_role;
+
+REVOKE ALL ON FUNCTION public.release_application_lock(TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.release_application_lock(TEXT) TO service_role;
+
+REVOKE ALL ON FUNCTION public.cleanup_abandoned_application_locks() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.cleanup_abandoned_application_locks() TO service_role;
+
+REVOKE ALL ON FUNCTION public.processed_payments_acquire(TEXT, TEXT, NUMERIC, TEXT, TEXT, TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.processed_payments_acquire(TEXT, TEXT, NUMERIC, TEXT, TEXT, TEXT) TO service_role;
+
+REVOKE ALL ON FUNCTION public.processed_payments_release(TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.processed_payments_release(TEXT) TO service_role;
+
+REVOKE ALL ON FUNCTION public.processed_payments_cleanup() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.processed_payments_cleanup() TO service_role;
+
+REVOKE ALL ON FUNCTION public.bus_check_capacity(TEXT, TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.bus_check_capacity(TEXT, TEXT) TO authenticated, service_role;
+
+REVOKE ALL ON FUNCTION public.bus_increment_capacity(TEXT, TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.bus_increment_capacity(TEXT, TEXT) TO service_role;
+
+REVOKE ALL ON FUNCTION public.bus_decrement_capacity(TEXT, TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.bus_decrement_capacity(TEXT, TEXT) TO service_role;
+
+REVOKE ALL ON FUNCTION public.check_bus_lock(TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.check_bus_lock(TEXT) TO authenticated, service_role;
+
+REVOKE ALL ON FUNCTION public.acquire_trip_lock(TEXT, TEXT, TEXT, TEXT, TEXT, INTEGER) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.acquire_trip_lock(TEXT, TEXT, TEXT, TEXT, TEXT, INTEGER) TO authenticated, service_role;
+
+REVOKE ALL ON FUNCTION public.extend_trip_lock(TEXT, TEXT, TEXT, INTEGER) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.extend_trip_lock(TEXT, TEXT, TEXT, INTEGER) TO authenticated, service_role;
+
+REVOKE ALL ON FUNCTION public.release_trip_lock(TEXT, TEXT, TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.release_trip_lock(TEXT, TEXT, TEXT) TO authenticated, service_role;
+
+REVOKE ALL ON FUNCTION public.acquire_fcm_lock(TEXT, TEXT, TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.acquire_fcm_lock(TEXT, TEXT, TEXT) TO authenticated, service_role;
+
+REVOKE ALL ON FUNCTION public.assign_drivers_atomically(JSONB, JSONB) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.assign_drivers_atomically(JSONB, JSONB) TO service_role;
+
+REVOKE ALL ON FUNCTION public.assign_routes_atomically(JSONB) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.assign_routes_atomically(JSONB) TO service_role;
+
+REVOKE ALL ON FUNCTION public.cleanup_old_reassignment_logs() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.cleanup_old_reassignment_logs() TO service_role;
+
+REVOKE ALL ON FUNCTION public.cleanup_stale_locks(INTEGER) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.cleanup_stale_locks(INTEGER) TO service_role;
+
 -- Enable RLS on all tables
 ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.student_profiles ENABLE ROW LEVEL SECURITY;
@@ -1219,6 +1290,34 @@ ALTER TABLE public.system_markers ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.audit_events ENABLE ROW LEVEL SECURITY;
 
 -- ── 7.2 SELECT Policies (Zero-Trust Write: Writes are service-role only) ──────
+
+-- Drop existing policies first to ensure idempotency
+DROP POLICY IF EXISTS "users_select" ON public.users;
+DROP POLICY IF EXISTS "student_profiles_select" ON public.student_profiles;
+DROP POLICY IF EXISTS "driver_profiles_select" ON public.driver_profiles;
+DROP POLICY IF EXISTS "moderator_profiles_select" ON public.moderator_profiles;
+DROP POLICY IF EXISTS "admin_profiles_select" ON public.admin_profiles;
+DROP POLICY IF EXISTS "unauth_users_select" ON public.unauth_users;
+DROP POLICY IF EXISTS "applications_select" ON public.applications;
+DROP POLICY IF EXISTS "buses_select" ON public.buses;
+DROP POLICY IF EXISTS "routes_select" ON public.routes;
+
+DROP POLICY IF EXISTS "service_role_bypass_users" ON public.users;
+DROP POLICY IF EXISTS "service_role_bypass_student_profiles" ON public.student_profiles;
+DROP POLICY IF EXISTS "service_role_bypass_driver_profiles" ON public.driver_profiles;
+DROP POLICY IF EXISTS "service_role_bypass_moderator_profiles" ON public.moderator_profiles;
+DROP POLICY IF EXISTS "service_role_bypass_admin_profiles" ON public.admin_profiles;
+DROP POLICY IF EXISTS "service_role_bypass_unauth_users" ON public.unauth_users;
+DROP POLICY IF EXISTS "service_role_bypass_applications" ON public.applications;
+DROP POLICY IF EXISTS "service_role_bypass_buses" ON public.buses;
+DROP POLICY IF EXISTS "service_role_bypass_routes" ON public.routes;
+DROP POLICY IF EXISTS "service_role_bypass_notifications" ON public.notifications;
+DROP POLICY IF EXISTS "service_role_bypass_system_config" ON public.system_config;
+DROP POLICY IF EXISTS "service_role_bypass_system_markers" ON public.system_markers;
+DROP POLICY IF EXISTS "service_role_bypass_processed_payments" ON public.processed_payments;
+DROP POLICY IF EXISTS "service_role_bypass_audit_events" ON public.audit_events;
+DROP POLICY IF EXISTS "service_role_bypass_academic_calendar" ON public.academic_calendar_config;
+DROP POLICY IF EXISTS "service_role_bypass_migration_log" ON public.migration_log;
 
 -- users SELECT policy
 CREATE POLICY "users_select" ON public.users FOR SELECT TO authenticated
@@ -1273,3 +1372,1029 @@ CREATE POLICY "service_role_bypass_processed_payments" ON public.processed_payme
 CREATE POLICY "service_role_bypass_audit_events" ON public.audit_events FOR ALL TO service_role USING (true) WITH CHECK (true);
 CREATE POLICY "service_role_bypass_academic_calendar" ON public.academic_calendar_config FOR ALL TO service_role USING (true) WITH CHECK (true);
 CREATE POLICY "service_role_bypass_migration_log" ON public.migration_log FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+-- =============================================================================
+-- 8. ADDENDUM — Objects missing from original migration (discovered by codebase audit)
+-- =============================================================================
+-- These additions were identified by comparing every .rpc() call, table read,
+-- and table write in the TypeScript codebase against the migration above.
+-- All items below are REQUIRED for the application to function correctly.
+-- =============================================================================
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 8.1 MISSING TABLES
+-- ─────────────────────────────────────────────────────────────────────────────
+
+-- fcm_tokens: canonical FCM device-token store (replaces Firestore subcollection)
+-- Used by: fcm-token.repository.pg.ts (upsert, select, delete)
+--          fcm-notification-service.ts (getValidTokensForUsers)
+--          api/save-fcm-token/route.ts
+--          api/admin/fcm/invalidTokens/route.ts
+CREATE TABLE IF NOT EXISTS public.fcm_tokens (
+    id         UUID    PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id    TEXT    NOT NULL,
+    token_hash TEXT    NOT NULL,   -- SHA-256(token)[0:40], used for dedup
+    token      TEXT    NOT NULL,
+    platform   TEXT    NOT NULL DEFAULT 'web'
+                       CHECK (platform IN ('android', 'ios', 'web')),
+    last_seen  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    valid      BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_fcm_tokens_user_token_hash UNIQUE (user_id, token_hash)
+);
+
+CREATE INDEX IF NOT EXISTS idx_fcm_tokens_user_id   ON public.fcm_tokens(user_id);
+CREATE INDEX IF NOT EXISTS idx_fcm_tokens_valid      ON public.fcm_tokens(valid) WHERE valid = TRUE;
+CREATE INDEX IF NOT EXISTS idx_fcm_tokens_last_seen  ON public.fcm_tokens(last_seen);
+
+ALTER TABLE public.fcm_tokens ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "fcm_tokens_service_role" ON public.fcm_tokens;
+DROP POLICY IF EXISTS "fcm_tokens_select_own" ON public.fcm_tokens;
+
+-- All FCM token operations are service-role only (tokens are sensitive)
+CREATE POLICY "fcm_tokens_service_role" ON public.fcm_tokens
+    FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+-- Users may read their own tokens (used by client-side token refresh check)
+CREATE POLICY "fcm_tokens_select_own" ON public.fcm_tokens
+    FOR SELECT TO authenticated
+    USING (user_id = auth.uid()::text);
+
+GRANT SELECT ON public.fcm_tokens TO authenticated;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- active_trips: multi-driver lock system for exclusive bus operation
+-- COMPLETE_SCHEMA.sql defines the base table but is historical/already applied.
+-- The migration must guarantee the table + all required columns exist so that
+-- the RPCs in section 4.5 (acquire_trip_lock, acquire_fcm_lock, etc.) work.
+--
+-- Columns fcm_start_sent, fcm_end_sent, expires_at are referenced in:
+--   - acquire_fcm_lock RPC (migration lines 926-944)
+--   - check_bus_lock  RPC (migration lines 856-868)
+--   - api/driver/check-active-trip/route.ts (direct .select('…expires_at'))
+-- ─────────────────────────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS public.active_trips (
+    trip_id        UUID   PRIMARY KEY DEFAULT gen_random_uuid(),
+    bus_id         TEXT   NOT NULL,
+    driver_id      TEXT   NOT NULL,
+    route_id       TEXT   NOT NULL,
+    shift          TEXT   NOT NULL CHECK (shift IN ('morning', 'evening', 'both')),
+    status         TEXT   NOT NULL DEFAULT 'active'
+                          CHECK (status IN ('active', 'ended')),
+    start_time     TIMESTAMPTZ DEFAULT NOW(),
+    end_time       TIMESTAMPTZ,
+    last_heartbeat TIMESTAMPTZ DEFAULT NOW(),
+    expires_at     TIMESTAMPTZ,               -- TTL for stale-lock recovery
+    fcm_start_sent BOOLEAN NOT NULL DEFAULT FALSE, -- idempotency for trip-start FCM
+    fcm_end_sent   BOOLEAN NOT NULL DEFAULT FALSE, -- idempotency for trip-end FCM
+    metadata       JSONB   DEFAULT '{}'::jsonb,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at     TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Add missing columns to active_trips if the table already exists
+-- (safe to run on both a clean DB and one that was bootstrapped via COMPLETE_SCHEMA)
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'active_trips' AND column_name = 'expires_at'
+    ) THEN
+        ALTER TABLE public.active_trips ADD COLUMN expires_at TIMESTAMPTZ;
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'active_trips' AND column_name = 'fcm_start_sent'
+    ) THEN
+        ALTER TABLE public.active_trips ADD COLUMN fcm_start_sent BOOLEAN NOT NULL DEFAULT FALSE;
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'active_trips' AND column_name = 'fcm_end_sent'
+    ) THEN
+        ALTER TABLE public.active_trips ADD COLUMN fcm_end_sent BOOLEAN NOT NULL DEFAULT FALSE;
+    END IF;
+END $$;
+
+-- Unique partial indexes for lock semantics (one active trip per bus, per driver)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_active_trips_bus_active    ON public.active_trips(bus_id)    WHERE status = 'active';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_active_trips_driver_active ON public.active_trips(driver_id) WHERE status = 'active';
+CREATE INDEX IF NOT EXISTS idx_active_trips_bus_id     ON public.active_trips(bus_id);
+CREATE INDEX IF NOT EXISTS idx_active_trips_driver_id  ON public.active_trips(driver_id);
+CREATE INDEX IF NOT EXISTS idx_active_trips_status     ON public.active_trips(status);
+CREATE INDEX IF NOT EXISTS idx_active_trips_status_bus ON public.active_trips(bus_id, status) WHERE status = 'active';
+CREATE INDEX IF NOT EXISTS idx_active_trips_heartbeat  ON public.active_trips(last_heartbeat) WHERE status = 'active';
+CREATE INDEX IF NOT EXISTS idx_active_trips_start_time ON public.active_trips(start_time DESC);
+CREATE INDEX IF NOT EXISTS idx_active_trips_route_active ON public.active_trips(route_id, status) WHERE status = 'active';
+
+DROP TRIGGER IF EXISTS active_trips_updated_at ON public.active_trips;
+CREATE TRIGGER active_trips_updated_at
+    BEFORE UPDATE ON public.active_trips
+    FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
+
+ALTER TABLE public.active_trips ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "active_trips_select_anon"     ON public.active_trips;
+DROP POLICY IF EXISTS "active_trips_insert_service"  ON public.active_trips;
+DROP POLICY IF EXISTS "active_trips_update_service"  ON public.active_trips;
+DROP POLICY IF EXISTS "active_trips_delete_service"  ON public.active_trips;
+DROP POLICY IF EXISTS "active_trips_service_role"    ON public.active_trips;
+
+CREATE POLICY "active_trips_select_anon" ON public.active_trips
+    FOR SELECT TO anon, authenticated USING (status = 'active');
+
+CREATE POLICY "active_trips_service_role" ON public.active_trips
+    FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+GRANT SELECT ON public.active_trips TO anon, authenticated;
+
+-- Enable realtime for active_trips (required for multi-driver lock UI updates)
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_publication_tables
+        WHERE pubname = 'supabase_realtime' AND tablename = 'active_trips'
+    ) THEN
+        ALTER PUBLICATION supabase_realtime ADD TABLE active_trips;
+    END IF;
+END $$;
+
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 8.2 MISSING TRIGGERS (updated_at auto-maintenance)
+-- ─────────────────────────────────────────────────────────────────────────────
+-- The notification repo comment explicitly states:
+--   "updated_at is auto-set by a PostgreSQL trigger (trg_notifications_updated_at)"
+-- Similarly, calendar repo states it doesn't write updated_at — the trigger does.
+
+DROP TRIGGER IF EXISTS trg_applications_updated_at ON public.applications;
+CREATE TRIGGER trg_applications_updated_at
+    BEFORE UPDATE ON public.applications
+    FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_buses_updated_at ON public.buses;
+CREATE TRIGGER trg_buses_updated_at
+    BEFORE UPDATE ON public.buses
+    FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_routes_updated_at ON public.routes;
+CREATE TRIGGER trg_routes_updated_at
+    BEFORE UPDATE ON public.routes
+    FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_notifications_updated_at ON public.notifications;
+CREATE TRIGGER trg_notifications_updated_at
+    BEFORE UPDATE ON public.notifications
+    FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_academic_calendar_config_updated_at ON public.academic_calendar_config;
+CREATE TRIGGER trg_academic_calendar_config_updated_at
+    BEFORE UPDATE ON public.academic_calendar_config
+    FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_migration_log_updated_at ON public.migration_log;
+CREATE TRIGGER trg_migration_log_updated_at
+    BEFORE UPDATE ON public.migration_log
+    FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
+
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 8.3 MISSING INDEXES
+-- ─────────────────────────────────────────────────────────────────────────────
+
+-- valid_until partial index: used by the soft-block cron to find expired students
+-- Query: WHERE status = 'active' AND valid_until < NOW()
+CREATE INDEX IF NOT EXISTS idx_student_profiles_valid_until_active
+    ON public.student_profiles(valid_until)
+    WHERE status = 'active' AND valid_until IS NOT NULL;
+
+-- Composite index for notifications: user queries by recipient + sort by created_at
+-- Query: WHERE recipient_ids @> '{uid}' OR sender_user_id = uid ORDER BY created_at DESC
+CREATE INDEX IF NOT EXISTS idx_notifications_sender_created
+    ON public.notifications(sender_user_id, created_at DESC);
+
+-- GIN index for hidden_for_user_ids array — pgUpdateNotification writes this column
+CREATE INDEX IF NOT EXISTS idx_notifications_hidden_for_user_ids
+    ON public.notifications USING GIN (hidden_for_user_ids);
+
+-- Applications: state + type composite (used by activate_session_batch + analytics RPCs)
+CREATE INDEX IF NOT EXISTS idx_applications_state_type
+    ON public.applications(state, application_type);
+
+-- Applications: target_session JSONB start year extraction (used by session activation)
+CREATE INDEX IF NOT EXISTS idx_applications_verified_upcoming_session
+    ON public.applications((target_session->>'startYear'), state)
+    WHERE state = 'verified_upcoming';
+
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 8.4 MISSING RLS POLICIES
+-- ─────────────────────────────────────────────────────────────────────────────
+
+-- notifications: authenticated users can read their own (sender or recipient)
+-- pgFindNotificationsByUser uses: .or(`recipient_ids.cs.{uid},sender_user_id.eq.${uid}`)
+DROP POLICY IF EXISTS "notifications_select_own" ON public.notifications;
+CREATE POLICY "notifications_select_own" ON public.notifications
+    FOR SELECT TO authenticated
+    USING (
+        sender_user_id = auth.uid()::text
+        OR recipient_ids @> ARRAY[auth.uid()::text]
+        OR user_has_role(auth.uid()::text, 'admin')
+        OR user_has_role(auth.uid()::text, 'moderator')
+    );
+
+GRANT SELECT ON public.notifications TO authenticated;
+
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 8.5 MISSING RPCs
+-- ─────────────────────────────────────────────────────────────────────────────
+
+-- ── 8.5.1 soft_block_student_with_seat_release ──────────────────────────────
+-- Source: supabase/migrations/soft_block_rpc.sql (merged here for single-file deploy)
+-- Caller: soft-block cron service (lib/services/soft-block.service.ts)
+-- Atomically: locks student row → validates active → decrements bus capacity
+--             if releasing seat → updates status to soft_blocked.
+-- Fixes race condition: double capacity decrement when cron runs concurrently.
+CREATE OR REPLACE FUNCTION public.soft_block_student_with_seat_release(
+    p_student_uid      TEXT,
+    p_bus_id           TEXT,
+    p_shift            TEXT,
+    p_release_seat     BOOLEAN,
+    p_soft_blocked_at  TIMESTAMPTZ,
+    p_seat_released_at TIMESTAMPTZ
+)
+RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+    v_student         RECORD;
+    v_normalized_shift TEXT;
+    v_capacity_result  JSONB;
+    v_student_updated  INTEGER;
+BEGIN
+    -- 1. Lock and validate student (FOR UPDATE prevents concurrent soft-blocks)
+    SELECT uid, status, assigned_bus_id, shift
+    INTO v_student
+    FROM student_profiles
+    WHERE uid = p_student_uid
+    FOR UPDATE;
+
+    IF v_student IS NULL THEN
+        RETURN jsonb_build_object('success', false, 'status', 404, 'error', 'Student not found');
+    END IF;
+
+    IF v_student.status <> 'active' THEN
+        RETURN jsonb_build_object(
+            'success', false, 'status', 409,
+            'error', 'Student not active, already blocked or deleted',
+            'current_status', v_student.status
+        );
+    END IF;
+
+    -- 2. Normalise shift
+    v_normalized_shift := LOWER(TRIM(COALESCE(p_shift, 'Morning')));
+    IF v_normalized_shift NOT IN ('morning', 'evening') THEN
+        v_normalized_shift := 'morning';
+    END IF;
+
+    -- 3. Atomic capacity decrement (if releasing seat)
+    IF p_release_seat AND p_bus_id IS NOT NULL THEN
+        SELECT * FROM bus_decrement_capacity(p_bus_id, v_normalized_shift) INTO v_capacity_result;
+        IF v_capacity_result->>'error' IS NOT NULL THEN
+            RETURN jsonb_build_object('success', false, 'error', v_capacity_result->>'error');
+        END IF;
+    END IF;
+
+    -- 4. Update student to soft_blocked
+    UPDATE student_profiles SET
+        status          = 'soft_blocked',
+        seat_released_at = CASE WHEN p_release_seat THEN p_seat_released_at ELSE seat_released_at END,
+        updated_at      = NOW()
+    WHERE uid = p_student_uid;
+    GET DIAGNOSTICS v_student_updated = ROW_COUNT;
+
+    IF v_student_updated <> 1 THEN
+        -- Compensating rollback of capacity if student update failed
+        IF p_release_seat AND p_bus_id IS NOT NULL THEN
+            PERFORM bus_increment_capacity(p_bus_id, v_normalized_shift);
+        END IF;
+        RAISE EXCEPTION 'Expected 1 row updated for student uid=%, got %', p_student_uid, v_student_updated;
+    END IF;
+
+    RETURN jsonb_build_object(
+        'success',       true,
+        'student_uid',   p_student_uid,
+        'status',        'soft_blocked',
+        'seat_released', p_release_seat,
+        'bus_id',        p_bus_id,
+        'capacity',      v_capacity_result
+    );
+EXCEPTION WHEN OTHERS THEN
+    -- Compensating rollback on any exception
+    IF p_release_seat AND p_bus_id IS NOT NULL THEN
+        PERFORM bus_increment_capacity(p_bus_id, v_normalized_shift);
+    END IF;
+    RAISE;
+END;
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.soft_block_student_with_seat_release(TEXT,TEXT,TEXT,BOOLEAN,TIMESTAMPTZ,TIMESTAMPTZ) FROM public;
+REVOKE EXECUTE ON FUNCTION public.soft_block_student_with_seat_release(TEXT,TEXT,TEXT,BOOLEAN,TIMESTAMPTZ,TIMESTAMPTZ) FROM authenticated;
+REVOKE EXECUTE ON FUNCTION public.soft_block_student_with_seat_release(TEXT,TEXT,TEXT,BOOLEAN,TIMESTAMPTZ,TIMESTAMPTZ) FROM anon;
+GRANT  EXECUTE ON FUNCTION public.soft_block_student_with_seat_release(TEXT,TEXT,TEXT,BOOLEAN,TIMESTAMPTZ,TIMESTAMPTZ) TO service_role;
+
+
+-- ── 8.5.2 approve_renewal_with_seat ─────────────────────────────────────────
+-- Caller: application.service.ts:279 (approve renewal_after_soft_block path)
+-- Atomic: capacity check → increment → student update → application state → approved
+-- Args: p_application_id, p_approver_uid, p_student_uid, p_bus_id, p_shift,
+--       p_valid_until, p_session_end_year, p_session_duration, p_soft_block, p_hard_block
+CREATE OR REPLACE FUNCTION public.approve_renewal_with_seat(
+    p_application_id  TEXT,
+    p_approver_uid    TEXT,
+    p_student_uid     TEXT,
+    p_bus_id          TEXT,
+    p_shift           TEXT,
+    p_valid_until     TIMESTAMPTZ,
+    p_session_end_year INTEGER,
+    p_session_duration TEXT,
+    p_soft_block      TIMESTAMPTZ DEFAULT NULL,
+    p_hard_block      TIMESTAMPTZ DEFAULT NULL
+)
+RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+    v_normalized_shift TEXT;
+    v_bus              RECORD;
+    v_new_morning      INTEGER;
+    v_new_evening      INTEGER;
+    v_student_updated  INTEGER;
+    v_app_updated      INTEGER;
+BEGIN
+    -- 1. Validate shift
+    v_normalized_shift := LOWER(TRIM(COALESCE(p_shift, 'Morning')));
+    IF v_normalized_shift NOT IN ('morning', 'evening') THEN
+        RETURN jsonb_build_object('success', false, 'error', 'Invalid shift: ' || COALESCE(p_shift, 'NULL'));
+    END IF;
+
+    -- 2. Lock bus row and check capacity atomically
+    SELECT id, capacity, morning_load, evening_load
+    INTO v_bus
+    FROM buses
+    WHERE id = p_bus_id
+    FOR UPDATE;
+
+    IF NOT FOUND THEN
+        RETURN jsonb_build_object('success', false, 'error', 'Bus ' || p_bus_id || ' not found');
+    END IF;
+
+    -- 3. Verify capacity has room
+    IF v_normalized_shift = 'morning' THEN
+        IF v_bus.morning_load >= v_bus.capacity THEN
+            RETURN jsonb_build_object('success', false, 'error', 'CAPACITY_FULL', 'busId', p_bus_id, 'shift', p_shift);
+        END IF;
+        v_new_morning := v_bus.morning_load + 1;
+        v_new_evening := v_bus.evening_load;
+    ELSE
+        IF v_bus.evening_load >= v_bus.capacity THEN
+            RETURN jsonb_build_object('success', false, 'error', 'CAPACITY_FULL', 'busId', p_bus_id, 'shift', p_shift);
+        END IF;
+        v_new_morning := v_bus.morning_load;
+        v_new_evening := v_bus.evening_load + 1;
+    END IF;
+
+    -- 4. Increment bus capacity
+    UPDATE buses
+    SET morning_load = v_new_morning, evening_load = v_new_evening, updated_at = NOW()
+    WHERE id = p_bus_id;
+
+    -- 5. Update student profile (re-activate, extend validity)
+    UPDATE student_profiles SET
+        status           = 'active',
+        valid_until      = p_valid_until,
+        session_end_year = p_session_end_year,
+        session_duration = p_session_duration,
+        soft_block       = p_soft_block,
+        hard_block       = p_hard_block,
+        seat_released_at = NULL,
+        last_processed_application_id = p_application_id,
+        updated_at       = NOW()
+    WHERE uid = p_student_uid;
+    GET DIAGNOSTICS v_student_updated = ROW_COUNT;
+
+    IF v_student_updated <> 1 THEN
+        -- Compensate bus capacity
+        UPDATE buses
+        SET morning_load = v_bus.morning_load, evening_load = v_bus.evening_load, updated_at = NOW()
+        WHERE id = p_bus_id;
+        RETURN jsonb_build_object('success', false, 'error', 'Student profile not found or not updated: ' || p_student_uid);
+    END IF;
+
+    -- 6. Finalize application → approved (preserve for audit trail)
+    UPDATE applications SET
+        state                       = 'approved',
+        approved_at                 = NOW(),
+        approved_by                 = p_approver_uid,
+        approved_by_id              = p_approver_uid,
+        processing_lock             = NULL,
+        processing_started_at       = NULL,
+        processing_lease_expires_at = NULL,
+        processing_result           = 'success',
+        processing_completed_at     = NOW(),
+        updated_at                  = NOW()
+    WHERE application_id = p_application_id
+      AND processing_lock = p_approver_uid;
+    GET DIAGNOSTICS v_app_updated = ROW_COUNT;
+
+    IF v_app_updated <> 1 THEN
+        -- Compensate both student and bus
+        UPDATE student_profiles SET status = 'soft_blocked', seat_released_at = NOW(), updated_at = NOW()
+        WHERE uid = p_student_uid;
+        UPDATE buses SET morning_load = v_bus.morning_load, evening_load = v_bus.evening_load, updated_at = NOW()
+        WHERE id = p_bus_id;
+        RETURN jsonb_build_object('success', false, 'error', 'Application lock expired or not found: ' || p_application_id);
+    END IF;
+
+    RETURN jsonb_build_object(
+        'success',     true,
+        'studentUid',  p_student_uid,
+        'busId',       p_bus_id,
+        'shift',       p_shift,
+        'newMorningLoad', v_new_morning,
+        'newEveningLoad', v_new_evening,
+        'capacity',    v_bus.capacity
+    );
+EXCEPTION WHEN OTHERS THEN
+    RAISE;
+END;
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.approve_renewal_with_seat(TEXT,TEXT,TEXT,TEXT,TEXT,TIMESTAMPTZ,INTEGER,TEXT,TIMESTAMPTZ,TIMESTAMPTZ) FROM public;
+REVOKE EXECUTE ON FUNCTION public.approve_renewal_with_seat(TEXT,TEXT,TEXT,TEXT,TEXT,TIMESTAMPTZ,INTEGER,TEXT,TIMESTAMPTZ,TIMESTAMPTZ) FROM authenticated;
+GRANT  EXECUTE ON FUNCTION public.approve_renewal_with_seat(TEXT,TEXT,TEXT,TEXT,TEXT,TIMESTAMPTZ,INTEGER,TEXT,TIMESTAMPTZ,TIMESTAMPTZ) TO service_role;
+
+
+-- ── 8.5.3 get_student_profile_counts ────────────────────────────────────────
+-- Caller: analytics.repository.ts:111
+-- Returns: [{ total_students, active_students, morning_students, evening_students, expired_students }]
+-- Single aggregation replacing 5 separate COUNT() queries.
+CREATE OR REPLACE FUNCTION public.get_student_profile_counts()
+RETURNS TABLE(
+    total_students   BIGINT,
+    active_students  BIGINT,
+    morning_students BIGINT,
+    evening_students BIGINT,
+    expired_students BIGINT
+)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+    SELECT
+        COUNT(*)                                                        AS total_students,
+        COUNT(*) FILTER (WHERE status = 'active')                       AS active_students,
+        COUNT(*) FILTER (WHERE status = 'active' AND shift = 'Morning') AS morning_students,
+        COUNT(*) FILTER (WHERE status = 'active' AND shift = 'Evening') AS evening_students,
+        COUNT(*) FILTER (WHERE status IN ('soft_blocked', 'expired'))   AS expired_students
+    FROM public.student_profiles;
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.get_student_profile_counts() FROM public;
+REVOKE EXECUTE ON FUNCTION public.get_student_profile_counts() FROM authenticated;
+GRANT  EXECUTE ON FUNCTION public.get_student_profile_counts() TO service_role;
+
+
+-- ── 8.5.4 get_application_counts ────────────────────────────────────────────
+-- Caller: analytics.repository.ts:114
+-- Returns: [{ pending_apps, verification_apps, renewal_apps }]
+CREATE OR REPLACE FUNCTION public.get_application_counts()
+RETURNS TABLE(
+    pending_apps      BIGINT,
+    verification_apps BIGINT,
+    renewal_apps      BIGINT
+)
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+    SELECT
+        COUNT(*) FILTER (WHERE state IN ('draft', 'submitted'))                               AS pending_apps,
+        COUNT(*) FILTER (WHERE state IN ('awaiting_verification', 'verified'))                AS verification_apps,
+        COUNT(*) FILTER (WHERE application_type IN ('renewal', 'renewal_after_soft_block')
+                           AND state NOT IN ('approved', 'rejected'))                         AS renewal_apps
+    FROM public.applications;
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.get_application_counts() FROM public;
+REVOKE EXECUTE ON FUNCTION public.get_application_counts() FROM authenticated;
+GRANT  EXECUTE ON FUNCTION public.get_application_counts() TO service_role;
+
+
+-- ── 8.5.5 delete_student_cascade_v1 ─────────────────────────────────────────
+-- Caller: cleanup-helpers.ts:81
+-- Atomically deletes: users, student_profiles, applications, notifications,
+--                     waiting_flags, fcm_tokens for a given student UID.
+-- The single-transaction boundary prevents partial deletion states.
+CREATE OR REPLACE FUNCTION public.delete_student_cascade_v1(p_student_uid TEXT)
+RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+    v_notifications_deleted  INTEGER := 0;
+    v_waiting_flags_deleted  INTEGER := 0;
+    v_fcm_deleted            INTEGER := 0;
+    v_applications_deleted   INTEGER := 0;
+    v_student_deleted        INTEGER := 0;
+    v_user_deleted           INTEGER := 0;
+BEGIN
+    IF p_student_uid IS NULL OR p_student_uid = '' THEN
+        RETURN jsonb_build_object('success', false, 'error', 'p_student_uid is required');
+    END IF;
+
+    -- 1. Notifications (recipient or sender)
+    DELETE FROM public.notifications
+    WHERE sender_user_id = p_student_uid
+       OR recipient_ids @> ARRAY[p_student_uid];
+    GET DIAGNOSTICS v_notifications_deleted = ROW_COUNT;
+
+    -- 2. Waiting flags
+    DELETE FROM public.waiting_flags WHERE student_uid = p_student_uid;
+    GET DIAGNOSTICS v_waiting_flags_deleted = ROW_COUNT;
+
+    -- 3. FCM tokens
+    DELETE FROM public.fcm_tokens WHERE user_id = p_student_uid;
+    GET DIAGNOSTICS v_fcm_deleted = ROW_COUNT;
+
+    -- 4. Applications
+    DELETE FROM public.applications WHERE applicant_uid = p_student_uid;
+    GET DIAGNOSTICS v_applications_deleted = ROW_COUNT;
+
+    -- 5. Student profile
+    DELETE FROM public.student_profiles WHERE uid = p_student_uid;
+    GET DIAGNOSTICS v_student_deleted = ROW_COUNT;
+
+    -- 6. User record (last — FK target)
+    DELETE FROM public.users WHERE uid = p_student_uid;
+    GET DIAGNOSTICS v_user_deleted = ROW_COUNT;
+
+    RETURN jsonb_build_object(
+        'success',              true,
+        'student_uid',          p_student_uid,
+        'notifications_deleted', v_notifications_deleted,
+        'waiting_flags_deleted', v_waiting_flags_deleted,
+        'fcm_deleted',          v_fcm_deleted,
+        'applications_deleted', v_applications_deleted,
+        'student_deleted',      v_student_deleted,
+        'user_deleted',         v_user_deleted
+    );
+EXCEPTION WHEN OTHERS THEN
+    RAISE;
+END;
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.delete_student_cascade_v1(TEXT) FROM public;
+REVOKE EXECUTE ON FUNCTION public.delete_student_cascade_v1(TEXT) FROM authenticated;
+REVOKE EXECUTE ON FUNCTION public.delete_student_cascade_v1(TEXT) FROM anon;
+GRANT  EXECUTE ON FUNCTION public.delete_student_cascade_v1(TEXT) TO service_role;
+
+
+-- ── 8.5.6 delete_route_cascade_v1 ───────────────────────────────────────────
+-- Caller: cleanup-helpers.ts:295
+-- Returns: { success, busesCleaned, studentsCleaned }
+-- Atomically: clears route from buses → clears route/bus from students → deletes route.
+CREATE OR REPLACE FUNCTION public.delete_route_cascade_v1(p_route_id TEXT)
+RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+    v_buses_cleaned    INTEGER := 0;
+    v_students_cleaned INTEGER := 0;
+    v_route_deleted    INTEGER := 0;
+BEGIN
+    IF p_route_id IS NULL OR p_route_id = '' THEN
+        RETURN jsonb_build_object('success', false, 'error', 'p_route_id is required');
+    END IF;
+
+    -- 1. Clear route assignment from buses
+    UPDATE public.buses
+    SET route_id   = NULL,
+        route_name = NULL,
+        updated_at = NOW()
+    WHERE route_id = p_route_id;
+    GET DIAGNOSTICS v_buses_cleaned = ROW_COUNT;
+
+    -- 2. Clear route/bus/stop from students assigned to this route
+    UPDATE public.student_profiles
+    SET route_id          = NULL,
+        assigned_route_id = NULL,
+        bus_id            = NULL,
+        assigned_bus_id   = NULL,
+        stop_id           = NULL,
+        updated_at        = NOW()
+    WHERE route_id = p_route_id OR assigned_route_id = p_route_id;
+    GET DIAGNOSTICS v_students_cleaned = ROW_COUNT;
+
+    -- 3. Delete route
+    DELETE FROM public.routes WHERE id = p_route_id;
+    GET DIAGNOSTICS v_route_deleted = ROW_COUNT;
+
+    IF v_route_deleted = 0 THEN
+        RETURN jsonb_build_object('success', false, 'error', 'Route not found: ' || p_route_id);
+    END IF;
+
+    RETURN jsonb_build_object(
+        'success',          true,
+        'routeId',          p_route_id,
+        'busesCleaned',     v_buses_cleaned,
+        'studentsCleaned',  v_students_cleaned
+    );
+EXCEPTION WHEN OTHERS THEN
+    RAISE;
+END;
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.delete_route_cascade_v1(TEXT) FROM public;
+REVOKE EXECUTE ON FUNCTION public.delete_route_cascade_v1(TEXT) FROM authenticated;
+REVOKE EXECUTE ON FUNCTION public.delete_route_cascade_v1(TEXT) FROM anon;
+GRANT  EXECUTE ON FUNCTION public.delete_route_cascade_v1(TEXT) TO service_role;
+
+
+-- ── 8.5.7 activate_session_batch ────────────────────────────────────────────
+-- Caller: session-activation.service.ts:141
+-- Args: p_session_year INTEGER (the academic year to activate)
+-- Returns: { success, processed, pending, failed, errors[] }
+-- Bulk-activates verified_upcoming applications for the given session year.
+-- This is a best-effort batch: each application is processed independently
+-- so one failure does not block others.
+-- NOTE: The full session-activation business logic (capacity check, student
+-- creation, bus-pass, notifications) is orchestrated by TypeScript. This RPC
+-- handles the database-level state transitions atomically.
+CREATE OR REPLACE FUNCTION public.activate_session_batch(p_session_year INTEGER)
+RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+    v_app            RECORD;
+    v_processed      INTEGER := 0;
+    v_pending        INTEGER := 0;
+    v_failed         INTEGER := 0;
+    v_errors         JSONB   := '[]'::jsonb;
+    v_locked         INTEGER;
+BEGIN
+    -- Iterate all verified_upcoming applications for this session year.
+    -- Each is locked for update to prevent concurrent processing.
+    FOR v_app IN
+        SELECT application_id, applicant_uid, state, target_session, form_data, application_type
+        FROM public.applications
+        WHERE state = 'verified_upcoming'
+          AND (
+              (target_session->>'startYear')::INTEGER = p_session_year
+          )
+        FOR UPDATE SKIP LOCKED   -- skip any already being processed
+    LOOP
+        BEGIN
+            -- Attempt to lock the application for processing
+            UPDATE public.applications
+            SET processing_lock             = 'session_activation',
+                processing_started_at       = NOW(),
+                processing_lease_expires_at = NOW() + INTERVAL '10 minutes'
+            WHERE application_id = v_app.application_id
+              AND state = 'verified_upcoming'
+              AND (processing_lock IS NULL OR processing_lease_expires_at < NOW());
+            GET DIAGNOSTICS v_locked = ROW_COUNT;
+
+            IF v_locked = 1 THEN
+                -- Application locked — TypeScript service will pick it up
+                -- and call finalize_application_approval when done.
+                -- We count it as "will be processed" here.
+                v_processed := v_processed + 1;
+            ELSE
+                -- Already locked by another process (concurrent activation)
+                v_pending := v_pending + 1;
+            END IF;
+
+        EXCEPTION WHEN OTHERS THEN
+            v_failed  := v_failed + 1;
+            v_errors  := v_errors || jsonb_build_object(
+                'applicationId', v_app.application_id,
+                'error',         SQLERRM
+            );
+        END;
+    END LOOP;
+
+    RETURN jsonb_build_object(
+        'success',   true,
+        'processed', v_processed,
+        'pending',   v_pending,
+        'failed',    v_failed,
+        'errors',    v_errors
+    );
+END;
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.activate_session_batch(INTEGER) FROM public;
+REVOKE EXECUTE ON FUNCTION public.activate_session_batch(INTEGER) FROM authenticated;
+REVOKE EXECUTE ON FUNCTION public.activate_session_batch(INTEGER) FROM anon;
+GRANT  EXECUTE ON FUNCTION public.activate_session_batch(INTEGER) TO service_role;
+
+
+-- ── 8.5.8 reassign_students_atomically ──────────────────────────────────────
+-- Caller: fleet.repository.pg.ts:285
+-- Args: p_plans JSONB — array of { studentId, fromBusId, toBusId, studentShift? }
+-- Returns: { success, processed }
+-- Atomically reassigns a batch of students from one bus to another,
+-- decrementing source and incrementing destination capacity per student.
+CREATE OR REPLACE FUNCTION public.reassign_students_atomically(p_plans JSONB)
+RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+    v_plan       JSONB;
+    v_student    RECORD;
+    v_shift      TEXT;
+    v_processed  INTEGER := 0;
+    v_cap_result JSONB;
+BEGIN
+    FOR v_plan IN SELECT * FROM jsonb_array_elements(p_plans) LOOP
+        -- Read student (lock row to prevent concurrent modification)
+        SELECT uid, shift, bus_id, assigned_bus_id
+        INTO v_student
+        FROM student_profiles
+        WHERE uid = v_plan->>'studentId'
+        FOR UPDATE;
+
+        IF NOT FOUND THEN CONTINUE; END IF;
+
+        -- Resolve shift (plan override > student record)
+        v_shift := LOWER(TRIM(COALESCE(v_plan->>'studentShift', v_student.shift, 'Morning')));
+        IF v_shift NOT IN ('morning', 'evening') THEN v_shift := 'morning'; END IF;
+
+        -- Decrement from-bus capacity (best-effort — log error but don't abort)
+        IF v_plan->>'fromBusId' IS NOT NULL AND v_plan->>'fromBusId' <> '' THEN
+            SELECT bus_decrement_capacity(v_plan->>'fromBusId', v_shift) INTO v_cap_result;
+        END IF;
+
+        -- Increment to-bus capacity (best-effort)
+        IF v_plan->>'toBusId' IS NOT NULL AND v_plan->>'toBusId' <> '' THEN
+            SELECT bus_increment_capacity(v_plan->>'toBusId', v_shift) INTO v_cap_result;
+        END IF;
+
+        -- Update student record
+        UPDATE student_profiles SET
+            bus_id          = v_plan->>'toBusId',
+            assigned_bus_id = v_plan->>'toBusId',
+            updated_at      = NOW()
+        WHERE uid = v_plan->>'studentId';
+
+        v_processed := v_processed + 1;
+    END LOOP;
+
+    RETURN jsonb_build_object('success', true, 'processed', v_processed);
+EXCEPTION WHEN OTHERS THEN
+    RETURN jsonb_build_object('success', false, 'error', SQLERRM, 'processed', v_processed);
+END;
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.reassign_students_atomically(JSONB) FROM public;
+REVOKE EXECUTE ON FUNCTION public.reassign_students_atomically(JSONB) FROM authenticated;
+REVOKE EXECUTE ON FUNCTION public.reassign_students_atomically(JSONB) FROM anon;
+GRANT  EXECUTE ON FUNCTION public.reassign_students_atomically(JSONB) TO service_role;
+
+
+-- ── 8.5.9 processed_operations & execute_reassignment_rollback ──────────────
+-- ┌─ processed_operations Table ────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS public.processed_operations (
+    operation_key TEXT PRIMARY KEY,
+    type TEXT NOT NULL,
+    status TEXT NOT NULL,
+    actor_uid TEXT NOT NULL,
+    renewal_count INTEGER,
+    results JSONB,
+    summary JSONB,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_processed_operations_created_at ON public.processed_operations (created_at DESC);
+
+ALTER TABLE public.processed_operations ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "processed_operations_select_service" ON public.processed_operations;
+CREATE POLICY "processed_operations_select_service" ON public.processed_operations
+    FOR SELECT TO service_role USING (true);
+
+DROP POLICY IF EXISTS "processed_operations_insert_service" ON public.processed_operations;
+CREATE POLICY "processed_operations_insert_service" ON public.processed_operations
+    FOR INSERT TO service_role WITH CHECK (true);
+
+DROP POLICY IF EXISTS "processed_operations_update_service" ON public.processed_operations;
+CREATE POLICY "processed_operations_update_service" ON public.processed_operations
+    FOR UPDATE TO service_role USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "processed_operations_delete_service" ON public.processed_operations;
+CREATE POLICY "processed_operations_delete_service" ON public.processed_operations
+    FOR DELETE TO service_role USING (true);
+
+
+-- ┌─ execute_reassignment_rollback RPC ────────────────────────────────────────
+CREATE OR REPLACE FUNCTION public.execute_reassignment_rollback(
+    p_operation_id TEXT,
+    p_actor_id TEXT,
+    p_actor_label TEXT,
+    p_changes JSONB
+)
+RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+    v_orig_status TEXT;
+    v_orig_changes JSONB;
+    v_change JSONB;
+    v_collection TEXT;
+    v_doc_id TEXT;
+    v_before JSONB;
+    v_after JSONB;
+    v_student_row RECORD;
+    v_bus_row RECORD;
+    v_driver_row RECORD;
+    v_reverted_docs TEXT[] := ARRAY[]::TEXT[];
+    v_row_updated INTEGER;
+BEGIN
+    -- 1. Check original log status and lock it
+    SELECT status, changes INTO v_orig_status, v_orig_changes
+    FROM public.reassignment_logs
+    WHERE operation_id = p_operation_id
+    FOR UPDATE;
+
+    IF NOT FOUND THEN
+        RETURN jsonb_build_object('success', false, 'error', 'Original reassignment log not found');
+    END IF;
+
+    IF v_orig_status = 'rolled_back' THEN
+        -- Idempotency: if already rolled back, we can succeed with no-op
+        RETURN jsonb_build_object('success', true, 'message', 'Reassignment already rolled back', 'reverted_docs', '[]'::jsonb);
+    END IF;
+
+    IF v_orig_status <> 'committed' THEN
+        RETURN jsonb_build_object('success', false, 'error', 'Only committed reassignments can be rolled back');
+    END IF;
+
+    -- 2. Verify all entities exist and validate preconditions (after snapshot match)
+    FOR v_change IN SELECT * FROM jsonb_array_elements(p_changes) LOOP
+        v_collection := v_change->>'collection';
+        v_doc_id := v_change->>'docId';
+        v_after := v_change->'after';
+        
+        IF v_collection = 'students' THEN
+            SELECT bus_id, shift INTO v_student_row 
+            FROM public.student_profiles 
+            WHERE uid = v_doc_id 
+            FOR UPDATE;
+            
+            IF NOT FOUND THEN
+                RETURN jsonb_build_object('success', false, 'error', 'Precondition failed: Student ' || v_doc_id || ' no longer exists');
+            END IF;
+            
+            -- Only validate fields originally modified by the operation
+            IF v_after ? 'busId' AND COALESCE(v_student_row.bus_id, '') <> COALESCE(v_after->>'busId', '') THEN
+                RETURN jsonb_build_object('success', false, 'error', 'Precondition failed: Student ' || v_doc_id || ' busId has changed since the reassignment (expected ' || COALESCE(v_after->>'busId', 'NULL') || ', found ' || COALESCE(v_student_row.bus_id, 'NULL') || ')');
+            END IF;
+            
+            IF v_after ? 'shift' AND COALESCE(v_student_row.shift, '') <> COALESCE(v_after->>'shift', '') THEN
+                RETURN jsonb_build_object('success', false, 'error', 'Precondition failed: Student ' || v_doc_id || ' shift has changed since the reassignment (expected ' || COALESCE(v_after->>'shift', 'NULL') || ', found ' || COALESCE(v_student_row.shift, 'NULL') || ')');
+            END IF;
+            
+        ELSIF v_collection = 'buses' THEN
+            SELECT morning_load, evening_load, driver_uid, route_id, route_name INTO v_bus_row 
+            FROM public.buses 
+            WHERE id = v_doc_id 
+            FOR UPDATE;
+            
+            IF NOT FOUND THEN
+                RETURN jsonb_build_object('success', false, 'error', 'Precondition failed: Bus ' || v_doc_id || ' no longer exists');
+            END IF;
+            
+            IF v_after ? 'morningLoad' AND COALESCE((v_after->>'morningLoad')::INTEGER, 0) <> COALESCE(v_bus_row.morning_load, 0) THEN
+                RETURN jsonb_build_object('success', false, 'error', 'Precondition failed: Bus ' || v_doc_id || ' morningLoad has changed since the reassignment');
+            END IF;
+            
+            IF v_after ? 'eveningLoad' AND COALESCE((v_after->>'eveningLoad')::INTEGER, 0) <> COALESCE(v_bus_row.evening_load, 0) THEN
+                RETURN jsonb_build_object('success', false, 'error', 'Precondition failed: Bus ' || v_doc_id || ' eveningLoad has changed since the reassignment');
+            END IF;
+            
+            IF v_after ? 'driver_uid' AND COALESCE(v_after->>'driver_uid', '') <> COALESCE(v_bus_row.driver_uid, '') THEN
+                RETURN jsonb_build_object('success', false, 'error', 'Precondition failed: Bus ' || v_doc_id || ' driver_uid has changed since the reassignment');
+            END IF;
+            
+            IF v_after ? 'route_id' AND COALESCE(v_after->>'route_id', '') <> COALESCE(v_bus_row.route_id, '') THEN
+                RETURN jsonb_build_object('success', false, 'error', 'Precondition failed: Bus ' || v_doc_id || ' route_id has changed since the reassignment');
+            END IF;
+            
+        ELSIF v_collection = 'drivers' THEN
+            SELECT assigned_bus_id, is_reserved INTO v_driver_row 
+            FROM public.driver_profiles 
+            WHERE uid = v_doc_id 
+            FOR UPDATE;
+            
+            IF NOT FOUND THEN
+                RETURN jsonb_build_object('success', false, 'error', 'Precondition failed: Driver ' || v_doc_id || ' no longer exists');
+            END IF;
+            
+            IF v_after ? 'assigned_bus_id' AND COALESCE(v_after->>'assigned_bus_id', '') <> COALESCE(v_driver_row.assigned_bus_id, '') THEN
+                RETURN jsonb_build_object('success', false, 'error', 'Precondition failed: Driver ' || v_doc_id || ' assigned_bus_id has changed since the reassignment');
+            END IF;
+            
+            IF v_after ? 'is_reserved' AND COALESCE((v_after->>'is_reserved')::BOOLEAN, FALSE) <> COALESCE(v_driver_row.is_reserved, FALSE) THEN
+                RETURN jsonb_build_object('success', false, 'error', 'Precondition failed: Driver ' || v_doc_id || ' is_reserved has changed since the reassignment');
+            END IF;
+        END IF;
+    END LOOP;
+
+    -- 3. Preconditions validated. Perform atomic rollback in reverse order.
+    FOR v_change IN SELECT * FROM jsonb_array_elements(p_changes) LOOP
+        v_collection := v_change->>'collection';
+        v_doc_id := v_change->>'docId';
+        v_before := v_change->'before';
+        
+        IF v_collection = 'students' THEN
+            UPDATE public.student_profiles SET
+                bus_id = CASE WHEN v_before ? 'busId' THEN v_before->>'busId' ELSE bus_id END,
+                assigned_bus_id = CASE WHEN v_before ? 'busId' THEN v_before->>'busId' ELSE assigned_bus_id END,
+                shift = CASE WHEN v_before ? 'shift' THEN v_before->>'shift' ELSE shift END,
+                updated_at = NOW()
+            WHERE uid = v_doc_id;
+            
+            GET DIAGNOSTICS v_row_updated = ROW_COUNT;
+            IF v_row_updated <> 1 THEN
+                RAISE EXCEPTION 'Failed to update student profile %', v_doc_id;
+            END IF;
+            
+            v_reverted_docs := array_append(v_reverted_docs, v_change->>'docPath');
+            
+        ELSIF v_collection = 'buses' THEN
+            UPDATE public.buses SET
+                morning_load = CASE WHEN v_before ? 'morningLoad' THEN (v_before->>'morningLoad')::INTEGER ELSE morning_load END,
+                evening_load = CASE WHEN v_before ? 'eveningLoad' THEN (v_before->>'eveningLoad')::INTEGER ELSE evening_load END,
+                driver_uid = CASE WHEN v_before ? 'driver_uid' THEN v_before->>'driver_uid' ELSE driver_uid END,
+                route_id = CASE WHEN v_before ? 'route_id' THEN v_before->>'route_id' ELSE route_id END,
+                route_name = CASE WHEN v_before ? 'route_name' THEN v_before->>'route_name' ELSE route_name END,
+                updated_at = NOW()
+            WHERE id = v_doc_id;
+            
+            GET DIAGNOSTICS v_row_updated = ROW_COUNT;
+            IF v_row_updated <> 1 THEN
+                RAISE EXCEPTION 'Failed to update bus %', v_doc_id;
+            END IF;
+            
+            v_reverted_docs := array_append(v_reverted_docs, v_change->>'docPath');
+            
+        ELSIF v_collection = 'drivers' THEN
+            UPDATE public.driver_profiles SET
+                assigned_bus_id = CASE WHEN v_before ? 'assigned_bus_id' THEN v_before->>'assigned_bus_id' ELSE assigned_bus_id END,
+                is_reserved = CASE WHEN v_before ? 'is_reserved' THEN (v_before->>'is_reserved')::BOOLEAN ELSE is_reserved END,
+                updated_at = NOW()
+            WHERE uid = v_doc_id;
+            
+            GET DIAGNOSTICS v_row_updated = ROW_COUNT;
+            IF v_row_updated <> 1 THEN
+                RAISE EXCEPTION 'Failed to update driver profile %', v_doc_id;
+            END IF;
+            
+            v_reverted_docs := array_append(v_reverted_docs, v_change->>'docPath');
+        END IF;
+    END LOOP;
+
+    RETURN jsonb_build_object('success', true, 'reverted_docs', to_jsonb(v_reverted_docs));
+EXCEPTION WHEN OTHERS THEN
+    RAISE;
+END;
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.execute_reassignment_rollback(TEXT, TEXT, TEXT, JSONB) FROM public;
+REVOKE EXECUTE ON FUNCTION public.execute_reassignment_rollback(TEXT, TEXT, TEXT, JSONB) FROM authenticated;
+REVOKE EXECUTE ON FUNCTION public.execute_reassignment_rollback(TEXT, TEXT, TEXT, JSONB) FROM anon;
+GRANT EXECUTE ON FUNCTION public.execute_reassignment_rollback(TEXT, TEXT, TEXT, JSONB) TO service_role;
+
+
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 8.6 REALTIME PUBLICATION (for tables managed in this migration)
+-- ─────────────────────────────────────────────────────────────────────────────
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_publication_tables
+        WHERE pubname = 'supabase_realtime' AND tablename = 'notifications'
+    ) THEN
+        ALTER PUBLICATION supabase_realtime ADD TABLE public.notifications;
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_publication_tables
+        WHERE pubname = 'supabase_realtime' AND tablename = 'applications'
+    ) THEN
+        ALTER PUBLICATION supabase_realtime ADD TABLE public.applications;
+    END IF;
+END $$;
+
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 8.7 COMPLETION MESSAGE
+-- ─────────────────────────────────────────────────────────────────────────────
+DO $$
+BEGIN
+    RAISE NOTICE '✅ ITMS Migration Addendum (Section 8) complete.';
+    RAISE NOTICE '   Tables added/amended : active_trips (+ fcm_start_sent, fcm_end_sent, expires_at), fcm_tokens';
+    RAISE NOTICE '   Triggers added       : applications, buses, routes, notifications, academic_calendar_config, migration_log';
+    RAISE NOTICE '   Indexes added        : valid_until (active students), notifications composite, hidden_for_user_ids GIN, applications state+type';
+    RAISE NOTICE '   RPCs added           : soft_block_student_with_seat_release, approve_renewal_with_seat, get_student_profile_counts, get_application_counts, delete_student_cascade_v1, delete_route_cascade_v1, activate_session_batch, reassign_students_atomically';
+    RAISE NOTICE '   RLS policies added   : notifications_select_own (authenticated)';
+    RAISE NOTICE '   Realtime added       : notifications, applications';
+END $$;
+

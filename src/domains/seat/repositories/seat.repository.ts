@@ -89,7 +89,16 @@ export async function findAlternatives(
 
 export async function validateAssignment(params: { routeId: string; stopId: string; shift: string }) {
   const { routeId, stopId, shift } = params;
-  const busId = routeId.replace('route_', 'bus_');
+
+  const buses = await fleetService.getBusesByRouteId(routeId);
+  const busId = buses[0]?.id || buses[0]?.busId;
+  if (!busId) {
+    return {
+      canAssign: false,
+      message: `No bus assigned to route ${routeId}`,
+      requiresAdminAttention: true,
+    };
+  }
 
   const capacityCheck = await fleetService.checkBusCapacity(busId, shift);
 

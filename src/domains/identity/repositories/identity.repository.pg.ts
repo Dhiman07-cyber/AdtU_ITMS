@@ -62,6 +62,95 @@ function pgRowToUser(row: PgUser): IdentityUser {
   return user;
 }
 
+// ─── Generic Profile Helpers ──────────────────────────────────────────────────
+// ponytail: driver/moderator/admin/unauth profiles share identical CRUD patterns.
+// Extracted to eliminate ~200 lines of copy-paste.
+
+/** Convert Firestore camelCase data to PostgreSQL snake_case row using a field map */
+function firestoreToRow(data: Record<string, any>, fieldMap: Record<string, string>): Record<string, any> {
+  const row: Record<string, any> = {};
+  for (const [key, value] of Object.entries(data)) {
+    if (key === 'id') continue;
+    const pgCol = fieldMap[key];
+    if (pgCol) {
+      if (value && typeof value === 'object' && typeof value.toDate === 'function') {
+        row[pgCol] = value.toDate().toISOString();
+      } else {
+        row[pgCol] = value;
+      }
+    }
+  }
+  return row;
+}
+
+/** Convert PostgreSQL snake_case row back to Firestore camelCase using a field map */
+function rowToFirestore(row: Record<string, any>, fieldMap: Record<string, string>): Record<string, any> {
+  const result: Record<string, any> = {};
+  for (const [firestoreField, pgCol] of Object.entries(fieldMap)) {
+    if (row[pgCol] !== undefined && row[pgCol] !== null) {
+      result[firestoreField] = row[pgCol];
+    }
+  }
+  return result;
+}
+
+/** Find a profile by UID from any *_profiles table */
+async function pgFindByUid(table: string, uid: string): Promise<Record<string, any> | null> {
+  const db = getSupabaseServer();
+  const { data, error } = await db.from(table).select('*').eq('uid', uid).single();
+  if (error) {
+    if (error.code === 'PGRST116') return null;
+    throw new Error(`IdentityRepository (PG) ${table} find failed: ${error.message}`);
+  }
+  return data;
+}
+
+/** Find profiles by status from any *_profiles table */
+async function pgFindByStatus(table: string, status: string): Promise<Record<string, any>[]> {
+  const db = getSupabaseServer();
+  const { data, error } = await db.from(table).select('*').eq('status', status);
+  if (error) throw new Error(`IdentityRepository (PG) ${table} by status failed: ${error.message}`);
+  return data || [];
+}
+
+/** Insert a profile into any *_profiles table */
+async function pgInsertProfile(table: string, data: Record<string, any>, fieldMap: Record<string, string>): Promise<void> {
+  const db = getSupabaseServer();
+  const row = firestoreToRow(data, fieldMap);
+  if (!row.uid) throw new Error(`IdentityRepository (PG) ${table} insert requires uid`);
+  if (!row.created_at) row.created_at = new Date().toISOString();
+  row.updated_at = new Date().toISOString();
+  const { error } = await db.from(table).insert(row);
+  if (error) throw new Error(`IdentityRepository (PG) ${table} insert failed: ${error.message}`);
+}
+
+/** Update a profile in any *_profiles table */
+async function pgUpdateProfile(table: string, uid: string, data: Record<string, any>, fieldMap: Record<string, string>): Promise<void> {
+  const db = getSupabaseServer();
+  const row = firestoreToRow(data, fieldMap);
+  delete row.uid;
+  row.updated_at = new Date().toISOString();
+  const { error } = await db.from(table).update(row).eq('uid', uid);
+  if (error) throw new Error(`IdentityRepository (PG) ${table} update failed: ${error.message}`);
+}
+
+/** Delete a profile from any *_profiles table */
+async function pgRemoveProfile(table: string, uid: string): Promise<void> {
+  const db = getSupabaseServer();
+  const { error } = await db.from(table).delete().eq('uid', uid);
+  if (error) throw new Error(`IdentityRepository (PG) ${table} delete failed: ${error.message}`);
+}
+
+/** Count rows in any table */
+async function pgCountTable(table: string, statusFilter?: string): Promise<number> {
+  const db = getSupabaseServer();
+  let query = db.from(table).select('*', { count: 'exact', head: true });
+  if (statusFilter) query = query.eq('status', statusFilter);
+  const { count, error } = await query;
+  if (error) throw new Error(`IdentityRepository (PG) ${table} count failed: ${error.message}`);
+  return count || 0;
+}
+
 // ─── Public API ──────────────────────────────────────────────────────────────
 
 /**
@@ -242,14 +331,6 @@ export async function pgFindStudentsByBusIds(busIds: string[]): Promise<Record<s
   return studentRepo.pgFindByBusIds(busIds);
 }
 
-/** Find students by route ID */
-export async function pgFindStudentByRouteId(routeId: string): Promise<Record<string, any>[]> {
-  // Wait, the original in repository.ts/service.ts is named pgFindStudentsByRouteId / findStudentsByRouteId,
-  // but wait, in identity.repository.pg.ts line 420 it is named pgFindStudentsByRouteId, but let's check
-  // if there's any other export. Let's make sure we export both if needed.
-  return studentRepo.pgFindByRouteId(routeId);
-}
-
 export async function pgFindStudentsByRouteId(routeId: string): Promise<Record<string, any>[]> {
   return studentRepo.pgFindByRouteId(routeId);
 }
@@ -295,16 +376,6 @@ export async function pgUpdateStudent(uid: string, data: Record<string, any>): P
 /** Delete a student profile */
 export async function pgRemoveStudent(uid: string): Promise<void> {
   return studentRepo.pgRemove(uid);
-}
-
-/** Count students by status */
-export async function pgCountStudentsByStatus(status: string): Promise<number> {
-  return studentRepo.pgCountByStatus(status);
-}
-
-/** Count all students */
-export async function pgCountStudents(): Promise<number> {
-  return studentRepo.pgCount();
 }
 
 /** Find students by shift */
@@ -354,230 +425,79 @@ const DRIVER_FIELD_MAP: Record<string, string> = {
 const KNOWN_DRIVER_FIELDS = new Set(Object.keys(DRIVER_FIELD_MAP));
 
 /** Convert Firestore driver data to PostgreSQL row */
-function firestoreDriverToRow(data: Record<string, any>): Record<string, any> {
-  const row: Record<string, any> = {};
-
-  for (const [key, value] of Object.entries(data)) {
-    if (key === 'id') continue;
-    const pgCol = DRIVER_FIELD_MAP[key];
-    if (pgCol) {
-      if (value && typeof value === 'object' && typeof value.toDate === 'function') {
-        row[pgCol] = value.toDate().toISOString();
-      } else {
-        row[pgCol] = value;
-      }
-    }
-  }
-
-  return row;
-}
+const firestoreDriverToRow = (data: Record<string, any>) => firestoreToRow(data, DRIVER_FIELD_MAP);
 
 /** Convert PostgreSQL row to Firestore-compatible driver object */
-function rowToFirestoreDriver(row: Record<string, any>): Record<string, any> {
-  const result: Record<string, any> = {};
-  for (const [firestoreField, pgCol] of Object.entries(DRIVER_FIELD_MAP)) {
-    if (row[pgCol] !== undefined && row[pgCol] !== null) {
-      result[firestoreField] = row[pgCol];
-    }
-  }
-  return result;
-}
+const rowToFirestoreDriver = (row: Record<string, any>) => rowToFirestore(row, DRIVER_FIELD_MAP);
 
 /** Find a driver profile by UID */
 export async function pgFindDriverById(uid: string): Promise<Record<string, any> | null> {
-  const db = getSupabaseServer();
-
-  const { data, error } = await db
-    .from('driver_profiles')
-    .select('*')
-    .eq('uid', uid)
-    .single();
-
-  if (error) {
-    if (error.code === 'PGRST116') return null;
-    throw new Error(`IdentityRepository (PG) driver find failed: ${error.message}`);
-  }
-
-  return rowToFirestoreDriver(data);
+  const data = await pgFindByUid('driver_profiles', uid);
+  return data ? rowToFirestoreDriver(data) : null;
 }
 
 /** Find drivers by bus ID */
 export async function pgFindDriversByBusId(busId: string): Promise<Record<string, any>[]> {
   const db = getSupabaseServer();
-
   const { data, error } = await db
     .from('driver_profiles')
     .select('*')
     .or(`assigned_bus_id.eq.${busId},bus_id.eq.${busId}`);
-
-  if (error) {
-    throw new Error(`IdentityRepository (PG) drivers by bus find failed: ${error.message}`);
-  }
-
-  return (data || []).map(rowToFirestoreDriver);
-}
-
-/** Find drivers by route ID */
-export async function pgFindDriversByRouteId(routeId: string): Promise<Record<string, any>[]> {
-  const db = getSupabaseServer();
-
-  const { data, error } = await db
-    .from('driver_profiles')
-    .select('*')
-    .or(`assigned_route_id.eq.${routeId},route_id.eq.${routeId}`);
-
-  if (error) {
-    throw new Error(`IdentityRepository (PG) drivers by route find failed: ${error.message}`);
-  }
-
+  if (error) throw new Error(`IdentityRepository (PG) drivers by bus find failed: ${error.message}`);
   return (data || []).map(rowToFirestoreDriver);
 }
 
 /** Find drivers by status */
 export async function pgFindDriversByStatus(status: string): Promise<Record<string, any>[]> {
-  const db = getSupabaseServer();
-
-  const { data, error } = await db
-    .from('driver_profiles')
-    .select('*')
-    .eq('status', status);
-
-  if (error) {
-    throw new Error(`IdentityRepository (PG) drivers by status find failed: ${error.message}`);
-  }
-
-  return (data || []).map(rowToFirestoreDriver);
+  const rows = await pgFindByStatus('driver_profiles', status);
+  return rows.map(rowToFirestoreDriver);
 }
 
 /** Find all drivers (no filter) */
 export async function pgFindAllDrivers(): Promise<Record<string, any>[]> {
   const db = getSupabaseServer();
-
-  const { data, error } = await db
-    .from('driver_profiles')
-    .select('*');
-
-  if (error) {
-    throw new Error(`IdentityRepository (PG) all drivers query failed: ${error.message}`);
-  }
-
+  const { data, error } = await db.from('driver_profiles').select('*');
+  if (error) throw new Error(`IdentityRepository (PG) all drivers query failed: ${error.message}`);
   return (data || []).map(rowToFirestoreDriver);
 }
 
-/** Find non-reserved drivers (available for assignment) */
-export async function pgFindAvailableDrivers(): Promise<Record<string, any>[]> {
+/** Find drivers with database-level pagination */
+export async function pgFindAllDriversPaginated(limit: number, offset: number): Promise<Record<string, any>[]> {
   const db = getSupabaseServer();
-
-  const { data, error } = await db
-    .from('driver_profiles')
-    .select('*')
-    .eq('is_reserved', false)
-    .eq('status', 'active');
-
-  if (error) {
-    throw new Error(`IdentityRepository (PG) available drivers find failed: ${error.message}`);
-  }
-
+  const { data, error } = await db.from('driver_profiles').select('*').range(offset, offset + limit - 1);
+  if (error) throw new Error(`IdentityRepository (PG) paginated drivers query failed: ${error.message}`);
   return (data || []).map(rowToFirestoreDriver);
 }
 
 /** Insert a driver profile */
 export async function pgInsertDriver(driver: Record<string, any>): Promise<void> {
-  const db = getSupabaseServer();
-  const row = firestoreDriverToRow(driver);
-
-  if (!row.uid) throw new Error('IdentityRepository (PG) driver insert requires uid');
-  if (!row.created_at) row.created_at = new Date().toISOString();
-  row.updated_at = new Date().toISOString();
-
-  const { error } = await db
-    .from('driver_profiles')
-    .insert(row);
-
-  if (error) {
-    throw new Error(`IdentityRepository (PG) driver insert failed: ${error.message}`);
-  }
+  return pgInsertProfile('driver_profiles', driver, DRIVER_FIELD_MAP);
 }
 
 /** Upsert a driver profile */
 export async function pgUpsertDriver(driver: Record<string, any>): Promise<void> {
   const db = getSupabaseServer();
   const row = firestoreDriverToRow(driver);
-
   if (!row.uid) throw new Error('IdentityRepository (PG) driver upsert requires uid');
   if (!row.created_at) row.created_at = new Date().toISOString();
   row.updated_at = new Date().toISOString();
-
-  const { error } = await db
-    .from('driver_profiles')
-    .upsert(row, { onConflict: 'uid' });
-
-  if (error) {
-    throw new Error(`IdentityRepository (PG) driver upsert failed: ${error.message}`);
-  }
+  const { error } = await db.from('driver_profiles').upsert(row, { onConflict: 'uid' });
+  if (error) throw new Error(`IdentityRepository (PG) driver upsert failed: ${error.message}`);
 }
 
 /** Update a driver profile (partial update) */
 export async function pgUpdateDriver(uid: string, data: Record<string, any>): Promise<void> {
-  const db = getSupabaseServer();
-  const row = firestoreDriverToRow(data);
-
-  delete row.uid;
-  row.updated_at = new Date().toISOString();
-
-  const { error } = await db
-    .from('driver_profiles')
-    .update(row)
-    .eq('uid', uid);
-
-  if (error) {
-    throw new Error(`IdentityRepository (PG) driver update failed: ${error.message}`);
-  }
+  return pgUpdateProfile('driver_profiles', uid, data, DRIVER_FIELD_MAP);
 }
 
 /** Delete a driver profile */
 export async function pgRemoveDriver(uid: string): Promise<void> {
-  const db = getSupabaseServer();
-
-  const { error } = await db
-    .from('driver_profiles')
-    .delete()
-    .eq('uid', uid);
-
-  if (error) {
-    throw new Error(`IdentityRepository (PG) driver delete failed: ${error.message}`);
-  }
+  return pgRemoveProfile('driver_profiles', uid);
 }
 
 /** Count all drivers */
 export async function pgCountDrivers(): Promise<number> {
-  const db = getSupabaseServer();
-
-  const { count, error } = await db
-    .from('driver_profiles')
-    .select('*', { count: 'exact', head: true });
-
-  if (error) {
-    throw new Error(`IdentityRepository (PG) driver count failed: ${error.message}`);
-  }
-
-  return count || 0;
-}
-
-/** Count drivers by status */
-export async function pgCountDriversByStatus(status: string): Promise<number> {
-  const db = getSupabaseServer();
-
-  const { count, error } = await db
-    .from('driver_profiles')
-    .select('*', { count: 'exact', head: true })
-    .eq('status', status);
-
-  if (error) {
-    throw new Error(`IdentityRepository (PG) driver count by status failed: ${error.message}`);
-  }
-
-  return count || 0;
+  return pgCountTable('driver_profiles');
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -608,124 +528,36 @@ const MODERATOR_FIELD_MAP: Record<string, string> = {
   updatedAt: 'updated_at',
 };
 
-/** Known Firestore fields that map to typed PostgreSQL columns */
 const KNOWN_MODERATOR_FIELDS = new Set(Object.keys(MODERATOR_FIELD_MAP));
 
-/** Convert Firestore moderator data to PostgreSQL row */
-function firestoreModeratorToRow(data: Record<string, any>): Record<string, any> {
-  const row: Record<string, any> = {};
-
-  for (const [key, value] of Object.entries(data)) {
-    if (key === 'id') continue;
-    const pgCol = MODERATOR_FIELD_MAP[key];
-    if (pgCol) {
-      if (value && typeof value === 'object' && typeof value.toDate === 'function') {
-        row[pgCol] = value.toDate().toISOString();
-      } else {
-        row[pgCol] = value;
-      }
-    }
-  }
-
-  return row;
-}
-
-/** Convert PostgreSQL row to Firestore-compatible moderator object */
-function rowToFirestoreModerator(row: Record<string, any>): Record<string, any> {
-  const result: Record<string, any> = {};
-  for (const [firestoreField, pgCol] of Object.entries(MODERATOR_FIELD_MAP)) {
-    if (row[pgCol] !== undefined && row[pgCol] !== null) {
-      result[firestoreField] = row[pgCol];
-    }
-  }
-  return result;
-}
+const firestoreModeratorToRow = (data: Record<string, any>) => firestoreToRow(data, MODERATOR_FIELD_MAP);
+const rowToFirestoreModerator = (row: Record<string, any>) => rowToFirestore(row, MODERATOR_FIELD_MAP);
 
 /** Find a moderator profile by UID */
 export async function pgFindModeratorById(uid: string): Promise<Record<string, any> | null> {
-  const db = getSupabaseServer();
-
-  const { data, error } = await db
-    .from('moderator_profiles')
-    .select('*')
-    .eq('uid', uid)
-    .single();
-
-  if (error) {
-    if (error.code === 'PGRST116') return null;
-    throw new Error(`IdentityRepository (PG) moderator find failed: ${error.message}`);
-  }
-
-  return rowToFirestoreModerator(data);
+  const data = await pgFindByUid('moderator_profiles', uid);
+  return data ? rowToFirestoreModerator(data) : null;
 }
 
 /** Find moderators by status */
 export async function pgFindModeratorsByStatus(status: string): Promise<Record<string, any>[]> {
-  const db = getSupabaseServer();
-
-  const { data, error } = await db
-    .from('moderator_profiles')
-    .select('*')
-    .eq('status', status);
-
-  if (error) {
-    throw new Error(`IdentityRepository (PG) moderators by status find failed: ${error.message}`);
-  }
-
-  return (data || []).map(rowToFirestoreModerator);
+  const rows = await pgFindByStatus('moderator_profiles', status);
+  return rows.map(rowToFirestoreModerator);
 }
 
 /** Find all active moderators */
 export async function pgFindActiveModerators(): Promise<Record<string, any>[]> {
-  const db = getSupabaseServer();
-
-  const { data, error } = await db
-    .from('moderator_profiles')
-    .select('*')
-    .eq('status', 'active');
-
-  if (error) {
-    throw new Error(`IdentityRepository (PG) active moderators find failed: ${error.message}`);
-  }
-
-  return (data || []).map(rowToFirestoreModerator);
+  return pgFindModeratorsByStatus('active');
 }
 
 /** Insert a moderator profile */
 export async function pgInsertModerator(moderator: Record<string, any>): Promise<void> {
-  const db = getSupabaseServer();
-  const row = firestoreModeratorToRow(moderator);
-
-  if (!row.uid) throw new Error('IdentityRepository (PG) moderator insert requires uid');
-  if (!row.created_at) row.created_at = new Date().toISOString();
-  row.updated_at = new Date().toISOString();
-
-  const { error } = await db
-    .from('moderator_profiles')
-    .insert(row);
-
-  if (error) {
-    throw new Error(`IdentityRepository (PG) moderator insert failed: ${error.message}`);
-  }
+  return pgInsertProfile('moderator_profiles', moderator, MODERATOR_FIELD_MAP);
 }
 
 /** Update a moderator profile (partial update) */
 export async function pgUpdateModerator(uid: string, data: Record<string, any>): Promise<void> {
-  const db = getSupabaseServer();
-  const row = firestoreModeratorToRow(data);
-
-  delete row.uid;
-  row.updated_at = new Date().toISOString();
-
-  // Update core fields
-  const { error } = await db
-    .from('moderator_profiles')
-    .update(row)
-    .eq('uid', uid);
-
-  if (error) {
-    throw new Error(`IdentityRepository (PG) moderator update failed: ${error.message}`);
-  }
+  return pgUpdateProfile('moderator_profiles', uid, data, MODERATOR_FIELD_MAP);
 }
 
 /** Update moderator permissions */
@@ -735,7 +567,6 @@ export async function pgUpdateModeratorPermissions(
   updatedBy: string
 ): Promise<void> {
   const db = getSupabaseServer();
-
   const { error } = await db
     .from('moderator_profiles')
     .update({
@@ -745,55 +576,22 @@ export async function pgUpdateModeratorPermissions(
       updated_at: new Date().toISOString(),
     })
     .eq('uid', uid);
-
-  if (error) {
-    throw new Error(`IdentityRepository (PG) moderator permissions update failed: ${error.message}`);
-  }
+  if (error) throw new Error(`IdentityRepository (PG) moderator permissions update failed: ${error.message}`);
 }
 
 /** Delete a moderator profile */
 export async function pgRemoveModerator(uid: string): Promise<void> {
-  const db = getSupabaseServer();
-
-  const { error } = await db
-    .from('moderator_profiles')
-    .delete()
-    .eq('uid', uid);
-
-  if (error) {
-    throw new Error(`IdentityRepository (PG) moderator delete failed: ${error.message}`);
-  }
+  return pgRemoveProfile('moderator_profiles', uid);
 }
 
 /** Count all moderators */
 export async function pgCountModerators(): Promise<number> {
-  const db = getSupabaseServer();
-
-  const { count, error } = await db
-    .from('moderator_profiles')
-    .select('*', { count: 'exact', head: true });
-
-  if (error) {
-    throw new Error(`IdentityRepository (PG) moderator count failed: ${error.message}`);
-  }
-
-  return count || 0;
+  return pgCountTable('moderator_profiles');
 }
 
 /** Count moderators by status */
 export async function pgCountModeratorsByStatus(status: string): Promise<number> {
-  const db = getSupabaseServer();
-
-  const { count, error } = await db
-    .from('moderator_profiles')
-    .select('*', { count: 'exact', head: true })
-    .eq('status', status);
-
-  if (error) {
-    throw new Error(`IdentityRepository (PG) moderator count by status failed: ${error.message}`);
-  }
-
-  return count || 0;
+  return pgCountTable('moderator_profiles', status);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -819,120 +617,35 @@ const ADMIN_FIELD_MAP: Record<string, string> = {
   updatedAt: 'updated_at',
 };
 
-/** Known Firestore fields that map to typed PostgreSQL columns */
 const KNOWN_ADMIN_FIELDS = new Set(Object.keys(ADMIN_FIELD_MAP));
 
-/** Convert Firestore admin data to PostgreSQL row */
-function firestoreAdminToRow(data: Record<string, any>): Record<string, any> {
-  const row: Record<string, any> = {};
-
-  for (const [key, value] of Object.entries(data)) {
-    if (key === 'id') continue;
-    const pgCol = ADMIN_FIELD_MAP[key];
-    if (pgCol) {
-      if (value && typeof value === 'object' && typeof value.toDate === 'function') {
-        row[pgCol] = value.toDate().toISOString();
-      } else {
-        row[pgCol] = value;
-      }
-    }
-  }
-
-  return row;
-}
-
-/** Convert PostgreSQL row to Firestore-compatible admin object */
-function rowToFirestoreAdmin(row: Record<string, any>): Record<string, any> {
-  const result: Record<string, any> = {};
-  for (const [firestoreField, pgCol] of Object.entries(ADMIN_FIELD_MAP)) {
-    if (row[pgCol] !== undefined && row[pgCol] !== null) {
-      result[firestoreField] = row[pgCol];
-    }
-  }
-  return result;
-}
+const firestoreAdminToRow = (data: Record<string, any>) => firestoreToRow(data, ADMIN_FIELD_MAP);
+const rowToFirestoreAdmin = (row: Record<string, any>) => rowToFirestore(row, ADMIN_FIELD_MAP);
 
 /** Find an admin profile by UID */
 export async function pgFindAdminById(uid: string): Promise<Record<string, any> | null> {
-  const db = getSupabaseServer();
-
-  const { data, error } = await db
-    .from('admin_profiles')
-    .select('*')
-    .eq('uid', uid)
-    .single();
-
-  if (error) {
-    if (error.code === 'PGRST116') return null;
-    throw new Error(`IdentityRepository (PG) admin find failed: ${error.message}`);
-  }
-
-  return rowToFirestoreAdmin(data);
+  const data = await pgFindByUid('admin_profiles', uid);
+  return data ? rowToFirestoreAdmin(data) : null;
 }
 
 /** Insert an admin profile */
 export async function pgInsertAdmin(admin: Record<string, any>): Promise<void> {
-  const db = getSupabaseServer();
-  const row = firestoreAdminToRow(admin);
-
-  if (!row.uid) throw new Error('IdentityRepository (PG) admin insert requires uid');
-  if (!row.created_at) row.created_at = new Date().toISOString();
-  row.updated_at = new Date().toISOString();
-
-  const { error } = await db
-    .from('admin_profiles')
-    .insert(row);
-
-  if (error) {
-    throw new Error(`IdentityRepository (PG) admin insert failed: ${error.message}`);
-  }
+  return pgInsertProfile('admin_profiles', admin, ADMIN_FIELD_MAP);
 }
 
 /** Update an admin profile (partial update) */
 export async function pgUpdateAdmin(uid: string, data: Record<string, any>): Promise<void> {
-  const db = getSupabaseServer();
-  const row = firestoreAdminToRow(data);
-
-  delete row.uid;
-  row.updated_at = new Date().toISOString();
-
-  const { error } = await db
-    .from('admin_profiles')
-    .update(row)
-    .eq('uid', uid);
-
-  if (error) {
-    throw new Error(`IdentityRepository (PG) admin update failed: ${error.message}`);
-  }
+  return pgUpdateProfile('admin_profiles', uid, data, ADMIN_FIELD_MAP);
 }
 
 /** Delete an admin profile */
 export async function pgRemoveAdmin(uid: string): Promise<void> {
-  const db = getSupabaseServer();
-
-  const { error } = await db
-    .from('admin_profiles')
-    .delete()
-    .eq('uid', uid);
-
-  if (error) {
-    throw new Error(`IdentityRepository (PG) admin delete failed: ${error.message}`);
-  }
+  return pgRemoveProfile('admin_profiles', uid);
 }
 
 /** Count all admins */
 export async function pgCountAdmins(): Promise<number> {
-  const db = getSupabaseServer();
-
-  const { count, error } = await db
-    .from('admin_profiles')
-    .select('*', { count: 'exact', head: true });
-
-  if (error) {
-    throw new Error(`IdentityRepository (PG) admin count failed: ${error.message}`);
-  }
-
-  return count || 0;
+  return pgCountTable('admin_profiles');
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -951,58 +664,18 @@ const UNAUTH_FIELD_MAP: Record<string, string> = {
   lastLoginAt: 'last_login_at',
 };
 
-/** Known Firestore fields that map to typed PostgreSQL columns */
 const KNOWN_UNAUTH_FIELDS = new Set(Object.keys(UNAUTH_FIELD_MAP));
 
-/** Convert Firestore unauth user data to PostgreSQL row */
-function firestoreUnauthToRow(data: Record<string, any>): Record<string, any> {
-  const row: Record<string, any> = {};
-
-  for (const [key, value] of Object.entries(data)) {
-    if (key === 'id') continue;
-    const pgCol = UNAUTH_FIELD_MAP[key];
-    if (pgCol) {
-      if (value && typeof value === 'object' && typeof value.toDate === 'function') {
-        row[pgCol] = value.toDate().toISOString();
-      } else {
-        row[pgCol] = value;
-      }
-    }
-  }
-
-  return row;
-}
-
-/** Convert PostgreSQL row to Firestore-compatible unauth user object */
-function rowToFirestoreUnauth(row: Record<string, any>): Record<string, any> {
-  const result: Record<string, any> = {};
-  for (const [firestoreField, pgCol] of Object.entries(UNAUTH_FIELD_MAP)) {
-    if (row[pgCol] !== undefined && row[pgCol] !== null) {
-      result[firestoreField] = row[pgCol];
-    }
-  }
-  return result;
-}
+const firestoreUnauthToRow = (data: Record<string, any>) => firestoreToRow(data, UNAUTH_FIELD_MAP);
+const rowToFirestoreUnauth = (row: Record<string, any>) => rowToFirestore(row, UNAUTH_FIELD_MAP);
 
 /** Find an unauth user by UID */
 export async function pgFindUnauthUserById(uid: string): Promise<Record<string, any> | null> {
-  const db = getSupabaseServer();
-
-  const { data, error } = await db
-    .from('unauth_users')
-    .select('*')
-    .eq('uid', uid)
-    .single();
-
-  if (error) {
-    if (error.code === 'PGRST116') return null;
-    throw new Error(`IdentityRepository (PG) unauth user find failed: ${error.message}`);
-  }
-
-  return rowToFirestoreUnauth(data);
+  const data = await pgFindByUid('unauth_users', uid);
+  return data ? rowToFirestoreUnauth(data) : null;
 }
 
-/** Insert an unauth user */
+/** Insert or upsert an unauth user */
 export async function pgInsertUnauthUser(user: Record<string, any>): Promise<void> {
   const db = getSupabaseServer();
   const row = firestoreUnauthToRow(user);
@@ -1011,13 +684,8 @@ export async function pgInsertUnauthUser(user: Record<string, any>): Promise<voi
   if (!row.created_at) row.created_at = new Date().toISOString();
   row.last_login_at = row.last_login_at || new Date().toISOString();
 
-  const { error } = await db
-    .from('unauth_users')
-    .insert(row);
-
-  if (error) {
-    throw new Error(`IdentityRepository (PG) unauth user insert failed: ${error.message}`);
-  }
+  const { error } = await db.from('unauth_users').upsert(row, { onConflict: 'uid' });
+  if (error) throw new Error(`IdentityRepository (PG) unauth user upsert failed: ${error.message}`);
 }
 
 /** Update an unauth user (partial update) */
@@ -1028,56 +696,24 @@ export async function pgUpdateUnauthUser(uid: string, data: Record<string, any>)
   delete row.uid;
   row.last_login_at = new Date().toISOString();
 
-  const { error } = await db
-    .from('unauth_users')
-    .update(row)
-    .eq('uid', uid);
-
-  if (error) {
-    throw new Error(`IdentityRepository (PG) unauth user update failed: ${error.message}`);
-  }
+  const { error } = await db.from('unauth_users').update(row).eq('uid', uid);
+  if (error) throw new Error(`IdentityRepository (PG) unauth user update failed: ${error.message}`);
 }
 
 /** Delete an unauth user */
 export async function pgRemoveUnauthUser(uid: string): Promise<void> {
-  const db = getSupabaseServer();
-
-  const { error } = await db
-    .from('unauth_users')
-    .delete()
-    .eq('uid', uid);
-
-  if (error) {
-    throw new Error(`IdentityRepository (PG) unauth user delete failed: ${error.message}`);
-  }
+  return pgRemoveProfile('unauth_users', uid);
 }
 
 /** Count all unauth users */
 export async function pgCountUnauthUsers(): Promise<number> {
-  const db = getSupabaseServer();
-
-  const { count, error } = await db
-    .from('unauth_users')
-    .select('*', { count: 'exact', head: true });
-
-  if (error) {
-    throw new Error(`IdentityRepository (PG) unauth user count failed: ${error.message}`);
-  }
-
-  return count || 0;
+  return pgCountTable('unauth_users');
 }
 
 /** Find all unauth users */
 export async function pgFindAllUnauthUsers(): Promise<Record<string, any>[]> {
   const db = getSupabaseServer();
-
-  const { data, error } = await db
-    .from('unauth_users')
-    .select('*');
-
-  if (error) {
-    throw new Error(`IdentityRepository (PG) all unauth users query failed: ${error.message}`);
-  }
-
+  const { data, error } = await db.from('unauth_users').select('*');
+  if (error) throw new Error(`IdentityRepository (PG) all unauth users query failed: ${error.message}`);
   return (data || []).map(rowToFirestoreUnauth);
 }

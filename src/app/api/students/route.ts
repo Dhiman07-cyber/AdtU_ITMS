@@ -5,11 +5,14 @@ import { handleApiError } from '@/lib/security/safe-error';
 import {
   getStudentsByStatus,
   getStudentsByBusIds,
-  getAllStudents,
 } from '@/domains/identity';
+import { getSupabaseServer } from '@/lib/supabase-server';
 
 // D1 Identity — Student list API. Runtime owner: PostgreSQL (student_profiles table).
-// Supports optional query filters: busId, enrollmentId, q (search)
+// Supports optional query filters: busId, enrollmentId, q (search), limit, offset
+
+const DEFAULT_LIMIT = 50;
+const MAX_LIMIT = 200;
 
 export async function GET(request: NextRequest) {
   try {
@@ -25,6 +28,8 @@ export async function GET(request: NextRequest) {
     const busId = searchParams.get('busId');
     const enrollmentId = searchParams.get('enrollmentId');
     const q = searchParams.get('q');
+    const limit = Math.min(parseInt(searchParams.get('limit') || String(DEFAULT_LIMIT), 10), MAX_LIMIT);
+    const offset = parseInt(searchParams.get('offset') || '0', 10);
 
     let studentRows: Record<string, any>[];
 
@@ -32,19 +37,48 @@ export async function GET(request: NextRequest) {
       studentRows = await getStudentsByBusIds([busId]);
       studentRows = studentRows.filter((row: any) => !row.status || row.status === 'active');
     } else if (q) {
-      const allRows = await getAllStudents();
-      const lower = q.toLowerCase();
-      studentRows = allRows.filter((row: any) =>
-        (row.fullName || '').toLowerCase().includes(lower) ||
-        (row.name || '').toLowerCase().includes(lower) ||
-        (row.email || '').toLowerCase().includes(lower) ||
-        (row.enrollmentId || '').toLowerCase().includes(lower)
-      );
+      // Server-side search via ILIKE instead of loading all rows
+      const db = getSupabaseServer();
+      // Escape ILIKE wildcards to prevent abuse
+      const escaped = q.replace(/%/g, '\\%').replace(/_/g, '\\_');
+      const pattern = `%${escaped}%`;
+      const { data, error } = await db
+        .from('student_profiles')
+        .select('uid, full_name, email, phone, alt_phone, enrollment_id, gender, dob, faculty, department, parent_name, parent_phone, bus_id, route_id, assigned_bus_id, assigned_route_id, status, shift, profile_photo_url, session_start_year')
+        .or(`full_name.ilike.${pattern},email.ilike.${pattern},enrollment_id.ilike.${pattern}`)
+        .order('full_name', { ascending: true })
+        .range(offset, offset + limit - 1);
+
+      if (error) throw error;
+      studentRows = (data || []).map((row: any) => ({
+        uid: row.uid,
+        fullName: row.full_name,
+        email: row.email,
+        phone: row.phone,
+        altPhone: row.alt_phone,
+        enrollmentId: row.enrollment_id,
+        gender: row.gender,
+        dob: row.dob,
+        faculty: row.faculty,
+        department: row.department,
+        parentName: row.parent_name,
+        parentPhone: row.parent_phone,
+        busId: row.bus_id,
+        routeId: row.route_id,
+        assignedBusId: row.assigned_bus_id,
+        assignedRouteId: row.assigned_route_id,
+        status: row.status,
+        shift: row.shift,
+        profilePhotoUrl: row.profile_photo_url,
+        enrollmentYear: row.session_start_year,
+      }));
     } else {
       studentRows = await getStudentsByStatus('active');
     }
 
-    const students = studentRows.map((row: any) => ({
+    const students = (enrollmentId ? studentRows.filter((row: any) =>
+      (row.enrollmentId || '').toLowerCase() === enrollmentId.toLowerCase()
+    ) : studentRows).map((row: any) => ({
       id: row.uid,
       name: row.fullName || row.name || '',
       email: row.email || '',
@@ -66,13 +100,6 @@ export async function GET(request: NextRequest) {
       shift: row.shift || '',
       enrollmentYear: row.enrollmentYear || '',
     }));
-
-    if (enrollmentId) {
-      const match = students.filter((s: any) =>
-        (s.enrollmentId || '').toLowerCase() === enrollmentId.toLowerCase()
-      );
-      return NextResponse.json(match, { headers: rl.headers });
-    }
 
     return NextResponse.json(students, { headers: rl.headers });
   } catch (error) {

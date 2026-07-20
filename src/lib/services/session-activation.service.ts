@@ -40,8 +40,6 @@ import { Application } from '@/lib/types/application';
 import type { Bus } from '@/lib/types';
 import { getDeadlineConfig } from '@/lib/deadline-config-service';
 import { DeadlineConfig } from '@/lib/types/deadline-config';
-import { sendBusFullAlert } from '@/lib/busCapacityService';
-import { computeBlockDatesFromValidUntil } from '@/lib/utils/deadline-computation';
 import { createAuditEvent, SYSTEM_ACTOR } from '@/domains/audit';
 import { CapacityFullError } from '@/lib/errors/sentinel-errors';
 import { normalizeShift, areShiftsCompatible, getShiftLoad } from '@/lib/utils/shift-utils';
@@ -54,37 +52,24 @@ import * as Notification from '@/domains/notification';
 import * as fleetService from '@/domains/fleet/services/fleet.service';
 import * as routeService from '@/domains/route';
 import { findAlternatives } from '@/domains/seat/repositories/seat.repository';
-
-// Page size for paginating verified_upcoming applications.
-const PAGE_SIZE = 200;
-
-export interface SessionActivationSummary {
-  /** ISO timestamp the run started. */
-  startedAt: string;
-  /** ISO timestamp the run finished. */
-  completedAt: string;
-  /** Resolved current session start year (e.g. 2027 for the 2027-2028 session). */
-  currentSessionStartYear: number;
-  /** Was activation date reached? If false, the job exited early. */
-  activationReached: boolean;
-  /** Number of verified_upcoming applications scanned for the current session. */
-  scanned: number;
-  /** Activated → student created, seat allocated, capacity decremented. */
-  activated: number;
-  /** Moved to pending_seat_allocation because no seat was available. */
-  pendingSeatAllocation: number;
-  /** Skipped because the application changed state between scan and activation
-   *  (e.g. concurrent admin manual activation). */
-  skipped: number;
-  /** Failed for an unexpected reason. Per-app errors are isolated; the run continues. */
-  failed: number;
-  /** Per-application errors (failed only). Each entry: { applicationId, error }. */
-  errors: Array<{ applicationId: string; error: string }>;
-  /** Who triggered the run. */
-  trigger: 'cron' | 'admin';
-}
+import { sendBusFullAlert } from '@/lib/busCapacityService';
+import { computeBlockDatesFromValidUntil } from '@/lib/utils/deadline-computation';
 
 class StateChangedError extends Error {}
+
+export interface SessionActivationSummary {
+  startedAt: string;
+  completedAt: string;
+  currentSessionStartYear: number;
+  activationReached: boolean;
+  scanned: number;
+  activated: number;
+  pendingSeatAllocation: number;
+  skipped: number;
+  failed: number;
+  errors: Array<{ applicationId: string; error: string }>;
+  trigger: 'cron' | 'admin';
+}
 
 export function getCurrentSessionStartYear(config: DeadlineConfig, now: Date = new Date()): number {
   const startMonth = config.academicSessionStart?.month ?? 6;
@@ -94,62 +79,116 @@ export function getCurrentSessionStartYear(config: DeadlineConfig, now: Date = n
   return now.getTime() >= sessionStartThisYear.getTime() ? thisYear : thisYear - 1;
 }
 
-/**
- * Helper to deterministically find alternative buses for a given stop, route, and shift.
- * Suggested order:
- * 1. Same requested route (true comes before false)
- * 2. Same stop (filter condition)
- * 3. Same shift (exact shift match comes before 'both')
- * 4. Lowest current occupancy (shiftLoad ascending)
- * 5. Lowest document ID (busId alphabetical comparison)
- *
- * CANONICAL CAPACITY MODEL (per-shift): each student is gated against their own
- * shift's trip counter, never against the combined currentMembers total.
- * Uses getShiftLoad from shift-utils so the filter is identical to the write-path.
- */
-async function findDeterministicAlternativeBuses(
-  stopId: string,
-  requestedRouteId: string,
-  requestedShift: string,
-  preFetchedBuses?: Bus[],
-  preFetchedRoutes?: any[]
-): Promise<Array<{ busId: string; routeId: string; shift: string; currentMembers: number; capacity: number }>> {
-  // ponytail: delegate core stop-matching and route-filtering to seatRepository
-  const res = await findAlternatives(stopId, requestedRouteId, requestedShift, preFetchedBuses, preFetchedRoutes);
-  if (!res.success || !res.alternativeBuses) return [];
+export async function activateUpcomingSessionApplications(opts: {
+  trigger: 'cron' | 'admin';
+}): Promise<SessionActivationSummary> {
+  const startedAt = new Date().toISOString();
+  const config = await getDeadlineConfig();
+  const now = new Date();
+  const currentSessionStartYear = getCurrentSessionStartYear(config, now);
 
-  const alternatives = res.alternativeBuses.map(b => ({
-    busId: b.busId,
-    routeId: b.routeId,
-    shift: b.shift,
-    currentMembers: b.currentMembers,
-    capacity: b.capacity
-  }));
+  const summary: SessionActivationSummary = {
+    startedAt,
+    completedAt: '',
+    currentSessionStartYear,
+    activationReached: false,
+    scanned: 0,
+    activated: 0,
+    pendingSeatAllocation: 0,
+    skipped: 0,
+    failed: 0,
+    errors: [],
+    trigger: opts.trigger,
+  };
 
-  alternatives.sort((a, b) => {
-    const aSameRoute = a.routeId === requestedRouteId ? 1 : 0;
-    const bSameRoute = b.routeId === requestedRouteId ? 1 : 0;
-    if (aSameRoute !== bSameRoute) return bSameRoute - aSameRoute;
+  const startMonth = config.academicSessionStart?.month ?? 6;
+  const startDay = config.academicSessionStart?.day ?? 1;
 
-    const aExactShift = a.shift.toLowerCase() === requestedShift.toLowerCase() ? 1 : 0;
-    const bExactShift = b.shift.toLowerCase() === requestedShift.toLowerCase() ? 1 : 0;
-    if (aExactShift !== bExactShift) return bExactShift - aExactShift;
+  // Compute activationDate using the dynamic academicSessionStart
+  const activationDate = new Date(Date.UTC(currentSessionStartYear, startMonth, startDay, 0, 0, 0, 0));
 
-    if (a.currentMembers !== b.currentMembers) return a.currentMembers - b.currentMembers;
+  // Normalize today and activation date to midnight for comparison
+  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0));
+  const normalizedActivationDate = new Date(Date.UTC(activationDate.getUTCFullYear(), activationDate.getUTCMonth(), activationDate.getUTCDate(), 0, 0, 0, 0));
 
-    return a.busId.localeCompare(b.busId);
+  // 1. Activation Gate Comparison
+  if (today.getTime() < normalizedActivationDate.getTime()) {
+    summary.activationReached = false;
+    summary.completedAt = new Date().toISOString();
+    return summary;
+  }
+
+  // 2. Check Soft Block Completion Marker
+  const softBlockMarkerData = await findMarker(`soft_block_completed_${currentSessionStartYear}`);
+  if (!softBlockMarkerData) {
+    console.log(`⚠️ Soft Block completion marker 'soft_block_completed_${currentSessionStartYear}' is missing. Postponing session activation.`);
+    summary.activationReached = false;
+    summary.completedAt = new Date().toISOString();
+    return summary;
+  }
+
+  // 3. Check Activation Marker (if marker already exists, exit immediately)
+  const activationMarkerData = await findMarker(`activation_${currentSessionStartYear}`);
+  if (activationMarkerData) {
+    summary.activationReached = false;
+    summary.completedAt = new Date().toISOString();
+    return summary;
+  }
+
+  summary.activationReached = true;
+
+  // 4. Use atomic bulk activation RPC
+  const { data: rpcResult, error: rpcError } = await getSupabaseServer().rpc('activate_session_batch', {
+    p_session_year: currentSessionStartYear,
   });
 
-  return alternatives;
+  if (rpcError) {
+    console.error('activate_session_batch RPC error:', rpcError);
+    summary.failed = 1;
+    summary.errors.push({ applicationId: 'bulk', error: rpcError.message });
+    summary.completedAt = new Date().toISOString();
+    return summary;
+  }
+
+  if (!rpcResult?.success) {
+    console.error('activate_session_batch RPC failed:', rpcResult?.error);
+    summary.failed = 1;
+    summary.errors.push({ applicationId: 'bulk', error: rpcResult?.error || 'Unknown error' });
+    summary.completedAt = new Date().toISOString();
+    return summary;
+  }
+
+  // Map RPC result to summary
+  summary.activated = rpcResult.processed || 0;
+  summary.pendingSeatAllocation = rpcResult.pending || 0;
+  summary.failed = rpcResult.failed || 0;
+  summary.errors = rpcResult.errors || [];
+  summary.scanned = summary.activated + summary.pendingSeatAllocation + summary.failed;
+
+  // Check remaining verified_upcoming applications for the current session
+  const { getAllByState } = await import('@/domains/application');
+  const remainingApps = await getAllByState('verified_upcoming');
+  const hasRemainingForCurrentSession = remainingApps.some(app => {
+    const targetStartYear = Number((app as any).targetSession?.startYear);
+    return targetStartYear === currentSessionStartYear;
+  });
+
+  // Write activation marker only if NO eligible verified_upcoming applications remain
+  if (!hasRemainingForCurrentSession) {
+    await upsertMarker(`activation_${currentSessionStartYear}`, {
+      activatedAt: new Date().toISOString(),
+      currentSessionStartYear,
+      scanned: summary.scanned,
+      activated: summary.activated,
+      pendingSeatAllocation: summary.pendingSeatAllocation,
+      trigger: opts.trigger,
+    });
+  }
+
+  summary.completedAt = new Date().toISOString();
+  return summary;
 }
 
-/**
- * Activate a SINGLE verified_upcoming application. Used by both the bulk job
- * and (potentially) per-app retry from the Applications page when an admin
- * manually resolves a pending_seat_allocation.
- *
- * Returns the outcome so the caller can aggregate.
- */
 async function activateOne(
   app: Application,
   config: DeadlineConfig,
@@ -407,6 +446,42 @@ async function notifyStudentActivated(app: Application, formData: any, validUnti
   );
 }
 
+async function findDeterministicAlternativeBuses(
+  stopId: string,
+  requestedRouteId: string,
+  requestedShift: string,
+  preFetchedBuses?: Bus[],
+  preFetchedRoutes?: any[]
+): Promise<Array<{ busId: string; routeId: string; shift: string; currentMembers: number; capacity: number }>> {
+  // ponytail: delegate core stop-matching and route-filtering to seatRepository
+  const res = await findAlternatives(stopId, requestedRouteId, requestedShift, preFetchedBuses, preFetchedRoutes);
+  if (!res.success || !res.alternativeBuses) return [];
+
+  const alternatives = res.alternativeBuses.map(b => ({
+    busId: b.busId,
+    routeId: b.routeId,
+    shift: b.shift,
+    currentMembers: b.currentMembers,
+    capacity: b.capacity
+  }));
+
+  alternatives.sort((a, b) => {
+    const aSameRoute = a.routeId === requestedRouteId ? 1 : 0;
+    const bSameRoute = b.routeId === requestedRouteId ? 1 : 0;
+    if (aSameRoute !== bSameRoute) return bSameRoute - aSameRoute;
+
+    const aExactShift = a.shift.toLowerCase() === requestedShift.toLowerCase() ? 1 : 0;
+    const bExactShift = b.shift.toLowerCase() === requestedShift.toLowerCase() ? 1 : 0;
+    if (aExactShift !== bExactShift) return bExactShift - aExactShift;
+
+    if (a.currentMembers !== b.currentMembers) return a.currentMembers - b.currentMembers;
+
+    return a.busId.localeCompare(b.busId);
+  });
+
+  return alternatives;
+}
+
 async function notifyPendingSeatAllocation(appId: string, app: Application, formData: any): Promise<void> {
   // Notify student
   await Notification.createNotification(
@@ -439,16 +514,6 @@ async function notifyPendingSeatAllocation(appId: string, app: Application, form
   }
 }
 
-/**
- * Activate a SINGLE application by id. Used when an admin clicks "Retry"
- * on a pending_seat_allocation application from the Applications page, OR
- * to manually activate a single verified_upcoming application early.
- *
- * Reuses `activateOne`, so the exact same activation pipeline runs as the
- * bulk job — there is no second seat-allocation implementation.
- *
- * Returns the same SessionActivationSummary shape (with scanned: 1).
- */
 export async function activateSingleApplication(
   applicationId: string,
   trigger: 'admin' = 'admin'
@@ -500,120 +565,6 @@ export async function activateSingleApplication(
     summary.failed++;
     summary.errors.push({ applicationId, error: err?.message || String(err) });
   }
-  summary.completedAt = new Date().toISOString();
-  return summary;
-}
-
-export async function activateUpcomingSessionApplications(opts: {
-  trigger: 'cron' | 'admin';
-}): Promise<SessionActivationSummary> {
-  const startedAt = new Date().toISOString();
-  const config = await getDeadlineConfig();
-  const now = new Date();
-  const currentSessionStartYear = getCurrentSessionStartYear(config, now);
-
-  const summary: SessionActivationSummary = {
-    startedAt,
-    completedAt: '',
-    currentSessionStartYear,
-    activationReached: false,
-    scanned: 0,
-    activated: 0,
-    pendingSeatAllocation: 0,
-    skipped: 0,
-    failed: 0,
-    errors: [],
-    trigger: opts.trigger,
-  };
-
-  const startMonth = config.academicSessionStart?.month ?? 6;
-  const startDay = config.academicSessionStart?.day ?? 1;
-
-  // Compute activationDate using the dynamic academicSessionStart
-  const activationDate = new Date(Date.UTC(currentSessionStartYear, startMonth, startDay, 0, 0, 0, 0));
-
-  // Normalize today and activation date to midnight for comparison
-  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0));
-  const normalizedActivationDate = new Date(Date.UTC(activationDate.getUTCFullYear(), activationDate.getUTCMonth(), activationDate.getUTCDate(), 0, 0, 0, 0));
-
-  // 1. Activation Gate Comparison
-  if (today.getTime() < normalizedActivationDate.getTime()) {
-    summary.activationReached = false;
-    summary.completedAt = new Date().toISOString();
-    return summary;
-  }
-
-  // 2. Check Soft Block Completion Marker
-  const softBlockMarkerData = await findMarker(`soft_block_completed_${currentSessionStartYear}`);
-  if (!softBlockMarkerData) {
-    console.log(`⚠️ Soft Block completion marker 'soft_block_completed_${currentSessionStartYear}' is missing. Postponing session activation.`);
-    summary.activationReached = false;
-    summary.completedAt = new Date().toISOString();
-    return summary;
-  }
-
-  // 3. Check Activation Marker (if marker already exists, exit immediately)
-  const activationMarkerData = await findMarker(`activation_${currentSessionStartYear}`);
-  if (activationMarkerData) {
-    summary.activationReached = false;
-    summary.completedAt = new Date().toISOString();
-    return summary;
-  }
-
-  summary.activationReached = true;
-
-  // Read verified_upcoming applications from PG and filter by current session
-  const { getAllByState } = await import('@/domains/application');
-  const allUpcoming = await getAllByState('verified_upcoming');
-  const eligibleApps = allUpcoming.filter(app => {
-    const targetStartYear = Number((app as any).targetSession?.startYear);
-    return targetStartYear === currentSessionStartYear;
-  });
-
-  const allBuses = await fleetService.getAllBuses();
-  const allRoutes = await routeService.getAll();
-
-  // ponytail: Process in batches of 10 concurrently to avoid serial N+1 network latency
-  const batchSize = 10;
-  for (let i = 0; i < eligibleApps.length; i += batchSize) {
-    const chunk = eligibleApps.slice(i, i + batchSize);
-    await Promise.all(chunk.map(async (app) => {
-      summary.scanned++;
-      try {
-        const outcome = await activateOne(app, config, opts.trigger, allBuses, allRoutes);
-        if (outcome === 'activated') summary.activated++;
-        else if (outcome === 'pending') summary.pendingSeatAllocation++;
-        else if (outcome === 'skipped') summary.skipped++;
-        else {
-          summary.failed++;
-          summary.errors.push({ applicationId: app.applicationId, error: outcome.failed });
-        }
-      } catch (err: any) {
-        summary.failed++;
-        summary.errors.push({ applicationId: app.applicationId, error: err?.message || String(err) });
-      }
-    }));
-  }
-
-  // Check remaining verified_upcoming applications for the current session
-  const remainingApps = await getAllByState('verified_upcoming');
-  const hasRemainingForCurrentSession = remainingApps.some(app => {
-    const targetStartYear = Number((app as any).targetSession?.startYear);
-    return targetStartYear === currentSessionStartYear;
-  });
-
-  // Write activation marker only if NO eligible verified_upcoming applications remain
-  if (!hasRemainingForCurrentSession) {
-    await upsertMarker(`activation_${currentSessionStartYear}`, {
-      activatedAt: new Date().toISOString(),
-      currentSessionStartYear,
-      scanned: summary.scanned,
-      activated: summary.activated,
-      pendingSeatAllocation: summary.pendingSeatAllocation,
-      trigger: opts.trigger,
-    });
-  }
-
   summary.completedAt = new Date().toISOString();
   return summary;
 }

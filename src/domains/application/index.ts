@@ -1,6 +1,7 @@
 // D4 Application — public surface. Only this file may be imported by other domains.
 export {
   getAll,
+  getAllPaginated,
   getById,
   getByApplicantUid,
   getAllByState,

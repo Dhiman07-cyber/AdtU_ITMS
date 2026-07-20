@@ -233,6 +233,24 @@ export async function pgFindAll(): Promise<Application[]> {
 }
 
 /**
+ * Find all applications with database-level pagination.
+ */
+export async function pgFindAllPaginated(limit: number, offset: number): Promise<Application[]> {
+  const db = getSupabaseServer();
+
+  const { data, error } = await db
+    .from('applications')
+    .select('*')
+    .range(offset, offset + limit - 1);
+
+  if (error) {
+    throw new Error(`ApplicationRepository (PG) findAllPaginated failed: ${error.message}`);
+  }
+
+  return (data || []).map(row => pgRowToApplication(row));
+}
+
+/**
  * Find all applications by state.
  */
 export async function pgFindAllByState(state: ApplicationState): Promise<Application[]> {

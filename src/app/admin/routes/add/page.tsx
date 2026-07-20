@@ -203,7 +203,7 @@ export default function AddRoutePage() {
         finalRouteId = `route_${finalRouteId}`;
       }
 
-      const response = await fetch('/api/routes/create', {
+      const response = await fetch('/api/routes', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

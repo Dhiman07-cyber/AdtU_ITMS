@@ -204,7 +204,7 @@ export default function AddRoutePage() {
     try {
       const idToken = await currentUser.getIdToken();
 
-      const response = await fetch('/api/routes/create', {
+      const response = await fetch('/api/routes', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -220,11 +220,11 @@ export default function AddRoutePage() {
 
       const result = await response.json();
 
-      if (!response.ok || !result.success) {
+      if (!response.ok) {
         throw new Error(result.error || 'Failed to create route');
       }
 
-      addToast(result.message || "Route created successfully!", 'success');
+      addToast("Route created successfully!", 'success');
       signalCollectionRefresh('routes');
 
       setTimeout(() => {

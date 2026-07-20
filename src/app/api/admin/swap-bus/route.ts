@@ -6,20 +6,37 @@ import { RateLimits } from '@/lib/security/rate-limiter';
 import { notifyRouteTopic } from '@/lib/services/fcm-notification-service';
 import { getBusById, updateBus } from '@/domains/fleet';
 import * as routeService from '@/domains/route';
+import crypto from 'crypto';
 
 /**
  * POST /api/admin/swap-bus
  * 
- * Optimized:
- * - Parallelized metadata fetching (Route, FromBus, ToBus)
- * - Scalable FCM Topic notifications (replaces expensive N+1 token fetching)
- * - Atomic Firestore batch updates
+ * Idempotency: optional `idempotencyKey` in body prevents duplicate swaps.
+ * If provided and a swap with that key was already processed, returns the original result.
  */
-
 export const POST = withSecurity(
-    async (request, { body }) => {
-        const { routeId, fromBusId, toBusId } = body as any;
+    async (request, { body, auth }) => {
+        const { routeId, fromBusId, toBusId, idempotencyKey } = body as any;
         const supabase = getSupabaseServer();
+
+        // Idempotency check
+        if (idempotencyKey) {
+            const { data: existing } = await supabase
+                .from('reassignment_logs')
+                .select('operation_id, meta')
+                .eq('meta->>idempotencyKey', idempotencyKey)
+                .eq('type', 'bus_swap')
+                .maybeSingle();
+            
+            if (existing) {
+                return NextResponse.json({
+                    success: true,
+                    message: 'Bus swap already processed (idempotent)',
+                    idempotent: true,
+                    operationId: existing.operation_id,
+                });
+            }
+        }
 
         // 1. Fetch route from PG + buses from PG
         const [routeData, fromBus, toBus] = await Promise.all([
@@ -38,7 +55,37 @@ export const POST = withSecurity(
             updateBus(toBusId, { status: 'active', routeId: routeId })
         ]);
 
-        // 3. Parallelized Realtime & Notifications (Non-blocking response)
+        const operationId = `bus_swap_${Date.now()}_${crypto.randomUUID()}`;
+
+        // 3. Audit log with idempotency key
+        try {
+            await supabase.from('reassignment_logs').insert([{
+                operation_id: operationId,
+                type: 'bus_swap',
+                actor_id: auth.uid,
+                actor_label: 'Admin Bus Swap',
+                status: 'committed',
+                summary: `Swapped bus ${fromBusId} to ${toBusId} on route ${routeId}`,
+                changes: [{
+                    docPath: `buses/${fromBusId}`,
+                    collection: 'buses',
+                    docId: fromBusId,
+                    before: { status: fromBus.status || 'active', routeId: fromBus.routeId },
+                    after: { status: 'maintenance', routeId: null },
+                }, {
+                    docPath: `buses/${toBusId}`,
+                    collection: 'buses',
+                    docId: toBusId,
+                    before: { status: toBus.status, routeId: toBus.routeId },
+                    after: { status: 'active', routeId: routeId },
+                }],
+                meta: { idempotencyKey: idempotencyKey || null },
+            }]);
+        } catch (auditErr) {
+            console.error('Bus swap audit log failed:', auditErr);
+        }
+
+        // 4. Parallelized Realtime & Notifications (Non-blocking response)
         const postTasks = [
             // Supabase Broadcast
             supabase.channel(`route_${routeId}`).send({
@@ -62,6 +109,8 @@ export const POST = withSecurity(
         return NextResponse.json({
             success: true,
             message: 'Bus swapped successfully',
+            operationId,
+            idempotent: false,
             data: {
                 routeId,
                 fromBus: { busId: fromBusId, busNumber: fromBus.busNumber, status: 'maintenance' },

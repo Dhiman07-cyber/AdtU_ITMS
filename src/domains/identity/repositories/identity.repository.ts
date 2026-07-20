@@ -35,8 +35,8 @@ import {
   pgFindDriverById,
   pgFindDriversByStatus,
   pgFindAllDrivers,
+  pgFindAllDriversPaginated,
   pgInsertDriver,
-  pgUpsertDriver,
   pgUpdateDriver,
   pgRemoveDriver,
   pgFindDriversByBusId,
@@ -161,12 +161,12 @@ export async function findAllDrivers(): Promise<Record<string, any>[]> {
   return pgFindAllDrivers();
 }
 
-export async function insertDriver(driver: Record<string, any>): Promise<void> {
-  return pgInsertDriver(driver);
+export async function findAllDriversPaginated(limit: number, offset: number): Promise<Record<string, any>[]> {
+  return pgFindAllDriversPaginated(limit, offset);
 }
 
-export async function upsertDriver(driver: Record<string, any>): Promise<void> {
-  return pgUpsertDriver(driver);
+export async function insertDriver(driver: Record<string, any>): Promise<void> {
+  return pgInsertDriver(driver);
 }
 
 export async function updateDriver(uid: string, data: Record<string, any>): Promise<void> {

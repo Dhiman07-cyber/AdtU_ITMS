@@ -47,6 +47,18 @@ export async function getModeratorPermissions(uid: string): Promise<ModeratorPer
   return permissions;
 }
 
+export async function requireAdminPermission(
+  auth: SecurityAuth,
+  requestId?: string
+): Promise<NextResponse | null> {
+  if (auth.role === 'admin') return null;
+
+  return NextResponse.json(
+    { success: false, error: 'Insufficient permissions', requestId },
+    { status: 403 }
+  );
+}
+
 export async function requireModeratorPermission<C extends PermissionCategory>(
   auth: SecurityAuth,
   category: C,

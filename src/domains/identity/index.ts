@@ -33,6 +33,7 @@ export {
   getDriverById,
   getDriversByStatus,
   getAllDrivers,
+  getAllDriversPaginated,
   getDriversByBusId,
   createDriver,
   updateDriver,
@@ -58,5 +59,11 @@ export {
   updateUnauthUser,
   deleteUnauthUser,
   getAllUnauthUsers,
+  // FCM Tokens
+  saveFcmToken,
+  deleteFcmToken,
+  getValidFcmTokensForUsers,
+  cleanupStaleFcmTokens,
+  hashFcmToken,
 } from './services/identity.service';
 export type { User, UserRole, ModeratorPermissions } from './services/identity.service';

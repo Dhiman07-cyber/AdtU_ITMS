@@ -7,7 +7,7 @@ import * as routeService from '@/domains/route';
 export async function GET(request: NextRequest) {
   try {
     // SECURITY: Require authentication (any logged-in user can view routes)
-    const auth = await verifyApiAuth(request, ['admin', 'moderator', 'driver', 'student']);
+    const auth = await verifyApiAuth(request);
     if (!auth.authenticated) return auth.response;
 
     // Rate limit
@@ -47,8 +47,8 @@ export async function POST(request: NextRequest) {
     if (!newRouteData.routeName || typeof newRouteData.routeName !== 'string' || newRouteData.routeName.length > 200) {
       return NextResponse.json({ error: 'Valid route name is required (max 200 chars)' }, { status: 400 });
     }
-    if (!newRouteData.stops || !Array.isArray(newRouteData.stops)) {
-      return NextResponse.json({ error: 'Stops array is required' }, { status: 400 });
+    if (!newRouteData.stops || !Array.isArray(newRouteData.stops) || newRouteData.stops.length < 2) {
+      return NextResponse.json({ error: 'At least 2 stops are required' }, { status: 400 });
     }
 
     // Determine status from active or status field

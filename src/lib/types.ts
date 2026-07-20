@@ -29,7 +29,7 @@ export interface Student {
   routeId?: string;
   stopName?: string;
   shift?: 'Morning' | 'Evening';
-  status?: 'active' | 'inactive' | 'suspended' | 'soft_blocked' | 'pending_deletion';
+  status?: 'active' | 'inactive' | 'suspended' | 'soft_blocked' | 'pending_deletion' | 'expired';
   profilePhotoUrl?: string;
   photoURL?: string;
   avatar?: string;

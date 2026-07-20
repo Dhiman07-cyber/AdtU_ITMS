@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { adminAuth } from '@/lib/firebase-admin';
 import { getUiConfig, updateUiConfig } from '@/domains/admin';
+import { getUserById } from '@/domains/identity';
 
 /**
  * GET /api/settings/ui-config
@@ -45,9 +46,8 @@ export async function POST(req: NextRequest) {
         const token = authHeader.split('Bearer ')[1];
         const decodedToken = await adminAuth.verifyIdToken(token);
 
-        const userDoc = await adminAuth.getUser(decodedToken.uid);
-        const customClaims = userDoc.customClaims;
-        if (customClaims?.role !== 'admin') {
+        const user = await getUserById(decodedToken.uid);
+        if (!user || user.role !== 'admin') {
             return NextResponse.json({ message: 'Forbidden: Admin access required' }, { status: 403 });
         }
 

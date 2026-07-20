@@ -7,6 +7,7 @@ const mockWriteAudit = vi.fn();
 const mockPgUpsertUser = vi.fn();
 const mockPgUpsertStudent = vi.fn();
 const mockFindAlternatives = vi.fn();
+const mockRpc = vi.fn();
 
 vi.mock('@/lib/deadline-config-service', () => ({
   getDeadlineConfig: () => mockGetDeadlineConfig(),
@@ -108,6 +109,7 @@ const mockSupabaseChain = vi.fn();
 
 vi.mock('@/lib/supabase-server', () => ({
   getSupabaseServer: () => ({
+    rpc: (...args: any[]) => mockRpc(...args),
     from: (table: string) => {
       const chain: Record<string, any> = {};
       chain.select = vi.fn().mockReturnValue(chain);
@@ -128,6 +130,7 @@ vi.mock('@/lib/supabase-server', () => ({
   }),
 }));
 
+import { getSupabaseServer } from '@/lib/supabase-server';
 import {
   getCurrentSessionStartYear,
   activateUpcomingSessionApplications,
@@ -377,12 +380,15 @@ describe('Session Activation Service', () => {
 
       mockGetBusById.mockResolvedValue({ busId: 'bus_03', busNumber: 'B03', routeId: 'route_03' });
 
+      mockRpc.mockResolvedValue({ data: { success: true, processed: 1 }, error: null });
+
       const summary = await activateUpcomingSessionApplications({ trigger: 'cron' });
 
       expect(summary.activated).toBe(1);
       expect(summary.failed).toBe(0);
-      // checkBusCapacity called twice: once for requested bus, once for alternative
-      expect(mockCheckBusCapacity).toHaveBeenCalledTimes(2);
+      expect(mockRpc).toHaveBeenCalledWith('activate_session_batch', {
+        p_session_year: 2026,
+      });
     });
   });
 });

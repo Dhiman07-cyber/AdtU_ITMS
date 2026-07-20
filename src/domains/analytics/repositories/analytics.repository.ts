@@ -106,35 +106,26 @@ export async function fetchDashboardRawData(): Promise<DashboardRawData> {
   const sevenDaysAgo = new Date();
   sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
+  // Single aggregation query for student profile counts using Postgres FILTER
+  // This replaces 5 separate count queries - executes as single SQL with FILTER clauses
+  const { data: studentAgg } = await supabase.rpc('get_student_profile_counts');
+
+  // Single aggregation query for application counts
+  const { data: applicationAgg } = await supabase.rpc('get_application_counts');
+
   const [
-    totalStudentsSnap,
-    activeStudentsSnap,
-    morningStudentsSnap,
-    eveningStudentsSnap,
-    expiredStudentsSnap,
     driversSnap,
     allBusesFromPg,
     routesList,
-    pendingAppsSnap,
-    verificationSnap,
-    renewalSnap,
     feedbackSnap,
     statusSnap,
     paymentsSnap,
     sysSnap,
     deadlineConfig,
   ] = await Promise.all([
-    supabase.from('student_profiles').select('*', { count: 'exact', head: true }),
-    supabase.from('student_profiles').select('*', { count: 'exact', head: true }).eq('status', 'active'),
-    supabase.from('student_profiles').select('*', { count: 'exact', head: true }).eq('status', 'active').eq('shift', 'Morning'),
-    supabase.from('student_profiles').select('*', { count: 'exact', head: true }).eq('status', 'active').eq('shift', 'Evening'),
-    supabase.from('student_profiles').select('*', { count: 'exact', head: true }).eq('status', 'expired'),
     supabase.from('driver_profiles').select('*', { count: 'exact', head: true }),
     getAllBuses(),
     routeService.getAll(),
-    supabase.from('applications').select('*', { count: 'exact', head: true }).eq('state', 'submitted'),
-    supabase.from('applications').select('*', { count: 'exact', head: true }).eq('state', 'awaiting_verification'),
-    supabase.from('applications').select('*', { count: 'exact', head: true }).eq('state', 'submitted').in('application_type', ['renewal', 'renewal_after_soft_block']),
     adminDb.collection('feedbacks').where('createdAt', '>=', sevenDaysAgo).count().get().catch(() => ({ data: () => ({ count: 0 }) })),
     supabase.from('driver_status').select('*').in('status', ['enroute', 'on_trip']),
     supabase.from('payments').select('amount, method').or('status.eq.Completed,status.eq.completed'),
@@ -143,17 +134,17 @@ export async function fetchDashboardRawData(): Promise<DashboardRawData> {
   ]);
 
   return {
-    totalStudentsCount: totalStudentsSnap.count || 0,
-    activeStudentsCount: activeStudentsSnap.count || 0,
-    morningStudentsCount: morningStudentsSnap.count || 0,
-    eveningStudentsCount: eveningStudentsSnap.count || 0,
-    expiredStudentsCount: expiredStudentsSnap.count || 0,
+    totalStudentsCount: studentAgg?.[0]?.total_students || 0,
+    activeStudentsCount: studentAgg?.[0]?.active_students || 0,
+    morningStudentsCount: studentAgg?.[0]?.morning_students || 0,
+    eveningStudentsCount: studentAgg?.[0]?.evening_students || 0,
+    expiredStudentsCount: studentAgg?.[0]?.expired_students || 0,
     driversCount: driversSnap.count || 0,
     buses: allBusesFromPg,
     routes: routesList,
-    pendingAppsCount: pendingAppsSnap.count || 0,
-    verificationCount: verificationSnap.count || 0,
-    renewalCount: renewalSnap.count || 0,
+    pendingAppsCount: applicationAgg?.[0]?.pending_apps || 0,
+    verificationCount: applicationAgg?.[0]?.verification_apps || 0,
+    renewalCount: applicationAgg?.[0]?.renewal_apps || 0,
     feedbackCount: (feedbackSnap as any).data ? (feedbackSnap as any).data().count : 0,
     driverStatusData: statusSnap.data || [],
     paymentsData: paymentsSnap.data || [],

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   TrendingUp,
@@ -56,7 +56,12 @@ export default function TransactionalAnalytics({
   const [viewMode, setViewMode] = useState<'days' | 'months'>('days');
   const [metricType, setMetricType] = useState<'revenue' | 'volume'>('revenue');
   const [isExporting, setIsExporting] = useState(false);
+  const [isMounted, setIsMounted] = useState(false);
   const { currentUser } = useAuth();
+
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
 
   const currentData = viewMode === 'days' ? paymentTrends.days || [] : paymentTrends.months || [];
   const methodTrend = paymentTrends.methodTrend || [];
@@ -239,23 +244,25 @@ export default function TransactionalAnalytics({
                   </div>
                   <div className="flex-1 w-full mt-1 flex items-center justify-center">
                     {methodTrend.length > 0 ? (
-                      <ResponsiveContainer width="100%" height={80} minWidth={0} minHeight={0}>
-                        <PieChart>
-                          <Pie
-                            data={methodTrend}
-                            cx="50%"
-                            cy="50%"
-                            innerRadius={20}
-                            outerRadius={35}
-                            paddingAngle={5}
-                            dataKey="value"
-                          >
-                            {methodTrend.map((entry, index) => (
-                              <Cell key={`cell-${index}`} fill={entry.color || COLORS[index % COLORS.length]} />
-                            ))}
-                          </Pie>
-                        </PieChart>
-                      </ResponsiveContainer>
+                      isMounted ? (
+                        <ResponsiveContainer width="100%" height={80} minWidth={0} minHeight={0}>
+                          <PieChart>
+                            <Pie
+                              data={methodTrend}
+                              cx="50%"
+                              cy="50%"
+                              innerRadius={20}
+                              outerRadius={35}
+                              paddingAngle={5}
+                              dataKey="value"
+                            >
+                              {methodTrend.map((entry, index) => (
+                                <Cell key={`cell-${index}`} fill={entry.color || COLORS[index % COLORS.length]} />
+                              ))}
+                            </Pie>
+                          </PieChart>
+                        </ResponsiveContainer>
+                      ) : null
                     ) : (
                       <div className="text-[10px] text-slate-500 italic">Calculating...</div>
                     )}
@@ -282,42 +289,44 @@ export default function TransactionalAnalytics({
                   transition={{ duration: 0.4 }}
                   className="w-full h-full"
                 >
-                  <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
-                    <AreaChart data={currentData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                      <defs>
-                        <linearGradient id="colorMetric" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor={role === 'admin' && metricType === 'revenue' ? '#6366f1' : '#10b981'} stopOpacity={0.4} />
-                          <stop offset="95%" stopColor={role === 'admin' && metricType === 'revenue' ? '#6366f1' : '#10b981'} stopOpacity={0} />
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="rgba(255,255,255,0.03)" />
-                      <XAxis
-                        dataKey="date"
-                        axisLine={false}
-                        tickLine={false}
-                        tick={{ fill: '#64748b', fontSize: 10, fontWeight: 700 }}
-                        dy={15}
-                      />
-                      <YAxis
-                        axisLine={false}
-                        tickLine={false}
-                        tick={{ fill: '#64748b', fontSize: 10, fontWeight: 700 }}
-                        tickFormatter={(val) => role === 'admin' && metricType === 'revenue' ? `₹${(val / 1000)}k` : val}
-                      />
-                      <Tooltip content={<CustomTooltip />} cursor={{ stroke: 'rgba(99, 102, 241, 0.4)', strokeWidth: 1 }} />
-                      <Area
-                        type="monotone"
-                        dataKey={role === 'admin' && metricType === 'revenue' ? 'amount' : 'count'}
-                        stroke={role === 'admin' && metricType === 'revenue' ? '#6366f1' : '#10b981'}
-                        strokeWidth={4}
-                        fillOpacity={1}
-                        fill="url(#colorMetric)"
-                        animationDuration={1500}
-                        dot={{ fill: role === 'admin' && metricType === 'revenue' ? '#4f46e5' : '#10b981', r: 4, strokeWidth: 2, stroke: '#0f172a' }}
-                        activeDot={{ r: 7, strokeWidth: 0, fill: role === 'admin' && metricType === 'revenue' ? '#818cf8' : '#34d399' }}
-                      />
-                    </AreaChart>
-                  </ResponsiveContainer>
+                  {isMounted && (
+                    <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+                      <AreaChart data={currentData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                        <defs>
+                          <linearGradient id="colorMetric" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor={role === 'admin' && metricType === 'revenue' ? '#6366f1' : '#10b981'} stopOpacity={0.4} />
+                            <stop offset="95%" stopColor={role === 'admin' && metricType === 'revenue' ? '#6366f1' : '#10b981'} stopOpacity={0} />
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="rgba(255,255,255,0.03)" />
+                        <XAxis
+                          dataKey="date"
+                          axisLine={false}
+                          tickLine={false}
+                          tick={{ fill: '#64748b', fontSize: 10, fontWeight: 700 }}
+                          dy={15}
+                        />
+                        <YAxis
+                          axisLine={false}
+                          tickLine={false}
+                          tick={{ fill: '#64748b', fontSize: 10, fontWeight: 700 }}
+                          tickFormatter={(val) => role === 'admin' && metricType === 'revenue' ? `₹${(val / 1000)}k` : val}
+                        />
+                        <Tooltip content={<CustomTooltip />} cursor={{ stroke: 'rgba(99, 102, 241, 0.4)', strokeWidth: 1 }} />
+                        <Area
+                          type="monotone"
+                          dataKey={role === 'admin' && metricType === 'revenue' ? 'amount' : 'count'}
+                          stroke={role === 'admin' && metricType === 'revenue' ? '#6366f1' : '#10b981'}
+                          strokeWidth={4}
+                          fillOpacity={1}
+                          fill="url(#colorMetric)"
+                          animationDuration={1500}
+                          dot={{ fill: role === 'admin' && metricType === 'revenue' ? '#4f46e5' : '#10b981', r: 4, strokeWidth: 2, stroke: '#0f172a' }}
+                          activeDot={{ r: 7, strokeWidth: 0, fill: role === 'admin' && metricType === 'revenue' ? '#818cf8' : '#34d399' }}
+                        />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  )}
                 </motion.div>
               </AnimatePresence>
             )}
