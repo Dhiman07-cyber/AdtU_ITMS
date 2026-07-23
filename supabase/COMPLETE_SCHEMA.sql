@@ -69,7 +69,6 @@ CREATE TABLE IF NOT EXISTS waiting_flags (
   bus_id TEXT NOT NULL,
   route_id TEXT NOT NULL,
   stop_name TEXT,
-  stop_name TEXT,
   stop_lat DOUBLE PRECISION,
   stop_lng DOUBLE PRECISION,
   status TEXT NOT NULL DEFAULT 'raised' CHECK (status IN ('raised', 'acknowledged', 'boarded', 'expired', 'cancelled', 'removed')),
@@ -80,15 +79,11 @@ CREATE TABLE IF NOT EXISTS waiting_flags (
   ack_by_driver_uid TEXT
 );
 
-CREATE INDEX IF NOT EXISTS idx_waiting_flags_student_uid ON waiting_flags(student_uid);
-CREATE INDEX IF NOT EXISTS idx_waiting_flags_bus_id ON waiting_flags(bus_id);
-CREATE INDEX IF NOT EXISTS idx_waiting_flags_route_id ON waiting_flags(route_id);
-CREATE INDEX IF NOT EXISTS idx_waiting_flags_status ON waiting_flags(status);
-CREATE INDEX IF NOT EXISTS idx_waiting_flags_trip ON waiting_flags(trip_id);
-CREATE INDEX IF NOT EXISTS idx_waiting_flags_active ON waiting_flags(bus_id, status);
+-- ponytail: 9 indexes → 2. Removed idx_waiting_flags_{student_uid,bus_id,status,trip,active,bus_student,active_raised}.
+-- (student_uid, status) covers all student-side queries; (route_id) covers the driver hook fetch.
+-- Add back individual bus_id or composite (bus_id, student_uid) only if query plans show seq scans for driver lookups.
 CREATE INDEX IF NOT EXISTS idx_waiting_flags_student_active ON waiting_flags(student_uid, status);
-CREATE INDEX IF NOT EXISTS idx_waiting_flags_bus_student ON waiting_flags(bus_id, student_uid);
-CREATE INDEX IF NOT EXISTS idx_waiting_flags_active_raised ON waiting_flags(bus_id, student_uid) WHERE status = 'raised';
+CREATE INDEX IF NOT EXISTS idx_waiting_flags_route_id ON waiting_flags(route_id);
 
 -- driver_location_updates table (historical breadcrumbs)
 CREATE TABLE IF NOT EXISTS driver_location_updates (

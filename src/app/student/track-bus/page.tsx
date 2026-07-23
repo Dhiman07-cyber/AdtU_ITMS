@@ -575,36 +575,34 @@ function TrackBusLive() {
     // Run the check immediately
     checkActiveTrip();
 
-    // Subscribe to realtime changes on driver_status table
-    const driverStatusChannel = supabase
-      .channel(`driver_status_${busData.busId}`)
+    // Subscribe to realtime changes on active_trips table
+    const activeTripChannel = supabase
+      .channel(`active_trips_${busData.busId}`)
       .on(
         "postgres_changes",
         {
-          event: "*", // Listen to INSERT, UPDATE, DELETE
+          event: "*",
           schema: "public",
-          table: "driver_status",
+          table: "active_trips",
           filter: `bus_id=eq.${busData.busId}`
         },
         (payload) => {
-          console.log("📡 Driver status change received:", payload);
+          console.log("📡 Active trip change received:", payload);
 
           if (payload.eventType === "DELETE") {
-            // Driver ended trip (deleted their status)
             setTripActive(false);
             setBusLocation(null);
-            console.log("🛑 Trip ended - driver_status deleted");
+            console.log("🛑 Trip ended - active_trips row deleted");
           } else if (payload.new) {
             const newStatus = (payload.new as any).status;
-            const isActive = newStatus === "on_trip" || newStatus === "enroute";
-            setTripActive(isActive);
-            console.log("🚀 Trip status updated via realtime:", isActive);
+            setTripActive(newStatus === "active");
+            console.log("🚀 Trip status updated via realtime:", newStatus === "active");
           }
         }
       )
       .subscribe((status) => {
         if (status === "SUBSCRIBED") {
-          console.log("✅ Subscribed to driver_status changes for bus:", busData.busId);
+          console.log("✅ Subscribed to active_trips changes for bus:", busData.busId);
         }
       });
 
@@ -634,7 +632,7 @@ function TrackBusLive() {
 
     return () => {
       clearInterval(interval);
-      supabase.removeChannel(driverStatusChannel);
+      supabase.removeChannel(activeTripChannel);
       supabase.removeChannel(tripNotificationChannel);
     };
   }, [busData?.busId, addToast]);
@@ -967,56 +965,34 @@ function TrackBusLive() {
 
     try {
       setSubmittingFlag(true);
-
-      // Delete from Supabase
-      const { error } = await supabase
-        .from("waiting_flags")
-        .update({ status: 'cancelled' })
-        .eq("id", currentFlagId);
-
-      if (error) throw error;
-
-      // Broadcast removal to driver
-      const channel = supabase.channel(`waiting_flags_${busData.busId}`);
-      waitFlagBroadcastChannelRef.current = channel;
-      const broadcastResult = await channel.send({
-        type: "broadcast",
-        event: "waiting_flag_removed",
-        payload: {
-          flagId: currentFlagId,
-          studentUid: currentUser?.uid,
+      const idToken = await currentUser!.getIdToken();
+      const response = await fetch('/api/student/waiting-flag', {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${idToken}`
         },
+        body: JSON.stringify({
+          flagId: currentFlagId,
+          busId: busData.busId
+        })
       });
 
-      if (broadcastResult !== 'ok') {
-        console.warn("Broadcast warning:", broadcastResult);
+      if (!response.ok) {
+        const err = await response.json();
+        throw new Error(err.error || 'Failed to cancel waiting flag');
       }
-
-      // Remove the one-shot broadcast channel so it doesn't leak on repeated cancels.
-      supabase.removeChannel(channel);
-      waitFlagBroadcastChannelRef.current = null;
 
       setIsWaiting(false);
       setCurrentFlagId(null);
-      // NOTE: Do NOT clear busLocation or tripActive here.
-      // The trip continues regardless of the student's waiting flag.
       setEta(null);
       setDistanceToBus(null);
-
-      // Clear arrival notification flag
       sessionStorage.removeItem(`notified_arrival_${currentFlagId}`);
-
       addToast("Waiting flag removed", "success");
-
     } catch (error: any) {
       console.error("Error removing waiting flag:", error);
-      addToast("Failed to remove waiting flag", "error");
+      addToast(error.message || "Failed to remove waiting flag", "error");
     } finally {
-      // Ensure broadcast channel is always cleaned up
-      if (waitFlagBroadcastChannelRef.current) {
-        supabase.removeChannel(waitFlagBroadcastChannelRef.current);
-        waitFlagBroadcastChannelRef.current = null;
-      }
       setSubmittingFlag(false);
     }
   };

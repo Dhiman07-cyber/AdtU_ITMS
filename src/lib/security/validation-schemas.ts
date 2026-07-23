@@ -96,10 +96,6 @@ export const CreateUserSchema = z.object({
     status: z.string().max(50).optional(),
 });
 
-export const AckWaitingSchema = z.object({
-    waitingFlagId: z.string().uuid(),
-});
-
 export const FirestoreCleanupSchema = z.object({
     cleanupType: z.enum(['active_trips', 'reassignment_logs', 'driver_location_updates', 'waiting_flags', 'missed_bus_requests', 'all']),
     daysOld: z.number().int().min(1).max(3650).optional(),
