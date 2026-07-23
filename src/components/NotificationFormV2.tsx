@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import dynamic from 'next/dynamic';
@@ -177,8 +177,8 @@ export default function NotificationFormV2({ open, onClose, onSuccess, mode = 'c
   useEffect(() => {
     if (open && currentUser) {
       if (userRole === 'driver') {
-        const driverRoute = userData?.routeId || userData?.assignedRouteId;
-        const driverBus = userData?.busId || userData?.assignedBusId;
+        const driverRoute = userData?.routeId || userData?.routeId;
+        const driverBus = userData?.busId || userData?.busId;
         if (driverRoute) {
           setTargetType('route_based');
           setSelectedRoutes([driverRoute]);
@@ -256,7 +256,7 @@ export default function NotificationFormV2({ open, onClose, onSuccess, mode = 'c
         const routeCounts: Record<string, number> = {};
         if (Array.isArray(studentsRaw)) {
           studentsRaw.forEach((s: any) => {
-            const rid = s.routeId || s.assignedRouteId || '';
+            const rid = s.routeId || s.routeId || '';
             if (rid) routeCounts[rid] = (routeCounts[rid] || 0) + 1;
           });
         }
@@ -329,8 +329,8 @@ export default function NotificationFormV2({ open, onClose, onSuccess, mode = 'c
     setDropoffShift('morning');
 
     if (userRole === 'driver') {
-      const driverRoute = userData?.routeId || userData?.assignedRouteId;
-      const driverBus = userData?.busId || userData?.assignedBusId;
+      const driverRoute = userData?.routeId || userData?.routeId;
+      const driverBus = userData?.busId || userData?.busId;
       if (driverRoute) {
         setTargetType('route_based');
         setSelectedRoutes([driverRoute]);

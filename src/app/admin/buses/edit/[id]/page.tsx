@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState, useEffect, use } from "react";
 import { useRouter } from "next/navigation";
@@ -388,7 +388,7 @@ export default function EditBusPage({ params }: { params: Promise<{ id: string }
                     <div className="px-2 py-1.5 text-xs font-bold text-yellow-500 uppercase tracking-wider bg-gray-800/50">
                       Reserved
                     </div>
-                    {drivers.filter(d => !d.assignedBusId || d.assignedBusId === formData.busId || d.assignedBusId === id || d.uid === formData.driverUID).map(driver => (
+                    {drivers.filter(d => !d.busId || d.busId === formData.busId || d.busId === id || d.uid === formData.driverUID).map(driver => (
                       <SelectItem key={driver.uid} value={driver.uid || ''}>{driver.fullName || driver.name}</SelectItem>
                     ))}
                   </SelectContent>

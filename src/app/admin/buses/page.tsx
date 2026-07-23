@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState, useMemo, useCallback } from "react";
 import { useRouter } from 'next/navigation';
@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { exportToExcel } from '@/lib/export-helpers';
 import { ExportButton } from '@/components/ExportButton';
+import { supabase } from '@/lib/supabase-client';
 import { useToast } from '@/contexts/toast-context';
 import {
   Card,
@@ -93,8 +94,6 @@ interface DriverItem {
   phone?: string;
   alternatePhone?: string;
   licenseNumber?: string;
-  assignedBusId?: string;
-  assignedRouteId?: string;
   busId?: string;
   routeId?: string;
   employeeId?: string;
@@ -111,7 +110,7 @@ interface ExtendedRoute {
   routeName: string;
   route: string;
   stops: Array<{
-    stopId: string;
+    stop_name: string;
     name: string;
     lat: number;
     lng: number;
@@ -190,7 +189,7 @@ export default function BusesPage() {
     const byBusId = new Map<string, any>();
     for (const d of drivers as any[]) {
       if (d.id) byId.set(d.id, d);
-      if (d.assignedBusId) byBusId.set(d.assignedBusId, d);
+      if (d.busId) byBusId.set(d.busId, d);
       if (d.busId) byBusId.set(d.busId, d);
     }
     return { byId, byBusId };
@@ -228,91 +227,79 @@ export default function BusesPage() {
     });
   }, [buses, searchTerm, colorFilter, statusFilter]);
 
-  // Export buses data
+  // Export buses data from Supabase
   const handleExportBuses = async () => {
     try {
       const currentDate = new Date();
       const dateStr = currentDate.toISOString().split('T')[0].replace(/-/g, '-');
 
-      // Generate buses data in the same format as the comprehensive report - sort buses by number
-      const sortedBuses = [...buses].sort((a, b) => {
-        const numA = extractNumber(a.busId || a.id || '');
-        const numB = extractNumber(b.busId || b.id || '');
-        return parseInt(numA) - parseInt(numB);
-      });
+      // Fetch all buses directly from Supabase PostgreSQL table 'buses'
+      const { data: rawBuses, error: busesError } = await supabase
+        .from('buses')
+        .select('*')
+        .order('bus_number', { ascending: true });
 
-      const busesData = sortedBuses.map((bus, index) => {
-        // Buses have complete route object nested in them (bus.route)
-        // First try bus.route, then lookup from routes collection
-        let routeInfo = bus.route;
-        if (!routeInfo) {
-          routeInfo = routes.find(r =>
-            r.id === (bus.routeId || bus.assignedRouteId) ||
-            r.routeId === (bus.routeId || bus.assignedRouteId)
-          );
-        }
+      if (busesError) throw busesError;
 
-        // Get route name
-        const routeName = routeInfo?.routeName || routeInfo?.route || 'Not Assigned';
+      // Fetch routes and drivers for name lookup
+      const { data: rawRoutes } = await supabase.from('routes').select('id, route_name, route_number, stops');
+      const { data: rawDrivers } = await supabase.from('driver_profiles').select('uid, full_name, name');
 
-        // Get stops from route (bus.route.stops or route collection)
+      const routeMap = new Map((rawRoutes || []).map((r: any) => [r.id, r]));
+      const driverMap = new Map((rawDrivers || []).map((d: any) => [d.uid, d.full_name || d.name]));
+
+      const busesData = (rawBuses || []).map((bus: any, index: number) => {
+        const routeObj = routeMap.get(bus.route_id);
+        const routeName = routeObj?.route_name || routeObj?.route_number || 'Not Assigned';
+
         let stops = 'N/A';
-        if (routeInfo && routeInfo.stops) {
-          if (Array.isArray(routeInfo.stops)) {
-            stops = routeInfo.stops.map((s: any) => s.stopName || s.name || s).join(', ');
-          } else if (typeof routeInfo.stops === 'string') {
-            stops = routeInfo.stops;
+        if (routeObj && routeObj.stops) {
+          if (Array.isArray(routeObj.stops)) {
+            stops = routeObj.stops.map((s: any) => s.stop_name || s.name || s).join(', ');
+          } else if (typeof routeObj.stops === 'string') {
+            stops = routeObj.stops;
           }
         }
 
-        // Find assigned driver - use CORRECT Firestore fields
-        // Firestore stores: activeDriverId (current) and assignedDriverId (permanent)
-        const driverIdToFind = bus.activeDriverId || bus.assignedDriverId;
-        const assignedDriver = driverIdToFind ? drivers.find(d => d.id === driverIdToFind) : null;
-
-        const totalStudents = students?.filter(s =>
-          s.busId === bus.id ||
-          s.busId === bus.busId ||
-          s.assignedBusId === bus.id ||
-          s.assignedBusId === bus.busId ||
-          s.currentBusId === bus.id ||
-          s.currentBusId === bus.busId
-        ).length || 0;
+        const driverName = driverMap.get(bus.driver_id) || 'Not Assigned';
+        const status = bus.status || 'active';
 
         return [
           (index + 1).toString(),
-          `Bus-${extractNumber(bus.busId || bus.id)}`,
+          bus.bus_number || 'N/A',
           routeName,
           stops,
-          assignedDriver ? (assignedDriver.fullName || assignedDriver.name || 'Unknown Driver') : 'Not Assigned',
-          bus.shift ? bus.shift.charAt(0).toUpperCase() + bus.shift.slice(1) : 'N/A',
-          totalStudents.toString()
+          driverName,
+          bus.color || 'White',
+          bus.capacity ? bus.capacity.toString() : '0',
+          status.charAt(0).toUpperCase() + status.slice(1)
         ];
       });
 
       // Add headers
       busesData.unshift([
-        'Sl No', 'Bus Number', 'Route Number', 'All Stops', 'Driver Assigned', 'Shift', 'Total Students'
+        'Sl No', 'Bus Number', 'Route Assigned', 'Stops Summary', 'Driver Assigned', 'Color', 'Capacity', 'Status'
       ]);
 
       // Add section header
-      busesData.unshift(['ALL BUSES'], ['']);
+      busesData.unshift(['ALL BUSES REPORT (SUPABASE)'], ['']);
 
-      // Export to Excel
       await exportToExcel(busesData, `ADTU_Buses_Report_${dateStr}`, 'Buses');
 
       addToast(
-        `Buses data exported to ADTU_Buses_Report_${dateStr}.xlsx`,
+        `Exported ${(rawBuses || []).length} buses to ADTU_Buses_Report_${dateStr}.xlsx`,
         'success'
       );
     } catch (error) {
-      console.error('❌ Error exporting buses:', error);
+      console.error('❌ Error exporting buses from Supabase:', error);
       addToast(
         'Failed to export buses data. Please try again.',
         'error'
       );
     }
   };
+
+  const commonBtnClass = "group h-8 px-4 bg-white hover:bg-gray-50 text-gray-700 hover:text-purple-600 border border-gray-200 hover:border-purple-200 shadow-sm hover:shadow-lg hover:shadow-purple-500/10 font-bold text-[10px] uppercase tracking-widest rounded-lg transition-all duration-300 active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer";
 
   // Function to get driver name for a specific bus — O(1) via prebuilt indexes.
   const getDriverNameForBus = useCallback((bus: any) => {
@@ -338,7 +325,7 @@ export default function BusesPage() {
   // Function to get route name for a specific bus — O(1) via prebuilt index.
   const getRouteNameForBus = useCallback((bus: any) => {
     // 1. Try finding in routes collection first (Canonical source)
-    const routeIdToCheck = bus.routeId || bus.assignedRouteId;
+    const routeIdToCheck = bus.routeId || bus.routeId;
     if (routeIdToCheck) {
       const foundRoute = routeIndex.get(routeIdToCheck);
       if (foundRoute) return foundRoute.routeName || (foundRoute as any).route || `Route ${routeIdToCheck}`;
@@ -415,29 +402,23 @@ export default function BusesPage() {
           </Button>
           <ExportButton
             onClick={() => handleExportBuses()}
-            label="Export Buses"
-            className={cn(
-              "border transition-all duration-200 hover:scale-105 hover:shadow-lg rounded-md px-2.5 py-1.5 text-xs h-8",
-              theme === 'dark' ? "bg-white hover:bg-gray-100 text-black border-gray-300" : "bg-white hover:bg-gray-50 text-[#111827] border-[#E5E7EB]"
-            )}
+            label="EXPORT"
+            className={commonBtnClass}
           />
           <Button
             size="sm"
             onClick={handleRefresh}
             disabled={isRefreshing}
-            className={cn(
-              "group h-8 px-4 border shadow-sm hover:shadow-lg font-bold text-[10px] uppercase tracking-widest rounded-lg transition-all duration-300 active:scale-95",
-              theme === 'dark' ? "bg-white hover:bg-gray-50 text-black hover:text-purple-600 border-gray-200 hover:border-purple-200 hover:shadow-purple-500/10" : "bg-white hover:bg-gray-50 text-[#111827] hover:text-[#1E3A8A] border-[#E5E7EB] hover:border-[#1E3A8A] hover:shadow-[#1E3A8A]/10"
-            )}
+            className={commonBtnClass}
           >
-            <RefreshCw className={`mr-2 h-3.5 w-3.5 transition-transform duration-500 ${isRefreshing ? 'animate-spin' : 'group-hover:rotate-180'}`} />
-            Refresh
+            <RefreshCw className={cn("h-3.5 w-3.5 transition-transform duration-500", isRefreshing ? "animate-spin" : "group-hover:rotate-180")} />
+            REFRESH
           </Button>
         </div>
       </div>
 
-      <Card className={cn("border-border", theme === 'dark' ? "bg-gray-900" : "bg-admin-bg")}>
-        <CardContent className="pt-3">
+      <Card className={cn("border-border min-h-[480px] flex flex-col", theme === 'dark' ? "bg-gray-900" : "bg-admin-bg")}>
+        <CardContent className="pt-3 flex-1 flex flex-col min-h-0 pb-4">
           <div className="mb-3">
             {/* Search Bar and Filters */}
             <div className="flex flex-col md:flex-row gap-3">
@@ -494,8 +475,8 @@ export default function BusesPage() {
                       setStatusFilter("all");
                     }}
                     className={cn(
-                      "h-8 px-3 text-xs flex-shrink-0",
-                      theme === 'dark' ? "bg-red-500 hover:bg-red-600 text-white" : "bg-[#EF4444] hover:bg-[#DC2626] text-white"
+                      "h-8 px-3 text-xs",
+                      theme === 'dark' ? "bg-red-500 hover:bg-red-600" : "bg-[#EF4444] hover:bg-[#DC2626]"
                     )}
                   >
                     Clear
@@ -504,8 +485,8 @@ export default function BusesPage() {
               </div>
             </div>
           </div>
-          <div className="students-section">
-            <div className="students-scroll-wrapper rounded-md border" role="region" aria-label="Bus list">
+          <div className="students-section md:mt-5 flex-1 flex flex-col min-h-0">
+            <div className="students-scroll-wrapper rounded-md border overflow-x-auto flex-1 flex flex-col min-h-0" role="region" aria-label="Bus list">
               <Table>
                 <TableHeader>
                   <TableRow className="h-10">
@@ -518,98 +499,105 @@ export default function BusesPage() {
                     <TableHead className="text-xs font-semibold text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
-                <TableBody>
-                  {filteredBuses.map((bus) => (
-                    <TableRow key={bus.id}>
-                      <TableCell>
-                        <div className="flex items-center">
-                          <Bus className="mr-2 h-4 w-4 text-muted-foreground" />
-                          <span className="font-medium text-sm">{bus.busNumber}</span>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center">
-                          <span className="font-medium text-sm">{getRouteNameForBus(bus)}</span>
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-sm">{bus.color}</TableCell>
-                      <TableCell>
-                        <div className="flex items-center text-sm">
-                          <Users className="mr-1 h-4 w-4 text-muted-foreground" />
-                          {bus.capacity}
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-sm">{getDriverNameForBus(bus)}</TableCell>
-                      <TableCell>
-                        <span className={cn(
-                          "inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium",
-                          (bus.status === 'active' || bus.status === 'idle' || bus.status === 'enroute') ? 'bg-green-500 text-white' :
-                          (bus.status === 'inactive' || bus.status === 'expired') ? 'bg-red-500 text-white' :
-                          (bus.status === 'maintenance') ? 'bg-yellow-500 text-white' :
-                          theme === 'dark' ? 'bg-gray-100 text-gray-800' : 'bg-gray-200 text-gray-700'
-                        )}>
-                          {(() => {
-                            const status = bus.status || 'active';
-                            if (status.toLowerCase() === 'idle' || status.toLowerCase() === 'enroute') return 'Active';
-                            return status.charAt(0).toUpperCase() + status.slice(1).toLowerCase();
-                          })()}
-                        </span>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" className={cn(
-                              "h-8 w-8 p-0 cursor-pointer",
-                              theme === 'dark' ? "hover:bg-gray-700" : "hover:bg-gray-100"
-                            )}>
-                              <span className="sr-only">Open menu</span>
-                              <MoreHorizontal className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end" className={cn(
-                            "shadow-xl rounded-lg w-44",
-                            theme === 'dark' ? "bg-gray-900 border-gray-600" : "bg-white border-[#E5E7EB]"
+                {filteredBuses.length > 0 && (
+                  <TableBody>
+                    {filteredBuses.map((bus) => (
+                      <TableRow key={bus.id}>
+                        <TableCell>
+                          <div className="flex items-center">
+                            <Bus className="mr-2 h-4 w-4 text-muted-foreground" />
+                            <span className="font-medium text-sm">{bus.busNumber}</span>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center">
+                            <span className="font-medium text-sm">{getRouteNameForBus(bus)}</span>
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-sm">{bus.color}</TableCell>
+                        <TableCell>
+                          <div className="flex items-center text-sm">
+                            <Users className="mr-1 h-4 w-4 text-muted-foreground" />
+                            {bus.capacity}
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-sm">{getDriverNameForBus(bus)}</TableCell>
+                        <TableCell>
+                          <span className={cn(
+                            "inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium",
+                            (bus.status === 'active' || bus.status === 'idle' || bus.status === 'enroute') ? 'bg-green-500 text-white' :
+                            (bus.status === 'inactive' || bus.status === 'expired') ? 'bg-red-500 text-white' :
+                            (bus.status === 'maintenance') ? 'bg-yellow-500 text-white' :
+                            theme === 'dark' ? 'bg-gray-100 text-gray-800' : 'bg-gray-200 text-gray-700'
                           )}>
-                            <DropdownMenuLabel className={cn("font-semibold px-2 py-1.5 text-sm", theme === 'dark' ? "text-white" : "text-[#111827]")}>Actions</DropdownMenuLabel>
-                            <DropdownMenuSeparator className={cn(theme === 'dark' ? "bg-gray-600" : "bg-[#E5E7EB]")} />
-                            <DropdownMenuItem
-                              className={cn(
-                                "px-2 py-1.5 text-sm cursor-pointer",
-                                theme === 'dark' ? "text-white hover:bg-gray-800 focus:bg-gray-800" : "text-[#111827] hover:bg-gray-100 focus:bg-gray-100"
-                              )}
-                              onClick={() => router.push(`/admin/buses/view/${bus.id}`)}
-                            >
-                              <Eye className="mr-2 h-3.5 w-3.5 text-blue-400" />
-                              View Details
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              className={cn(
-                                "px-2 py-1.5 text-sm cursor-pointer",
-                                theme === 'dark' ? "text-white hover:bg-gray-800 focus:bg-gray-800" : "text-[#111827] hover:bg-gray-100 focus:bg-gray-100"
-                              )}
-                              onClick={() => router.push(`/admin/buses/edit/${bus.id}`)}
-                            >
-                              <Edit className="mr-2 h-3.5 w-3.5 text-yellow-400" />
-                              Edit Bus
-                            </DropdownMenuItem>
-                            <DropdownMenuSeparator className={cn(theme === 'dark' ? "bg-gray-600" : "bg-[#E5E7EB]")} />
-                            <DropdownMenuItem
-                              className={cn(
-                                "px-2 py-1.5 text-sm cursor-pointer transition-colors",
-                                theme === 'dark' ? "text-white hover:!bg-red-600 focus:!bg-red-600" : "text-[#111827] hover:!bg-red-600 focus:!bg-red-600"
-                              )}
-                              onClick={() => handleDelete(bus.id, bus.busNumber)}
-                            >
-                              <Trash2 className="mr-2 h-3.5 w-3.5" />
-                              Delete Bus
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
+                            {(() => {
+                              const status = bus.status || 'active';
+                              if (status.toLowerCase() === 'idle' || status.toLowerCase() === 'enroute') return 'Active';
+                              return status.charAt(0).toUpperCase() + status.slice(1).toLowerCase();
+                            })()}
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" className={cn(
+                                "h-8 w-8 p-0 cursor-pointer",
+                                theme === 'dark' ? "hover:bg-gray-700" : "hover:bg-gray-100"
+                              )}>
+                                <span className="sr-only">Open menu</span>
+                                <MoreHorizontal className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className={cn(
+                              "shadow-xl rounded-lg w-44",
+                              theme === 'dark' ? "bg-gray-900 border-gray-600" : "bg-white border-[#E5E7EB]"
+                            )}>
+                              <DropdownMenuLabel className={cn("font-semibold px-2 py-1.5 text-sm", theme === 'dark' ? "text-white" : "text-[#111827]")}>Actions</DropdownMenuLabel>
+                              <DropdownMenuSeparator className={cn(theme === 'dark' ? "bg-gray-600" : "bg-[#E5E7EB]")} />
+                              <DropdownMenuItem
+                                className={cn(
+                                  "px-2 py-1.5 text-sm cursor-pointer",
+                                  theme === 'dark' ? "text-white hover:bg-gray-800 focus:bg-gray-800" : "text-[#111827] hover:bg-gray-100 focus:bg-gray-100"
+                                )}
+                                onClick={() => router.push(`/admin/buses/view/${bus.id}`)}
+                              >
+                                <Eye className="mr-2 h-3.5 w-3.5 text-blue-400" />
+                                View Details
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                className={cn(
+                                  "px-2 py-1.5 text-sm cursor-pointer",
+                                  theme === 'dark' ? "text-white hover:bg-gray-800 focus:bg-gray-800" : "text-[#111827] hover:bg-gray-100 focus:bg-gray-100"
+                                )}
+                                onClick={() => router.push(`/admin/buses/edit/${bus.id}`)}
+                              >
+                                <Edit className="mr-2 h-3.5 w-3.5 text-yellow-400" />
+                                Edit Bus
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator className={cn(theme === 'dark' ? "bg-gray-600" : "bg-[#E5E7EB]")} />
+                              <DropdownMenuItem
+                                className={cn(
+                                  "px-2 py-1.5 text-sm cursor-pointer transition-colors",
+                                  theme === 'dark' ? "text-white hover:!bg-red-600 focus:!bg-red-600" : "text-[#111827] hover:!bg-red-600 focus:!bg-red-600"
+                                )}
+                                onClick={() => handleDelete(bus.id, bus.busNumber)}
+                              >
+                                <Trash2 className="mr-2 h-3.5 w-3.5" />
+                                Delete Bus
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                )}
               </Table>
+              {filteredBuses.length === 0 && (
+                <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-xs text-muted-foreground min-h-[220px]">
+                  No buses found
+                </div>
+              )}
             </div>
           </div>
         </CardContent>

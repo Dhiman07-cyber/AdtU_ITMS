@@ -51,7 +51,7 @@ export async function GET(request: NextRequest) {
                     (c: any) => c.tripId === requestStatus.candidate_trip_id
                 );
                 statusMessage = acceptedCandidate
-                    ? MESSAGES.REQUEST_ACCEPTED(acceptedCandidate.busId, requestStatus.stop_id)
+                    ? MESSAGES.REQUEST_ACCEPTED(acceptedCandidate.busId, requestStatus.stop_name)
                     : 'Your pickup request has been accepted.';
                 break;
         }
@@ -63,7 +63,7 @@ export async function GET(request: NextRequest) {
                 id: requestStatus.id,
                 status: requestStatus.status,
                 routeId: requestStatus.route_id,
-                stopId: requestStatus.stop_id,
+                stop_name: requestStatus.stop_name,
                 candidateTripId: requestStatus.candidate_trip_id,
                 createdAt: requestStatus.created_at,
                 expiresAt: requestStatus.expires_at,

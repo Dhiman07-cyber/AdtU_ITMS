@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+﻿import { NextResponse } from 'next/server';
 import { db as adminDb } from '@/lib/firebase-admin';
 import { withSecurity } from '@/lib/security/api-security';
 import { RequestProfileUpdateSchema } from '@/lib/security/validation-schemas';
@@ -26,7 +26,7 @@ export const POST = withSecurity(
 
         const currentImageUrl = student.profilePhotoUrl || '';
         const currentName = student.fullName || student.name || '';
-        const assignedBusId = student.assignedBusId || student.busId || null;
+        const busId = student.busId || student.busId || null;
 
         // Create a profile update request document
         const requestId = `profile_update_${studentUid}_${Date.now()}`;
@@ -38,7 +38,7 @@ export const POST = withSecurity(
             newImageUrl,
             currentName,
             newName: fullName || currentName,
-            assignedBusId, // Store the bus ID so drivers can filter requests
+            busId, // Store the bus ID so drivers can filter requests
             status: 'pending',
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString()

@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import { withSecurity } from '@/lib/security/api-security';
 import { WaitingFlagPostSchema } from '@/lib/security/validation-schemas';
@@ -20,7 +20,7 @@ export const POST = withSecurity(
     const {
       busId,
       routeId,
-      stopName,
+      stop_name,
       accuracy,
       message
     } = body;
@@ -41,7 +41,7 @@ export const POST = withSecurity(
       const studentName = studentData.fullName || studentData.name || 'Student';
 
       // 3. Authorization: Is student assigned to this bus?
-      const isAssigned = studentData.assignedBusId === busId || studentData.busId === busId;
+      const isAssigned = studentData.busId === busId || studentData.busId === busId;
       if (!isAssigned) {
         return NextResponse.json({ success: false, error: 'Authorization failed: Student not assigned to this bus', requestId }, { status: 403 });
       }
@@ -87,7 +87,7 @@ export const POST = withSecurity(
         student_name: studentName,
         bus_id: busId,
         route_id: routeId,
-        stop_name: stopName || 'Current Location',
+        stop_name: stop_name || 'Current Location',
         accuracy,
         status: 'raised',
         message: message || null,
@@ -117,7 +117,7 @@ export const POST = withSecurity(
             flagId: flag.id,
             studentUid,
             studentName,
-            stopName: flagData.stop_name,
+            stop_name: flagData.stop_name,
             accuracy,
             message: flagData.message,
             timestamp: flagData.created_at

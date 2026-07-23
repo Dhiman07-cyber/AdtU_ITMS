@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+﻿import { NextResponse } from 'next/server';
 import { headers } from 'next/headers';
 import { adminAuth } from '@/lib/firebase-admin';
 import { getSupabaseServer } from '@/lib/supabase-server';
@@ -113,10 +113,8 @@ export async function PUT(request: Request) {
         if (newDriverId && newDriverId !== currentDriverId && currentDriverId) {
             try {
                 await updateDriver(currentDriverId, {
-                    assignedBusId: null,
                     busId: null,
-                    assignedRouteId: null,
-                    routeId: null
+                    routeId: null,
                 });
             } catch (err) {
                 console.error(`⚠️ Failed to unassign old driver ${currentDriverId} in PG:`, err);
@@ -128,9 +126,7 @@ export async function PUT(request: Request) {
             const finalRouteId = routeChanged ? newRouteId : oldBusData.routeId;
             try {
                 await updateDriver(newDriverId, {
-                    assignedBusId: busId,
                     busId: busId,
-                    assignedRouteId: finalRouteId,
                     routeId: finalRouteId,
                     status: 'active'
                 });
@@ -141,8 +137,7 @@ export async function PUT(request: Request) {
             // If driver didn't change but route did, update existing driver's route
             try {
                 await updateDriver(currentDriverId, {
-                    assignedRouteId: newRouteId,
-                    routeId: newRouteId
+                    routeId: newRouteId,
                 });
             } catch (err) {
                 console.error(`⚠️ Failed to update existing driver ${currentDriverId} route in PG:`, err);

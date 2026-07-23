@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
@@ -101,9 +101,7 @@ interface DriverData {
     driverId?: string;
     employeeId?: string;
     busId?: string;
-    assignedBusId?: string;
     routeId?: string;
-    assignedRouteId?: string;
     shift?: string;
     status?: string;
     profilePhotoUrl?: string;
@@ -123,7 +121,7 @@ interface BusData {
     activeTripId?: string;
     status?: string;
     shift?: string;
-    stops?: Array<{ name: string; stopId?: string; sequence: number }>;
+    stops?: Array<{ name: string; stop_name?: string; sequence: number }>;
 }
 
 interface RouteData {
@@ -131,7 +129,7 @@ interface RouteData {
     routeId: string;
     routeName: string;
     totalStops: number;
-    stops?: Array<{ name: string; sequence: number; stopId?: string }>;
+    stops?: Array<{ name: string; sequence: number; stop_name?: string }>;
     estimatedTime?: string;
 }
 
@@ -293,7 +291,7 @@ export default function SmartDriverAssignmentPage() {
 
     // Get bus info for a driver
     const getBusForDriver = useCallback((driver: DriverData): BusData | null => {
-        const busId = driver.busId || driver.assignedBusId;
+        const busId = driver.busId || driver.busId;
         if (!busId) return null;
         return buses.find((b) => b.id === busId || b.busId === busId) || null;
     }, [buses]);
@@ -313,8 +311,8 @@ export default function SmartDriverAssignmentPage() {
         }
 
         // Fallback: search drivers for anyone assigned to this bus (handles data inconsistencies)
-        // Check both 'busId' and 'assignedBusId' fields on the driver document
-        const falloutDriver = drivers.find((d) => d.busId === bus.id || d.assignedBusId === bus.id);
+        // Check both 'busId' and 'busId' fields on the driver document
+        const falloutDriver = drivers.find((d) => d.busId === bus.id || d.busId === bus.id);
         return falloutDriver || null;
     }, [drivers]);
 
@@ -667,8 +665,8 @@ export default function SmartDriverAssignmentPage() {
                 id: d.id,
                 name: d.fullName || d.name || "Unknown",
                 employeeId: d.driverId || d.employeeId || d.id,
-                busId: d.busId || d.assignedBusId || null,
-                isReserved: d.isReserved || (!d.busId && !d.assignedBusId),
+                busId: d.busId || d.busId || null,
+                isReserved: d.isReserved || (!d.busId && !d.busId),
             })),
             buses: buses.map(b => ({
                 id: b.id,

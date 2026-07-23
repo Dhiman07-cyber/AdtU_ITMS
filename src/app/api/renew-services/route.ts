@@ -97,85 +97,6 @@ export async function POST(request: NextRequest) {
 
     const operationKey = `renew_${opKey}`;
 
-    // Try to insert a new processed_operations record (atomically claim the lock)
-    let { error: insertError } = await supabase
-      .from('processed_operations')
-      .insert({
-        operation_key: operationKey,
-        type: 'renew-services',
-        status: 'in_progress',
-        actor_uid: decodedToken.uid,
-        renewal_count: renewals.length,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      });
-
-    let isDuplicate = false;
-    let claimData: any = null;
-
-    if (insertError) {
-      isDuplicate = true;
-      // Fetch the existing record to see its status and timestamp
-      const { data: existing, error: fetchError } = await supabase
-        .from('processed_operations')
-        .select('*')
-        .eq('operation_key', operationKey)
-        .maybeSingle();
-
-      if (existing) {
-        claimData = existing;
-      } else {
-        return NextResponse.json(
-          { success: false, error: 'Idempotency verification error' },
-          { status: 500 }
-        );
-      }
-    }
-
-    if (isDuplicate && claimData) {
-      if (claimData.status === 'completed') {
-        return NextResponse.json({
-          success: true,
-          replayed: true,
-          results: claimData.results,
-          summary: claimData.summary
-        });
-      }
-
-      // Staleness check: if the in_progress record is older than 5 minutes, delete and retry
-      const createdAt = claimData.created_at ? new Date(claimData.created_at) : null;
-      const isStale = createdAt && (Date.now() - createdAt.getTime()) > 5 * 60 * 1000;
-
-      if (isStale) {
-        await supabase.from('processed_operations').delete().eq('operation_key', operationKey);
-        
-        // Re-try insert
-        const { error: retryError } = await supabase
-          .from('processed_operations')
-          .insert({
-            operation_key: operationKey,
-            type: 'renew-services',
-            status: 'in_progress',
-            actor_uid: decodedToken.uid,
-            renewal_count: renewals.length,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-          });
-
-        if (retryError) {
-          return NextResponse.json(
-            { success: false, error: 'An identical renewal request is already being processed.' },
-            { status: 409 }
-          );
-        }
-      } else {
-        return NextResponse.json(
-          { success: false, error: 'An identical renewal request is already being processed.' },
-          { status: 409 }
-        );
-      }
-    }
-
     // Process renewals
     const results: Array<{
       studentUid: string;
@@ -282,7 +203,7 @@ export async function POST(request: NextRequest) {
 
         // ── Seat reclamation ────────────────────────────────────────────────
         const seatWasReleased = wasSeatReleased(studentData);
-        const renewalBusId = studentData.busId || studentData.currentBusId || studentData.assignedBusId || null;
+        const renewalBusId = studentData.busId || studentData.currentBusId || studentData.busId || null;
 
         if (seatWasReleased && renewalBusId) {
           try {
@@ -341,31 +262,6 @@ export async function POST(request: NextRequest) {
     console.log(`🎉 Renewal process completed: ${successCount} success, ${failCount} failed`);
 
     const summary = { total: renewals.length, successful: successCount, failed: failCount };
-
-    // Finalize the idempotency record
-    try {
-      const { error: finalError } = await supabase
-        .from('processed_operations')
-        .update({
-          status: 'completed',
-          updated_at: new Date().toISOString(),
-          results,
-          summary
-        })
-        .eq('operation_key', operationKey);
-
-      if (finalError) {
-        throw finalError;
-      }
-    } catch (finalErr: any) {
-      console.error('CRITICAL: Renewal idempotency finalization failed — renewals committed but record not finalized:', finalErr);
-      return NextResponse.json({
-        success: true,
-        warning: 'Renewals processed but operation record could not be finalized. Do NOT retry — contact administrator.',
-        results,
-        summary
-      });
-    }
 
     return NextResponse.json({
       success: true,

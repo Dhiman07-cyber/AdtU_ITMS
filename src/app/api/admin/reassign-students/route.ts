@@ -19,8 +19,7 @@ type ReassignmentAssignment = {
     toBusId: string;
     toBusNumber: string;
     shift: 'Morning' | 'Evening' | 'Both';
-    stopId?: string;
-    stopName?: string;
+    stop_name?: string;
 };
 
 type ReassignStudentsBody = {
@@ -78,7 +77,7 @@ export const POST = withSecurity<ReassignStudentsBody>(
             busIdsToLoad.add(assignment.fromBusId);
         }
         if (sourceBusId) busIdsToLoad.add(sourceBusId);
-        
+
         // Fetch actor info, students, and buses (PG) in parallel
         const actorInfoPromise = (async () => {
             let label = auth.name || 'System';
@@ -102,12 +101,10 @@ export const POST = withSecurity<ReassignStudentsBody>(
             const pgStudentsList = await Promise.all(assignments.map((a) => getStudentById(a.studentId)));
             const pgBuses = await getAllBuses();
 
-            const busIdSet = new Set(busIdsToLoad);
             for (const bus of pgBuses) {
-                const busId = bus.busId || bus.id || '';
-                if (busIdSet.has(busId)) {
-                    busPgData.set(busId, bus);
-                }
+                if (bus.id) busPgData.set(bus.id, bus);
+                if (bus.busId) busPgData.set(bus.busId, bus);
+                if (bus.busNumber) busPgData.set(bus.busNumber, bus);
             }
 
             const studentRecords = new Map<string, any>();
@@ -127,7 +124,7 @@ export const POST = withSecurity<ReassignStudentsBody>(
                     throw new ReassignmentValidationError(`Student ${studentId} not found`, 404);
                 }
 
-                const currentBusId = studentData.busId || studentData.assignedBusId || '';
+                const currentBusId = studentData.busId || '';
 
                 if (currentBusId === toBusId && studentData.shift === targetShift) {
                     continue;
@@ -149,14 +146,12 @@ export const POST = withSecurity<ReassignStudentsBody>(
 
                 const studentUpdateData: Record<string, unknown> = {
                     busId: toBusId,
-                    assignedBusId: toBusId,
                     shift: targetShift,
                     routeId: (targetBusData as any).routeId || '',
-                    assignedRouteId: (targetBusData as any).routeId || '',
                     updatedAt: new Date().toISOString(),
                 };
-                if (assignment.stopId) studentUpdateData.stopId = assignment.stopId;
-                if (assignment.stopName) studentUpdateData.stopName = assignment.stopName;
+                const resolved_stop_name = assignment.stop_name || (assignment as any).stopName || studentData.stop_name || '';
+                if (resolved_stop_name) studentUpdateData.stop_name = resolved_stop_name;
 
                 if (currentBusId && currentBusId === fromBusId) {
                     if (!busLoadChanges.has(fromBusId)) busLoadChanges.set(fromBusId, { morningDelta: 0, eveningDelta: 0 });
@@ -207,6 +202,7 @@ export const POST = withSecurity<ReassignStudentsBody>(
                 fromBusId: a.fromBusId,
                 toBusId: a.toBusId,
                 studentShift: a.shift,
+                stopName: a.stop_name || (a as any).stopName,
             }));
 
             await reassignStudentsAtomically(rpcPlans);
@@ -258,10 +254,10 @@ export const POST = withSecurity<ReassignStudentsBody>(
                     docPath: `students/${a.studentId}`,
                     collection: 'students',
                     docId: a.studentId,
-                    // before: original state (oldShift = what was in Firestore before this op)
-                    before: { busId: a.fromBusId, studentName: a.studentName, shift: anyA._originalShift || a.shift },
-                    // after: new state (shift = targetShift persisted in transaction)
-                    after: { busId: a.toBusId, studentName: a.studentName, shift: a.shift },
+                    // before: original state
+                    before: { busId: a.fromBusId, studentName: a.studentName, shift: anyA._originalShift || a.shift, stopName: anyA._originalStopName || a.stop_name || anyA.stopName },
+                    // after: new state
+                    after: { busId: a.toBusId, studentName: a.studentName, shift: a.shift, stopName: a.stop_name || anyA.stopName },
                 });
             }
 

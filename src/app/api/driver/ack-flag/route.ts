@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+﻿import { NextResponse } from 'next/server';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import { withSecurity } from '@/lib/security/api-security';
 import { MarkBoardedSchema } from '@/lib/security/validation-schemas';
@@ -47,7 +47,7 @@ export const POST = withSecurity(
     }
 
     const driverClaimsBus =
-      driverData.assignedBusId === flagData.bus_id ||
+      driverData.busId === flagData.bus_id ||
       driverData.busId === flagData.bus_id;
 
     if (!driverClaimsBus) {

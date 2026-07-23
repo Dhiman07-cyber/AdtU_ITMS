@@ -155,12 +155,12 @@ export async function decrementBusCapacity(busId: string, studentUid: string, sh
  * Reads from PostgreSQL via D6 Fleet + D7 Route domains.
  */
 export async function findAlternativeBuses(
-  stopId: string,
+  stop_name: string,
   routeId: string,
   shift: string
 ): Promise<AlternativeBusResult> {
   try {
-    console.log(`🔍 Finding alternative buses for stop: ${stopId}, route: ${routeId}, shift: ${shift}`);
+    console.log(`🔍 Finding alternative buses for stop: ${stop_name}, route: ${routeId}, shift: ${shift}`);
 
     const allBuses = await fleetService.getAllBuses();
     const alternativeBuses: BusCapacity[] = [];
@@ -203,8 +203,8 @@ export async function findAlternativeBuses(
       };
     }
 
-    console.warn(`⚠️ No alternative buses found for stop ${stopId}`);
-    await sendHighDemandAlert(routeId, stopId);
+    console.warn(`⚠️ No alternative buses found for stop ${stop_name}`);
+    await sendHighDemandAlert(routeId, stop_name);
 
     return {
       success: false,
@@ -289,7 +289,7 @@ export async function sendBusFullAlert(busId: string, busNumber: string, routeId
  * Send high-demand alert to admins when no alternatives exist.
  * Admin/moderator UIDs sourced from D1 Identity domain (PostgreSQL).
  */
-async function sendHighDemandAlert(routeId: string, stopId: string): Promise<void> {
+async function sendHighDemandAlert(routeId: string, stop_name: string): Promise<void> {
   try {
     const allStaffUIDs = await getStaffUIDs();
     if (allStaffUIDs.length === 0) return;
@@ -301,7 +301,7 @@ async function sendHighDemandAlert(routeId: string, stopId: string): Promise<voi
     for (const staffId of allStaffUIDs) {
       await pgInsertNotification({
         title: 'High Demand Alert',
-        content: `All buses serving ${stopId} (${routeId}) are at full capacity. Students are unable to register. Action required: Increase capacity or add buses to this route.`,
+        content: `All buses serving ${stop_name} (${routeId}) are at full capacity. Students are unable to register. Action required: Increase capacity or add buses to this route.`,
         type: 'emergency',
         sender: {
           userId: 'system',
@@ -318,7 +318,7 @@ async function sendHighDemandAlert(routeId: string, stopId: string): Promise<voi
         expiresAt: expiryDate.toISOString(),
         metadata: {
           routeId,
-          stopId,
+          stop_name,
           action: '/admin/buses',
           priority: 'critical'
         }
@@ -337,7 +337,7 @@ async function sendHighDemandAlert(routeId: string, stopId: string): Promise<voi
  */
 export async function validateAndSuggestBus(params: {
   routeId: string;
-  stopId: string;
+  stop_name: string;
   shift: string;
 }): Promise<{
   canAssign: boolean;
@@ -347,7 +347,7 @@ export async function validateAndSuggestBus(params: {
   requiresAdminAttention?: boolean;
 }> {
   try {
-    const { routeId, stopId, shift } = params;
+    const { routeId, stop_name, shift } = params;
     const busId = routeId.replace('route_', 'bus_');
 
     const capacityCheck = await checkBusCapacity(busId, shift);
@@ -362,7 +362,7 @@ export async function validateAndSuggestBus(params: {
 
     console.log(`🔄 Primary bus ${busId} is full for ${normalizeShift(shift)} (${capacityCheck.shiftLoad}/${capacityCheck.capacity}), searching alternatives...`);
 
-    const alternativeResult = await findAlternativeBuses(stopId, routeId, shift);
+    const alternativeResult = await findAlternativeBuses(stop_name, routeId, shift);
 
     if (alternativeResult.success && alternativeResult.alternativeBuses && alternativeResult.alternativeBuses.length > 0) {
       return {

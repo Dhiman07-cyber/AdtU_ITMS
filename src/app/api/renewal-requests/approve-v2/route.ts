@@ -103,7 +103,7 @@ export async function POST(request: NextRequest) {
               busNumber: (app.formData?.busId as string)?.replace('bus_', 'Bus-') || 'Assigned Bus',
               routeName: 'Service Renewal',
               shift: (app.formData?.shift as string) || 'Assigned Shift',
-              validUntil: new Date(Date.now() + 365 * 86400000).toLocaleDateString('en-IN'),
+              validUntil: new Date(Date.UTC(((app.formData as any)?.sessionEndYear as number) || (new Date().getFullYear() + 1), 5, 30)).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }),
             });
           } catch (err) { console.error('Email notify failed:', err); }
         }

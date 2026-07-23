@@ -42,8 +42,7 @@ export const ReassignStudentsSchema = z.object({
         toBusId: z.string().min(1).max(100),
         toBusNumber: z.string().min(1).max(50),
         shift: z.enum(['Morning', 'Evening']),
-        stopId: z.string().max(100).optional(),
-        stopName: z.string().max(200).optional(),
+        stop_name: z.string().max(200).optional(),
     })),
     sourceBusId: z.string().min(1).max(100),
     actorId: z.string().min(1).max(128).optional(),
@@ -82,9 +81,7 @@ export const CreateUserSchema = z.object({
     driverId: z.string().max(100).optional(),
     employeeId: z.string().max(100).optional(),
     staffId: z.string().max(100).optional(),
-    assignedRouteId: z.string().max(100).optional(),
     routeId: z.string().max(100).optional(),
-    assignedBusId: z.string().max(100).optional(),
     busId: z.string().max(100).optional(),
     address: z.string().max(500).optional(),
     bloodGroup: z.string().max(10).optional(),
@@ -95,7 +92,7 @@ export const CreateUserSchema = z.object({
     sessionEndYear: z.number().int().optional(),
     validUntil: z.string().optional(),
     pickupPoint: z.string().max(200).optional(),
-    stopId: z.string().max(100).optional(),
+    stop_name: z.string().max(100).optional(),
     status: z.string().max(50).optional(),
 });
 
@@ -248,8 +245,7 @@ export const WaitingFlagSchema = z.object({
     studentName: z.string().max(200),
     busId: z.string().max(50),
     routeId: z.string().max(50),
-    stopId: z.string().max(50).optional(),
-    stopName: z.string().max(200).optional(),
+    stop_name: z.string().max(200).optional(),
     stopLat: z.number().min(-90).max(90).optional(),
     stopLng: z.number().min(-180).max(180).optional(),
     message: z.string().max(500).optional(),
@@ -402,8 +398,7 @@ export const WaitingFlagPostSchema = z.object({
     message: z.string().max(500).optional(),
     timestamp: z.number().optional(),
     routeId: z.string().max(100).optional(),
-    stopName: z.string().max(200).optional(),
-    stopId: z.string().max(100).optional(),
+    stop_name: z.string().max(200).optional(),
     stopLat: z.number().min(-90).max(90).optional(),
     stopLng: z.number().min(-180).max(180).optional(),
 });
@@ -505,7 +500,7 @@ export const RequestWaitSchema = z.object({
     busId: z.string().min(1).max(100),
     studentId: z.string().min(1).max(128),
     studentName: z.string().min(1).max(200).optional(),
-    stopName: z.string().min(1).max(200).optional(),
+    stop_name: z.string().min(1).max(200).optional(),
 });
 
 export const RespondWaitSchema = z.object({

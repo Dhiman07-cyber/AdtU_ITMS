@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+﻿import { NextResponse } from 'next/server';
 import { withSecurity } from '@/lib/security/api-security';
 import { UpdateStudentSchema } from '@/lib/security/validation-schemas';
 import { RateLimits } from '@/lib/security/rate-limiter';
@@ -50,7 +50,7 @@ export const POST = withSecurity(
                 return NextResponse.json({ success: false, error: 'Student not found' }, { status: 404 });
             }
 
-            const oldBusId = currentData.busId || currentData.assignedBusId;
+            const oldBusId = currentData.busId || currentData.busId;
             const oldShift = currentData.shift || 'Morning';
 
             const newBusId = updateData.busId !== undefined ? updateData.busId : oldBusId;

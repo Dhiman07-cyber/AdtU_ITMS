@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+﻿import { NextResponse } from 'next/server';
 import { wasSeatReleased } from '@/lib/config/capacity-flags';
 import { withSecurity } from '@/lib/security/api-security';
 import { DeleteStudentSchema } from '@/lib/security/validation-schemas';
@@ -18,7 +18,7 @@ export const POST = withSecurity(
             return NextResponse.json({ success: false, error: 'Student not found' }, { status: 404 });
         }
 
-        const busId = studentData.busId || studentData.currentBusId || studentData.assignedBusId || null;
+        const busId = studentData.busId || studentData.currentBusId || studentData.busId || null;
         const shouldDecrement = !!busId && !wasSeatReleased(studentData);
 
         // Resolve the acting admin BEFORE deletion

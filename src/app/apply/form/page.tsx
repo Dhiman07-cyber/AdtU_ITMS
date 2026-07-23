@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import FormStepper from './components/FormStepper';
 import Step1Personal from './steps/Step1Personal';
@@ -98,10 +98,9 @@ function ApplicationFormContent() {
       parentPhone: '',
       bloodGroup: '',
       routeId: '',
-      stopId: '',
+      stop_name: '',
       busId: '',
       busAssigned: '',
-      assignedBusId: '',
       shift: '',
       sessionInfo: {
         sessionStartYear: new Date().getFullYear(),
@@ -287,15 +286,6 @@ function ApplicationFormContent() {
     setIsMobile(isMobileDevice());
   }, []);
 
-  // Verification state ( and verificationExpiry already initialized above from localStorage)
-  const [requestingVerification, setRequestingVerification] = useState(false);
-  const [verificationCode, setVerificationCode] = useState('');
-  const [verifyingCode, setVerifyingCode] = useState(false);
-  const [sendingCode, setSendingCode] = useState(false);
-  const [codeSent, setCodeSent] = useState(false);
-  const [countdownTime, setCountdownTime] = useState(0);
-  const [codesSentToday, setCodesSentToday] = useState(0);
-  const [maxCodesReached, setMaxCodesReached] = useState(false);
 
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [existingApplication, setExistingApplication] = useState<any>(null);
@@ -360,7 +350,7 @@ function ApplicationFormContent() {
       formData.phoneNumber && formData.parentName && formData.parentPhone &&
       formData.address && (finalImageUrl || profilePhotoUrl)),
     2: !!(formData.faculty && formData.department && formData.semester && formData.enrollmentId),
-    3: !!(formData.routeId && formData.stopId && formData.shift),
+    3: !!(formData.routeId && formData.stop_name && formData.shift),
     4: paymentCompleted,
   }), [
     formData.fullName,
@@ -375,7 +365,7 @@ function ApplicationFormContent() {
     formData.semester,
     formData.enrollmentId,
     formData.routeId,
-    formData.stopId,
+    formData.stop_name,
     formData.shift,
     finalImageUrl,
     profilePhotoUrl,
@@ -769,7 +759,7 @@ function ApplicationFormContent() {
       showToast('Please select a bus', 'error');
       return false;
     }
-    if (!formData.stopId) {
+    if (!formData.stop_name) {
       showToast('Please select a pickup point / stop', 'error');
       return false;
     }
@@ -898,10 +888,9 @@ function ApplicationFormContent() {
           ...prev,
           declarationAccepted: false,
           routeId: '',
-          stopId: '',
+          stop_name: '',
           busId: '',
           busAssigned: '',
-          assignedBusId: '',
           shift: ''
         }));
         showToast('Step 3 (Bus Information) cleared.', 'info');
@@ -1047,10 +1036,9 @@ function ApplicationFormContent() {
       parentPhone: '',
       bloodGroup: '',
       routeId: '',
-      stopId: '',
+      stop_name: '',
       busId: '',
       busAssigned: '',
-      assignedBusId: '',
       shift: 'morning',
       sessionInfo: {
         sessionStartYear: new Date().getFullYear(),
@@ -1126,10 +1114,9 @@ function ApplicationFormContent() {
         parentPhone: '',
         bloodGroup: '',
         routeId: '',
-        stopId: '',
+        stop_name: '',
         busId: '',
         busAssigned: '',
-        assignedBusId: '',
         shift: '',
         sessionInfo: {
           sessionStartYear: new Date().getFullYear(),
@@ -1186,11 +1173,6 @@ function ApplicationFormContent() {
       hasProfilePhotoUrl: !!formData.profilePhotoUrl,
       paymentMode: formData.paymentInfo?.paymentMode
     });
-
-    if (applicationState !== 'verified') {
-      showToast('Please complete verification first', 'error');
-      return;
-    }
 
     if (!formData.declarationAccepted) {
       showToast('Please accept the declaration first', 'error');

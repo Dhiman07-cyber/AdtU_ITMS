@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
@@ -83,9 +83,7 @@ interface DriverData {
     driverId?: string;
     employeeId?: string;
     busId?: string;
-    assignedBusId?: string;
     routeId?: string;
-    assignedRouteId?: string;
     shift?: string;
     status?: string;
     profilePhotoUrl?: string;
@@ -105,7 +103,7 @@ interface BusData {
     activeTripId?: string;
     status?: string;
     shift?: string;
-    stops?: Array<{ name: string; stopId?: string; sequence: number }>;
+    stops?: Array<{ name: string; stop_name?: string; sequence: number }>;
 }
 
 interface RouteData {
@@ -113,7 +111,7 @@ interface RouteData {
     routeId: string;
     routeName: string;
     totalStops: number;
-    stops?: Array<{ name: string; sequence: number; stopId?: string }>;
+    stops?: Array<{ name: string; sequence: number; stop_name?: string }>;
     estimatedTime?: string;
 }
 
@@ -130,7 +128,7 @@ function getDriversForBusSlots(bus: BusData, drivers: DriverData[]): DriverSlotI
 
     // Also check drivers who reference this bus
     drivers.forEach(d => {
-        const dBusId = d.assignedBusId || d.busId;
+        const dBusId = d.busId || d.busId;
         if (dBusId === bus.id || dBusId === bus.busId) {
             driverIds.add(d.id);
         }
@@ -304,7 +302,7 @@ export default function SmartDriverAssignmentPage() {
         , [selectedDriverId, drivers]);
 
     const getBusForDriver = useCallback((driver: DriverData): BusData | null => {
-        const busId = driver.assignedBusId || driver.busId;
+        const busId = driver.busId || driver.busId;
         if (!busId) return null;
         return buses.find(b => b.id === busId || b.busId === busId) || null;
     }, [buses]);
@@ -320,7 +318,7 @@ export default function SmartDriverAssignmentPage() {
             const driver = drivers.find(d => d.id === driverId);
             if (driver) return driver;
         }
-        return drivers.find(d => d.assignedBusId === bus.id || d.busId === bus.id) || null;
+        return drivers.find(d => d.busId === bus.id || d.busId === bus.id) || null;
     }, [drivers]);
 
     const selectedDriverBus = useMemo(() =>
@@ -589,8 +587,8 @@ export default function SmartDriverAssignmentPage() {
                 id: d.id,
                 name: d.fullName || d.name || "Unknown",
                 employeeId: d.driverId || d.employeeId || d.id,
-                busId: d.assignedBusId || d.busId || null,
-                isReserved: d.isReserved || (!d.assignedBusId && !d.busId),
+                busId: d.busId || d.busId || null,
+                isReserved: d.isReserved || (!d.busId && !d.busId),
             })),
             buses: buses.map(b => ({
                 id: b.id,

@@ -50,7 +50,7 @@
  * eligible_reminder_sent_at      → eligibleReminderSentAt (ISO string)
  *
  * Promoted form_data sub-fields (typed columns):
- *   route_id, bus_id, stop_id, shift, session_start_year, session_end_year,
+ *   route_id, bus_id, stop_name, shift, session_start_year, session_end_year,
  *   application_type, eligible_approval
  *
  * audit_logs is NOT stored here — Audit domain owns audit trail.
@@ -97,6 +97,12 @@ const APPLICATION_FIELD_MAP: Record<string, string> = {
   expiredAt: 'expired_at',
   expiryReason: 'expiry_reason',
   eligibleReminderSentAt: 'eligible_reminder_sent_at',
+  busId: 'bus_id',
+  routeId: 'route_id',
+  stop_name: 'stop_name',
+  shift: 'shift',
+  sessionStartYear: 'session_start_year',
+  sessionEndYear: 'session_end_year',
 };
 
 /** Known fields that map to typed PostgreSQL columns */
@@ -136,12 +142,13 @@ function pgApplicationToRow(data: Partial<Application>): Record<string, any> {
 
 /** Convert PostgreSQL row to Application domain object */
 function pgRowToApplication(row: Record<string, any>): Application {
+  const fd = row.form_data || {};
   const app: Application = {
     applicationId: row.application_id,
     applicantUid: row.applicant_uid,
     applicantEmail: row.applicant_email,
     email: row.email,
-    formData: row.form_data || {},
+    formData: fd,
     state: row.state as ApplicationState,
     stateHistory: row.state_history || [],
     pendingVerifier: row.pending_verifier,
@@ -166,9 +173,15 @@ function pgRowToApplication(row: Record<string, any>): Application {
     targetSession: row.target_session,
     eligibleApproval: row.eligible_approval,
     linkedStudentUid: row.linked_student_uid,
+    bus_id: row.bus_id || fd.busId || fd.bus_id || fd.selectedBus,
+    route_id: row.route_id || fd.routeId || fd.route_id || fd.selectedRoute,
+    stop_name: row.stop_name || fd.stop_name || fd.stop_name || fd.selected_stop_name || fd.selectedStop || fd.stop_name || fd.stop_name,
+    shift: row.shift || fd.shift || fd.selectedShift || 'Morning',
+    busId: row.bus_id || fd.busId || fd.bus_id || fd.selectedBus,
+    routeId: row.route_id || fd.routeId || fd.route_id || fd.selectedRoute,
+    sessionStartYear: row.session_start_year || fd.sessionStartYear || fd.startYear,
+    sessionEndYear: row.session_end_year || fd.sessionEndYear || fd.endYear,
   } as Application;
-
-
 
   return app;
 }
@@ -241,6 +254,7 @@ export async function pgFindAllPaginated(limit: number, offset: number): Promise
   const { data, error } = await db
     .from('applications')
     .select('*')
+    .order('created_at', { ascending: false })
     .range(offset, offset + limit - 1);
 
   if (error) {

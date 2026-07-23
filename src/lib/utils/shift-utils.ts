@@ -176,9 +176,9 @@ export function isStudentBusShiftCompatible(
  * @returns The current occupancy of the relevant shift trip
  */
 export function getShiftLoad(busData: Record<string, any> | undefined, shift: string | undefined | null): number {
-  const load = busData?.load || { morningCount: 0, eveningCount: 0 };
-  const morning = load.morningCount || 0;
-  const evening = load.eveningCount || 0;
+  const load = busData?.load || {};
+  const morning = Number(busData?.morningLoad ?? busData?.morning_load ?? load.morningCount ?? load.morning_count ?? 0);
+  const evening = Number(busData?.eveningLoad ?? busData?.evening_load ?? load.eveningCount ?? load.evening_count ?? 0);
   const normalized = normalizeShift(shift);
 
   if (normalized === 'Evening') return evening;

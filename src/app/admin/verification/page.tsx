@@ -579,7 +579,7 @@ export default function AdminVerificationPage() {
                                         {/* Header with Logo */}
                                         <div className="w-full px-3 sm:px-4 py-2 sm:py-3 flex items-center justify-center border-b border-white/5 bg-gradient-to-r from-[#1a1b2e] to-[#0f1019] relative">
                                             <div className="flex items-center gap-2">
-                                                <Image src="/adtu-new-logo.svg" alt="AdtU" width={96} height={24} className="h-5 sm:h-7 w-auto flex-shrink-0" />
+                                                <Image src="/adtu-new-logo.svg" alt="AdtU" width={96} height={24} className="h-5 sm:h-7 w-auto flex-shrink-0" style={{ width: 'auto', height: 'auto' }} />
                                                 <span className="text-[9px] sm:text-xs font-bold text-white/70 tracking-wider">Assam down town University</span>
                                             </div>
                                         </div>

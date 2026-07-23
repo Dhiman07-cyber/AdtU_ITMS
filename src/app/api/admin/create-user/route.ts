@@ -31,9 +31,8 @@ type CreateUserBody = z.infer<typeof CreateUserSchema>;
 
 type RouteStop = {
     id?: string;
-    stopId?: string;
+    stop_name?: string;
     name?: string;
-    stopName?: string;
 };
 
 /**
@@ -47,7 +46,7 @@ type RouteStop = {
  */
 
 // Helper function to fetch multiple names in parallel
-async function resolveReferenceNames(routeId?: string, busId?: string, stopId?: string) {
+async function resolveReferenceNames(routeId?: string, busId?: string, stop_name?: string) {
     const tasks: Promise<string>[] = [
         (async () => {
             if (!routeId) return 'Not Assigned';
@@ -62,11 +61,11 @@ async function resolveReferenceNames(routeId?: string, busId?: string, stopId?: 
             return busNum ? `Bus-${busNum} (${(bus as any).licensePlate || (bus as any).plateNumber || '?'})` : (bus.busNumber || busId);
         })(),
         (async () => {
-            if (!routeId || !stopId) return 'Not Selected';
+            if (!routeId || !stop_name) return 'Not Selected';
             const route = await routeService.getById(routeId);
             const stops = (route?.stops || []) as RouteStop[];
-            const stop = stops.find((s) => s.id === stopId || s.stopId === stopId);
-            return stop?.name || stop?.stopName || stopId;
+            const stop = stops.find((s) => s.stop_name === stop_name || s.name === stop_name || s.id === stop_name);
+            return stop?.name || stop?.stop_name || stop_name;
         })()
     ];
     return Promise.all(tasks);
@@ -92,9 +91,9 @@ export const POST = withSecurity<CreateUserBody>(
             email, name, role, phone, alternatePhone, profilePhotoUrl, enrollmentId,
             gender, faculty, department, semester, parentName, parentPhone,
             dob, licenseNumber, joiningDate, aadharNumber, driverId,
-            employeeId, staffId, assignedRouteId, routeId, assignedBusId,
-            busId, address, bloodGroup, shift, durationYears, sessionDuration,
-            sessionStartYear, sessionEndYear, validUntil, pickupPoint, stopId, status
+            employeeId, staffId, routeId, busId,
+            address, bloodGroup, shift, durationYears, sessionDuration,
+            sessionStartYear, sessionEndYear, validUntil, pickupPoint, stop_name, status
         } = body;
 
         if (currentUserRole === 'moderator') {
@@ -131,7 +130,7 @@ export const POST = withSecurity<CreateUserBody>(
             }
         }
 
-        const finalStopId = stopId || pickupPoint || '';
+        const final_stop_name = stop_name || body.stop_name || body.stop_name || pickupPoint || '';
         const finalDuration = durationYears || (typeof sessionDuration === 'string' ? parseInt(sessionDuration) : sessionDuration) || 1;
 
         // 2. Auth management
@@ -175,7 +174,7 @@ export const POST = withSecurity<CreateUserBody>(
                 phoneNumber: phone || '', phone: phone || '', profilePhotoUrl: profilePhotoUrl || '',
                 role: 'student', routeId: routeId || '', semester: semester || '',
                 sessionEndYear: finalSessionEndYear, sessionStartYear: sessionStartYear || new Date().getFullYear(),
-                shift: normalizeShift(shift), status: 'active', stopId: finalStopId,
+                shift: normalizeShift(shift), status: 'active', stop_name: final_stop_name,
                 uid, updatedAt: now, validUntil: finalValidUntil,
                 softBlock: blockDates.softBlock, hardBlock: blockDates.hardBlock,
                 paymentAmount: totalAmount, paid_on: now,
@@ -187,7 +186,7 @@ export const POST = withSecurity<CreateUserBody>(
                 const { paymentsSupabaseService } = await import('@/lib/services/payments-supabase');
                 const createdPaymentId = await paymentsSupabaseService.createPayment({
                     paymentId, studentId: enrollmentId || '', studentUid: uid, studentName: name,
-                    stopId: finalStopId, amount: totalAmount, method: 'Offline', status: 'Completed',
+                    stop_name: final_stop_name, amount: totalAmount, method: 'Offline', status: 'Completed',
                     sessionStartYear: sessionStartYear || new Date().getFullYear(),
                     sessionEndYear: finalSessionEndYear, durationYears: finalDuration,
                     validUntil: new Date(finalValidUntil), transactionDate: new Date(),
@@ -204,7 +203,7 @@ export const POST = withSecurity<CreateUserBody>(
             //   Admin-create intentionally preserves over-fill capability (no capacity
             //   gate). Capacity is incremented only when the student did not already
             //   exist, so a double-submit (same uid) can never double-allocate a seat.
-            const assignedBusId = studentDoc.busId;
+            const studentBusId = studentDoc.busId;
 
             // ponytail: idempotency check MUST happen BEFORE createStudent, not after.
             // If we create first and then check, alreadyExisted is always true and
@@ -236,33 +235,33 @@ export const POST = withSecurity<CreateUserBody>(
             let capBusNumber = '';
             let capRouteId = '';
 
-            if (assignedBusId && !alreadyExisted) {
+            if (studentBusId && !alreadyExisted) {
                 // Increment capacity in PG (source of truth) — admin-create intentionally
                 // over-fills (no capacity gate), matching legacy behavior.
                 try {
-                    const capResult = await incrementBusCapacity(assignedBusId, studentDoc.shift);
+                    const capResult = await incrementBusCapacity(studentBusId, studentDoc.shift);
                     capNewMembers = capResult.newShiftLoad;
                     capLimit = capResult.capacity;
                     capExceeded = capNewMembers > capLimit;
-                    const busData = await getBusById(assignedBusId);
+                    const busData = await getBusById(studentBusId);
                     capBusNumber = busData?.busNumber || '';
                     capRouteId = busData?.routeId || '';
                 } catch (pgErr) {
-                    console.warn(`⚠️ create-user: PG capacity increment failed for bus ${assignedBusId}; student created without capacity increment:`, pgErr);
+                    console.warn(`⚠️ create-user: PG capacity increment failed for bus ${studentBusId}; student created without capacity increment:`, pgErr);
                 }
-            } else if (assignedBusId && alreadyExisted) {
+            } else if (studentBusId && alreadyExisted) {
                 capAlreadyCounted = true;
             }
 
             // Phase 3 — Post-commit: alert + admin over-fill audit (never affects committed state).
             if (capAlreadyCounted) {
-                console.warn(`⚠️ create-user: student ${uid} already existed; skipped duplicate capacity allocation on bus ${assignedBusId}`);
+                console.warn(`⚠️ create-user: student ${uid} already existed; skipped duplicate capacity allocation on bus ${studentBusId}`);
             }
-            if (assignedBusId && capLimit > 0 && capNewMembers >= capLimit) {
-                await sendBusFullAlert(assignedBusId, capBusNumber, capRouteId).catch(e => console.error('Bus full alert failed:', e));
+            if (studentBusId && capLimit > 0 && capNewMembers >= capLimit) {
+                await sendBusFullAlert(studentBusId, capBusNumber, capRouteId).catch(e => console.error('Bus full alert failed:', e));
             }
             if (capExceeded) {
-                console.warn(`🚨 ADMIN OVER-FILL: bus ${assignedBusId} now ${capNewMembers}/${capLimit} via admin-create of ${uid}`);
+                console.warn(`🚨 ADMIN OVER-FILL: bus ${studentBusId} now ${capNewMembers}/${capLimit} via admin-create of ${uid}`);
                 await createAuditEvent({
                     category: 'additions',
                     action: 'capacity_exceeded_admin_create',
@@ -274,7 +273,7 @@ export const POST = withSecurity<CreateUserBody>(
                     target_type: 'student',
                     target_id: uid,
                     target_name: name,
-                    metadata: { busId: assignedBusId, newMembers: capNewMembers, capacity: capLimit, shift: studentDoc.shift },
+                    metadata: { busId: studentBusId, newMembers: capNewMembers, capacity: capLimit, shift: studentDoc.shift },
                 });
             }
 
@@ -282,8 +281,8 @@ export const POST = withSecurity<CreateUserBody>(
             if (currentUserRole === 'moderator') {
                 (async () => {
                     try {
-                        const [[routeName, busName, resolvedStopName], adminRecipients] = await Promise.all([
-                            resolveReferenceNames(routeId, busId, finalStopId),
+                        const [[routeName, busName, resolved_stop_name], adminRecipients] = await Promise.all([
+                            resolveReferenceNames(routeId, busId, final_stop_name),
                             getAdminEmailRecipients()
                         ]);
 
@@ -291,7 +290,7 @@ export const POST = withSecurity<CreateUserBody>(
                             const emailData: StudentAddedEmailData = {
                                 studentName: name, studentEmail: email, studentPhone: phone || '', enrollmentId: enrollmentId || '',
                                 faculty: faculty || '', department: department || '', semester: semester || '', shift: shift || 'Morning',
-                                routeName, busName, pickupPoint: resolvedStopName, sessionStartYear: sessionStartYear || new Date().getFullYear(),
+                                routeName, busName, pickupPoint: resolved_stop_name, sessionStartYear: sessionStartYear || new Date().getFullYear(),
                                 sessionEndYear: finalSessionEndYear, validUntil: finalValidUntil, durationYears: finalDuration,
                                 paymentAmount: totalAmount, transactionId: paymentId || 'N/A',
                                 addedBy: { name: currentUserName, employeeId: currentUserEmployeeId, role: 'moderator' },
@@ -314,7 +313,7 @@ export const POST = withSecurity<CreateUserBody>(
                 uid, email, fullName: name, licenseNumber: licenseNumber || '', aadharNumber: aadharNumber || '',
                 phone: phone || '', altPhone: alternatePhone || '', joiningDate: joiningDate || '',
                 driverId: driverId || employeeId || '', address: address || '', profilePhotoUrl: profilePhotoUrl || '',
-                assignedRouteId: assignedRouteId || routeId || null, assignedBusId: assignedBusId || busId || null,
+                routeId: routeId || null, busId: busId || null,
                 shift: shift || 'Both', approvedBy: approvedByDisplay, dob: dob || '',
                 status: 'active', createdAt: now, updatedAt: now,
             };

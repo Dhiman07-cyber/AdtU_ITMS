@@ -205,7 +205,7 @@ export interface DropoffAssignment {
   plateNumber?: string;
   routeId: string;
   routeName: string;
-  stops: Array<{ name: string; stopId?: string }>;
+  stops: Array<{ name: string; stop_name?: string }>;
 }
 
 export function buildDropoffSummary(assignments: DropoffAssignment[]): string {

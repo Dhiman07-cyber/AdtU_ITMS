@@ -106,6 +106,8 @@ interface RenewalRequest {
 interface Transaction {
   studentId: string;
   studentName: string;
+  studentUid?: string;
+  student_uid?: string;
   amount: number;
   paymentMethod: 'online' | 'offline' | 'manual';
   paymentId: string;
@@ -358,33 +360,38 @@ export default function AdminRenewalServicePage() {
 
       try {
         setLoadingRequests(true);
-        // D8: Query PostgreSQL applications table instead of Firestore renewal_requests
-        const { data, error } = await supabase
-          .from('applications')
-          .select('*')
-          .eq('state', 'submitted')
-          .in('application_type', ['renewal', 'renewal_after_soft_block'])
-          .order('created_at', { ascending: false });
+        const token = await currentUser.getIdToken();
+        const res = await fetch('/api/applications/all?limit=200', {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (!res.ok) throw new Error(`API error: ${res.status}`);
+        const responseData = await res.json();
+        const apps = responseData.applications || [];
 
-        if (error) throw error;
-
-        const requests: RenewalRequest[] = (data || []).map((row: any) => ({
-          id: row.application_id,
-          studentId: row.applicant_uid,
-          enrollmentId: row.formData?.enrollmentId || row.form_data?.enrollmentId || '',
-          studentName: row.formData?.studentName || row.form_data?.studentName || '',
-          totalFee: row.formData?.totalFee || row.form_data?.totalFee || 0,
-          durationYears: row.formData?.durationYears || row.form_data?.durationYears || 0,
-          paymentMode: row.formData?.paymentMode || row.form_data?.paymentMode || '',
-          paymentId: row.formData?.paymentId || row.form_data?.paymentId || '',
-          receiptImageUrl: row.formData?.receiptImageUrl || row.form_data?.receiptImageUrl || '',
-          studentEmail: row.formData?.studentEmail || row.form_data?.studentEmail || '',
-          studentPhone: row.formData?.studentPhone || row.form_data?.studentPhone || '',
-          paidAt: row.formData?.paidAt || row.form_data?.paidAt || '',
-          status: 'pending',
-          createdAt: row.created_at,
-          updatedAt: row.updated_at,
-        }));
+        const requests: RenewalRequest[] = apps
+          .filter((row: any) => {
+            const state = row.state || '';
+            const type = row.applicationType || row.application_type || '';
+            return (state === 'submitted' || state === 'awaiting_verification' || state === 'pending') &&
+                   (type === 'renewal' || type === 'renewal_after_soft_block');
+          })
+          .map((row: any) => ({
+            id: row.applicationId || row.application_id || row.id,
+            studentId: row.applicantUid || row.applicant_uid || row.studentId,
+            enrollmentId: row.formData?.enrollmentId || row.form_data?.enrollmentId || '',
+            studentName: row.formData?.studentName || row.form_data?.studentName || row.applicantEmail || '',
+            totalFee: row.formData?.totalFee || row.form_data?.totalFee || 0,
+            durationYears: row.formData?.durationYears || row.form_data?.durationYears || 0,
+            paymentMode: row.formData?.paymentMode || row.form_data?.paymentMode || 'online',
+            paymentId: row.formData?.paymentId || row.form_data?.paymentId || row.paymentId || '',
+            receiptImageUrl: row.formData?.receiptImageUrl || row.form_data?.receiptImageUrl || '',
+            studentEmail: row.formData?.studentEmail || row.form_data?.studentEmail || row.applicantEmail || '',
+            studentPhone: row.formData?.studentPhone || row.form_data?.studentPhone || '',
+            paidAt: row.formData?.paidAt || row.form_data?.paidAt || row.createdAt || row.created_at || '',
+            status: 'pending',
+            createdAt: row.createdAt || row.created_at,
+            updatedAt: row.updatedAt || row.updated_at,
+          }));
 
         // Fetch student data for each request
         const requestsWithStudentData = await Promise.all(
@@ -452,17 +459,19 @@ export default function AdminRenewalServicePage() {
           const enriched = await Promise.all(
             rawTransactions.map(async (transaction: any) => {
               try {
-                const res = await fetch(`/api/students?enrollmentId=${encodeURIComponent(transaction.studentId)}`, {
-                  headers: { 'Authorization': `Bearer ${token}` }
-                });
+                if (transaction.studentId && typeof transaction.studentId === 'string' && transaction.studentId.trim() && transaction.studentId !== 'N/A') {
+                  const res = await fetch(`/api/students?enrollmentId=${encodeURIComponent(transaction.studentId.trim())}`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                  });
 
-                if (res.ok) {
-                  const students = await res.json();
-                  if (Array.isArray(students) && students.length > 0) {
-                    return {
-                      ...transaction,
-                      userId: students[0].id
-                    };
+                  if (res.ok) {
+                    const students = await res.json();
+                    if (Array.isArray(students) && students.length > 0) {
+                      return {
+                        ...transaction,
+                        userId: students[0].id || students[0].uid
+                      };
+                    }
                   }
                 }
                 return transaction;
@@ -1355,7 +1364,7 @@ export default function AdminRenewalServicePage() {
                             {/* Approved By */}
                             <div className="col-span-4 text-left pl-2 ml-1">
                               <p className="text-[10px] font-bold text-gray-700 dark:text-gray-300 truncate" title={transaction.approvedBy}>
-                                {transaction.paymentMethod === 'online' ? 'AdtU ITMS System' : (transaction.approvedBy || '-')}
+                                {transaction.paymentMethod === 'online' || transaction.approvedBy === 'AdtU ITMS System' || transaction.approvedBy === 'System Verified' ? 'System-Approved' : (transaction.approvedBy || 'System-Approved')}
                               </p>
                             </div>
 
@@ -1384,10 +1393,14 @@ export default function AdminRenewalServicePage() {
                                 size="sm"
                                 variant="ghost"
                                 onClick={() => {
-                                  if (transaction.userId) {
-                                    const baseRoute = userData?.role === 'moderator' ? '/moderator' : '/admin';
-                                    router.push(`${baseRoute}/students/view/${transaction.userId}`);
-                                  }
+                                   const tx = transaction as any;
+                                   const targetUid = tx.student_uid || tx.studentUid || tx.userId || tx.student_id || tx.studentId;
+                                   if (targetUid) {
+                                     const baseRoute = userData?.role === 'moderator' ? '/moderator' : '/admin';
+                                     router.push(`${baseRoute}/students/view/${encodeURIComponent(targetUid)}`);
+                                   } else {
+                                     toast.error('Student profile unavailable');
+                                   }
                                 }}
                                 className="h-5 text-[9px] font-bold w-full text-zinc-500 dark:text-zinc-400 hover:text-purple-600 dark:hover:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/20"
                               >

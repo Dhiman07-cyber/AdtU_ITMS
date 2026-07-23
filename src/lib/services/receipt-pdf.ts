@@ -103,15 +103,16 @@ export async function renderReceiptPdf(data: ReceiptPdfData): Promise<Buffer> {
   doc.rect(0, 0, pageWidth, doc.internal.pageSize.getHeight(), 'F');
 
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(18);
+  doc.setFontSize(14);
   doc.setTextColor(15, 23, 42);
-  doc.text('Assam down town University', 18, 22);
+  doc.text('Assam down town University,', 18, 20);
 
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8);
+  doc.setFontSize(7.5);
   doc.setTextColor(100, 116, 139);
-  doc.text('Integrated Transit Management System', 18, 28);
-  doc.text('Sankar Madhab Path, Gandhi Nagar, Panikhaiti, Guwahati, Assam - 781026', 18, 33);
+  doc.text('Sankar Madhab Path, Gandhi Nagar,', 18, 25);
+  doc.text('Panikhaiti, Guwahati, Assam, India,', 18, 29);
+  doc.text('Pin – 781026', 18, 33);
 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8);

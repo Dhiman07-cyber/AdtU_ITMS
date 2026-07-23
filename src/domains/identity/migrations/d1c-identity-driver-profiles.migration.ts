@@ -11,9 +11,9 @@
  *
  * Core fields → typed columns:
  *   uid, email, fullName, phone, alternatePhone, licenseNumber,
- *   aadharNumber, employeeId, address, profilePhotoUrl, assignedBusId,
- *   assignedRouteId, busId, routeId, busAssigned, driverId, joiningDate,
- *   shift, status, tripActive, activeTripId, isReserved, createdAt, updatedAt
+ *   aadharNumber, employeeId, address, profilePhotoUrl, busId,
+ *   routeId, joiningDate, shift, status, tripActive, activeTripId,
+ *   isReserved, createdAt, updatedAt
  *
  * Infrastructure only. No business logic. No service calls.
  */
@@ -28,8 +28,7 @@ const DRIVERS_COLLECTION = 'drivers';
 const CORE_FIELDS = new Set([
   'uid', 'email', 'fullName', 'name', 'phone', 'alternatePhone',
   'licenseNumber', 'aadharNumber', 'employeeId', 'address',
-  'profilePhotoUrl', 'assignedBusId', 'assignedRouteId', 'busId',
-  'routeId', 'busAssigned', 'driverId', 'joiningDate', 'shift',
+  'profilePhotoUrl', 'busId', 'routeId', 'joiningDate', 'shift',
   'status', 'tripActive', 'activeTripId', 'isReserved', 'createdAt', 'updatedAt',
 ]);
 
@@ -46,12 +45,8 @@ const FIELD_MAP: Record<string, string> = {
   employeeId: 'employee_id',
   address: 'address',
   profilePhotoUrl: 'profile_photo_url',
-  assignedBusId: 'assigned_bus_id',
-  assignedRouteId: 'assigned_route_id',
   busId: 'bus_id',
   routeId: 'route_id',
-  busAssigned: 'bus_assigned',
-  driverId: 'driver_id',
   joiningDate: 'joining_date',
   shift: 'shift',
   status: 'status',

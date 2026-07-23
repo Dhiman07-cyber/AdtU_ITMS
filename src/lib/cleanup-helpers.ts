@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Cleanup Helper Functions
  * Utilities for deleting data from Firestore and associated resources
  */
@@ -72,7 +72,7 @@ export async function deleteUserAndData(
 
     const profileImageUrl = userData?.profilePhotoUrl;
     const firebaseAuthUid = userData?.uid || userId;
-    const busId = userData?.busId || userData?.currentBusId || userData?.assignedBusId || null;
+    const busId = userData?.busId || userData?.currentBusId || userData?.busId || null;
     const shouldDecrement = !!busId && !wasSeatReleased(userData);
 
     // 2. PostgreSQL Transaction Commit Boundary (PG deletes first)
@@ -241,13 +241,11 @@ export async function deleteBusAndData(
       for (const student of students) {
         await updateStudent(student.uid, {
           busId: null,
-          assignedBusId: null,
           routeId: null,
-          assignedRouteId: null,
-          stopId: null
+          stop_name: null
         });
       }
-      console.log(`Cleared busId/routeId/stopId from ${students.length} students in PostgreSQL`);
+      console.log(`Cleared busId/routeId/stop_name from ${students.length} students in PostgreSQL`);
     } catch (pgStudErr) {
       console.error('Error clearing student bus assignments in PostgreSQL:', pgStudErr);
     }
@@ -255,11 +253,10 @@ export async function deleteBusAndData(
     // 2. Unassign bus from drivers in PostgreSQL
     try {
       const drivers = await getAllDrivers();
-      const assignedDrivers = drivers.filter(d => d.assignedBusId === busId || d.busId === busId);
+      const assignedDrivers = drivers.filter(d => d.busId === busId || d.busId === busId);
       for (const driver of assignedDrivers) {
         await updateDriver(driver.uid, {
           busId: null,
-          assignedBusId: null
         });
       }
       console.log(`Unassigned bus ${busId} from ${assignedDrivers.length} drivers in PostgreSQL`);

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * ─────────────────────────────────────────────────────────────────────────────
  * CANONICAL BUS-LOAD RECONCILIATION (PostgreSQL-backed, server-safe)
  * ─────────────────────────────────────────────────────────────────────────────
@@ -109,7 +109,7 @@ export async function adminReconcileBusLoads(options: ReconcileOptions = {}): Pr
 
   for (const s of candidateStudents) {
     if (!occupiesSeat(s)) continue;
-    const busId = s.busId || s.currentBusId || s.assignedBusId;
+    const busId = s.busId || s.currentBusId || s.busId;
     if (!busId || !targetBusIds.has(busId)) continue; // orphan / other bus — not in scope of this run
     const c = counts.get(busId)!;
     c.currentMembers += 1; // every occupying student counts toward the canonical total

@@ -76,12 +76,12 @@ export async function GET(request: NextRequest) {
             const suffix = role.toLowerCase() === 'admin' ? '(ADMIN)' : `(${p.approvedBy.empId || 'STAFF'})`;
             approvedByStr = `${name} ${suffix}`;
           } else if (p.approvedBy.type === 'SYSTEM') {
-            approvedByStr = 'System Verified';
+            approvedByStr = 'System-Approved';
           }
         } else {
           // Handle string case
           const strValue = String(p.approvedBy);
-          approvedByStr = strValue;
+          approvedByStr = (strValue === 'AdtU ITMS System' || strValue === 'System Verified') ? 'System-Approved' : strValue;
 
           // Check if it's the specific "email (ID)" format (e.g. "shivdj519@gmail.com (MB-01)")
           const emailMatch = strValue.match(/^(.+?) \((.+?)\)$/);
@@ -112,7 +112,7 @@ export async function GET(request: NextRequest) {
         ...p,
         paymentMethod: p.method?.toLowerCase() || 'online',
         status: p.status?.toLowerCase() || 'completed',
-        approvedBy: approvedByStr,
+        approvedBy: approvedByStr || (p.method?.toLowerCase() === 'online' ? 'System-Approved' : '-'),
         timestamp: getTimestamp(p.createdAt || p.timestamp),
         validUntil: p.validUntil ? getTimestamp(p.validUntil) : 'N/A'
       };

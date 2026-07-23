@@ -1,4 +1,4 @@
-/**
+﻿/**
  * POST /api/notifications/create
  * 
  * Create a notification and save it to the `notifications` collection.
@@ -132,7 +132,7 @@ async function resolveRecipientIds(
           if (!recipientIds.includes(student.uid)) recipientIds.push(student.uid);
         }
         for (const driver of drivers) {
-          if (targetRouteIds.includes(driver.routeId) || targetRouteIds.includes(driver.assignedRouteId)) {
+          if (targetRouteIds.includes(driver.routeId) || targetRouteIds.includes(driver.routeId)) {
             recipientIds.push(driver.uid);
           }
         }

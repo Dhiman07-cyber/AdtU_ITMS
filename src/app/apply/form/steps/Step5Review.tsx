@@ -221,7 +221,7 @@ export default function Step5Review({
       ]);
       drawRow([
         { label: 'Assigned Route', value: formData.routeId?.replace(/_/g, '-')?.toUpperCase(), x: col1, width: 60 },
-        { label: 'Pick-up Point', value: formData.stopId?.toUpperCase(), x: col2, width: 100 }
+        { label: 'Pick-up Point', value: formData.stop_name?.toUpperCase(), x: col2, width: 100 }
       ]);
 
       y += 8; // Distinctly space out the next section
@@ -389,7 +389,7 @@ export default function Step5Review({
 
           <ReviewSection title="Transportation Selection" icon={MapPin}>
             <DetailItem label="Selected Route" value={formData.routeId ? formData.routeId.charAt(0).toUpperCase() + formData.routeId.slice(1).replace(/_/g, '-') : 'Not Selected'} />
-            <DetailItem label="Pick-up Point" value={formData.stopId ? formData.stopId.charAt(0).toUpperCase() + formData.stopId.slice(1) : 'Not Selected'} />
+            <DetailItem label="Pick-up Point" value={formData.stop_name ? formData.stop_name.charAt(0).toUpperCase() + formData.stop_name.slice(1) : 'Not Selected'} />
             <DetailItem label="Bus Selected" value={formData.busAssigned || (formData.busId ? formData.busId.charAt(0).toUpperCase() + formData.busId.slice(1).replace(/_/g, '-') : 'Not Selected')} />
             <DetailItem label="Shift Time" value={formData.shift} />
           </ReviewSection>
@@ -516,7 +516,7 @@ export default function Step5Review({
               handleSubmitApplication();
             }}
             disabled={submitting}
-            className={`bg-indigo-600 hover:bg-indigo-500 text-white font-semibold h-11 px-8 rounded-xl shadow-lg shadow-indigo-600/20 transition-colors flex items-center gap-2 group ${!declarationAgreed ? 'opacity-50 cursor-not-allowed' : ''}`}
+            className={`bg-indigo-600 hover:bg-indigo-500 text-white font-semibold h-11 px-8 rounded-xl transition-colors flex items-center gap-2 group ${!declarationAgreed ? 'opacity-50 cursor-not-allowed' : ''}`}
           >
             {submitting ? (
               <><Loader2 className="h-5 w-5 animate-spin" /> Finalizing...</>

@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+﻿import { NextResponse } from 'next/server';
 import { getModeratorPermissions } from '@/lib/security/moderator-permissions';
 import { getDriverById, getUserById } from '@/domains/identity';
 
@@ -18,22 +18,22 @@ function collectAssignedBusIds(data: Record<string, unknown> | undefined): Set<s
   if (!data) return ids;
 
   addBusId(ids, data.busId);
-  addBusId(ids, data.assignedBusId);
+  addBusId(ids, data.busId);
   addBusId(ids, data.activeBusId);
   addBusId(ids, data.currentBusId);
 
-  const assignedBusIds = data.assignedBusIds;
-  if (Array.isArray(assignedBusIds)) {
-    assignedBusIds.forEach((busId) => addBusId(ids, busId));
+  const busIds = data.busIds;
+  if (Array.isArray(busIds)) {
+    busIds.forEach((busId) => addBusId(ids, busId));
   }
 
   return ids;
 }
 
-export function scannerBusMatchesStudent(scannerBusId: unknown, assignedBusId: unknown): boolean {
+export function scannerBusMatchesStudent(scannerBusId: unknown, busId: unknown): boolean {
   if (typeof scannerBusId !== 'string' || !scannerBusId.trim()) return true;
-  if (typeof assignedBusId !== 'string' || !assignedBusId.trim()) return false;
-  return scannerBusId.trim() === assignedBusId.trim();
+  if (typeof busId !== 'string' || !busId.trim()) return false;
+  return scannerBusId.trim() === busId.trim();
 }
 
 export async function validateStudentScannerContext(

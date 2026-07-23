@@ -78,6 +78,7 @@ export async function upsertApprovalPayment(input: {
   validUntil?: Date;
   razorpayPaymentId?: string;
   razorpayOrderId?: string;
+  approvedAt?: Date;
 }): Promise<string | null> {
   return paymentsSupabaseService.upsertPayment(input);
 }

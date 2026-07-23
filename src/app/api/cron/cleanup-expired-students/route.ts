@@ -1,5 +1,5 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { adminAuth, adminDb } from '@/lib/firebase-admin';
+﻿import { NextRequest, NextResponse } from 'next/server';
+import { adminAuth } from '@/lib/firebase-admin';
 import crypto from 'crypto';
 import { shouldBlockAccessFromStoredDates, shouldHardDeleteFromStoredDates } from '@/lib/utils/renewal-utils';
 import { computeBlockDatesFromValidUntil } from '@/lib/utils/deadline-computation';
@@ -170,7 +170,7 @@ export async function GET(request: NextRequest) {
                         }
                     }
 
-                    const freshBusId = studentData.busId || studentData.assignedBusId || null;
+                    const freshBusId = studentData.busId || studentData.busId || null;
                     const freshShift = studentData.shift || null;
                     const freshShouldDecrement = !!freshBusId && !wasSeatReleased(studentData);
                     const fullName = studentData.fullName || studentData.name || '';
@@ -243,7 +243,7 @@ export async function GET(request: NextRequest) {
                         if (currentStatus !== 'active') {
                             didBlock = false;
                         } else {
-                            const sbBusId = freshStudent?.busId || freshStudent?.assignedBusId || studentData.busId || null;
+                            const sbBusId = freshStudent?.busId || freshStudent?.busId || studentData.busId || null;
                             const sbShift = freshStudent?.shift || studentData.shift;
                             const sbFullName = freshStudent?.fullName || studentData.fullName || '';
 

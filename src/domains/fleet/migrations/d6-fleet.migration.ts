@@ -18,8 +18,7 @@
  *
  * Driver core fields → typed columns:
  *   uid, email, fullName, phone, alternatePhone, licenseNumber,
- *   assignedBusId, assignedRouteId, busId, routeId, busAssigned,
- *   driverId, joiningDate, shift, status, tripActive, activeTripId,
+ *   busId, routeId, joiningDate, shift, status, tripActive, activeTripId,
  *   profilePhotoUrl, createdAt, updatedAt
  *
  * Infrastructure only. No business logic. No service calls.
@@ -51,9 +50,9 @@ const BUS_CORE_FIELDS = new Set([
 // ─── Driver core fields ───────────────────────────────────────────────────────
 const DRIVER_CORE_FIELDS = new Set([
   'uid', 'id', 'email', 'name', 'fullName', 'phone', 'alternatePhone', 'licenseNumber',
-  'aadharNumber', 'employeeId', 'address', 'profilePhotoUrl', 'assignedBusId',
-  'assignedRouteId', 'busId', 'routeId', 'busAssigned', 'driverId', 'joiningDate',
-  'shift', 'status', 'tripActive', 'activeTripId', 'isReserved', 'createdAt', 'updatedAt',
+  'aadharNumber', 'employeeId', 'address', 'profilePhotoUrl', 'busId',
+  'routeId', 'joiningDate', 'shift', 'status',
+  'tripActive', 'activeTripId', 'isReserved', 'createdAt', 'updatedAt',
 ]);
 
 // ─── Timestamp helper ─────────────────────────────────────────────────────────
@@ -158,12 +157,8 @@ async function up(): Promise<MigrationResult> {
         employee_id: fsData.employeeId || fsData.driverId || null,
         address: fsData.address || null,
         profile_photo_url: fsData.profilePhotoUrl || null,
-        assigned_bus_id: fsData.assignedBusId || null,
-        assigned_route_id: fsData.assignedRouteId || null,
         bus_id: fsData.busId || null,
         route_id: fsData.routeId || null,
-        bus_assigned: fsData.busAssigned || null,
-        driver_id: fsData.driverId || null,
         joining_date: fsData.joiningDate || null,
         shift: fsData.shift || null,
         status: fsData.status || null,

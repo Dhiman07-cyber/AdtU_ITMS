@@ -50,7 +50,7 @@ const API_ROUTE_MAP: Record<string, { path: string; normalize: ResponseNormalize
         normalize: (raw) => Array.isArray(raw) ? raw : raw.routes ?? [],
     },
     applications: {
-        path: '/api/applications/all',
+        path: '/api/applications/all?limit=200',
         normalize: (raw) => raw.applications ?? raw ?? [],
     },
     moderators: {

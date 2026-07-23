@@ -1,11 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import QRCode from 'qrcode';
 import { verifyApiAuth } from '@/lib/security/api-auth';
 import { getModeratorPermissions } from '@/lib/security/moderator-permissions';
-import { generateSecureQRData, buildDocumentPayloadFromPayment } from '@/lib/security/document-crypto.service';
 import { paymentsSupabaseService, type PaymentRecord } from '@/lib/services/payments-supabase';
-import { getOrCreateReceiptSignature } from '@/lib/services/receipt.service';
-import { renderReceiptPdf } from '@/lib/services/receipt-pdf';
+import { generateReceiptPdf } from '@/lib/services/receipt.service';
 import { checkRateLimit, createRateLimitId } from '@/lib/security/rate-limiter';
 import { getByUid as getStudentByUid } from '@/domains/student';
 import { getUserById } from '@/domains/identity';
@@ -134,39 +131,10 @@ export async function GET(
     return NextResponse.json({ error: 'Moderator payment permission not granted' }, { status: 403 });
   }
 
-  const signature = await getOrCreateReceiptSignature(payment);
-  if (!signature) {
-    return NextResponse.json({ error: 'Failed to secure receipt' }, { status: 500 });
+  const pdfBuffer = await generateReceiptPdf(paymentId);
+  if (!pdfBuffer) {
+    return NextResponse.json({ error: 'Failed to generate receipt' }, { status: 500 });
   }
-
-  const documentPayload = buildDocumentPayloadFromPayment(payment);
-  const secureQRToken = generateSecureQRData(documentPayload, signature);
-  const qrCodeDataUrl = await QRCode.toDataURL(secureQRToken, {
-    errorCorrectionLevel: 'M',
-    margin: 3,
-    width: 200,
-    color: { dark: '#000000', light: '#ffffff' },
-  });
-
-  const pdfBuffer = await renderReceiptPdf({
-    receiptId: payment.payment_id,
-    studentName: display.studentName,
-    enrollmentId: display.enrollmentId || 'N/A',
-    faculty: display.faculty,
-    amount: payment.amount || 0,
-    paymentMethod: payment.method || 'Offline',
-    paymentReference: getPaymentReference(payment),
-    approvedBy: getApprovedByDisplay(payment),
-    sessionStartYear: payment.session_start_year,
-    sessionEndYear: payment.session_end_year,
-    durationYears: payment.duration_years,
-    validUntil: payment.valid_until,
-    transactionDate: payment.transaction_date || payment.created_at || new Date().toISOString(),
-    qrCodeDataUrl,
-    previousValidUntil: asOptionalString(payment.metadata?.previousValidUntil),
-    previousSessionEndYear: asOptionalStringOrNumber(payment.metadata?.previousSessionEndYear),
-    purpose: payment.purpose,
-  });
 
   const safeFilename = `Receipt_${safeFilenamePart(display.studentName)}_${safeFilenamePart(paymentId)}.pdf`;
 

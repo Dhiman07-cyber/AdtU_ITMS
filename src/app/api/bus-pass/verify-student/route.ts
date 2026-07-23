@@ -1,4 +1,4 @@
-/**
+﻿/**
  * API Route: Verify Student by UID
  * POST /api/bus-pass/verify-student
  */
@@ -117,8 +117,8 @@ export async function POST(request: NextRequest) {
         }
 
         const validUntilDate = getValidUntilDate(studentData.validUntil);
-        const assignedBusId = studentData.assignedBus || studentData.busId || studentData.currentBusId;
-        const busMatchesScanner = scannerBusMatchesStudent(scannerBusId, assignedBusId);
+        const busId = studentData.assignedBus || studentData.busId || studentData.currentBusId;
+        const busMatchesScanner = scannerBusMatchesStudent(scannerBusId, busId);
 
         // CANONICAL entitlement (Phase 3): a pass is valid for boarding ONLY while the
         // student owns transport access. This is the SAME source of truth used by the
@@ -142,17 +142,17 @@ export async function POST(request: NextRequest) {
             studentData: {
                 uid: studentUid.trim(),
                 fullName: studentData.fullName || studentData.name,
-                enrollmentId: studentData.enrollmentId || studentData.enrollmentNo,
+                enrollmentId: studentData.enrollmentId || studentData.enrollmentId,
                 gender: studentData.gender,
                 profilePhotoUrl: studentData.profilePhotoUrl || studentData.photoURL || studentData.avatar,
-                assignedBus: assignedBusId,
-                busId: assignedBusId,
+                assignedBus: busId,
+                busId: busId,
                 assignedShift: studentData.assignedShift || studentData.shift,
                 shift: studentData.assignedShift || studentData.shift,
                 validUntil: validUntilDate ? validUntilDate.toISOString() : undefined,
                 status: studentData.status,
             },
-            isAssigned: Boolean(assignedBusId),
+            isAssigned: Boolean(busId),
             matchesScannerBus: busMatchesScanner,
             canBoard: accountValid && busMatchesScanner,
             sessionActive: accountValid,

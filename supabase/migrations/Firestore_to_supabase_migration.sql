@@ -37,6 +37,69 @@ BEGIN
     END IF;
 END $$;
 
+-- ── 1.2 LEGACY COLUMN CLEANUP (idempotent) ───────────────────────────────────
+-- Drop any legacy columns that were removed during migration cleanup.
+-- Safe to run on both fresh and existing databases.
+DO $$
+BEGIN
+    -- student_profiles: remove old alias columns (replaced by bus_id / route_id)
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='student_profiles' AND column_name='assigned_bus_id') THEN
+        ALTER TABLE public.student_profiles DROP COLUMN assigned_bus_id;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='student_profiles' AND column_name='assigned_route_id') THEN
+        ALTER TABLE public.student_profiles DROP COLUMN assigned_route_id;
+    END IF;
+
+    -- driver_profiles: remove old alias columns and deprecated fields
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='driver_profiles' AND column_name='assigned_bus_id') THEN
+        ALTER TABLE public.driver_profiles DROP COLUMN assigned_bus_id;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='driver_profiles' AND column_name='assigned_route_id') THEN
+        ALTER TABLE public.driver_profiles DROP COLUMN assigned_route_id;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='driver_profiles' AND column_name='bus_assigned') THEN
+        ALTER TABLE public.driver_profiles DROP COLUMN bus_assigned;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='driver_profiles' AND column_name='driver_id') THEN
+        ALTER TABLE public.driver_profiles DROP COLUMN driver_id;
+    END IF;
+
+    -- moderator_profiles: remove old legacy fields
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='moderator_profiles' AND column_name='name') THEN
+        ALTER TABLE public.moderator_profiles DROP COLUMN name;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='moderator_profiles' AND column_name='staff_id') THEN
+        ALTER TABLE public.moderator_profiles DROP COLUMN staff_id;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='moderator_profiles' AND column_name='managing_team') THEN
+        ALTER TABLE public.moderator_profiles DROP COLUMN managing_team;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='moderator_profiles' AND column_name='assigned_faculty') THEN
+        ALTER TABLE public.moderator_profiles DROP COLUMN assigned_faculty;
+    END IF;
+
+    -- admin_profiles: remove old legacy name and assigned_faculty fields
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='admin_profiles' AND column_name='name') THEN
+        ALTER TABLE public.admin_profiles DROP COLUMN name;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='admin_profiles' AND column_name='assigned_faculty') THEN
+        ALTER TABLE public.admin_profiles DROP COLUMN assigned_faculty;
+    END IF;
+
+    -- student_profiles & applications: remove old legacy stop_name and add stop_name to applications
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='student_profiles' AND column_name='stop_name') THEN
+        -- Drop view first as it depends on student_profiles(stop_name)
+        DROP VIEW IF EXISTS public.bus_stop_counts_view;
+        ALTER TABLE public.student_profiles DROP COLUMN stop_name;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='applications' AND column_name='stop_name') THEN
+        ALTER TABLE public.applications DROP COLUMN stop_name;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='applications' AND column_name='stop_name') THEN
+        ALTER TABLE public.applications ADD COLUMN stop_name TEXT;
+    END IF;
+END $$;
+
 -- ── 1. EXTENSIONS ────────────────────────────────────────────────────────────
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
@@ -77,9 +140,6 @@ CREATE TABLE IF NOT EXISTS student_profiles (
     profile_photo_url TEXT,
     bus_id            TEXT,
     route_id          TEXT,
-    assigned_route_id TEXT,
-    assigned_bus_id   TEXT,
-    stop_id           TEXT,
     stop_name         TEXT,
     shift             TEXT CHECK (shift IN ('Morning', 'Evening')),
     -- ↑ BUSINESS RULE: Students may ONLY be Morning or Evening. 'Both' is a bus/driver capability, NOT a student one.
@@ -113,12 +173,8 @@ CREATE TABLE IF NOT EXISTS driver_profiles (
     employee_id        TEXT,
     address            TEXT,
     profile_photo_url  TEXT,
-    assigned_bus_id    TEXT,
-    assigned_route_id  TEXT,
     bus_id             TEXT,
     route_id           TEXT,
-    bus_assigned       TEXT,
-    driver_id          TEXT,
     joining_date       TEXT,
     shift              TEXT CHECK (shift IN ('Morning', 'Evening', 'Both')),
     status             TEXT CHECK (status IN ('active', 'inactive', 'suspended', 'reserved')),
@@ -133,18 +189,14 @@ CREATE TABLE IF NOT EXISTS moderator_profiles (
     uid                    TEXT PRIMARY KEY,
     email                  TEXT,
     full_name              TEXT,
-    name                   TEXT,
     phone                  TEXT,
     employee_id            TEXT,
-    staff_id               TEXT,
-    managing_team          TEXT,
     team_name              TEXT,
     status                 TEXT CHECK (status IN ('active', 'inactive', 'suspended')),
     profile_photo_url      TEXT,
     role                   TEXT DEFAULT 'moderator',
     created_by             TEXT,
     faculty                TEXT,
-    assigned_faculty       TEXT,
     permissions            JSONB DEFAULT '{}'::jsonb,
     permissions_updated_at TIMESTAMPTZ,
     permissions_updated_by TEXT,
@@ -156,11 +208,9 @@ CREATE TABLE IF NOT EXISTS admin_profiles (
     uid                TEXT PRIMARY KEY,
     email              TEXT,
     full_name          TEXT,
-    name               TEXT,
     phone              TEXT,
     employee_id        TEXT,
     role               TEXT DEFAULT 'admin',
-    assigned_faculty   TEXT,
     years_of_service   TEXT,
     alt_phone          TEXT,
     dob                TEXT,
@@ -210,7 +260,7 @@ CREATE TABLE IF NOT EXISTS applications (
     email                       TEXT,
     route_id                    TEXT,
     bus_id                      TEXT,
-    stop_id                     TEXT,
+    stop_name                   TEXT,
     shift                       TEXT CHECK (shift IN ('Morning', 'Evening')),
     session_start_year          INTEGER,
     session_end_year            INTEGER,
@@ -322,6 +372,27 @@ CREATE TABLE IF NOT EXISTS routes (
 -- Trip, Tracking, Swaps, Reassignment, and Payments domains are defined in COMPLETE_SCHEMA.sql.
 -- Only student_profiles, buses, routes, etc. are created in this migration.
 
+-- ── 2.7 Reassignment Domain ──────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS public.reassignment_logs (
+    id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    operation_id   TEXT NOT NULL,
+    type           TEXT NOT NULL,
+    actor_id       TEXT NOT NULL,
+    actor_label    TEXT NOT NULL,
+    logged_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    status         TEXT NOT NULL DEFAULT 'pending',
+    summary        TEXT,
+    changes        JSONB NOT NULL DEFAULT '[]'::jsonb,
+    meta           JSONB DEFAULT '{}'::jsonb,
+    rollback_of    TEXT,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at     TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_reassignment_logs_operation_id ON public.reassignment_logs (operation_id);
+CREATE INDEX IF NOT EXISTS idx_reassignment_logs_status ON public.reassignment_logs (status);
+
 CREATE TABLE IF NOT EXISTS audit_events (
     id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     action         TEXT NOT NULL,
@@ -364,22 +435,6 @@ CREATE TABLE IF NOT EXISTS notifications (
     metadata            JSONB DEFAULT '{}'::jsonb
 );
 
--- ── 2.11 Config Domain ──────────────────────────────────────────────────────
-
-CREATE TABLE IF NOT EXISTS system_config (
-    config_key     TEXT PRIMARY KEY,
-    config_data    JSONB NOT NULL DEFAULT '{}',
-    updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_by_uid TEXT
-);
-
-CREATE TABLE IF NOT EXISTS system_markers (
-    marker_key  TEXT PRIMARY KEY,
-    marker_data JSONB NOT NULL DEFAULT '{}',
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
 -- =============================================================================
 -- 3. TRIGGERS (auto updated_at)
 -- =============================================================================
@@ -399,15 +454,6 @@ BEGIN
   RETURN NEW;
 END;
 $$;
-
--- Config
-DROP TRIGGER IF EXISTS trg_system_config_updated_at ON system_config;
-CREATE TRIGGER trg_system_config_updated_at BEFORE UPDATE ON system_config
-    FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
-
-DROP TRIGGER IF EXISTS trg_system_markers_updated_at ON system_markers;
-CREATE TRIGGER trg_system_markers_updated_at BEFORE UPDATE ON system_markers
-    FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
 
 -- Identity tables — defense-in-depth so every UPDATE path is covered
 DROP TRIGGER IF EXISTS trg_users_updated_at ON users;
@@ -434,6 +480,8 @@ DROP TRIGGER IF EXISTS trg_unauth_users_updated_at ON unauth_users;
 CREATE TRIGGER trg_unauth_users_updated_at BEFORE UPDATE ON unauth_users
     FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
 
+-- Triggers for automatic synchronization of legacy IDs removed.
+
 -- =============================================================================
 -- 4. FUNCTIONS (RPCs, Cleanup, Helpers)
 -- =============================================================================
@@ -447,48 +495,88 @@ CREATE OR REPLACE FUNCTION public.identity_activate_student(
 RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE
     v_already_existed BOOLEAN;
+    v_bus_id TEXT;
+    v_route_id TEXT;
+    v_stop_name TEXT;
+    v_shift TEXT;
+    v_full_name TEXT;
+    v_email TEXT;
+    v_enrollment_id TEXT;
+    v_session_duration TEXT;
+    v_last_processed_app_id TEXT;
+    v_valid_until TIMESTAMPTZ;
+    v_soft_block TIMESTAMPTZ;
+    v_hard_block TIMESTAMPTZ;
 BEGIN
     IF p_uid IS NULL OR p_uid = '' THEN
         RETURN jsonb_build_object('success', false, 'error', 'p_uid is required');
     END IF;
 
+    v_email := COALESCE(NULLIF(p_email, ''), NULLIF(p_student_data->>'email', ''), '');
+    v_full_name := COALESCE(NULLIF(p_full_name, ''), NULLIF(p_student_data->>'fullName', ''), NULLIF(p_student_data->>'full_name', ''), '');
+    v_enrollment_id := COALESCE(
+        NULLIF(p_student_data->>'enrollmentId', ''),
+        NULLIF(p_student_data->>'enrollment_id', ''),
+        ''
+    );
+
+    v_bus_id := COALESCE(p_student_data->>'busId', p_student_data->>'bus_id');
+    v_route_id := COALESCE(p_student_data->>'routeId', p_student_data->>'route_id');
+    v_stop_name := COALESCE(p_student_data->>'stop_name', p_student_data->>'selectedStop');
+    v_shift := COALESCE(p_student_data->>'shift', 'Morning');
+
+    v_session_duration := COALESCE(
+        NULLIF(p_student_data->>'sessionDuration', ''),
+        NULLIF(p_student_data->>'durationYears', ''),
+        (COALESCE((p_student_data->>'sessionEndYear')::INTEGER, 2027) - COALESCE((p_student_data->>'sessionStartYear')::INTEGER, 2026))::TEXT
+    );
+    v_last_processed_app_id := COALESCE(
+        NULLIF(p_student_data->>'applicationId', ''),
+        NULLIF(p_student_data->>'lastProcessedApplicationId', ''),
+        NULLIF(p_student_data->>'application_id', '')
+    );
+
+    v_valid_until := CASE WHEN p_student_data->>'validUntil' IS NOT NULL AND p_student_data->>'validUntil' <> '' THEN (p_student_data->>'validUntil')::TIMESTAMPTZ ELSE NULL END;
+    v_soft_block  := CASE WHEN p_student_data->>'softBlock' IS NOT NULL AND p_student_data->>'softBlock' <> '' THEN (p_student_data->>'softBlock')::TIMESTAMPTZ ELSE NULL END;
+    v_hard_block  := CASE WHEN p_student_data->>'hardBlock' IS NOT NULL AND p_student_data->>'hardBlock' <> '' THEN (p_student_data->>'hardBlock')::TIMESTAMPTZ ELSE NULL END;
+
     SELECT EXISTS(SELECT 1 FROM users WHERE uid = p_uid) INTO v_already_existed;
 
     INSERT INTO users (uid, email, name, role, created_at, updated_at)
-    VALUES (p_uid, COALESCE(p_email, ''), COALESCE(p_full_name, ''), 'student', NOW(), NOW())
+    VALUES (p_uid, v_email, v_full_name, 'student', NOW(), NOW())
     ON CONFLICT (uid) DO UPDATE SET
-        email = EXCLUDED.email, name = EXCLUDED.name,
+        email = EXCLUDED.email,
+        name = EXCLUDED.name,
         role = CASE WHEN users.role IS NULL OR users.role = '' THEN 'student' ELSE users.role END,
         updated_at = NOW();
 
     INSERT INTO student_profiles (
         uid, email, full_name, phone, alt_phone, parent_name, parent_phone,
         faculty, department, gender, dob, enrollment_id, blood_group, address,
-        profile_photo_url, bus_id, route_id, assigned_route_id, assigned_bus_id,
-        stop_id, shift, status, session_start_year, session_end_year, semester,
-        valid_until, approved_by, approved_at, created_at, updated_at
+        profile_photo_url, bus_id, route_id,
+        stop_name, shift, status, session_duration, session_start_year, session_end_year, semester,
+        valid_until, soft_block, hard_block, last_processed_application_id, approved_by, approved_at, created_at, updated_at
     ) VALUES (
-        p_uid, COALESCE(p_email, p_student_data->>'email'),
-        COALESCE(p_full_name, p_student_data->>'fullName'),
+        p_uid, v_email, v_full_name,
         p_student_data->>'phone', p_student_data->>'altPhone',
         p_student_data->>'parentName', p_student_data->>'parentPhone',
         p_student_data->>'faculty', p_student_data->>'department',
         p_student_data->>'gender', p_student_data->>'dob',
-        p_student_data->>'enrollmentId', p_student_data->>'bloodGroup',
+        v_enrollment_id, p_student_data->>'bloodGroup',
         p_student_data->>'address', p_student_data->>'profilePhotoUrl',
-        p_student_data->>'busId', p_student_data->>'routeId',
-        p_student_data->>'routeId', p_student_data->>'busId',
-        p_student_data->>'stopId', p_student_data->>'shift', 'active',
+        v_bus_id, v_route_id,
+        v_stop_name, v_shift, 'active',
+        v_session_duration,
         (p_student_data->>'sessionStartYear')::INTEGER,
         (p_student_data->>'sessionEndYear')::INTEGER,
         p_student_data->>'semester',
-        CASE WHEN p_student_data->>'validUntil' IS NOT NULL
-             THEN (p_student_data->>'validUntil')::TIMESTAMPTZ ELSE NULL END,
+        v_valid_until, v_soft_block, v_hard_block,
+        v_last_processed_app_id,
         p_student_data->>'approvedBy', NOW(), NOW(), NOW()
     )
     ON CONFLICT (uid) DO UPDATE SET
-        email = COALESCE(EXCLUDED.email, student_profiles.email),
-        full_name = COALESCE(EXCLUDED.full_name, student_profiles.full_name),
+        email = COALESCE(NULLIF(EXCLUDED.email, ''), student_profiles.email),
+        full_name = COALESCE(NULLIF(EXCLUDED.full_name, ''), student_profiles.full_name),
         phone = COALESCE(EXCLUDED.phone, student_profiles.phone),
         alt_phone = COALESCE(EXCLUDED.alt_phone, student_profiles.alt_phone),
         parent_name = COALESCE(EXCLUDED.parent_name, student_profiles.parent_name),
@@ -497,21 +585,23 @@ BEGIN
         department = COALESCE(EXCLUDED.department, student_profiles.department),
         gender = COALESCE(EXCLUDED.gender, student_profiles.gender),
         dob = COALESCE(EXCLUDED.dob, student_profiles.dob),
-        enrollment_id = COALESCE(EXCLUDED.enrollment_id, student_profiles.enrollment_id),
+        enrollment_id = COALESCE(NULLIF(EXCLUDED.enrollment_id, ''), student_profiles.enrollment_id),
         blood_group = COALESCE(EXCLUDED.blood_group, student_profiles.blood_group),
         address = COALESCE(EXCLUDED.address, student_profiles.address),
         profile_photo_url = COALESCE(EXCLUDED.profile_photo_url, student_profiles.profile_photo_url),
         bus_id = COALESCE(EXCLUDED.bus_id, student_profiles.bus_id),
         route_id = COALESCE(EXCLUDED.route_id, student_profiles.route_id),
-        assigned_route_id = COALESCE(EXCLUDED.assigned_route_id, student_profiles.assigned_route_id),
-        assigned_bus_id = COALESCE(EXCLUDED.assigned_bus_id, student_profiles.assigned_bus_id),
-        stop_id = COALESCE(EXCLUDED.stop_id, student_profiles.stop_id),
+        stop_name = COALESCE(EXCLUDED.stop_name, student_profiles.stop_name),
         shift = COALESCE(EXCLUDED.shift, student_profiles.shift),
         status = 'active',
+        session_duration = COALESCE(EXCLUDED.session_duration, student_profiles.session_duration),
         session_start_year = COALESCE(EXCLUDED.session_start_year, student_profiles.session_start_year),
         session_end_year = COALESCE(EXCLUDED.session_end_year, student_profiles.session_end_year),
         semester = COALESCE(EXCLUDED.semester, student_profiles.semester),
         valid_until = COALESCE(EXCLUDED.valid_until, student_profiles.valid_until),
+        soft_block = COALESCE(EXCLUDED.soft_block, student_profiles.soft_block),
+        hard_block = COALESCE(EXCLUDED.hard_block, student_profiles.hard_block),
+        last_processed_application_id = COALESCE(EXCLUDED.last_processed_application_id, student_profiles.last_processed_application_id),
         approved_by = COALESCE(EXCLUDED.approved_by, student_profiles.approved_by),
         approved_at = COALESCE(EXCLUDED.approved_at, student_profiles.approved_at),
         updated_at = NOW();
@@ -791,13 +881,13 @@ BEGIN
     IF v_normalized NOT IN ('morning', 'evening') THEN
         RETURN jsonb_build_object('error', 'Invalid student shift: ' || COALESCE(p_shift, 'NULL') || ' (must be Morning or Evening)');
     END IF;
-    SELECT id, capacity, morning_load, evening_load INTO v_bus FROM buses WHERE id = p_bus_id FOR UPDATE;
+    SELECT id, capacity, morning_load, evening_load INTO v_bus FROM buses WHERE id = p_bus_id OR bus_number = p_bus_id FOR UPDATE LIMIT 1;
     IF NOT FOUND THEN RETURN jsonb_build_object('error', 'Bus ' || p_bus_id || ' not found'); END IF;
     v_new_morning := v_bus.morning_load + CASE WHEN v_normalized = 'morning' THEN 1 ELSE 0 END;
     v_new_evening := v_bus.evening_load + CASE WHEN v_normalized = 'evening' THEN 1 ELSE 0 END;
-    UPDATE buses SET morning_load = v_new_morning, evening_load = v_new_evening, updated_at = NOW()
-    WHERE id = p_bus_id;
-    RETURN jsonb_build_object('busId', p_bus_id, 'capacity', v_bus.capacity,
+    UPDATE buses SET morning_load = v_new_morning, evening_load = v_new_evening, current_members = v_new_morning + v_new_evening, updated_at = NOW()
+    WHERE id = v_bus.id;
+    RETURN jsonb_build_object('busId', v_bus.id, 'capacity', v_bus.capacity,
         'morningLoad', v_new_morning, 'eveningLoad', v_new_evening, 'currentMembers', v_new_morning + v_new_evening,
         'oldShiftLoad', CASE WHEN v_normalized = 'evening' THEN v_bus.evening_load ELSE v_bus.morning_load END,
         'newShiftLoad', CASE WHEN v_normalized = 'evening' THEN v_new_evening ELSE v_new_morning END,
@@ -814,15 +904,13 @@ BEGIN
     IF v_normalized NOT IN ('morning', 'evening') THEN
         RETURN jsonb_build_object('error', 'Invalid student shift: ' || COALESCE(p_shift, 'NULL') || ' (must be Morning or Evening)');
     END IF;
-    SELECT id, capacity, morning_load, evening_load INTO v_bus FROM buses WHERE id = p_bus_id FOR UPDATE;
+    SELECT id, capacity, morning_load, evening_load INTO v_bus FROM buses WHERE id = p_bus_id OR bus_number = p_bus_id FOR UPDATE LIMIT 1;
     IF NOT FOUND THEN RETURN jsonb_build_object('error', 'Bus ' || p_bus_id || ' not found'); END IF;
     v_new_morning := GREATEST(0, v_bus.morning_load - CASE WHEN v_normalized = 'morning' THEN 1 ELSE 0 END);
     v_new_evening := GREATEST(0, v_bus.evening_load - CASE WHEN v_normalized = 'evening' THEN 1 ELSE 0 END);
-    -- current_members is now GENERATED ALWAYS AS (morning_load + evening_load) STORED.
-    -- Do NOT write it explicitly. PostgreSQL computes it atomically on this UPDATE.
-    UPDATE buses SET morning_load = v_new_morning, evening_load = v_new_evening, updated_at = NOW()
-    WHERE id = p_bus_id;
-    RETURN jsonb_build_object('busId', p_bus_id, 'capacity', v_bus.capacity,
+    UPDATE buses SET morning_load = v_new_morning, evening_load = v_new_evening, current_members = v_new_morning + v_new_evening, updated_at = NOW()
+    WHERE id = v_bus.id;
+    RETURN jsonb_build_object('busId', v_bus.id, 'capacity', v_bus.capacity,
         'morningLoad', v_new_morning, 'eveningLoad', v_new_evening, 'currentMembers', v_new_morning + v_new_evening,
         'oldShiftLoad', CASE WHEN v_normalized = 'evening' THEN v_bus.evening_load ELSE v_bus.morning_load END,
         'newShiftLoad', CASE WHEN v_normalized = 'evening' THEN v_new_evening ELSE v_new_morning END,
@@ -952,8 +1040,8 @@ BEGIN
     FOR v_driver_rec IN SELECT * FROM jsonb_array_elements(p_driver_updates) LOOP
         v_is_reserved := (v_driver_rec->>'is_reserved')::boolean;
         UPDATE driver_profiles SET
-            assigned_bus_id = v_driver_rec->>'new_bus_id', bus_id = v_driver_rec->>'new_bus_id',
-            assigned_route_id = v_driver_rec->>'new_route_id', route_id = v_driver_rec->>'new_route_id',
+            bus_id = v_driver_rec->>'new_bus_id',
+            route_id = v_driver_rec->>'new_route_id',
             is_reserved = v_is_reserved,
             status = CASE WHEN v_is_reserved THEN 'reserved' ELSE 'active' END,
             updated_at = NOW()
@@ -1035,34 +1123,6 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 -- 5. VIEWS
 -- =============================================================================
 
-CREATE OR REPLACE VIEW public.bus_occupancy_counts_view AS
-SELECT
-    assigned_bus_id AS bus_id,
-    COUNT(*) AS total_count,
-    SUM(CASE WHEN (shift = 'Morning' OR shift = 'Both') THEN 1 ELSE 0 END) AS morning_count,
-    SUM(CASE WHEN (shift = 'Evening' OR shift = 'Both') THEN 1 ELSE 0 END) AS evening_count
-FROM public.student_profiles
-WHERE (status = 'active')
-   OR (status IN ('soft_blocked', 'pending_deletion') AND seat_released_at IS NULL)
-GROUP BY assigned_bus_id;
-
-CREATE OR REPLACE VIEW public.bus_stop_counts_view AS
-SELECT
-    assigned_bus_id AS bus_id,
-    stop_id,
-    COUNT(*) AS stop_count
-FROM public.student_profiles
-WHERE ((status = 'active')
-   OR (status IN ('soft_blocked', 'pending_deletion') AND seat_released_at IS NULL))
-  AND stop_id IS NOT NULL
-GROUP BY assigned_bus_id, stop_id;
-
--- ── 5.1 Restrict View Access to Service Role ──────────────────────────────────
-REVOKE ALL ON public.bus_occupancy_counts_view FROM public, anon, authenticated;
-REVOKE ALL ON public.bus_stop_counts_view FROM public, anon, authenticated;
-GRANT SELECT ON public.bus_occupancy_counts_view TO service_role;
-GRANT SELECT ON public.bus_stop_counts_view TO service_role;
-
 -- =============================================================================
 -- 6. INDEXES
 -- =============================================================================
@@ -1074,29 +1134,23 @@ CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
 CREATE INDEX IF NOT EXISTS idx_student_profiles_email ON student_profiles(email);
 CREATE INDEX IF NOT EXISTS idx_student_profiles_bus_id ON student_profiles(bus_id);
 CREATE INDEX IF NOT EXISTS idx_student_profiles_route_id ON student_profiles(route_id) WHERE route_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_student_profiles_assigned_route_id ON student_profiles(assigned_route_id);
-CREATE INDEX IF NOT EXISTS idx_student_profiles_assigned_bus_id ON student_profiles(assigned_bus_id);
 CREATE INDEX IF NOT EXISTS idx_student_profiles_shift ON student_profiles(shift);
 CREATE INDEX IF NOT EXISTS idx_student_profiles_status ON student_profiles(status);
 CREATE INDEX IF NOT EXISTS idx_student_profiles_enrollment_id ON student_profiles(enrollment_id);
 CREATE INDEX IF NOT EXISTS idx_student_profiles_status_valid_until ON student_profiles(status, valid_until);
-CREATE INDEX IF NOT EXISTS idx_student_profiles_assigned_bus_shift ON student_profiles(assigned_bus_id, shift) WHERE assigned_bus_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_student_profiles_bus_shift ON student_profiles(bus_id, shift) WHERE bus_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_student_profiles_seat_released_at ON student_profiles(seat_released_at) WHERE seat_released_at IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_driver_profiles_email ON driver_profiles(email);
-CREATE INDEX IF NOT EXISTS idx_driver_profiles_assigned_bus_id ON driver_profiles(assigned_bus_id) WHERE assigned_bus_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_driver_profiles_assigned_route_id ON driver_profiles(assigned_route_id);
 CREATE INDEX IF NOT EXISTS idx_driver_profiles_bus_id ON driver_profiles(bus_id);
 CREATE INDEX IF NOT EXISTS idx_driver_profiles_route_id ON driver_profiles(route_id);
 CREATE INDEX IF NOT EXISTS idx_driver_profiles_shift ON driver_profiles(shift);
 CREATE INDEX IF NOT EXISTS idx_driver_profiles_status ON driver_profiles(status);
-CREATE INDEX IF NOT EXISTS idx_driver_profiles_driver_id ON driver_profiles(driver_id);
 CREATE INDEX IF NOT EXISTS idx_driver_profiles_is_reserved ON driver_profiles(is_reserved);
 
 CREATE INDEX IF NOT EXISTS idx_moderator_profiles_email ON moderator_profiles(email);
 CREATE INDEX IF NOT EXISTS idx_moderator_profiles_status ON moderator_profiles(status);
 CREATE INDEX IF NOT EXISTS idx_moderator_profiles_employee_id ON moderator_profiles(employee_id);
-CREATE INDEX IF NOT EXISTS idx_moderator_profiles_managing_team ON moderator_profiles(managing_team);
 
 CREATE INDEX IF NOT EXISTS idx_admin_profiles_email ON admin_profiles(email);
 CREATE INDEX IF NOT EXISTS idx_admin_profiles_employee_id ON admin_profiles(employee_id);
@@ -1106,9 +1160,7 @@ CREATE INDEX IF NOT EXISTS idx_unauth_users_email ON unauth_users(email);
 CREATE INDEX IF NOT EXISTS idx_unauth_users_status ON unauth_users(status);
 CREATE INDEX IF NOT EXISTS idx_unauth_users_last_login_at ON unauth_users(last_login_at);
 
--- Calendar
-CREATE UNIQUE INDEX IF NOT EXISTS uq_academic_calendar_config_singleton ON academic_calendar_config(is_active) WHERE (is_active = TRUE);
-CREATE INDEX IF NOT EXISTS idx_academic_calendar_config_updated_at ON academic_calendar_config(updated_at DESC);
+-- Calendar (Kept in Firestore)
 CREATE INDEX IF NOT EXISTS idx_migration_log_domain_id ON migration_log(domain_id);
 CREATE INDEX IF NOT EXISTS idx_migration_log_status ON migration_log(status);
 
@@ -1144,7 +1196,7 @@ CREATE INDEX IF NOT EXISTS idx_buses_evening_load ON buses(evening_load);
 -- idx_routes_route_id removed: route_id column dropped (was always identical to id).
 CREATE INDEX IF NOT EXISTS idx_routes_status ON routes(status);
 
--- Indexes for active_trips, bus_locations, driver_status, waiting_flags, driver_location_updates, route_cache, driver_swap_requests, temporary_assignments, missed_bus_requests, device_sessions, reassignment_logs, and payments are defined in COMPLETE_SCHEMA.sql.
+-- Indexes for active_trips, bus_locations, driver_status, waiting_flags, driver_location_updates, driver_swap_requests, temporary_assignments, missed_bus_requests, device_sessions, reassignment_logs, and payments are defined in COMPLETE_SCHEMA.sql.
 CREATE INDEX IF NOT EXISTS idx_temp_assignments_source_request ON temporary_assignments(source_request_id);
 
 -- Processed payments
@@ -1162,9 +1214,6 @@ CREATE INDEX IF NOT EXISTS idx_audit_events_category_ts ON audit_events(category
 CREATE INDEX IF NOT EXISTS idx_audit_events_severity_ts ON audit_events(severity, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_events_actor_role_ts ON audit_events(actor_role, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_events_created_at ON audit_events(created_at DESC);
-
--- Config
-CREATE INDEX IF NOT EXISTS idx_system_config_data ON system_config USING GIN (config_data);
 
 -- =============================================================================
 -- 7. RLS POLICIES & GRANTS
@@ -1281,12 +1330,9 @@ ALTER TABLE public.unauth_users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.applications ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.buses ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.routes ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.academic_calendar_config ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.migration_log ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.processed_payments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.system_config ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.system_markers ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.audit_events ENABLE ROW LEVEL SECURITY;
 
 -- ── 7.2 SELECT Policies (Zero-Trust Write: Writes are service-role only) ──────
@@ -1312,11 +1358,8 @@ DROP POLICY IF EXISTS "service_role_bypass_applications" ON public.applications;
 DROP POLICY IF EXISTS "service_role_bypass_buses" ON public.buses;
 DROP POLICY IF EXISTS "service_role_bypass_routes" ON public.routes;
 DROP POLICY IF EXISTS "service_role_bypass_notifications" ON public.notifications;
-DROP POLICY IF EXISTS "service_role_bypass_system_config" ON public.system_config;
-DROP POLICY IF EXISTS "service_role_bypass_system_markers" ON public.system_markers;
 DROP POLICY IF EXISTS "service_role_bypass_processed_payments" ON public.processed_payments;
 DROP POLICY IF EXISTS "service_role_bypass_audit_events" ON public.audit_events;
-DROP POLICY IF EXISTS "service_role_bypass_academic_calendar" ON public.academic_calendar_config;
 DROP POLICY IF EXISTS "service_role_bypass_migration_log" ON public.migration_log;
 
 -- users SELECT policy
@@ -1366,11 +1409,8 @@ CREATE POLICY "service_role_bypass_applications" ON public.applications FOR ALL 
 CREATE POLICY "service_role_bypass_buses" ON public.buses FOR ALL TO service_role USING (true) WITH CHECK (true);
 CREATE POLICY "service_role_bypass_routes" ON public.routes FOR ALL TO service_role USING (true) WITH CHECK (true);
 CREATE POLICY "service_role_bypass_notifications" ON public.notifications FOR ALL TO service_role USING (true) WITH CHECK (true);
-CREATE POLICY "service_role_bypass_system_config" ON public.system_config FOR ALL TO service_role USING (true) WITH CHECK (true);
-CREATE POLICY "service_role_bypass_system_markers" ON public.system_markers FOR ALL TO service_role USING (true) WITH CHECK (true);
 CREATE POLICY "service_role_bypass_processed_payments" ON public.processed_payments FOR ALL TO service_role USING (true) WITH CHECK (true);
 CREATE POLICY "service_role_bypass_audit_events" ON public.audit_events FOR ALL TO service_role USING (true) WITH CHECK (true);
-CREATE POLICY "service_role_bypass_academic_calendar" ON public.academic_calendar_config FOR ALL TO service_role USING (true) WITH CHECK (true);
 CREATE POLICY "service_role_bypass_migration_log" ON public.migration_log FOR ALL TO service_role USING (true) WITH CHECK (true);
 
 -- =============================================================================
@@ -1551,11 +1591,6 @@ CREATE TRIGGER trg_notifications_updated_at
     BEFORE UPDATE ON public.notifications
     FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
 
-DROP TRIGGER IF EXISTS trg_academic_calendar_config_updated_at ON public.academic_calendar_config;
-CREATE TRIGGER trg_academic_calendar_config_updated_at
-    BEFORE UPDATE ON public.academic_calendar_config
-    FOR EACH ROW EXECUTE FUNCTION trg_set_updated_at();
-
 DROP TRIGGER IF EXISTS trg_migration_log_updated_at ON public.migration_log;
 CREATE TRIGGER trg_migration_log_updated_at
     BEFORE UPDATE ON public.migration_log
@@ -1636,7 +1671,7 @@ DECLARE
     v_student_updated  INTEGER;
 BEGIN
     -- 1. Lock and validate student (FOR UPDATE prevents concurrent soft-blocks)
-    SELECT uid, status, assigned_bus_id, shift
+    SELECT uid, status, bus_id, shift
     INTO v_student
     FROM student_profiles
     WHERE uid = p_student_uid
@@ -1767,7 +1802,7 @@ BEGIN
 
     -- 4. Increment bus capacity
     UPDATE buses
-    SET morning_load = v_new_morning, evening_load = v_new_evening, updated_at = NOW()
+    SET morning_load = v_new_morning, evening_load = v_new_evening, current_members = v_new_morning + v_new_evening, updated_at = NOW()
     WHERE id = p_bus_id;
 
     -- 5. Update student profile (re-activate, extend validity)
@@ -1787,7 +1822,7 @@ BEGIN
     IF v_student_updated <> 1 THEN
         -- Compensate bus capacity
         UPDATE buses
-        SET morning_load = v_bus.morning_load, evening_load = v_bus.evening_load, updated_at = NOW()
+        SET morning_load = v_bus.morning_load, evening_load = v_bus.evening_load, current_members = v_bus.morning_load + v_bus.evening_load, updated_at = NOW()
         WHERE id = p_bus_id;
         RETURN jsonb_build_object('success', false, 'error', 'Student profile not found or not updated: ' || p_student_uid);
     END IF;
@@ -1812,7 +1847,8 @@ BEGIN
         -- Compensate both student and bus
         UPDATE student_profiles SET status = 'soft_blocked', seat_released_at = NOW(), updated_at = NOW()
         WHERE uid = p_student_uid;
-        UPDATE buses SET morning_load = v_bus.morning_load, evening_load = v_bus.evening_load, updated_at = NOW()
+        UPDATE buses
+        SET morning_load = v_bus.morning_load, evening_load = v_bus.evening_load, current_members = v_bus.morning_load + v_bus.evening_load, updated_at = NOW()
         WHERE id = p_bus_id;
         RETURN jsonb_build_object('success', false, 'error', 'Application lock expired or not found: ' || p_application_id);
     END IF;
@@ -1852,8 +1888,8 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
     SELECT
         COUNT(*)                                                        AS total_students,
         COUNT(*) FILTER (WHERE status = 'active')                       AS active_students,
-        COUNT(*) FILTER (WHERE status = 'active' AND shift = 'Morning') AS morning_students,
-        COUNT(*) FILTER (WHERE status = 'active' AND shift = 'Evening') AS evening_students,
+        COUNT(*) FILTER (WHERE LOWER(shift) = 'morning')                AS morning_students,
+        COUNT(*) FILTER (WHERE LOWER(shift) = 'evening')                AS evening_students,
         COUNT(*) FILTER (WHERE status IN ('soft_blocked', 'expired'))   AS expired_students
     FROM public.student_profiles;
 $$;
@@ -1978,12 +2014,10 @@ BEGIN
     -- 2. Clear route/bus/stop from students assigned to this route
     UPDATE public.student_profiles
     SET route_id          = NULL,
-        assigned_route_id = NULL,
         bus_id            = NULL,
-        assigned_bus_id   = NULL,
-        stop_id           = NULL,
+        stop_name         = NULL,
         updated_at        = NOW()
-    WHERE route_id = p_route_id OR assigned_route_id = p_route_id;
+    WHERE route_id = p_route_id;
     GET DIAGNOSTICS v_students_cleaned = ROW_COUNT;
 
     -- 3. Delete route
@@ -2093,53 +2127,97 @@ GRANT  EXECUTE ON FUNCTION public.activate_session_batch(INTEGER) TO service_rol
 -- Args: p_plans JSONB — array of { studentId, fromBusId, toBusId, studentShift? }
 -- Returns: { success, processed }
 -- Atomically reassigns a batch of students from one bus to another,
--- decrementing source and incrementing destination capacity per student.
+-- decrementing source and incrementing destination capacity per student
+-- and recalculating bus capacity counts for 100% precision.
 CREATE OR REPLACE FUNCTION public.reassign_students_atomically(p_plans JSONB)
 RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE
-    v_plan       JSONB;
-    v_student    RECORD;
-    v_shift      TEXT;
-    v_processed  INTEGER := 0;
-    v_cap_result JSONB;
+    v_plan           JSONB;
+    v_student        RECORD;
+    v_old_shift      TEXT;
+    v_new_shift      TEXT;
+    v_target_route_id TEXT;
+    v_stop_name      TEXT;
+    v_student_id     TEXT;
+    v_from_bus_id    TEXT;
+    v_to_bus_id      TEXT;
+    v_processed      INTEGER := 0;
+    v_cap_result     JSONB;
+    v_affected_buses TEXT[] := ARRAY[]::TEXT[];
 BEGIN
     FOR v_plan IN SELECT * FROM jsonb_array_elements(p_plans) LOOP
+        v_student_id  := COALESCE(v_plan->>'studentId', v_plan->>'student_id');
+        v_from_bus_id := COALESCE(v_plan->>'fromBusId', v_plan->>'from_bus_id');
+        v_to_bus_id   := COALESCE(v_plan->>'toBusId', v_plan->>'to_bus_id');
+
+        IF v_student_id IS NULL OR v_student_id = '' THEN CONTINUE; END IF;
+
+        IF v_from_bus_id IS NOT NULL AND v_from_bus_id <> '' THEN
+            v_affected_buses := array_append(v_affected_buses, v_from_bus_id);
+        END IF;
+        IF v_to_bus_id IS NOT NULL AND v_to_bus_id <> '' THEN
+            v_affected_buses := array_append(v_affected_buses, v_to_bus_id);
+        END IF;
+
         -- Read student (lock row to prevent concurrent modification)
-        SELECT uid, shift, bus_id, assigned_bus_id
+        SELECT uid, shift, bus_id, stop_name
         INTO v_student
         FROM student_profiles
-        WHERE uid = v_plan->>'studentId'
+        WHERE uid = v_student_id
         FOR UPDATE;
 
         IF NOT FOUND THEN CONTINUE; END IF;
 
-        -- Resolve shift (plan override > student record)
-        v_shift := LOWER(TRIM(COALESCE(v_plan->>'studentShift', v_student.shift, 'Morning')));
-        IF v_shift NOT IN ('morning', 'evening') THEN v_shift := 'morning'; END IF;
+        -- Resolve old shift for decrement (student's current shift)
+        v_old_shift := LOWER(TRIM(COALESCE(v_student.shift, 'Morning')));
+        IF v_old_shift NOT IN ('morning', 'evening') THEN v_old_shift := 'morning'; END IF;
 
-        -- Decrement from-bus capacity (best-effort — log error but don't abort)
-        IF v_plan->>'fromBusId' IS NOT NULL AND v_plan->>'fromBusId' <> '' THEN
-            SELECT bus_decrement_capacity(v_plan->>'fromBusId', v_shift) INTO v_cap_result;
+        -- Resolve new shift for increment (plan override > student record)
+        v_new_shift := LOWER(TRIM(COALESCE(v_plan->>'studentShift', v_plan->>'shift', v_student.shift, 'Morning')));
+        IF v_new_shift NOT IN ('morning', 'evening') THEN v_new_shift := 'morning'; END IF;
+
+        -- Fetch target bus route_id
+        SELECT route_id INTO v_target_route_id
+        FROM buses
+        WHERE id = v_to_bus_id OR bus_number = v_to_bus_id
+        LIMIT 1;
+
+        -- Decrement from-bus capacity using student's OLD shift
+        IF v_from_bus_id IS NOT NULL AND v_from_bus_id <> '' THEN
+            SELECT bus_decrement_capacity(v_from_bus_id, v_old_shift) INTO v_cap_result;
         END IF;
 
-        -- Increment to-bus capacity (best-effort)
-        IF v_plan->>'toBusId' IS NOT NULL AND v_plan->>'toBusId' <> '' THEN
-            SELECT bus_increment_capacity(v_plan->>'toBusId', v_shift) INTO v_cap_result;
+        -- Increment to-bus capacity using student's NEW shift
+        IF v_to_bus_id IS NOT NULL AND v_to_bus_id <> '' THEN
+            SELECT bus_increment_capacity(v_to_bus_id, v_new_shift) INTO v_cap_result;
         END IF;
 
-        -- Update student record
+        -- Resolve stop_name override if provided
+        v_stop_name := COALESCE(v_plan->>'stopName', v_plan->>'stop_name', v_student.stop_name);
+
+        -- Update student record (bus_id, route_id, shift, stop_name)
         UPDATE student_profiles SET
-            bus_id          = v_plan->>'toBusId',
-            assigned_bus_id = v_plan->>'toBusId',
+            bus_id          = v_to_bus_id,
+            route_id        = COALESCE(v_target_route_id, route_id),
+            shift           = INITCAP(v_new_shift),
+            stop_name       = v_stop_name,
             updated_at      = NOW()
-        WHERE uid = v_plan->>'studentId';
+        WHERE uid = v_student_id;
 
         v_processed := v_processed + 1;
     END LOOP;
 
+    -- Recalculate bus load counts for all affected buses to ensure 100% precision
+    FOR v_to_bus_id IN SELECT DISTINCT unnest(v_affected_buses) LOOP
+        UPDATE buses b SET
+            morning_load = (SELECT COUNT(*) FROM student_profiles sp WHERE (sp.bus_id = b.id OR sp.bus_id = b.bus_number) AND LOWER(sp.shift) = 'morning' AND sp.status = 'active'),
+            evening_load = (SELECT COUNT(*) FROM student_profiles sp WHERE (sp.bus_id = b.id OR sp.bus_id = b.bus_number) AND LOWER(sp.shift) = 'evening' AND sp.status = 'active'),
+            current_members = (SELECT COUNT(*) FROM student_profiles sp WHERE (sp.bus_id = b.id OR sp.bus_id = b.bus_number) AND sp.status = 'active'),
+            updated_at = NOW()
+        WHERE b.id = v_to_bus_id OR b.bus_number = v_to_bus_id;
+    END LOOP;
+
     RETURN jsonb_build_object('success', true, 'processed', v_processed);
-EXCEPTION WHEN OTHERS THEN
-    RETURN jsonb_build_object('success', false, 'error', SQLERRM, 'processed', v_processed);
 END;
 $$;
 
@@ -2185,6 +2263,7 @@ CREATE POLICY "processed_operations_delete_service" ON public.processed_operatio
 
 
 -- ┌─ execute_reassignment_rollback RPC ────────────────────────────────────────
+DROP FUNCTION IF EXISTS public.execute_reassignment_rollback(TEXT, TEXT, TEXT, JSONB);
 CREATE OR REPLACE FUNCTION public.execute_reassignment_rollback(
     p_operation_id TEXT,
     p_actor_id TEXT,
@@ -2195,17 +2274,26 @@ RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE
     v_orig_status TEXT;
     v_orig_changes JSONB;
+    v_changes_array JSONB;
     v_change JSONB;
     v_collection TEXT;
     v_doc_id TEXT;
     v_before JSONB;
     v_after JSONB;
     v_student_row RECORD;
-    v_bus_row RECORD;
-    v_driver_row RECORD;
+    v_target_route_id TEXT;
     v_reverted_docs TEXT[] := ARRAY[]::TEXT[];
+    v_affected_buses TEXT[] := ARRAY[]::TEXT[];
+    v_bus_id_item TEXT;
     v_row_updated INTEGER;
 BEGIN
+    -- Handle case where p_changes might be passed as JSON string or JSON array
+    IF jsonb_typeof(p_changes) = 'string' THEN
+        v_changes_array := (p_changes#>>'{}')::jsonb;
+    ELSE
+        v_changes_array := p_changes;
+    END IF;
+
     -- 1. Check original log status and lock it
     SELECT status, changes INTO v_orig_status, v_orig_changes
     FROM public.reassignment_logs
@@ -2217,7 +2305,6 @@ BEGIN
     END IF;
 
     IF v_orig_status = 'rolled_back' THEN
-        -- Idempotency: if already rolled back, we can succeed with no-op
         RETURN jsonb_build_object('success', true, 'message', 'Reassignment already rolled back', 'reverted_docs', '[]'::jsonb);
     END IF;
 
@@ -2225,8 +2312,8 @@ BEGIN
         RETURN jsonb_build_object('success', false, 'error', 'Only committed reassignments can be rolled back');
     END IF;
 
-    -- 2. Verify all entities exist and validate preconditions (after snapshot match)
-    FOR v_change IN SELECT * FROM jsonb_array_elements(p_changes) LOOP
+    -- 2. Verify all entities exist and validate preconditions
+    FOR v_change IN SELECT jsonb_array_elements(v_changes_array) LOOP
         v_collection := v_change->>'collection';
         v_doc_id := v_change->>'docId';
         v_after := v_change->'after';
@@ -2241,72 +2328,37 @@ BEGIN
                 RETURN jsonb_build_object('success', false, 'error', 'Precondition failed: Student ' || v_doc_id || ' no longer exists');
             END IF;
             
-            -- Only validate fields originally modified by the operation
-            IF v_after ? 'busId' AND COALESCE(v_student_row.bus_id, '') <> COALESCE(v_after->>'busId', '') THEN
-                RETURN jsonb_build_object('success', false, 'error', 'Precondition failed: Student ' || v_doc_id || ' busId has changed since the reassignment (expected ' || COALESCE(v_after->>'busId', 'NULL') || ', found ' || COALESCE(v_student_row.bus_id, 'NULL') || ')');
-            END IF;
-            
-            IF v_after ? 'shift' AND COALESCE(v_student_row.shift, '') <> COALESCE(v_after->>'shift', '') THEN
-                RETURN jsonb_build_object('success', false, 'error', 'Precondition failed: Student ' || v_doc_id || ' shift has changed since the reassignment (expected ' || COALESCE(v_after->>'shift', 'NULL') || ', found ' || COALESCE(v_student_row.shift, 'NULL') || ')');
-            END IF;
-            
-        ELSIF v_collection = 'buses' THEN
-            SELECT morning_load, evening_load, driver_uid, route_id, route_name INTO v_bus_row 
-            FROM public.buses 
-            WHERE id = v_doc_id 
-            FOR UPDATE;
-            
-            IF NOT FOUND THEN
-                RETURN jsonb_build_object('success', false, 'error', 'Precondition failed: Bus ' || v_doc_id || ' no longer exists');
-            END IF;
-            
-            IF v_after ? 'morningLoad' AND COALESCE((v_after->>'morningLoad')::INTEGER, 0) <> COALESCE(v_bus_row.morning_load, 0) THEN
-                RETURN jsonb_build_object('success', false, 'error', 'Precondition failed: Bus ' || v_doc_id || ' morningLoad has changed since the reassignment');
-            END IF;
-            
-            IF v_after ? 'eveningLoad' AND COALESCE((v_after->>'eveningLoad')::INTEGER, 0) <> COALESCE(v_bus_row.evening_load, 0) THEN
-                RETURN jsonb_build_object('success', false, 'error', 'Precondition failed: Bus ' || v_doc_id || ' eveningLoad has changed since the reassignment');
-            END IF;
-            
-            IF v_after ? 'driver_uid' AND COALESCE(v_after->>'driver_uid', '') <> COALESCE(v_bus_row.driver_uid, '') THEN
-                RETURN jsonb_build_object('success', false, 'error', 'Precondition failed: Bus ' || v_doc_id || ' driver_uid has changed since the reassignment');
-            END IF;
-            
-            IF v_after ? 'route_id' AND COALESCE(v_after->>'route_id', '') <> COALESCE(v_bus_row.route_id, '') THEN
-                RETURN jsonb_build_object('success', false, 'error', 'Precondition failed: Bus ' || v_doc_id || ' route_id has changed since the reassignment');
-            END IF;
-            
-        ELSIF v_collection = 'drivers' THEN
-            SELECT assigned_bus_id, is_reserved INTO v_driver_row 
-            FROM public.driver_profiles 
-            WHERE uid = v_doc_id 
-            FOR UPDATE;
-            
-            IF NOT FOUND THEN
-                RETURN jsonb_build_object('success', false, 'error', 'Precondition failed: Driver ' || v_doc_id || ' no longer exists');
-            END IF;
-            
-            IF v_after ? 'assigned_bus_id' AND COALESCE(v_after->>'assigned_bus_id', '') <> COALESCE(v_driver_row.assigned_bus_id, '') THEN
-                RETURN jsonb_build_object('success', false, 'error', 'Precondition failed: Driver ' || v_doc_id || ' assigned_bus_id has changed since the reassignment');
-            END IF;
-            
-            IF v_after ? 'is_reserved' AND COALESCE((v_after->>'is_reserved')::BOOLEAN, FALSE) <> COALESCE(v_driver_row.is_reserved, FALSE) THEN
-                RETURN jsonb_build_object('success', false, 'error', 'Precondition failed: Driver ' || v_doc_id || ' is_reserved has changed since the reassignment');
+            IF (v_after ? 'busId' OR v_after ? 'bus_id') AND COALESCE(v_student_row.bus_id, '') <> COALESCE(v_after->>'busId', v_after->>'bus_id', '') THEN
+                RETURN jsonb_build_object('success', false, 'error', 'Precondition failed: Student ' || v_doc_id || ' busId has changed since the reassignment');
             END IF;
         END IF;
     END LOOP;
 
-    -- 3. Preconditions validated. Perform atomic rollback in reverse order.
-    FOR v_change IN SELECT * FROM jsonb_array_elements(p_changes) LOOP
+    -- 3. Perform atomic rollback
+    FOR v_change IN SELECT jsonb_array_elements(v_changes_array) LOOP
         v_collection := v_change->>'collection';
         v_doc_id := v_change->>'docId';
         v_before := v_change->'before';
+        v_after := v_change->'after';
         
         IF v_collection = 'students' THEN
+            v_target_route_id := NULL;
+            IF (v_before ? 'busId' OR v_before ? 'bus_id') AND COALESCE(v_before->>'busId', v_before->>'bus_id') <> '' THEN
+                SELECT route_id INTO v_target_route_id FROM buses WHERE id = COALESCE(v_before->>'busId', v_before->>'bus_id') OR bus_number = COALESCE(v_before->>'busId', v_before->>'bus_id') LIMIT 1;
+            END IF;
+
+            IF v_before ? 'busId' OR v_before ? 'bus_id' THEN
+                v_affected_buses := array_append(v_affected_buses, COALESCE(v_before->>'busId', v_before->>'bus_id'));
+            END IF;
+            IF v_after ? 'busId' OR v_after ? 'bus_id' THEN
+                v_affected_buses := array_append(v_affected_buses, COALESCE(v_after->>'busId', v_after->>'bus_id'));
+            END IF;
+
             UPDATE public.student_profiles SET
-                bus_id = CASE WHEN v_before ? 'busId' THEN v_before->>'busId' ELSE bus_id END,
-                assigned_bus_id = CASE WHEN v_before ? 'busId' THEN v_before->>'busId' ELSE assigned_bus_id END,
-                shift = CASE WHEN v_before ? 'shift' THEN v_before->>'shift' ELSE shift END,
+                bus_id = CASE WHEN v_before ? 'busId' THEN v_before->>'busId' WHEN v_before ? 'bus_id' THEN v_before->>'bus_id' ELSE bus_id END,
+                route_id = COALESCE(v_target_route_id, CASE WHEN v_before ? 'routeId' THEN v_before->>'routeId' WHEN v_before ? 'route_id' THEN v_before->>'route_id' ELSE route_id END),
+                shift = CASE WHEN v_before ? 'shift' THEN INITCAP(v_before->>'shift') ELSE shift END,
+                stop_name = CASE WHEN v_before ? 'stopName' THEN v_before->>'stopName' WHEN v_before ? 'stop_name' THEN v_before->>'stop_name' ELSE stop_name END,
                 updated_at = NOW()
             WHERE uid = v_doc_id;
             
@@ -2316,45 +2368,37 @@ BEGIN
             END IF;
             
             v_reverted_docs := array_append(v_reverted_docs, v_change->>'docPath');
-            
-        ELSIF v_collection = 'buses' THEN
-            UPDATE public.buses SET
-                morning_load = CASE WHEN v_before ? 'morningLoad' THEN (v_before->>'morningLoad')::INTEGER ELSE morning_load END,
-                evening_load = CASE WHEN v_before ? 'eveningLoad' THEN (v_before->>'eveningLoad')::INTEGER ELSE evening_load END,
-                driver_uid = CASE WHEN v_before ? 'driver_uid' THEN v_before->>'driver_uid' ELSE driver_uid END,
-                route_id = CASE WHEN v_before ? 'route_id' THEN v_before->>'route_id' ELSE route_id END,
-                route_name = CASE WHEN v_before ? 'route_name' THEN v_before->>'route_name' ELSE route_name END,
-                updated_at = NOW()
-            WHERE id = v_doc_id;
-            
-            GET DIAGNOSTICS v_row_updated = ROW_COUNT;
-            IF v_row_updated <> 1 THEN
-                RAISE EXCEPTION 'Failed to update bus %', v_doc_id;
-            END IF;
-            
-            v_reverted_docs := array_append(v_reverted_docs, v_change->>'docPath');
-            
-        ELSIF v_collection = 'drivers' THEN
-            UPDATE public.driver_profiles SET
-                assigned_bus_id = CASE WHEN v_before ? 'assigned_bus_id' THEN v_before->>'assigned_bus_id' ELSE assigned_bus_id END,
-                is_reserved = CASE WHEN v_before ? 'is_reserved' THEN (v_before->>'is_reserved')::BOOLEAN ELSE is_reserved END,
-                updated_at = NOW()
-            WHERE uid = v_doc_id;
-            
-            GET DIAGNOSTICS v_row_updated = ROW_COUNT;
-            IF v_row_updated <> 1 THEN
-                RAISE EXCEPTION 'Failed to update driver profile %', v_doc_id;
-            END IF;
-            
-            v_reverted_docs := array_append(v_reverted_docs, v_change->>'docPath');
         END IF;
     END LOOP;
 
-    RETURN jsonb_build_object('success', true, 'reverted_docs', to_jsonb(v_reverted_docs));
-EXCEPTION WHEN OTHERS THEN
-    RAISE;
+    -- 4. Recalculate bus load counts for all affected buses
+    FOR v_bus_id_item IN SELECT DISTINCT unnest(v_affected_buses) LOOP
+        UPDATE buses b SET
+            morning_load = (SELECT COUNT(*) FROM student_profiles sp WHERE (sp.bus_id = b.id OR sp.bus_id = b.bus_number) AND LOWER(sp.shift) = 'morning' AND sp.status = 'active'),
+            evening_load = (SELECT COUNT(*) FROM student_profiles sp WHERE (sp.bus_id = b.id OR sp.bus_id = b.bus_number) AND LOWER(sp.shift) = 'evening' AND sp.status = 'active'),
+            current_members = (SELECT COUNT(*) FROM student_profiles sp WHERE (sp.bus_id = b.id OR sp.bus_id = b.bus_number) AND sp.status = 'active'),
+            updated_at = NOW()
+        WHERE b.id = v_bus_id_item OR b.bus_number = v_bus_id_item;
+    END LOOP;
+
+    -- 5. Mark log as rolled back
+    UPDATE public.reassignment_logs SET
+        status = 'rolled_back',
+        meta = jsonb_set(COALESCE(meta, '{}'::jsonb), '{rolledBackAt}', to_jsonb(NOW()))
+    WHERE operation_id = p_operation_id;
+
+    RETURN jsonb_build_object(
+        'success', true,
+        'message', 'Rollback executed successfully',
+        'reverted_docs', to_jsonb(v_reverted_docs)
+    );
 END;
 $$;
+
+REVOKE EXECUTE ON FUNCTION public.reassign_students_atomically(JSONB) FROM public;
+REVOKE EXECUTE ON FUNCTION public.reassign_students_atomically(JSONB) FROM authenticated;
+REVOKE EXECUTE ON FUNCTION public.reassign_students_atomically(JSONB) FROM anon;
+GRANT  EXECUTE ON FUNCTION public.reassign_students_atomically(JSONB) TO service_role;
 
 REVOKE EXECUTE ON FUNCTION public.execute_reassignment_rollback(TEXT, TEXT, TEXT, JSONB) FROM public;
 REVOKE EXECUTE ON FUNCTION public.execute_reassignment_rollback(TEXT, TEXT, TEXT, JSONB) FROM authenticated;
@@ -2391,7 +2435,7 @@ DO $$
 BEGIN
     RAISE NOTICE '✅ ITMS Migration Addendum (Section 8) complete.';
     RAISE NOTICE '   Tables added/amended : active_trips (+ fcm_start_sent, fcm_end_sent, expires_at), fcm_tokens';
-    RAISE NOTICE '   Triggers added       : applications, buses, routes, notifications, academic_calendar_config, migration_log';
+    RAISE NOTICE '   Triggers added       : applications, buses, routes, notifications, migration_log';
     RAISE NOTICE '   Indexes added        : valid_until (active students), notifications composite, hidden_for_user_ids GIN, applications state+type';
     RAISE NOTICE '   RPCs added           : soft_block_student_with_seat_release, approve_renewal_with_seat, get_student_profile_counts, get_application_counts, delete_student_cascade_v1, delete_route_cascade_v1, activate_session_batch, reassign_students_atomically';
     RAISE NOTICE '   RLS policies added   : notifications_select_own (authenticated)';

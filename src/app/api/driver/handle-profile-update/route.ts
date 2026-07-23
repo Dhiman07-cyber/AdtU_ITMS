@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+﻿import { NextResponse } from 'next/server';
 import { db as adminDb } from '@/lib/firebase-admin';
 import { v2 as cloudinary } from 'cloudinary';
 import { withSecurity } from '@/lib/security/api-security';
@@ -59,9 +59,9 @@ export const POST = withSecurity(
     let isAuthorized = false;
 
     // Check if driver is assigned to student's bus (from PG)
-    const assignedBusId = studentData.assignedBusId || studentData.busId;
-    if (assignedBusId) {
-      const busData = await getBusById(assignedBusId);
+    const busId = studentData.busId || studentData.busId;
+    if (busId) {
+      const busData = await getBusById(busId);
       if (busData) {
         if ((busData as any).assignedDriverId === driverUid || busData.driverUID === driverUid) {
           isAuthorized = true;
@@ -76,7 +76,7 @@ export const POST = withSecurity(
 
       for (const bus of driverBuses) {
         const busId = bus.busId || bus.id || '';
-        if (assignedBusId === busId) {
+        if (busId === busId) {
           isAuthorized = true;
           break;
         }

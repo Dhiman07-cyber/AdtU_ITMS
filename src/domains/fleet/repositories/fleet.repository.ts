@@ -96,6 +96,7 @@ export async function reassignStudentsAtomically(plans: Array<{
   fromBusId: string;
   toBusId: string;
   studentShift?: string;
+  stopName?: string;
 }>) {
   return pgReassignStudentsAtomically(plans);
 }

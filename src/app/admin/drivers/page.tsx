@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useAuth } from '@/contexts/auth-context';
 import { useEffect, useState, useMemo, useCallback, memo } from 'react';
@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { exportToExcel } from '@/lib/export-helpers';
 import { ExportButton } from '@/components/ExportButton';
+import { supabase } from '@/lib/supabase-client';
 import { useToast } from '@/contexts/toast-context';
 import {
   Dialog,
@@ -311,8 +312,8 @@ export default function AdminDrivers() {
       })
       .sort((a, b) => {
         // Sort: Bus-assigned first (by bus number), then reserved
-        const aBusId = a.assignedBusId || a.busId;
-        const bBusId = b.assignedBusId || b.busId;
+        const aBusId = a.busId || a.busId;
+        const bBusId = b.busId || b.busId;
 
         if (aBusId && !bBusId) return -1; // a has bus, b doesn't
         if (!aBusId && bBusId) return 1;  // b has bus, a doesn't
@@ -325,53 +326,56 @@ export default function AdminDrivers() {
       });
   }, [drivers, searchTerm, experienceFilter]);
 
-  // Export drivers data
+  // Export drivers data from Supabase
   const handleExportDrivers = async () => {
     try {
       const currentDate = new Date();
       const dateStr = currentDate.toISOString().split('T')[0].replace(/-/g, '-');
 
-      // Generate drivers data in the same format as the comprehensive report
-      const driversData = drivers.map((driver, index) => {
-        // Find assigned bus - use CORRECT Firestore field names
-        // Check: 1) Driver has busId/assignedBusId, 2) Bus has this driver as activeDriverId/assignedDriverId
-        const assignedBus = buses.find(b =>
-          b.id === driver.assignedBusId ||
-          b.id === driver.busId ||
-          b.busId === driver.assignedBusId ||
-          b.activeDriverId === driver.id ||
-          b.assignedDriverId === driver.id
-        );
+      // Fetch all driver profiles from Supabase PostgreSQL table 'driver_profiles'
+      const { data: rawDrivers, error } = await supabase
+        .from('driver_profiles')
+        .select('*')
+        .order('full_name', { ascending: true });
 
-        // Show "Reserved" for drivers without bus, "Active" for drivers with bus
-        const busAssignment = assignedBus ? `Bus-${extractNumber(assignedBus.busId || assignedBus.id)}` : 'Reserved';
-        const status = assignedBus ? 'Active' : 'Reserved';
+      if (error) throw error;
+
+      // Fetch buses to resolve assigned bus numbers
+      const { data: rawBuses } = await supabase
+        .from('buses')
+        .select('id, bus_number, registration_number');
+
+      const busMap = new Map((rawBuses || []).map((b: any) => [b.id, b.bus_number || b.registration_number]));
+
+      const driversData = (rawDrivers || []).map((driver: any, index: number) => {
+        const busAssigned = busMap.get(driver.bus_id) || (driver.bus_id ? `Bus-${driver.bus_id}` : 'Reserved');
+        const status = driver.status || (driver.bus_id ? 'Active' : 'Reserved');
 
         return [
           (index + 1).toString(),
-          driver.fullName || driver.name || 'N/A',
+          driver.full_name || driver.name || 'N/A',
           driver.email || 'N/A',
-          driver.phoneNumber || driver.phone || 'N/A',
-          driver.driverId || driver.employeeId || driver.empId || 'N/A',
-          busAssignment,
-          driver.joiningDate ? formatDate(driver.joiningDate) : 'N/A',
+          driver.phone || driver.phoneNumber || 'N/A',
+          driver.employee_id || driver.emp_id || driver.license_number || 'N/A',
+          busAssigned,
+          driver.joining_date ? formatDateDDMMYYYY(driver.joining_date) : 'N/A',
+          status
         ];
       });
 
       // Add headers
       driversData.unshift([
-        'Sl No', 'Name', 'Email', 'Phone', 'Driver ID', 'Bus Assigned', 'Joining Date'
+        'Sl No', 'Name', 'Email', 'Phone', 'Driver ID', 'Bus Assigned', 'Joining Date', 'Status'
       ]);
 
       // Add section header
-      driversData.unshift(['ALL DRIVERS'], ['']);
+      driversData.unshift(['ALL DRIVERS REPORT (SUPABASE)'], ['']);
 
-      // Export to Excel
       await exportToExcel(driversData, `ADTU_Drivers_Report_${dateStr}`, 'Drivers');
 
-      addToast(`Drivers data exported to ADTU_Drivers_Report_${dateStr}.xlsx`, 'success');
+      addToast(`Exported ${(rawDrivers || []).length} drivers to ADTU_Drivers_Report_${dateStr}.xlsx`, 'success');
     } catch (error) {
-      console.error('❌ Error exporting drivers:', error);
+      console.error('❌ Error exporting drivers from Supabase:', error);
       addToast("Failed to export drivers data. Please try again.", 'error');
     }
   };
@@ -393,6 +397,8 @@ export default function AdminDrivers() {
   if (!currentUser || !userData || userData.role !== 'admin') {
     return null;
   }
+
+  const commonBtnClass = "group h-8 px-4 bg-white hover:bg-gray-50 text-gray-700 hover:text-purple-600 border border-gray-200 hover:border-purple-200 shadow-sm hover:shadow-lg hover:shadow-purple-500/10 font-bold text-[10px] uppercase tracking-widest rounded-lg transition-all duration-300 active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer";
 
   return (
     <div className="mt-12 space-y-6">
@@ -420,29 +426,23 @@ export default function AdminDrivers() {
           </Link>
           <ExportButton
             onClick={() => handleExportDrivers()}
-            label="Export Drivers"
-            className={cn(
-              "border transition-all duration-200 hover:scale-105 hover:shadow-lg rounded-md px-2.5 py-1.5 text-xs h-8",
-              theme === 'dark' ? "bg-white hover:bg-gray-100 text-black border-gray-300" : "bg-white hover:bg-gray-50 text-[#111827] border-[#E5E7EB]"
-            )}
+            label="EXPORT"
+            className={commonBtnClass}
           />
           <Button
             size="sm"
             onClick={handleRefresh}
             disabled={isRefreshing}
-            className={cn(
-              "group h-8 px-4 border shadow-sm hover:shadow-lg font-bold text-[10px] uppercase tracking-widest rounded-lg transition-all duration-300 active:scale-95",
-              theme === 'dark' ? "bg-white hover:bg-gray-50 text-black hover:text-purple-600 border-gray-200 hover:border-purple-200 hover:shadow-purple-500/10" : "bg-white hover:bg-gray-50 text-[#111827] hover:text-[#1E3A8A] border-[#E5E7EB] hover:border-[#1E3A8A] hover:shadow-[#1E3A8A]/10"
-            )}
+            className={commonBtnClass}
           >
-            <RefreshCw className={`mr-2 h-3.5 w-3.5 transition-transform duration-500 ${isRefreshing ? 'animate-spin' : 'group-hover:rotate-180'}`} />
-            Refresh
+            <RefreshCw className={cn("h-3.5 w-3.5 transition-transform duration-500", isRefreshing ? "animate-spin" : "group-hover:rotate-180")} />
+            REFRESH
           </Button>
         </div>
       </div>
 
-      <Card className={cn("border min-h-[480px]", theme === 'dark' ? "bg-gray-900 border-gray-800" : "bg-admin-bg border-admin-border")}>
-        <CardContent className="pt-3">
+      <Card className={cn("border min-h-[480px] flex flex-col", theme === 'dark' ? "bg-gray-900 border-gray-800" : "bg-admin-bg border-admin-border")}>
+        <CardContent className="pt-3 flex-1 flex flex-col min-h-0 pb-4">
           <div className="mb-3">
             {/* Search Bar and Filters */}
             <div className="flex flex-col md:flex-row gap-3">
@@ -493,8 +493,8 @@ export default function AdminDrivers() {
             </div>
           </div>
 
-          <div className="students-section">
-            <div className="students-scroll-wrapper rounded-md border" role="region" aria-label="Driver list">
+          <div className="students-section md:mt-5 flex-1 flex flex-col min-h-0">
+            <div className="students-scroll-wrapper rounded-md border overflow-x-auto flex-1 flex flex-col min-h-0" role="region" aria-label="Driver list">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -506,26 +506,25 @@ export default function AdminDrivers() {
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
-                <TableBody>
-                  {filteredDrivers.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={8} className="text-center py-8 text-gray-500">
-                        No drivers found
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    filteredDrivers.map((driver) => (
+                {filteredDrivers.length > 0 && (
+                  <TableBody>
+                    {filteredDrivers.map((driver) => (
                       <DriverRow
                         key={driver.id}
                         driver={driver}
                         theme={theme}
-                        busDisplay={getBusDisplay(driver.assignedBusId || driver.busId)}
+                        busDisplay={getBusDisplay(driver.busId || driver.busId)}
                         onDelete={handleDeleteClick}
                       />
-                    ))
-                  )}
-                </TableBody>
+                    ))}
+                  </TableBody>
+                )}
               </Table>
+              {filteredDrivers.length === 0 && (
+                <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-xs text-gray-500 min-h-[220px]">
+                  No drivers found
+                </div>
+              )}
             </div>
           </div>
         </CardContent>

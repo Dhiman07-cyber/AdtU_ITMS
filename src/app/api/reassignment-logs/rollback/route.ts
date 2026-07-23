@@ -90,15 +90,18 @@ async function getCurrentPostgresState(collection: string, docId: string): Promi
     if (collection === 'students') {
         const { data, error } = await supabase
             .from('student_profiles')
-            .select('bus_id, full_name, shift')
+            .select('bus_id, full_name, shift, stop_name')
             .eq('uid', docId)
             .maybeSingle();
 
         if (error || !data) return null;
         return {
             busId: data.bus_id,
+            bus_id: data.bus_id,
             studentName: data.full_name,
-            shift: data.shift
+            shift: data.shift,
+            stopName: data.stop_name || '',
+            stop_name: data.stop_name || ''
         };
     } else if (collection === 'buses') {
         const { data, error } = await supabase
@@ -108,10 +111,15 @@ async function getCurrentPostgresState(collection: string, docId: string): Promi
             .maybeSingle();
 
         if (error || !data) return null;
+        const morning = data.morning_load ?? 0;
+        const evening = data.evening_load ?? 0;
         return {
-            morningLoad: data.morning_load,
-            eveningLoad: data.evening_load,
-            currentMembers: (data.morning_load || 0) + (data.evening_load || 0),
+            morningLoad: morning,
+            morning_load: morning,
+            eveningLoad: evening,
+            evening_load: evening,
+            currentMembers: morning + evening,
+            current_members: morning + evening,
             driver_uid: data.driver_uid,
             route_id: data.route_id,
             route_name: data.route_name
@@ -119,13 +127,13 @@ async function getCurrentPostgresState(collection: string, docId: string): Promi
     } else if (collection === 'drivers') {
         const { data, error } = await supabase
             .from('driver_profiles')
-            .select('assigned_bus_id, is_reserved')
+            .select('bus_id, is_reserved')
             .eq('uid', docId)
             .maybeSingle();
 
         if (error || !data) return null;
         return {
-            assigned_bus_id: data.assigned_bus_id,
+            bus_id: data.bus_id,
             is_reserved: data.is_reserved
         };
     }
@@ -178,6 +186,8 @@ export const GET = withSecurity(
 
         for (const change of changes) {
             if (!change.after || !change.collection || !change.docId) continue;
+            // Bus counters fluctuate automatically; precondition validation focuses on student records
+            if (change.collection === 'buses') continue;
 
             try {
                 const currentState = await getCurrentPostgresState(change.collection, change.docId);
@@ -187,14 +197,12 @@ export const GET = withSecurity(
                     continue;
                 }
 
-                // Compare only the fields originally modified by the reassignment operation
-                for (const key of Object.keys(change.after)) {
-                    const expected = JSON.stringify(change.after[key]);
-                    const actual = JSON.stringify(currentState[key]);
-
-                    if (expected !== actual) {
+                // For student profile check, verify student's bus_id matches the target bus from the reassignment
+                if (change.collection === 'students') {
+                    const expectedBusId = (change.after.busId || change.after.bus_id) as string;
+                    if (expectedBusId && currentState.busId !== expectedBusId) {
                         conflicts.push(
-                            `${change.docPath}.${key}: expected '${expected}', found '${actual}'`
+                            `${change.docPath}.busId: expected '${expectedBusId}', found '${currentState.busId}'`
                         );
                     }
                 }
@@ -285,7 +293,7 @@ export const POST = withSecurity(
                 p_operation_id: operationId,
                 p_actor_id: auth.uid,
                 p_actor_label: actorLabel,
-                p_changes: JSON.stringify(reverts)
+                p_changes: reverts
             });
 
             if (rpcError) {

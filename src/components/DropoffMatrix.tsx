@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState, useEffect } from "react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -31,7 +31,7 @@ export default function DropoffMatrix({ routes, buses, assignments, onChange }: 
     plateNumber?: string;
     routeId: string;
     routeName: string;
-    stops: Array<{ name: string; stopId?: string }>;
+    stops: Array<{ name: string; stop_name?: string }>;
   }>>([]);
 
   // Initialize rows based on buses prop
@@ -53,7 +53,7 @@ export default function DropoffMatrix({ routes, buses, assignments, onChange }: 
   }, [buses, assignments]);
 
   // Get all assigned route IDs for highlighting
-  const assignedRouteIds = rows.filter(row => row.routeId).map(row => row.routeId);
+  const routeIds = rows.filter(row => row.routeId).map(row => row.routeId);
 
   const handleRouteChange = (busIndex: number, routeId: string | undefined) => {
     const newRows = [...rows];
@@ -67,7 +67,7 @@ export default function DropoffMatrix({ routes, buses, assignments, onChange }: 
           routeName: route.routeName,
           stops: route.stops.map(stop => ({
             name: typeof stop === 'string' ? stop : stop.name,
-            stopId: typeof stop === 'string' ? undefined : stop.stopId
+            stop_name: typeof stop === 'string' ? undefined : stop.stop_name
           }))
         };
       }
@@ -170,7 +170,7 @@ export default function DropoffMatrix({ routes, buses, assignments, onChange }: 
                       <SelectContent className="text-xs z-[100]">
                         <SelectItem value="__none__" className="text-xs">-- None --</SelectItem>
                         {sortedRoutes.map(route => {
-                          const isAssigned = assignedRouteIds.includes(route.routeId) && route.routeId !== row.routeId;
+                          const isAssigned = routeIds.includes(route.routeId) && route.routeId !== row.routeId;
                           return (
                             <SelectItem
                               key={route.routeId}

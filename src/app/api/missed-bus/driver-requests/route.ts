@@ -36,7 +36,7 @@ export async function GET(request: NextRequest) {
                 id: req.id,
                 studentId: req.student_id,
                 routeId: req.route_id,
-                stopId: req.stop_id,
+                stop_name: req.stop_name,
                 studentSequence: req.student_sequence,
                 createdAt: req.created_at,
                 expiresAt: req.expires_at

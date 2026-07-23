@@ -1,4 +1,18 @@
 import { normalizeShift } from '@/lib/utils/shift-utils';
+import { auth } from '@/lib/firebase';
+
+async function getAuthHeaders(): Promise<Record<string, string>> {
+  try {
+    const user = auth?.currentUser;
+    if (user) {
+      const token = await user.getIdToken();
+      return { Authorization: `Bearer ${token}` };
+    }
+  } catch (e) {
+    // Ignore token acquisition errors
+  }
+  return {};
+}
 
 export interface BusCapacityInfo {
   busId: string;
@@ -34,7 +48,8 @@ export async function checkBusCapacity(busId: string, shift?: string): Promise<B
     const params = new URLSearchParams({ busId });
     if (shift) params.set('shift', shift);
 
-    const response = await fetch(`/api/buses/capacity?${params.toString()}`);
+    const headers = await getAuthHeaders();
+    const response = await fetch(`/api/buses/capacity?${params.toString()}`, { headers });
     if (!response.ok) {
       console.error('Capacity check failed:', response.statusText);
       return null;
@@ -64,16 +79,16 @@ export async function checkBusCapacity(busId: string, shift?: string): Promise<B
  */
 export async function checkCapacityForApplication(
   routeId: string,
-  stopId: string,
-  stopName: string,
+  stop_name: string,
   selectedBusId?: string,
   shift?: string
 ): Promise<CapacityCheckResult> {
   try {
+    const authHeaders = await getAuthHeaders();
     const response = await fetch('/api/buses/capacity', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ routeId, stopId, stopName, busId: selectedBusId, shift }),
+      headers: { 'Content-Type': 'application/json', ...authHeaders },
+      body: JSON.stringify({ routeId, stop_name, busId: selectedBusId, shift }),
     });
 
     if (!response.ok) {
@@ -117,7 +132,7 @@ export async function createOverloadNotification(
   studentName: string,
   enrollmentId: string,
   busInfo: BusCapacityInfo,
-  stopName: string
+  stop_name: string
 ): Promise<boolean> {
   try {
     const response = await fetch('/api/notifications/create', {
@@ -129,7 +144,7 @@ export async function createOverloadNotification(
         content: `**Student Application Alert**\n\n` +
           `**Student:** ${studentName} (${enrollmentId})\n` +
           `**Bus:** ${busInfo.busNumber} (${busInfo.busId})\n` +
-          `**Stop:** ${stopName}\n` +
+          `**Stop:** ${stop_name}\n` +
           `**Status:** Bus is currently at FULL capacity (${busInfo.currentMembers}/${busInfo.capacity})\n\n` +
           `**Action Required:** Please review capacity reallocation or consider adding additional bus service for this route.\n\n` +
           `[View Smart Allocation](/admin/smart-allocation)`,
@@ -151,7 +166,7 @@ export async function createNearCapacityNotification(
   studentName: string,
   enrollmentId: string,
   busInfo: BusCapacityInfo,
-  stopName: string,
+  stop_name: string,
   currentPercentage: number,
   futurePercentage: number
 ): Promise<boolean> {
@@ -168,7 +183,7 @@ export async function createNearCapacityNotification(
         content: `**New Student Enrollment - Capacity Warning**\n\n` +
           `**Student:** ${studentName} (${enrollmentId})\n` +
           `**Bus:** ${busInfo.busNumber} (${busInfo.busId})\n` +
-          `**Stop:** ${stopName}\n\n` +
+          `**Stop:** ${stop_name}\n\n` +
           `**Current Capacity:**\n` +
           `• Occupancy: ${busInfo.currentMembers}/${busInfo.capacity} seats (${currentPercentage.toFixed(1)}%)\n` +
           `• Available: ${busInfo.availableSeats} seat(s)\n\n` +

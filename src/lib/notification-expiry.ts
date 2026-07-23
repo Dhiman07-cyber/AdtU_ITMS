@@ -3,7 +3,6 @@
  * Automatically delete expired notifications at midnight
  */
 
-import { cleanupExpired } from '@/domains/payment/repositories/processed-payments.repository';
 import { pgFindExpiredNotifications, pgBulkDeleteNotifications } from '@/domains/notification/repositories/notification.repository.pg';
 
 export function calculateNotificationExpiry(startDate: Date, daysToLive: number = 0): string {
@@ -21,21 +20,10 @@ export async function deleteExpiredProcessedPayments(): Promise<{
   deletedPayments: number;
   errors: string[];
 }> {
-  const result = {
+  return {
     deletedPayments: 0,
-    errors: [] as string[]
+    errors: []
   };
-
-  try {
-    const deleted = await cleanupExpired();
-    result.deletedPayments = deleted;
-    console.log(`   Deleted ${result.deletedPayments} expired processed payments.`);
-    return result;
-  } catch (error: any) {
-    console.error('❌ Error in processed payments cleanup:', error);
-    result.errors.push(`Processed payments cleanup error: ${error.message}`);
-    return result;
-  }
 }
 
 /**

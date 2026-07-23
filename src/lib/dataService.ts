@@ -39,6 +39,20 @@ export const invalidateCache = (key?: string) => {
   }
 };
 
+async function getAuthHeaders(): Promise<Record<string, string>> {
+  try {
+    const auth = getAuth();
+    const currentUser = auth.currentUser;
+    if (currentUser) {
+      const idToken = await currentUser.getIdToken();
+      return { Authorization: `Bearer ${idToken}` };
+    }
+  } catch (err) {
+    console.error('Error getting auth headers:', err);
+  }
+  return {};
+}
+
 // ============================================================================
 // Students collection functions
 // ============================================================================
@@ -47,7 +61,8 @@ export const getStudentByUid = async (uid: string): Promise<any | null> => {
   const cached = getCachedData(cacheKey);
   if (cached) return cached;
   try {
-    const response = await fetch(`/api/students/${uid}`);
+    const headers = await getAuthHeaders();
+    const response = await fetch(`/api/students/${encodeURIComponent(uid)}`, { headers });
     if (!response.ok) return null;
     const data = await response.json();
     setCachedData(cacheKey, data);
@@ -63,7 +78,8 @@ export const getAllStudents = async (): Promise<Student[]> => {
   const cached = getCachedData(cacheKey);
   if (cached) return cached;
   try {
-    const response = await fetch('/api/students');
+    const headers = await getAuthHeaders();
+    const response = await fetch('/api/students', { headers });
     if (!response.ok) return [];
     const data = await response.json();
     setCachedData(cacheKey, data);
@@ -79,7 +95,8 @@ export const getStudentById = async (id: string): Promise<any | null> => {
   const cached = getCachedData(cacheKey);
   if (cached) return cached;
   try {
-    const response = await fetch(`/api/students/${id}`);
+    const headers = await getAuthHeaders();
+    const response = await fetch(`/api/students/${encodeURIComponent(id)}`, { headers });
     if (!response.ok) return null;
     const data = await response.json();
     setCachedData(cacheKey, data);
@@ -275,7 +292,8 @@ export const getStudentsByBusId = async (busId: string): Promise<Student[]> => {
   const cached = getCachedData(cacheKey);
   if (cached) return cached;
   try {
-    const response = await fetch(`/api/students?busId=${encodeURIComponent(busId)}`);
+    const headers = await getAuthHeaders();
+    const response = await fetch(`/api/students?busId=${encodeURIComponent(busId)}`, { headers });
     if (!response.ok) return [];
     const data = await response.json();
     setCachedData(cacheKey, data);
@@ -300,9 +318,9 @@ export const getPaymentsByStudentUid = async (uid: string, enrollmentId?: string
     }
     const idToken = await currentUser.getIdToken();
 
-    let url = `/api/payment/transactions?studentUid=${uid}`;
+    let url = `/api/payment/transactions?studentUid=${encodeURIComponent(uid)}`;
     if (enrollmentId) {
-      url += `&studentId=${enrollmentId}`;
+      url += `&studentId=${encodeURIComponent(enrollmentId)}`;
     }
 
     const response = await fetch(url, {

@@ -44,7 +44,7 @@ export async function GET(request: NextRequest) {
       const pattern = `%${escaped}%`;
       const { data, error } = await db
         .from('student_profiles')
-        .select('uid, full_name, email, phone, alt_phone, enrollment_id, gender, dob, faculty, department, parent_name, parent_phone, bus_id, route_id, assigned_bus_id, assigned_route_id, status, shift, profile_photo_url, session_start_year')
+        .select('uid, full_name, email, phone, alt_phone, enrollment_id, gender, dob, faculty, department, parent_name, parent_phone, bus_id, route_id, status, shift, profile_photo_url, session_start_year, session_end_year')
         .or(`full_name.ilike.${pattern},email.ilike.${pattern},enrollment_id.ilike.${pattern}`)
         .order('full_name', { ascending: true })
         .range(offset, offset + limit - 1);
@@ -65,12 +65,11 @@ export async function GET(request: NextRequest) {
         parentPhone: row.parent_phone,
         busId: row.bus_id,
         routeId: row.route_id,
-        assignedBusId: row.assigned_bus_id,
-        assignedRouteId: row.assigned_route_id,
         status: row.status,
         shift: row.shift,
         profilePhotoUrl: row.profile_photo_url,
-        enrollmentYear: row.session_start_year,
+        sessionStartYear: row.session_start_year,
+        sessionEndYear: row.session_end_year,
       }));
     } else {
       studentRows = await getStudentsByStatus('active');
@@ -79,7 +78,7 @@ export async function GET(request: NextRequest) {
     const students = (enrollmentId ? studentRows.filter((row: any) =>
       (row.enrollmentId || '').toLowerCase() === enrollmentId.toLowerCase()
     ) : studentRows).map((row: any) => ({
-      id: row.uid,
+      id: row.uid || row.id,
       name: row.fullName || row.name || '',
       email: row.email || '',
       phone: row.phone || '',
@@ -91,14 +90,16 @@ export async function GET(request: NextRequest) {
       department: row.department || '',
       parentName: row.parentName || '',
       parentPhone: row.parentPhone || '',
-      busId: row.busId || '',
-      routeId: row.routeId || '',
-      profilePhotoUrl: row.profilePhotoUrl || '',
-      assignedBusId: row.assignedBusId || row.busId || '',
-      assignedRouteId: row.assignedRouteId || row.routeId || '',
+      busId: row.busId || row.bus_id || '',
+      routeId: row.routeId || row.route_id || '',
+      stop_name: row.stop_name || row.stop_name || row.stop_name || row.stop_name || '',
+      profilePhotoUrl: row.profilePhotoUrl || row.profile_photo_url || '',
       status: row.status || 'active',
       shift: row.shift || '',
-      enrollmentYear: row.enrollmentYear || '',
+      semester: row.semester || '',
+      sessionStartYear: row.sessionStartYear || '',
+      sessionEndYear: row.sessionEndYear || '',
+      enrollmentYear: row.sessionStartYear || '',
     }));
 
     return NextResponse.json(students, { headers: rl.headers });

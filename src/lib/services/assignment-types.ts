@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Assignment Types & Utilities
  *
  * Extracted from assignment-service.ts to decouple type definitions
@@ -75,7 +75,7 @@ export function formatDriverCode(driverId: string): string {
  * Gets driver assignment status label
  */
 export function getDriverStatus(driver: any): "Assigned" | "Reserved" | "Unassigned" {
-    const hasBus = driver.assignedBusId || driver.busId;
+    const hasBus = driver.busId || driver.busId;
     if (hasBus) return "Assigned";
     if (driver.status === "reserved" || driver.isReserved) return "Reserved";
     return "Reserved";

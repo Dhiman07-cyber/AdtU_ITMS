@@ -52,8 +52,18 @@ export const POST = withSecurity<CreateOrderBody>(
             timestamp: new Date().toISOString(),
         };
 
-        // Create Razorpay order
-        const order = await createRazorpayOrder(expectedAmount, receipt, orderNotes);
+        // Create Razorpay order with error handling
+        let order;
+        try {
+            order = await createRazorpayOrder(expectedAmount, receipt, orderNotes);
+        } catch (orderErr: any) {
+            console.error('❌ Failed to create Razorpay order:', orderErr?.message || orderErr);
+            const status = orderErr?.statusCode || 500;
+            return NextResponse.json(
+                { success: false, error: orderErr?.message || 'Failed to create payment order' },
+                { status }
+            );
+        }
 
         console.log('📝 Order created:', {
             orderId: order.id,

@@ -1,4 +1,4 @@
-import { getAllStudents } from '@/domains/identity';
+﻿import { getAllStudents } from '@/domains/identity';
 import { getAllBuses } from '@/domains/fleet';
 import * as applicationService from '@/domains/application';
 import { wasSeatReleased } from '@/lib/config/capacity-flags';
@@ -48,7 +48,7 @@ export interface IntegrityReport {
 const LIVE_APPLICATION_STATES = new Set(['draft', 'awaiting_verification', 'verified', 'submitted']);
 
 function busIdOf(studentData: Record<string, any>): string | null {
-  return studentData.busId || studentData.currentBusId || studentData.assignedBusId || null;
+  return studentData.busId || studentData.currentBusId || studentData.busId || null;
 }
 
 function sessionKey(targetSession: any): string {

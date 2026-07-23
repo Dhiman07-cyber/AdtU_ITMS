@@ -31,7 +31,7 @@ export type LiveTrackingBusMapProps = {
     currentLocation?: any;
     loading?: boolean;
     /** Shown on Google Maps only (route polyline + stop pins). */
-    routeStops?: RouteStopLite[];
+    route_stops?: RouteStopLite[];
 };
 
 /**
@@ -39,7 +39,7 @@ export type LiveTrackingBusMapProps = {
  * - Default: Guwahati Map (MapLibre + PMTiles)
  */
 export default function LiveTrackingBusMap(props: LiveTrackingBusMapProps) {
-    const { routeStops, ...rest } = props;
+    const { route_stops, ...rest } = props;
 
     return (
         <MapErrorBoundary>

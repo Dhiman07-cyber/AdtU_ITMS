@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+﻿import { NextResponse } from 'next/server';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import { withSecurity } from '@/lib/security/api-security';
 import { RateLimits } from '@/lib/security/rate-limiter';
@@ -84,7 +84,6 @@ export const POST = withSecurity<RollbackBody>(
         // Restore student to their original bus/route/shift
         await updateStudent(studentUid, {
           busId: before.busId,
-          assignedBusId: before.busId,
           shift: before.shift,
           updatedAt: new Date().toISOString(),
         });

@@ -93,8 +93,7 @@ export default function AdminApplicationsPage() {
   const openAlternativePicker = (item: any) => {
     const studentShift = (item.formData?.shift || 'Morning').toLowerCase();
     const appBusId = item.formData?.busId || item.formData?.routeId?.replace('route_', 'bus_') || '';
-    const stopId = (item.formData?.stopId || '').toLowerCase().trim();
-    const stopName = item.formData?.stopName || '';
+    const stop_name = item.formData?.stop_name || '';
 
     // Current (full) bus
     const currentBusDoc = buses.find((b: any) => b.id === appBusId || b.busId === appBusId);
@@ -114,12 +113,12 @@ export default function AdminApplicationsPage() {
     // Alternative buses (re-use the getCapacityStatus logic to find them)
     const matchingRouteIds: string[] = [];
     routes.forEach((route: any) => {
-      const routeStops = route.stops || [];
-      const hasStop = routeStops.some((stop: any) => {
-        const rsId = (stop.stopId || stop.id || stop.name || '').toLowerCase().trim();
-        const rsName = (stop.name || stop.stopName || '').toLowerCase().trim();
-        const normStopId = stopId;
-        const normStopName = stopName.toLowerCase().trim();
+      const route_stops = route.stops || [];
+      const hasStop = route_stops.some((stop: any) => {
+        const rsId = (stop.stop_name || stop.id || stop.name || '').toLowerCase().trim();
+        const rsName = (stop.name || stop.stop_name || '').toLowerCase().trim();
+        const normStopId = stop_name.toLowerCase().trim();
+        const normStopName = stop_name.toLowerCase().trim();
         return rsId === normStopId || rsName === normStopName ||
           rsName === normStopId || rsId === normStopName;
       });
@@ -194,29 +193,37 @@ export default function AdminApplicationsPage() {
   const fetchRenewalRequests = async () => {
     try {
       setLoadingRenewals(true);
-      // D8: Query PostgreSQL applications table instead of Firestore renewal_requests
-      const { data, error } = await supabase
-        .from('applications')
-        .select('*')
-        .eq('state', 'submitted')
-        .in('application_type', ['renewal', 'renewal_after_soft_block']);
+      if (!currentUser) return;
+      const token = await currentUser.getIdToken();
+      const res = await fetch('/api/applications/all?limit=200', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok) throw new Error(`API error: ${res.status}`);
+      const responseData = await res.json();
+      const apps = responseData.applications || [];
 
-      if (error) throw error;
-      const requests = (data || []).map((row: any) => ({
-        id: row.application_id,
-        studentId: row.applicant_uid,
-        enrollmentId: row.formData?.enrollmentId || row.form_data?.enrollmentId || '',
-        studentName: row.formData?.studentName || row.form_data?.studentName || '',
-        totalFee: row.formData?.totalFee || row.form_data?.totalFee || 0,
-        durationYears: row.formData?.durationYears || row.form_data?.durationYears || 0,
-        paymentMode: row.formData?.paymentMode || row.form_data?.paymentMode || '',
-        paymentId: row.formData?.paymentId || row.form_data?.paymentId || '',
-        receiptImageUrl: row.formData?.receiptImageUrl || row.form_data?.receiptImageUrl || '',
-        studentEmail: row.formData?.studentEmail || row.form_data?.studentEmail || '',
-        paidAt: row.formData?.paidAt || row.form_data?.paidAt || '',
-        status: 'pending',
-        createdAt: row.created_at,
-      }));
+      const requests = apps
+        .filter((row: any) => {
+          const state = row.state || '';
+          const type = row.applicationType || row.application_type || '';
+          return (state === 'submitted' || state === 'awaiting_verification' || state === 'pending') &&
+                 (type === 'renewal' || type === 'renewal_after_soft_block');
+        })
+        .map((row: any) => ({
+          id: row.applicationId || row.application_id || row.id,
+          studentId: row.applicantUid || row.applicant_uid || row.studentId,
+          enrollmentId: row.formData?.enrollmentId || row.form_data?.enrollmentId || '',
+          studentName: row.formData?.studentName || row.form_data?.studentName || row.applicantEmail || '',
+          totalFee: row.formData?.totalFee || row.form_data?.totalFee || 0,
+          durationYears: row.formData?.durationYears || row.form_data?.durationYears || 0,
+          paymentMode: row.formData?.paymentMode || row.form_data?.paymentMode || 'online',
+          paymentId: row.formData?.paymentId || row.form_data?.paymentId || row.paymentId || '',
+          receiptImageUrl: row.formData?.receiptImageUrl || row.form_data?.receiptImageUrl || '',
+          studentEmail: row.formData?.studentEmail || row.form_data?.studentEmail || row.applicantEmail || '',
+          paidAt: row.formData?.paidAt || row.form_data?.paidAt || row.createdAt || row.created_at || '',
+          status: row.state || 'pending',
+          createdAt: row.createdAt || row.created_at,
+        }));
       setRenewalRequests(requests);
     } catch (error) {
       console.error('Error fetching renewal requests:', error);
@@ -271,7 +278,11 @@ export default function AdminApplicationsPage() {
 
   // Filter applications relevant to the admin queue:
   const applicationApplications = useMemo(
-    () => pendingApplications.filter((app: any) => app.state === 'submitted' && !isUpcomingApplication(app)),
+    () => pendingApplications.filter((app: any) => {
+      const type = app.applicationType || app.application_type || '';
+      const isRenewal = type === 'renewal' || type === 'renewal_after_soft_block';
+      return app.state === 'submitted' && !isUpcomingApplication(app) && !isRenewal;
+    }),
     [pendingApplications]
   );
 
@@ -354,7 +365,7 @@ export default function AdminApplicationsPage() {
     }
 
     // Get bus information from route
-    const busId = route.busId || route.assignedBusId;
+    const busId = route.busId || route.busId;
     if (!busId) return `Route ${route.routeName || routeId}`;
 
     // Find the bus
@@ -401,7 +412,7 @@ export default function AdminApplicationsPage() {
     // Real-time check from loaded buses data
     const busId = item.formData?.busId;
     const routeId = item.formData?.routeId;
-    const stopId = item.formData?.stopId;
+    const stop_name = item.formData?.stop_name;
     const studentShift = (item.formData?.shift || 'Morning').toLowerCase();
 
     if (!busId || buses.length === 0) {
@@ -437,19 +448,16 @@ export default function AdminApplicationsPage() {
     }
 
     // Bus is full - check if alternatives exist for this stop
-    const stopName = item.formData?.stopName || '';
-    const normalizedStopId = (stopId || '').toLowerCase().trim();
-    const normalizedStopName = stopName.toLowerCase().trim();
+    const normalizedStopName = (stop_name || '').toLowerCase().trim();
 
     // Find routes that have this stop
     const matchingRouteIds: string[] = [];
     routes.forEach((route: any) => {
-      const routeStops = route.stops || [];
-      const hasStop = routeStops.some((stop: any) => {
-        const routeStopId = (stop.stopId || stop.id || stop.name || '').toLowerCase().trim();
-        const routeStopName = (stop.name || stop.stopName || '').toLowerCase().trim();
-        return routeStopId === normalizedStopId || routeStopName === normalizedStopName ||
-          routeStopName === normalizedStopId || routeStopId === normalizedStopName;
+      const route_stops = route.stops || [];
+      const hasStop = route_stops.some((stop: any) => {
+        const routeStopId = (stop.stop_name || stop.id || stop.name || '').toLowerCase().trim();
+        const routeStopName = (stop.name || stop.stop_name || '').toLowerCase().trim();
+        return routeStopId === normalizedStopName || routeStopName === normalizedStopName;
       });
       if (hasStop) {
         matchingRouteIds.push(route.routeId || route.id);
@@ -612,6 +620,7 @@ export default function AdminApplicationsPage() {
 
         // Format bus/route for toast
         const appItem = pendingApplications.find((app: any) => app.applicationId === applicationId);
+        const isUpcoming = appItem ? isUpcomingApplication(appItem) : false;
         const activeBusId = overrideBusId || appItem?.formData?.busId || appItem?.formData?.routeId?.replace('route_', 'bus_') || '';
         const selectedBus = buses.find((b: any) => (b.id || b.busId) === activeBusId);
         let busLabel = '';
@@ -624,9 +633,11 @@ export default function AdminApplicationsPage() {
           routeLabel = `Route-${routeNum || routeIdVal}`;
         }
 
-        const msg = busLabel 
-          ? `Application approved successfully with ${busLabel}${routeLabel ? ` on ${routeLabel}` : ''}! Student notified via email.` 
-          : 'Application approved successfully! Student notified via email.';
+        const msg = isUpcoming
+          ? 'Upcoming application verified successfully! It will be activated when the new session begins.'
+          : busLabel 
+            ? `Application approved successfully with ${busLabel}${routeLabel ? ` on ${routeLabel}` : ''}! Student notified via email.` 
+            : 'Application approved successfully! Student notified via email.';
         showToast(msg, 'success');
 
         // Optimistically hide the card
@@ -1485,7 +1496,7 @@ export default function AdminApplicationsPage() {
       {alternativePickerTarget && (
         <AlternativeBusPicker
           applicantName={alternativePickerTarget.item.formData?.fullName || 'Applicant'}
-          applicantStopName={alternativePickerTarget.item.formData?.stopName || alternativePickerTarget.item.formData?.stopId || ''}
+          applicantStopName={alternativePickerTarget.item.formData?.stop_name || alternativePickerTarget.item.formData?.stop_name || ''}
           applicantShift={alternativePickerTarget.item.formData?.shift || 'Morning'}
           currentBus={alternativePickerTarget.currentBus}
           alternatives={alternativePickerTarget.alternatives}

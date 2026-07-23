@@ -153,7 +153,7 @@ export function MiniLoader({ className = "" }: { className?: string }) {
  */
 export function PageLoader({ message = "Please wait..." }: { message?: string }) {
   return (
-    <div className="flex flex-col items-center justify-center min-h-[calc(100dvh-48px)] md:min-h-[calc(100vh-220px)] flex-grow gap-3 sm:gap-4 w-full">
+    <div className="flex flex-col items-center justify-center min-h-[calc(100dvh-48px)] flex-grow gap-3 sm:gap-4 w-full">
       <div className="relative">
         <div className="w-10 h-10 sm:w-12 sm:h-12 border-3 sm:border-4 border-gray-200 dark:border-gray-700 rounded-full animate-spin border-t-blue-600"></div>
       </div>
@@ -207,7 +207,7 @@ export function PremiumPageLoader({
   if (noWrapper) return content;
 
   return (
-    <div className={`flex flex-col items-center justify-center w-full p-6 text-center relative overflow-hidden ${fullScreen ? 'fixed inset-0 min-h-dvh bg-slate-950/80 backdrop-blur-sm z-50' : 'min-h-[calc(100dvh-48px)] md:min-h-[calc(100vh-220px)] flex-grow'} ${className}`}>
+    <div className={`flex flex-col items-center justify-center w-full p-6 text-center relative overflow-hidden ${fullScreen ? 'fixed inset-0 min-h-dvh bg-slate-950/80 backdrop-blur-sm z-50' : 'min-h-[calc(100dvh-48px)] flex-grow'} ${className}`}>
       <div className="w-full flex flex-col items-center gap-5 mt-0 md:mt-[-10dvh] relative z-10">
         {content}
       </div>

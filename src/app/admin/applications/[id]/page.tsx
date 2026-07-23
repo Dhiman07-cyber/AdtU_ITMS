@@ -22,6 +22,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { Application } from '@/lib/types/application';
 import { deriveAcademicLifecycle } from '@/lib/utils/deadline-computation';
+import { isUpcomingApplication } from '@/lib/utils/application-eligibility';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { SectionCard } from '@/components/application/section-card';
 import { StatusBadge } from '@/components/application/status-badge';
@@ -118,20 +119,17 @@ export default function AdminApplicationDetailPage() {
     }
 
     // Bus is full, check for alternative buses serving this stop in the same shift
-    const stopId = application.formData?.stopId || '';
-    const stopName = (application.formData as any)?.stopName || '';
-    const normalizedStopId = stopId.toLowerCase().trim();
-    const normalizedStopName = stopName.toLowerCase().trim();
+    const stop_name = application.formData?.stop_name || '';
+    const normalizedStopName = stop_name.toLowerCase().trim();
 
     // Find routes that serve this stop
     const matchingRouteIds: string[] = [];
     allRoutes.forEach((route: any) => {
-      const routeStops = route.stops || [];
-      const hasStop = routeStops.some((stop: any) => {
-        const routeStopId = (stop.stopId || stop.id || stop.name || '').toLowerCase().trim();
-        const routeStopName = (stop.name || stop.stopName || '').toLowerCase().trim();
-        return routeStopId === normalizedStopId || routeStopName === normalizedStopName ||
-          routeStopName === normalizedStopId || routeStopId === normalizedStopName;
+      const route_stops = route.stops || [];
+      const hasStop = route_stops.some((stop: any) => {
+        const routeStopId = (stop.stop_name || stop.id || stop.name || '').toLowerCase().trim();
+        const routeStopName = (stop.name || stop.stop_name || '').toLowerCase().trim();
+        return routeStopId === normalizedStopName || routeStopName === normalizedStopName;
       });
       if (hasStop) {
         matchingRouteIds.push(route.routeId || route.id);
@@ -179,7 +177,7 @@ export default function AdminApplicationDetailPage() {
     if (!application || !busData) return;
     setLoadingReassignmentData(true);
     try {
-      const studentAssignedBusId = application.formData?.busId || application.formData?.assignedBusId || application.formData?.routeId?.replace('route_', 'bus_') || '';
+      const studentAssignedBusId = application.formData?.busId || application.formData?.busId || application.formData?.routeId?.replace('route_', 'bus_') || '';
 
       const authToken = await currentUser?.getIdToken();
       const studentsRes = await fetch('/api/students?busId=' + encodeURIComponent(studentAssignedBusId), {
@@ -190,9 +188,8 @@ export default function AdminApplicationDetailPage() {
         id: s.id || '',
         fullName: s.name || s.id || '',
         enrollmentId: s.enrollmentId,
-        stopId: s.stopId || '',
-        stopName: s.stopName || s.stopId || '',
-        assignedBusId: s.assignedBusId || s.busId || studentAssignedBusId,
+        stop_name: s.stop_name || '',
+        busId: s.busId || s.busId || studentAssignedBusId,
         shift: s.shift,
         semester: s.semester,
         phone: s.phone,
@@ -205,16 +202,16 @@ export default function AdminApplicationDetailPage() {
           fetch('/api/routes', { headers: { 'Authorization': `Bearer ${authToken}` } }),
           fetch('/api/buses', { headers: { 'Authorization': `Bearer ${authToken}` } })
         ]);
-        const routesJson = await routesRes.json();
+        const routesJson = routesRes.ok ? await routesRes.json().catch(() => ([])) : [];
         const routesList = Array.isArray(routesJson) ? routesJson : (routesJson.routes || []);
-        const busesJson = await busesRes.json();
-        const busesList = busesJson.buses || [];
+        const busesJson = busesRes.ok ? await busesRes.json().catch(() => ({})) : {};
+        const busesList = Array.isArray(busesJson) ? busesJson : (busesJson.buses || []);
         rpBuses = busesList.map((b: any) => {
           const matchedRoute = routesList.find((r: any) => r.routeId === b.routeId || r.id === b.routeId);
           const rawStops = matchedRoute?.stops || b.route?.stops || b.stops || [];
           const stops = rawStops.map((s: any) => ({
-            id: s.id || s.stopId || s.name || '',
-            name: s.name || s.stopId || s.id || '',
+            id: s.id || s.stop_name || s.name || '',
+            name: s.name || s.stop_name || s.id || '',
             sequence: s.sequence ?? 0,
           }));
           return {
@@ -353,14 +350,14 @@ export default function AdminApplicationDetailPage() {
           document.body.appendChild(a);
           a.click();
           window.URL.revokeObjectURL(url);
-          showToast('Professional receipt downloaded!', 'success');
+          showToast('Payment Receipt downloaded!', 'success');
           setReceiptModalOpen(false);
         } else {
           throw new Error('Failed to generate PDF receipt');
         }
       } catch (error) {
         console.error('Error downloading PDF receipt:', error);
-        showToast('Failed to generate professional receipt', 'error');
+        showToast('Failed to generate Payment Receipt', 'error');
       } finally {
         setDownloadingReceipt(false);
       }
@@ -457,8 +454,8 @@ export default function AdminApplicationDetailPage() {
 
         // Fetch bus, route, and verifier data in parallel
         const promises = [];
-        const studentAssignedBusId = data.application.formData?.busId || data.application.formData?.assignedBusId;
-        const routeId = data.application.formData?.routeId || data.application.formData?.assignedRouteId;
+        const studentAssignedBusId = data.application.formData?.busId || data.application.formData?.busId;
+        const routeId = data.application.formData?.routeId || data.application.formData?.routeId;
         if ((routeId || studentAssignedBusId) && token) {
           promises.push(fetchBusAndRouteData(routeId, studentAssignedBusId, token));
         }
@@ -476,16 +473,16 @@ export default function AdminApplicationDetailPage() {
               fetch('/api/buses', { headers: { 'Authorization': `Bearer ${authToken}` } }),
               fetch('/api/routes', { headers: { 'Authorization': `Bearer ${authToken}` } })
             ]);
-            const busesJson = await busesRes.json();
-            const routesJson = await routesRes.json();
-            const busesList = busesJson.buses || [];
+            const busesJson = busesRes.ok ? await busesRes.json().catch(() => ({})) : {};
+            const routesJson = routesRes.ok ? await routesRes.json().catch(() => ([])) : [];
+            const busesList = Array.isArray(busesJson) ? busesJson : (busesJson.buses || []);
             const routesList = Array.isArray(routesJson) ? routesJson : (routesJson.routes || []);
             const rpBuses: RPBusData[] = busesList.map((bdata: any) => {
               const route = routesList.find((r: any) => r.id === bdata.routeId);
               const rawStops = route?.stops || bdata.route?.stops || bdata.stops || [];
               const stops = rawStops.map((s: any) => ({
-                id: s.id || s.stopId || s.name || '',
-                name: s.name || s.stopId || s.id || '',
+                id: s.id || s.stop_name || s.name || '',
+                name: s.name || s.stop_name || s.id || '',
                 sequence: s.sequence ?? 0,
               }));
               return {
@@ -512,7 +509,7 @@ export default function AdminApplicationDetailPage() {
         await Promise.all(promises);
 
         // Fetch payment data from Supabase separately
-        fetchPaymentData(applicationId, token);
+        fetchPaymentData(data.application.applicantUid, token);
       } else {
         showToast('Application not found', 'error');
         router.push('/admin/applications');
@@ -531,7 +528,7 @@ export default function AdminApplicationDetailPage() {
       const token = await currentUser?.getIdToken();
       if (!token) return;
 
-      const response = await fetch(`/api/payment/recover?studentUid=${applicationId}`, {
+      const response = await fetch(`/api/payment/recover?studentUid=${application?.applicantUid || applicationId}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
 
@@ -955,27 +952,38 @@ export default function AdminApplicationDetailPage() {
                   </div>
 
                   {/* Action Buttons */}
-                  {application.state === 'submitted' && (
+                  {application.state === 'verified_upcoming' ? (
                     <div className="flex flex-row md:flex-col gap-3 w-full md:w-auto self-center md:self-center mt-4 md:mt-0">
-                        <Button
-                          onClick={() => {
-                            if (hasUnsavedChanges) {
-                              setApproveConfirmOpen(true);
-                            } else {
-                              checkCapacityAndApprove(false);
-                            }
-                          }}
-                          disabled={processing || (capacityStatus.needsCapacityReview && !stagedBus)}
-                          className={cn(
-                            "flex-1 md:flex-none gap-2 h-11 px-6 md:min-w-[120px]",
-                            (capacityStatus.needsCapacityReview && !stagedBus)
-                              ? "bg-emerald-600/50 text-white/50 cursor-not-allowed shadow-lg shadow-emerald-900/20"
-                              : "bg-emerald-600 hover:bg-emerald-700 text-white shadow-xl shadow-emerald-900/10"
-                          )}
-                        >
-                          {processing ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
-                          Approve
-                        </Button>
+                      <Button
+                        disabled
+                        className="bg-indigo-600/40 text-white/70 cursor-not-allowed gap-2 h-11 px-6 md:min-w-[140px]"
+                        title={application.eligibleApproval ? `Activates on ${new Date(application.eligibleApproval).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}` : 'Awaiting new academic session'}
+                      >
+                        <Calendar className="h-4 w-4" />
+                        Awaiting Activation
+                      </Button>
+                    </div>
+                  ) : application.state === 'submitted' && (
+                    <div className="flex flex-row md:flex-col gap-3 w-full md:w-auto self-center md:self-center mt-4 md:mt-0">
+                      <Button
+                        onClick={() => {
+                          if (hasUnsavedChanges) {
+                            setApproveConfirmOpen(true);
+                          } else {
+                            checkCapacityAndApprove(false);
+                          }
+                        }}
+                        disabled={processing || (capacityStatus.needsCapacityReview && !stagedBus)}
+                        className={cn(
+                          "flex-1 md:flex-none gap-2 h-11 px-6 md:min-w-[120px]",
+                          (capacityStatus.needsCapacityReview && !stagedBus)
+                            ? "bg-emerald-600/50 text-white/50 cursor-not-allowed shadow-lg shadow-emerald-900/20"
+                            : "bg-emerald-600 hover:bg-emerald-700 text-white shadow-xl shadow-emerald-900/10"
+                        )}
+                      >
+                        {processing ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
+                        {isUpcomingApplication(application) ? "Verify" : "Approve"}
+                      </Button>
                       {application.formData?.paymentInfo?.paymentMode === 'online' && (
                         <Button
                           onClick={handleVerifyPayment}
@@ -1076,7 +1084,7 @@ export default function AdminApplicationDetailPage() {
                       <span className="text-[14px] font-semibold text-zinc-300">
                         {application.formData?.routeId ? `Route ${application.formData.routeId.replace('route_', '')}` : 'Not Assigned'}
                       </span>
-                      {routeError && !application.formData?.busId && !application.formData?.assignedBusId && (
+                      {routeError && !application.formData?.busId && !application.formData?.busId && (
                         <Badge variant="destructive" className="h-5 text-[10px] px-1.5 py-0" title="The assigned route doesn't exist or was deleted">
                           <AlertTriangle className="h-3 w-3 mr-1" />
                           Missing
@@ -1127,14 +1135,14 @@ export default function AdminApplicationDetailPage() {
                   <InfoRow
                     label="Bus Stop"
                     value={(() => {
-                      const stopId = application.formData?.stopId || (application.formData as any)?.pickupPoint;
-                      if (!stopId) return '—';
-                      let stopName = stopId;
+                      const raw_stop_name = application.formData?.stop_name || (application.formData as any)?.pickupPoint;
+                      if (!raw_stop_name) return '—';
+                      let stop_display = raw_stop_name;
                       if (routeData?.stops) {
-                        const stop = routeData.stops.find((s: any) => s.id === stopId || s.stopId === stopId);
-                        stopName = stop ? stop.name || stop.stopName || stopId : stopId;
+                        const stop = routeData.stops.find((s: any) => s.id === raw_stop_name || s.stop_name === raw_stop_name || s.name === raw_stop_name);
+                        stop_display = stop ? stop.name || stop.stop_name || raw_stop_name : raw_stop_name;
                       }
-                      return stopName.charAt(0).toUpperCase() + stopName.slice(1);
+                      return stop_display.charAt(0).toUpperCase() + stop_display.slice(1);
                     })()}
                   />
 
@@ -1240,7 +1248,7 @@ export default function AdminApplicationDetailPage() {
                       ) : (
                         <>
                           <Download className="h-3.5 w-3.5" />
-                          Professional Receipt
+                          Payment Receipt
                         </>
                       )}
                     </Button>

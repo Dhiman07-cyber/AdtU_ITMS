@@ -273,14 +273,14 @@ export default function AdminViewUserProfile() {
                       valueClassName={student.routeName ? 'text-green-600 dark:text-green-400 font-semibold' : ''}
                     />
                     <InfoRow label="Route ID" value={student.routeId} icon={Hash} />
-                    <InfoRow label="Stop ID" value={student.stopId} icon={MapPin} />
+                    <InfoRow label="Stop ID" value={student.stop_name} icon={MapPin} />
                   </div>
                 </div>
-                {student.routeStops && student.routeStops.length > 0 && (
+                {student.route_stops && student.route_stops.length > 0 && (
                   <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-800">
                     <p className="text-sm text-muted-foreground mb-2">Route Stops:</p>
                     <div className="flex flex-wrap gap-2">
-                      {student.routeStops.map((stop, idx) => (
+                      {student.route_stops.map((stop, idx) => (
                         <Badge key={idx} variant="outline">{stop}</Badge>
                       ))}
                     </div>

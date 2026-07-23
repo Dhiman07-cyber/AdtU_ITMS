@@ -1,4 +1,4 @@
-
+﻿
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/firebase-admin';
 import { resolveUserRole } from '@/lib/security/role-cache';
@@ -118,7 +118,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Get bus info if available
-    let bus_id = userData.assignedBusId || userData.busId || null;
+    let bus_id = userData.busId || userData.busId || null;
     let bus_plate = null;
 
     if (bus_id) {

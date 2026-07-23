@@ -97,9 +97,9 @@ function rowToFirestore(row: Record<string, any>, fieldMap: Record<string, strin
 /** Find a profile by UID from any *_profiles table */
 async function pgFindByUid(table: string, uid: string): Promise<Record<string, any> | null> {
   const db = getSupabaseServer();
-  const { data, error } = await db.from(table).select('*').eq('uid', uid).single();
+  const cleanId = decodeURIComponent(uid || '').trim();
+  const { data, error } = await db.from(table).select('*').eq('uid', cleanId).maybeSingle();
   if (error) {
-    if (error.code === 'PGRST116') return null;
     throw new Error(`IdentityRepository (PG) ${table} find failed: ${error.message}`);
   }
   return data;
@@ -405,12 +405,8 @@ const DRIVER_FIELD_MAP: Record<string, string> = {
   employeeId: 'employee_id',
   address: 'address',
   profilePhotoUrl: 'profile_photo_url',
-  assignedBusId: 'assigned_bus_id',
-  assignedRouteId: 'assigned_route_id',
   busId: 'bus_id',
   routeId: 'route_id',
-  busAssigned: 'bus_assigned',
-  driverId: 'driver_id',
   joiningDate: 'joining_date',
   shift: 'shift',
   status: 'status',
@@ -442,7 +438,7 @@ export async function pgFindDriversByBusId(busId: string): Promise<Record<string
   const { data, error } = await db
     .from('driver_profiles')
     .select('*')
-    .or(`assigned_bus_id.eq.${busId},bus_id.eq.${busId}`);
+    .eq('bus_id', busId);
   if (error) throw new Error(`IdentityRepository (PG) drivers by bus find failed: ${error.message}`);
   return (data || []).map(rowToFirestoreDriver);
 }
@@ -509,18 +505,14 @@ const MODERATOR_FIELD_MAP: Record<string, string> = {
   uid: 'uid',
   email: 'email',
   fullName: 'full_name',
-  name: 'name',
   phone: 'phone',
   employeeId: 'employee_id',
-  staffId: 'staff_id',
-  managingTeam: 'managing_team',
   teamName: 'team_name',
   status: 'status',
   profilePhotoUrl: 'profile_photo_url',
   role: 'role',
   createdBy: 'created_by',
   faculty: 'faculty',
-  assignedFaculty: 'assigned_faculty',
   permissions: 'permissions',
   permissionsUpdatedAt: 'permissions_updated_at',
   permissionsUpdatedBy: 'permissions_updated_by',
@@ -603,11 +595,9 @@ const ADMIN_FIELD_MAP: Record<string, string> = {
   uid: 'uid',
   email: 'email',
   fullName: 'full_name',
-  name: 'name',
   phone: 'phone',
   employeeId: 'employee_id',
   role: 'role',
-  assignedFaculty: 'assigned_faculty',
   yearsOfService: 'years_of_service',
   altPhone: 'alt_phone',
   dob: 'dob',

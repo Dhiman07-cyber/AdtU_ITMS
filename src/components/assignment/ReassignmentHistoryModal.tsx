@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "@/contexts/auth-context";
 import { toast } from "react-hot-toast";
+import { cn } from "@/lib/utils";
 import {
     Dialog,
     DialogContent,
@@ -34,7 +35,6 @@ import {
     Shield,
     FileText
 } from "lucide-react";
-import { cn } from "@/lib/utils";
 
 // ============================================
 // TYPES
@@ -317,7 +317,7 @@ export function ReassignmentHistoryModal({
                     {/* Close Button Custom */}
                     <button
                         onClick={() => onOpenChange(false)}
-                        className="absolute top-4 right-4 p-2 rounded-full hover:bg-black/20 text-zinc-400 hover:text-white transition-colors"
+                        className="absolute top-4 right-4 p-2 rounded-full hover:bg-black/20 hover:cursor-pointer text-zinc-400 hover:text-white transition-colors"
                     >
                         <XCircle className="w-5 h-5" />
                     </button>
@@ -469,7 +469,7 @@ export function ReassignmentHistoryModal({
                             )}
 
                             {/* Rollback Section */}
-                            {isAdmin && latestLog.status === "committed" && latestLog.type !== "rollback" && (
+                            {isAdmin && latestLog.type !== "rollback" && (
                                 <div className="space-y-3">
                                     <div className="flex items-center gap-3">
                                         <div className="h-px flex-1 bg-gradient-to-r from-transparent via-zinc-800 to-transparent" />
@@ -482,43 +482,49 @@ export function ReassignmentHistoryModal({
                                             <TooltipTrigger asChild>
                                                 <Button
                                                     onClick={() => handleRollback(latestLog.operation_id)}
-                                                    disabled={rollingBack === latestLog.operation_id}
-                                                    className="w-full relative overflow-hidden group h-11 bg-zinc-900 border border-zinc-800 hover:border-red-500/30 hover:bg-red-500/5 text-zinc-300 hover:text-red-400 transition-all duration-300"
+                                                    disabled={latestLog.status === "rolled_back" || rollingBack === latestLog.operation_id}
+                                                    className={cn(
+                                                        "w-full relative overflow-hidden group h-11 transition-all duration-300",
+                                                        latestLog.status === "rolled_back"
+                                                            ? "bg-amber-500/10 border border-amber-500/30 text-amber-400 cursor-not-allowed opacity-90"
+                                                            : "bg-zinc-900 border border-zinc-800 hover:border-red-500/30 hover:bg-red-500/5 text-zinc-300 hover:text-red-400"
+                                                    )}
                                                 >
                                                     <span className="relative z-10 flex items-center justify-center gap-2 font-medium">
-                                                        {rollingBack === latestLog.operation_id ? (
-                                                            <Loader2 className="w-4 h-4 animate-spin" />
+                                                        {latestLog.status === "rolled_back" ? (
+                                                            <>
+                                                                <RotateCcw className="w-4 h-4 text-amber-400 shrink-0" />
+                                                                This operation has been rolled back
+                                                            </>
+                                                        ) : rollingBack === latestLog.operation_id ? (
+                                                            <>
+                                                                <Loader2 className="w-4 h-4 animate-spin" />
+                                                                Rolling back...
+                                                            </>
                                                         ) : (
-                                                            <RotateCcw className="w-4 h-4 group-hover:-rotate-180 transition-transform duration-500" />
+                                                            <>
+                                                                <RotateCcw className="w-4 h-4 group-hover:-rotate-180 transition-transform duration-500" />
+                                                                Rollback to Previous State
+                                                            </>
                                                         )}
-                                                        {rollingBack ? "Rolling back..." : "Rollback to Previous State"}
                                                     </span>
-                                                    {/* Progress bar effect if needed or subtle bg */}
                                                 </Button>
                                             </TooltipTrigger>
                                             <TooltipContent>
-                                                <p>Undo all changes made in this operation</p>
+                                                <p>
+                                                    {latestLog.status === "rolled_back"
+                                                        ? "This operation has already been rolled back"
+                                                        : "Undo all changes made in this operation"}
+                                                </p>
                                             </TooltipContent>
                                         </Tooltip>
                                     </TooltipProvider>
 
-                                    <p className="text-[11px] text-center text-zinc-500">
-                                        This will immediately revert changes to drivers, buses, and routes.
-                                    </p>
-                                </div>
-                            )}
-
-                            {/* Already rolled back notice */}
-                            {latestLog.status === "rolled_back" && (
-                                <div className="flex items-start gap-3 p-3 rounded-xl bg-amber-500/5 border border-amber-500/10">
-                                    <Info className="w-4 h-4 text-amber-500 mt-0.5 shrink-0" />
-                                    <div>
-                                        <p className="text-xs font-medium text-amber-400 mb-0.5">Operation Rolled Back</p>
-                                        <p className="text-[10px] text-amber-500/70">
-                                            This action was reversed by a subsequent rollback operation.
-                                            {latestLog.rollback_of ? ` (Ref: ${latestLog.rollback_of})` : ''}
+                                    {latestLog.status !== "rolled_back" && (
+                                        <p className="text-[11px] text-center text-zinc-500">
+                                            This will immediately revert changes to drivers, buses, and routes.
                                         </p>
-                                    </div>
+                                    )}
                                 </div>
                             )}
                         </div>

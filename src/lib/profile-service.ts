@@ -33,8 +33,8 @@ export interface StudentProfile extends BaseProfile {
   address?: string;
   routeId?: string;
   routeName?: string;
-  routeStops?: string[];
-  stopId?: string;
+  route_stops?: string[];
+  stop_name?: string;
   busId?: string;
   busNumber?: string;
   busCapacity?: string;
@@ -57,10 +57,10 @@ export interface DriverProfile extends BaseProfile {
   role: 'driver';
   licenseNumber?: string;
   busId?: string | string[];
-  assignedBusIds?: string[];
+  busIds?: string[];
   busNumbers?: string[];
-  assignedRouteId?: string | string[];
-  assignedRouteIds?: string[];
+  routeId?: string | string[];
+  routeIds?: string[];
   routeNames?: string[];
   shift?: string;
   joiningDate?: Date | null;
@@ -311,7 +311,7 @@ async function fetchStudentProfile(uid: string): Promise<StudentProfile | null> 
     // Resolve bus reference (bus domain still in Firestore)
     let busNumber: string | undefined;
     let busCapacity: string | undefined;
-    const targetBusId = student.busId || student.assignedBusId;
+    const targetBusId = student.busId || student.busId;
     if (targetBusId) {
       const bus = await resolveBus(targetBusId);
       if (bus) {
@@ -324,13 +324,13 @@ async function fetchStudentProfile(uid: string): Promise<StudentProfile | null> 
 
     // Resolve route reference (route domain still in Firestore)
     let routeName: string | undefined;
-    let routeStops: string[] | undefined;
-    const targetRouteId = student.routeId || student.assignedRouteId;
+    let route_stops: string[] | undefined;
+    const targetRouteId = student.routeId || student.routeId;
     if (targetRouteId) {
       const route = await resolveRoute(targetRouteId);
       if (route) {
         routeName = route.routeName || route.routeNumber || route.id;
-        routeStops = route.stops || [];
+        route_stops = route.stops || [];
       }
     }
 
@@ -358,11 +358,11 @@ async function fetchStudentProfile(uid: string): Promise<StudentProfile | null> 
       parentName: student.parentName,
       parentPhone: student.parentPhone,
       address: student.address,
-      routeId: student.routeId || student.assignedRouteId,
+      routeId: student.routeId || student.routeId,
       routeName,
-      routeStops,
-      stopId: student.stopId,
-      busId: student.busId || student.assignedBusId,
+      route_stops,
+      stop_name: student.stop_name || student.stop_name,
+      busId: student.busId || student.busId,
       busNumber,
       busCapacity,
       assignedShift: student.shift,
@@ -403,14 +403,14 @@ async function fetchDriverProfile(uid: string): Promise<DriverProfile | null> {
     const busIds: string[] = [];
     
     // Collect all possible bus IDs from different fields
-    if (data.assignedBusIds && Array.isArray(data.assignedBusIds)) {
-      busIds.push(...data.assignedBusIds);
+    if (data.busIds && Array.isArray(data.busIds)) {
+      busIds.push(...data.busIds);
     }
     if (data.busId && !busIds.includes(data.busId)) {
       busIds.push(data.busId);
     }
-    if (data.assignedBusId && !busIds.includes(data.assignedBusId)) {
-      busIds.push(data.assignedBusId);
+    if (data.busId && !busIds.includes(data.busId)) {
+      busIds.push(data.busId);
     }
     
     // Resolve bus numbers from bus documents and deduplicate
@@ -444,14 +444,14 @@ async function fetchDriverProfile(uid: string): Promise<DriverProfile | null> {
     const routeIds: string[] = [];
     
     // Collect all possible route IDs from different fields
-    if (data.assignedRouteIds && Array.isArray(data.assignedRouteIds)) {
-      routeIds.push(...data.assignedRouteIds);
+    if (data.routeIds && Array.isArray(data.routeIds)) {
+      routeIds.push(...data.routeIds);
     }
     if (data.routeId && !routeIds.includes(data.routeId)) {
       routeIds.push(data.routeId);
     }
-    if (data.assignedRouteId && !routeIds.includes(data.assignedRouteId)) {
-      routeIds.push(data.assignedRouteId);
+    if (data.routeId && !routeIds.includes(data.routeId)) {
+      routeIds.push(data.routeId);
     }
 
     // Resolve route names from route documents and deduplicate
@@ -494,10 +494,10 @@ async function fetchDriverProfile(uid: string): Promise<DriverProfile | null> {
       approvedBy: data.approvedBy || 'Not available',
       licenseNumber: data.licenseNumber,
       busId: busIds.length > 0 ? busIds[0] : undefined,
-      assignedBusIds: busIds,
+      busIds: busIds,
       busNumbers,
-      assignedRouteId: routeIds.length > 0 ? routeIds[0] : undefined,
-      assignedRouteIds: routeIds,
+      routeId: routeIds.length > 0 ? routeIds[0] : undefined,
+      routeIds: routeIds,
       routeNames,
       shift: data.shift,
       joiningDate,

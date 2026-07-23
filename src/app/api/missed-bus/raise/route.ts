@@ -21,15 +21,15 @@ export async function POST(request: Request) {
 
     try {
         const body = await request.json();
-        const { idToken, opId, routeId, stopId, assignedTripId, assignedBusId } = body;
+        const { idToken, opId, routeId, stop_name, assignedTripId, assignedBusId } = body;
 
         // Validate required fields
-        if (!idToken || !opId || !routeId || !stopId) {
+        if (!idToken || !opId || !routeId || !stop_name) {
             return NextResponse.json(
                 {
                     success: false,
                     error: 'Missing required fields',
-                    required: ['idToken', 'opId', 'routeId', 'stopId']
+                    required: ['idToken', 'opId', 'routeId', 'stop_name']
                 },
                 { status: 400 }
             );
@@ -59,7 +59,7 @@ export async function POST(request: Request) {
             opId,
             studentId,
             routeId,
-            stopId,
+            stop_name,
             assignedTripId,
             assignedBusId
         });
@@ -69,7 +69,7 @@ export async function POST(request: Request) {
         console.log(`📝 Missed-bus raise completed in ${elapsed}ms:`, {
             studentId,
             routeId,
-            stopId,
+            stop_name,
             success: result.success,
             stage: result.stage
         });

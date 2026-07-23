@@ -29,7 +29,7 @@ export const getBusById = async (id: string): Promise<Bus | null> => {
     if (!currentUser) return null;
     const idToken = await currentUser.getIdToken();
 
-    const response = await fetch(`/api/buses/${id}`, {
+    const response = await fetch(`/api/buses/${encodeURIComponent(id)}`, {
       headers: {
         'Authorization': `Bearer ${idToken}`
       }

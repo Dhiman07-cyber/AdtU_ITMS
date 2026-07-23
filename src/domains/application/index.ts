@@ -9,6 +9,7 @@ export {
   count,
   approve,
   approveUnauth,
+  verifyUpcoming,
   reject,
   rejectUnauth,
   submit,

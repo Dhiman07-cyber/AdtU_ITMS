@@ -30,7 +30,7 @@ export async function decrementCapacity(busId: string, _studentUid: string, shif
 }
 
 export async function findAlternatives(
-  stopId: string,
+  stop_name: string,
   routeId: string,
   shift: string,
   preFetchedBuses?: any[],
@@ -44,9 +44,9 @@ export async function findAlternatives(
     .filter(route => {
       const stops = route.stops || [];
       return stops.some((stop: any) => {
-        const id = (stop.stopId || stop.id || stop.name || '').toLowerCase().trim();
+        const id = (stop.stop_name || stop.id || stop.name || '').toLowerCase().trim();
         const name = (stop.name || '').toLowerCase().trim();
-        return id === stopId.toLowerCase().trim() || name === stopId.toLowerCase().trim();
+        return id === stop_name.toLowerCase().trim() || name === stop_name.toLowerCase().trim();
       });
     })
     .map(route => route.routeId || route.id)
@@ -87,8 +87,8 @@ export async function findAlternatives(
   };
 }
 
-export async function validateAssignment(params: { routeId: string; stopId: string; shift: string }) {
-  const { routeId, stopId, shift } = params;
+export async function validateAssignment(params: { routeId: string; stop_name: string; shift: string }) {
+  const { routeId, stop_name, shift } = params;
 
   const buses = await fleetService.getBusesByRouteId(routeId);
   const busId = buses[0]?.id || buses[0]?.busId;
@@ -110,7 +110,7 @@ export async function validateAssignment(params: { routeId: string; stopId: stri
     };
   }
 
-  const alternativeResult = await findAlternatives(stopId, routeId, shift);
+  const alternativeResult = await findAlternatives(stop_name, routeId, shift);
 
   if (alternativeResult.success && alternativeResult.alternativeBuses && alternativeResult.alternativeBuses.length > 0) {
     return {

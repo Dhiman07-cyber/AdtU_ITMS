@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+﻿import { NextResponse } from 'next/server';
 import { headers } from 'next/headers';
 import { adminAuth } from '@/lib/firebase-admin';
 import { getUserById, updateDriver } from '@/domains/identity';
@@ -102,9 +102,7 @@ export async function POST(request: Request) {
     if (driverUID) {
       try {
         await updateDriver(driverUID, {
-          assignedBusId: busId,
           busId: busId,
-          assignedRouteId: routeId,
           routeId: routeId,
           status: 'active'
         });

@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState, useEffect, useMemo } from "react";
 import { useAuth } from "@/contexts/auth-context";
@@ -150,8 +150,8 @@ export default function DriverDashboard() {
     }
 
     // Legacy check with bus ID from driver data
-    let busId = driverData.assignedBusId || driverData.busId || driverData.busDetails ||
-      (Array.isArray(driverData.assignedBusIds) ? driverData.assignedBusIds[0] : driverData.assignedBusIds) ||
+    let busId = driverData.busId || driverData.busId || driverData.busDetails ||
+      (Array.isArray(driverData.busIds) ? driverData.busIds[0] : driverData.busIds) ||
       (Array.isArray(driverData.busId) ? driverData.busId[0] : driverData.busId);
 
     // Clean up the bus ID if it has special formatting
@@ -287,8 +287,8 @@ export default function DriverDashboard() {
     // Third priority: Try driver's assigned route
     if (!driverData || !routes.length) return null;
 
-    let routeId = driverData.assignedRouteId || driverData.routeId || driverData.routed ||
-      (Array.isArray(driverData.assignedRouteIds) ? driverData.assignedRouteIds[0] : driverData.assignedRouteIds) ||
+    let routeId = driverData.routeId || driverData.routeId || driverData.routed ||
+      (Array.isArray(driverData.routeIds) ? driverData.routeIds[0] : driverData.routeIds) ||
       (Array.isArray(driverData.routeId) ? driverData.routeId[0] : driverData.routeId);
 
     if (typeof window !== 'undefined') console.log('🔍 Looking for driver route with ID:', routeId);
@@ -818,7 +818,7 @@ export default function DriverDashboard() {
                                       {idx + 1}
                                     </div>
                                     <span className="text-xs sm:text-sm font-medium text-gray-700 dark:text-gray-300 whitespace-nowrap">
-                                      {typeof stop === 'string' ? stop : stop.name || stop.stopId || `Stop ${idx + 1}`}
+                                      {typeof stop === 'string' ? stop : stop.name || stop.stop_name || `Stop ${idx + 1}`}
                                     </span>
                                   </div>
                                 </div>

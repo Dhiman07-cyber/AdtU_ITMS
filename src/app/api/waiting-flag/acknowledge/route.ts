@@ -1,4 +1,4 @@
-/**
+﻿/**
  * POST /api/waiting-flag/acknowledge
  * 
  * Driver acknowledges a waiting flag with:
@@ -62,7 +62,7 @@ export async function POST(request: Request) {
     const supabase = getSupabaseServer();
     const { data: driverProfile } = await supabase
       .from('driver_profiles')
-      .select('uid, assigned_bus_id, bus_id, full_name')
+      .select('uid, bus_id, bus_id, full_name')
       .eq('uid', driverUid)
       .maybeSingle();
 
@@ -88,7 +88,7 @@ export async function POST(request: Request) {
     }
 
     // Verify driver is assigned to this bus
-    if (driverProfile.assigned_bus_id !== flag.bus_id &&
+    if (driverProfile.bus_id !== flag.bus_id &&
       driverProfile.bus_id !== flag.bus_id) {
       return NextResponse.json(
         { error: 'Driver is not assigned to this bus' },

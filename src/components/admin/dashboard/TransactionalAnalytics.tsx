@@ -223,17 +223,19 @@ export default function TransactionalAnalytics({
                   <div className="space-y-2">
                     <div className="text-lg font-black text-emerald-400">
                       {(() => {
-                        const data = viewMode === 'days' ? paymentTrends.days : paymentTrends.months;
                         if (viewMode === 'days') {
-                          const sum = data.reduce((acc, curr) => acc + curr.amount, 0);
+                          const sum = (paymentTrends.days || []).reduce((acc, curr) => acc + (curr.amount || 0), 0);
                           return formatCurrency(sum);
                         } else {
-                          const prevMonth = paymentTrends.months[paymentTrends.months.length - 2];
-                          return formatCurrency(prevMonth?.amount || 0);
+                          const months = paymentTrends.months || [];
+                          const currentMonthVal = months.length > 0 ? (months[months.length - 1]?.amount || 0) : 0;
+                          return formatCurrency(currentMonthVal);
                         }
                       })()}
                     </div>
-                    <div className="text-[10px] text-slate-500 opacity-60">Past Month</div>
+                    <div className="text-[10px] text-slate-500 opacity-60">
+                      {viewMode === 'days' ? 'Past 7 Days' : 'This Month'}
+                    </div>
                   </div>
                 </>
               ) : (

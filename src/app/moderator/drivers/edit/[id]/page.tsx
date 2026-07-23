@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState, useEffect, useRef, use } from 'react';
 import { useRouter } from 'next/navigation';
@@ -113,8 +113,8 @@ export default function EditDriverPage({ params }: { params: Promise<{ id: strin
           aadharNumber: foundDriver.aadharNumber || '',
           profilePhoto: null,
           profilePhotoUrl: foundDriver.profilePhotoUrl || '',
-          routeId: foundDriver.routeId || foundDriver.assignedRouteId || (foundDriver.isReserved ? 'Reserved' : ''),
-          busAssigned: foundDriver.busAssigned || foundDriver.assignedBusId || '',
+          routeId: foundDriver.routeId || foundDriver.routeId || (foundDriver.isReserved ? 'Reserved' : ''),
+          busAssigned: foundDriver.busAssigned || foundDriver.busId || '',
           employeeId: foundDriver.employeeId || foundDriver.driverId || '',
           address: foundDriver.address || foundDriver.location || '',
           status: foundDriver.status || 'active',

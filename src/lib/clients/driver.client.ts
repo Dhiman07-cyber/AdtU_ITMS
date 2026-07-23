@@ -28,7 +28,7 @@ export const getDriverById = async (id: string): Promise<any | null> => {
     if (!currentUser) return null;
     const idToken = await currentUser.getIdToken();
 
-    const response = await fetch(`/api/drivers/${id}`, {
+    const response = await fetch(`/api/drivers/${encodeURIComponent(id)}`, {
       headers: {
         'Authorization': `Bearer ${idToken}`
       }

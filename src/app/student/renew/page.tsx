@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/auth-context';
@@ -110,7 +110,7 @@ export default function StudentRenewalPage() {
   const busData = React.useMemo(() => {
     if (!studentData || !buses.length) return null;
 
-    const studentBusId = studentData?.busId || studentData?.assignedBusId;
+    const studentBusId = studentData?.busId || studentData?.busId;
     if (!studentBusId) return null;
 
     const foundBus = buses.find((bus: any) => {

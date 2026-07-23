@@ -42,10 +42,10 @@ export default function HighLoadAlert({ role, className = '' }: HighLoadAlertPro
     const overloadList: OverloadInfo[] = [];
 
     buses.forEach((bus: any) => {
-      const capacity = bus.capacity || bus.totalCapacity || 50;
+      const capacity = Number(bus.capacity || bus.totalCapacity || 50);
       const load = bus.load || {};
-      const morningCount = load.morningCount || 0;
-      const eveningCount = load.eveningCount || 0;
+      const morningCount = Number(bus.morningLoad ?? bus.morning_load ?? load.morningCount ?? load.morning_count ?? 0);
+      const eveningCount = Number(bus.eveningLoad ?? bus.evening_load ?? load.eveningCount ?? load.evening_count ?? 0);
       const busShift = bus.shift || 'Both';
 
       let isOverloaded = false;
@@ -112,7 +112,7 @@ export default function HighLoadAlert({ role, className = '' }: HighLoadAlertPro
       }
     });
 
-    return overloadList.sort((a, b) => b.overloadCount - a.overloadCount);
+    return overloadList.sort((a, b) => (b.loadPercentage - a.loadPercentage) || (b.overloadCount - a.overloadCount));
   }, [buses]);
 
   const totalStudents = overloadedBuses.reduce(

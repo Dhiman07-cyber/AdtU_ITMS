@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+﻿import { NextResponse } from 'next/server';
 import { adminAuth, adminDb } from '@/lib/firebase-admin';
 import { v2 as cloudinary } from 'cloudinary';
 import { decrementBusCapacity } from '@/lib/busCapacityService';
@@ -107,7 +107,7 @@ export const POST = withSecurity(
                     if (sbData.status !== 'active') { continue; }
 
                     const nowIso = new Date().toISOString();
-                    const sbBusId = sbData.busId || sbData.assignedBusId;
+                    const sbBusId = sbData.busId || sbData.busId;
                     const sbShift = sbData.shift;
 
                     // Call the atomic RPC to soft-block and release the seat
@@ -180,7 +180,7 @@ export const POST = withSecurity(
                     if (!waitingFlags.empty) { const b = adminDb.batch(); waitingFlags.docs.forEach((d: any) => b.delete(d.ref)); await b.commit(); }
 
                     // DEDUP GUARD: skip decrement if the seat was already released at soft block.
-                    const busId = studentData?.busId || studentData?.assignedBusId;
+                    const busId = studentData?.busId || studentData?.busId;
                     if (busId && !wasSeatReleased(studentData)) {
                         await decrementBusCapacity(busId, student.uid, studentData?.shift).catch(() => {});
                     }

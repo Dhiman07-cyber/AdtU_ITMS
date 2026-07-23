@@ -28,7 +28,7 @@ export const getRouteById = async (id: string): Promise<Route | null> => {
     if (!currentUser) return null;
     const idToken = await currentUser.getIdToken();
 
-    const response = await fetch(`/api/routes/${id}`, {
+    const response = await fetch(`/api/routes/${encodeURIComponent(id)}`, {
       headers: {
         'Authorization': `Bearer ${idToken}`
       }

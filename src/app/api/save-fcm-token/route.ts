@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 import { saveToken, isValidTokenFormat, subscribeToTopic } from '@/lib/services/fcm-token-service';
 import { withSecurity } from '@/lib/security/api-security';
 import { SaveFCMTokenSchema } from '@/lib/security/validation-schemas';
@@ -82,7 +82,7 @@ export const POST = withSecurity(
     }
 
     // 7. Topic Subscription: Subscribe to route-specific topic for high-performance notifications
-    const routeId = userData.routeId || userData.route_id || userData.assignedRouteId;
+    const routeId = userData.routeId || userData.route_id || userData.routeId;
     if (routeId) {
       try {
         const topic = `route_${routeId}`;

@@ -1,4 +1,4 @@
-// @ts-nocheck
+﻿// @ts-nocheck
 'use client';
 
 import { Suspense, useEffect, useState } from 'react';
@@ -308,9 +308,9 @@ function SwapRequestPageContent() {
       }
 
       const { driver: driverData } = await driverRes.json();
-      let driverBusId = driverData.assignedBusId || driverData.busId;
+      let driverBusId = driverData.busId || driverData.busId;
 
-      console.log('👤 Driver data:', { assignedBusId: driverData.assignedBusId, busId: driverData.busId });
+      console.log('👤 Driver data:', { busId: driverData.busId, busId: driverData.busId });
 
       if (!driverBusId || (typeof driverBusId === 'string' && driverBusId.toLowerCase() === 'reserved')) {
         console.log('⚠️ No bus assigned to driver or reserved status');
@@ -387,7 +387,7 @@ function SwapRequestPageContent() {
       for (const data of driversRaw) {
         // Exclude current user
         if (data.uid !== currentUser.uid) {
-          let busId = data.assignedBusId || data.busId;
+          let busId = data.busId || data.busId;
 
           // Normalize "reserved" drivers so they appear in the correct group (where busId is falsy)
           if (busId && typeof busId === 'string' && (

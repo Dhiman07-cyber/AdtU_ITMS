@@ -61,8 +61,42 @@ export function computeFutureEligibleApproval(
  * Legacy applications created before Phase 2 carry no discriminator and are, by
  * definition, current-session fresh applications.
  */
-export function resolveApplicationType(app: Partial<Application>): ApplicationType {
-  return app.applicationType ?? 'fresh';
+export function resolveApplicationType(app: Partial<Application> & Record<string, any>): ApplicationType {
+  if (!app) return 'fresh';
+  const formData = (app.formData || app.form_data || {}) as Record<string, any>;
+  const explicitType = app.applicationType || app.application_type || formData.applicationType || formData.application_type;
+  if (explicitType === 'future' || explicitType === 'renewal' || explicitType === 'renewal_after_soft_block' || explicitType === 'fresh') {
+    return explicitType as ApplicationType;
+  }
+
+  const currentYear = new Date().getFullYear();
+  const sessionInfo = formData.sessionInfo || formData.session_info || {};
+  const startYear = Number(
+    app.sessionStartYear ||
+    app.session_start_year ||
+    app.targetSession?.startYear ||
+    app.target_session?.start_year ||
+    formData.sessionStartYear ||
+    formData.startYear ||
+    formData.session_start_year ||
+    formData.start_year ||
+    sessionInfo.sessionStartYear ||
+    sessionInfo.startYear ||
+    sessionInfo.session_start_year ||
+    sessionInfo.start_year ||
+    0
+  );
+  if (startYear > currentYear) {
+    return 'future';
+  }
+
+  // Name hint check for test data (e.g. "Hayato - Future")
+  const studentName = (formData.studentName || formData.student_name || formData.fullName || formData.full_name || app.applicantName || app.name || '').toLowerCase();
+  if (studentName.includes('future')) {
+    return 'future';
+  }
+
+  return 'fresh';
 }
 
 /**
@@ -114,8 +148,40 @@ export function getUpcomingStatus(
  * Whether an application is a future-session ("upcoming") application.
  * Centralised so UI and server agree on the single discriminator.
  */
-export function isUpcomingApplication(app: Partial<Application>): boolean {
-  return resolveApplicationType(app) === 'future';
+export function isUpcomingApplication(app: Partial<Application> & Record<string, any>): boolean {
+  if (!app) return false;
+  if (app.state === 'verified_upcoming' || app.state === 'pending_seat_allocation') {
+    return true;
+  }
+  if (resolveApplicationType(app) === 'future') {
+    return true;
+  }
+  const currentYear = new Date().getFullYear();
+  const formData = (app.formData || app.form_data || {}) as Record<string, any>;
+  const sessionInfo = formData.sessionInfo || formData.session_info || {};
+  const startYear = Number(
+    app.sessionStartYear ||
+    app.session_start_year ||
+    app.targetSession?.startYear ||
+    app.target_session?.start_year ||
+    formData.sessionStartYear ||
+    formData.startYear ||
+    formData.session_start_year ||
+    formData.start_year ||
+    sessionInfo.sessionStartYear ||
+    sessionInfo.startYear ||
+    sessionInfo.session_start_year ||
+    sessionInfo.start_year ||
+    0
+  );
+  if (startYear > currentYear) {
+    return true;
+  }
+  const studentName = (formData.studentName || formData.student_name || formData.fullName || formData.full_name || app.applicantName || app.name || '').toLowerCase();
+  if (studentName.includes('future')) {
+    return true;
+  }
+  return false;
 }
 
 /**

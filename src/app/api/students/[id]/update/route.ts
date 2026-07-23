@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+﻿import { NextResponse } from 'next/server';
 import { verifyApiAuth } from '@/lib/security/api-auth';
 import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
 import { getById, update } from '@/domains/student';
@@ -18,7 +18,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     const ALLOWED_FIELDS = new Set([
       'fullName', 'name', 'email', 'phone', 'enrollmentId', 'photoURL',
       'faculty', 'department', 'yearOfStudy',
-      'stopId', 'stopName', 'stopLat', 'stopLng',
+      'stop_name', 'stop_name', 'stopLat', 'stopLng',
       'shift', 'profilePhotoUrl', 'address', 'bloodGroup', 'dob', 'parentName', 'parentPhone'
     ]);
     const BLOCKED_FIELDS = new Set([
@@ -63,8 +63,8 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
 
     const unifiedUpdateData = {
       ...updatedStudentData,
-      assignedBusId: updatedStudentData.busId || updatedStudentData.assignedBusId,
-      assignedRouteId: updatedStudentData.routeId || updatedStudentData.assignedRouteId,
+      busId: updatedStudentData.busId || updatedStudentData.busId,
+      routeId: updatedStudentData.routeId || updatedStudentData.routeId,
       updatedAt: new Date().toISOString(),
     };
 
@@ -88,8 +88,8 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       department: freshStudent.department || '',
       parentName: freshStudent.parentName || '',
       parentPhone: freshStudent.parentPhone || '',
-      busAssigned: freshStudent.busId || freshStudent.assignedBusId || '',
-      routeId: freshStudent.routeId || freshStudent.assignedRouteId || '',
+      busAssigned: freshStudent.busId || freshStudent.busId || '',
+      routeId: freshStudent.routeId || freshStudent.routeId || '',
       profilePhotoUrl: freshStudent.profilePhotoUrl || '',
       address: freshStudent.address || '',
       bloodGroup: freshStudent.bloodGroup || '',

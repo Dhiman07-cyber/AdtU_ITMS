@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+﻿import { NextResponse } from 'next/server';
 import { db as adminDb } from '@/lib/firebase-admin';
 import { withSecurity } from '@/lib/security/api-security';
 import { EmptySchema } from '@/lib/security/validation-schemas';
@@ -33,13 +33,13 @@ export const POST = withSecurity(
       });
     }
 
-    // Query profile_update_requests directly by assignedBusId
+    // Query profile_update_requests directly by busId
     const requests: any[] = [];
 
     for (const busId of busIds) {
       // Query pending requests for this bus
       const requestsSnapshot = await adminDb.collection('profile_update_requests')
-        .where('assignedBusId', '==', busId)
+        .where('busId', '==', busId)
         .where('status', '==', 'pending')
         .get();
 
@@ -55,13 +55,13 @@ export const POST = withSecurity(
       });
     }
 
-    // Also check for legacy requests without assignedBusId by looking at student_profiles in PostgreSQL
+    // Also check for legacy requests without busId by looking at student_profiles in PostgreSQL
     const supabase = getSupabaseServer();
     for (const busId of busIds) {
       const { data: students } = await supabase
         .from('student_profiles')
         .select('*')
-        .or(`assigned_bus_id.eq.${busId},bus_id.eq.${busId}`);
+        .or(`bus_id.eq.${busId},bus_id.eq.${busId}`);
 
       for (const studentData of students || []) {
         const pendingProfileUpdate = studentData.pendingProfileUpdate;
@@ -78,15 +78,15 @@ export const POST = withSecurity(
                 requests.push({
                   requestId: requestDoc.id,
                   ...data,
-                  assignedBusId: busId,
+                  busId: busId,
                   createdAt: data.createdAt ? (data.createdAt.toDate ? data.createdAt.toDate().toISOString() : data.createdAt) : null,
                   approvedAt: data.approvedAt ? (data.approvedAt.toDate ? data.approvedAt.toDate().toISOString() : data.approvedAt) : null,
                   rejectedAt: data.rejectedAt ? (data.rejectedAt.toDate ? data.rejectedAt.toDate().toISOString() : data.rejectedAt) : null
                 });
 
-                if (!data.assignedBusId) {
+                if (!data.busId) {
                   await adminDb.collection('profile_update_requests').doc(requestDoc.id).update({
-                    assignedBusId: busId
+                    busId: busId
                   });
                 }
               }
@@ -105,25 +105,25 @@ export const POST = withSecurity(
       for (const requestDoc of orphanedRequestsSnapshot.docs) {
         const requestData = requestDoc.data();
         if (requests.find(r => r.requestId === requestDoc.id)) continue;
-        if (requestData.assignedBusId && !busIds.includes(requestData.assignedBusId)) continue;
+        if (requestData.busId && !busIds.includes(requestData.busId)) continue;
 
         if (requestData.studentUid) {
           const studentData = await getStudentById(requestData.studentUid);
           if (studentData) {
-            const studentBusId = studentData.assignedBusId || studentData.busId;
+            const studentBusId = studentData.busId || studentData.busId;
 
             if (studentBusId && busIds.includes(studentBusId)) {
               requests.push({
                 requestId: requestDoc.id,
                 ...requestData,
-                assignedBusId: studentBusId,
+                busId: studentBusId,
                 createdAt: requestData.createdAt ? (requestData.createdAt.toDate ? requestData.createdAt.toDate().toISOString() : requestData.createdAt) : null,
                 approvedAt: requestData.approvedAt ? (requestData.approvedAt.toDate ? requestData.approvedAt.toDate().toISOString() : requestData.approvedAt) : null,
                 rejectedAt: requestData.rejectedAt ? (requestData.rejectedAt.toDate ? requestData.rejectedAt.toDate().toISOString() : requestData.rejectedAt) : null
               });
 
               await adminDb.collection('profile_update_requests').doc(requestDoc.id).update({
-                assignedBusId: studentBusId
+                busId: studentBusId
               });
             }
           }

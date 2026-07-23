@@ -31,10 +31,10 @@ export async function releaseSeat(busId: string, studentUid: string, shift?: str
   return seatRepository.decrementCapacity(busId, studentUid, shift);
 }
 
-export async function findAlternativeBuses(stopId: string, routeId: string, shift: string) {
-  return seatRepository.findAlternatives(stopId, routeId, shift);
+export async function findAlternativeBuses(stop_name: string, routeId: string, shift: string) {
+  return seatRepository.findAlternatives(stop_name, routeId, shift);
 }
 
-export async function validateAssignment(params: { routeId: string; stopId: string; shift: string }) {
+export async function validateAssignment(params: { routeId: string; stop_name: string; shift: string }) {
   return seatRepository.validateAssignment(params);
 }

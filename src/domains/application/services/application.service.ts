@@ -31,6 +31,7 @@ import { deleteUnauthUser } from '@/domains/identity';
 import { calculateValidUntilDate } from '@/lib/utils/date-utils';
 import { computeBlockDatesFromValidUntil } from '@/lib/utils/deadline-computation';
 import { getDeadlineConfig } from '@/lib/deadline-config-service';
+import { isUpcomingApplication } from '@/lib/utils/application-eligibility';
 import type { Application, ApplicationState, ApplicationType } from '@/lib/types/application';
 
 // ─── CRUD Methods ────────────────────────────────────────────────────────────
@@ -171,12 +172,38 @@ export async function submitFinal(
     }
   }
 
-  const applicationData: Partial<Application> = {
+  const currentYear = new Date().getFullYear();
+  const startYear = Number(
+    formData.sessionStartYear || formData.startYear || formData.session_start_year || formData.start_year ||
+    body.sessionStartYear || body.startYear || 0
+  );
+
+  let appType: ApplicationType = (body.applicationType || body.application_type) as ApplicationType;
+  if (!appType) {
+    if (startYear > currentYear) {
+      appType = 'future';
+    } else {
+      appType = 'fresh';
+    }
+  }
+
+  const busId = formData.busId || formData.bus_id || formData.selectedBus || formData.busId || body.busId || body.bus_id;
+  const routeId = formData.routeId || formData.route_id || formData.selectedRoute || formData.routeId || body.routeId || body.route_id;
+  const stop_name = formData.stop_name || formData.stop_name || formData.selected_stop_name || formData.selectedStop || body.stop_name || body.stop_name || formData.stop_name || formData.stop_name || body.stop_name || body.stop_name;
+  const shift = formData.shift || formData.selectedShift || body.shift || 'Morning';
+
+  const applicationData: any = {
     applicationId: body.applicationId || uid,
     applicantUid: uid,
     email,
     state: 'submitted',
     formData: { ...formData } as any,
+    busId,
+    routeId,
+    stop_name,
+    shift,
+    sessionStartYear: startYear,
+    sessionEndYear: startYear ? startYear + 1 : undefined,
     submittedAt: now,
     createdAt: now,
     updatedAt: now,
@@ -185,14 +212,76 @@ export async function submitFinal(
       : 'system_offline_submission_bypass',
     verifiedAt: now,
     needsCapacityReview: body.needsCapacityReview || false,
-    applicationType: body.applicationType,
-    targetSession: body.targetSession,
+    applicationType: appType,
+    targetSession: body.targetSession || (startYear ? { startYear, endYear: startYear + 1 } : undefined),
     eligibleApproval: body.eligibleApproval,
   } as Partial<Application>;
 
   await repository.upsert(applicationData);
 
   return { success: true, applicationId: applicationData.applicationId };
+}
+
+/**
+ * Verify an upcoming (future-session) application.
+ *
+ * Future-session applications follow the gating lifecycle (PHASE 2 & Session Activation Engine):
+ * 1. Application is submitted for a future academic session.
+ * 2. Admin/Moderator reviews documents/payment evidence and clicks "Verify".
+ * 3. Application state transitions to 'verified_upcoming'.
+ * 4. NO student profile is created in /students.
+ * 5. NO bus capacity is incremented / seat allocated.
+ * 6. NO active transport access is granted.
+ * 7. When the academic session starts (or session activation engine runs),
+ *    the application is activated and assigned a seat.
+ */
+export async function verifyUpcoming(
+  applicationId: string,
+  verifierData: { uid: string; name: string; role: string },
+  notes?: string
+): Promise<{ success: boolean; error?: string; status?: number }> {
+  const app = await repository.findByApplicationId(applicationId);
+  if (!app) {
+    return { success: false, error: 'Application not found', status: 404 };
+  }
+
+  if (app.state !== 'submitted' && app.state !== 'draft') {
+    return { success: false, error: `Application in state '${app.state}' cannot be verified`, status: 400 };
+  }
+
+  const now = new Date().toISOString();
+
+  await repository.update(applicationId, {
+    state: 'verified_upcoming',
+    verifiedUpcomingAt: now,
+    verifiedUpcomingBy: verifierData.name,
+    verifiedUpcomingById: verifierData.uid,
+    updatedAt: now,
+    stateHistory: [
+      ...(app.stateHistory || []),
+      { state: 'verified_upcoming', timestamp: now, actor: verifierData.uid }
+    ]
+  });
+
+  void createAuditEvent({
+    action: 'application_verified_upcoming',
+    actor_id: verifierData.uid,
+    actor_name: verifierData.name,
+    actor_role: verifierData.role,
+    target_id: applicationId,
+    target_type: 'application',
+    target_name: app.formData?.fullName || app.applicantEmail || '',
+    category: 'applications',
+    summary: `Verified upcoming session application for ${app.formData?.fullName || app.applicantEmail || ''}`,
+    severity: 'medium',
+    metadata: {
+      applicationId,
+      sessionStartYear: (app as any).sessionStartYear || app.targetSession?.startYear,
+      notes,
+    }
+  });
+
+  return { success: true };
 }
 
 /**
@@ -228,6 +317,23 @@ export async function approve(
   }
 
   const app = rpcResult.application;
+
+  // Intercept upcoming applications: verifying an upcoming application MUST NOT create a student
+  // profile or consume bus capacity. It transitions state to 'verified_upcoming' only.
+  if (isUpcomingApplication(app) && app.state === 'submitted') {
+    try {
+      await db.rpc('release_application_lock', { p_application_id: applicationId });
+    } catch {}
+    const verifyResult = await verifyUpcoming(applicationId, approverData, notes);
+    if (!verifyResult.success) {
+      return verifyResult;
+    }
+    return {
+      success: true,
+      studentUid: app.applicant_uid,
+    };
+  }
+
   const isRenewal = app.application_type === 'renewal' || app.application_type === 'renewal_after_soft_block';
 
   try {
@@ -269,7 +375,7 @@ const finalSessionEndYear = ((student as any).sessionEndYear && (student as any)
       const blockDates: { softBlock: string; hardBlock: string } = computeBlockDatesFromValidUntil(finalValidUntil, deadlineConfig);
 
       const seatWasReleased = !!(student as any).seatReleasedAt;
-      const renewalBusId = overrides?.busId || (student as any).busId || (student as any).currentBusId || (student as any).assignedBusId || null;
+      const renewalBusId = overrides?.busId || (student as any).busId || (student as any).currentBusId || (student as any).busId || null;
       const studentShift = (student as any).shift || 'Morning';
 
       let studentDataForRenewalRpc: Record<string, any> | null = null;
@@ -298,7 +404,7 @@ const finalSessionEndYear = ((student as any).sessionEndYear && (student as any)
         renewalAlreadyFinalized = true; // Track that finalize_application_approval should be skipped
       } else {
         // Standard renewal (no seat reclamation): just finalize application
-        studentDataForRenewalRpc = {
+        studentDataForRpc = {
           valid_until: finalValidUntil.toISOString(),
           status: 'active',
           session_end_year: finalSessionEndYear,
@@ -316,21 +422,61 @@ const finalSessionEndYear = ((student as any).sessionEndYear && (student as any)
       };
     } else {
       // ── FRESH APPLICATION PATH ────────────────────────────────────
-      studentData = buildStudentData(app, approverData, overrides);
+      studentData = await buildStudentData(app, approverData, overrides);
+
+      const targetBusId = overrides?.busId || studentData.busId || app.bus_id;
+      const studentShift = studentData.shift || app.shift || 'Morning';
+
+      if (targetBusId) {
+        const { data: capResult, error: capError } = await db.rpc('bus_increment_capacity', {
+          p_bus_id: targetBusId,
+          p_shift: studentShift,
+        });
+
+        if (capError) {
+          console.error('Failed to increment bus capacity for fresh application:', capError);
+          throw new Error(`Bus capacity check failed: ${capError.message || capError.code}`);
+        }
+
+        if (capResult && capResult.error) {
+          console.error('Bus capacity check returned error:', capResult.error);
+          throw new Error(capResult.error);
+        }
+      }
 
       const { data: identityResult, error: identityError } = await db.rpc('identity_activate_student', {
         p_uid: app.applicant_uid,
         p_email: app.email || app.applicant_email,
-        p_full_name: app.full_name,
+        p_full_name: app.form_data?.fullName || null,
         p_student_data: studentData,
       });
 
       if (identityError) {
+        if (targetBusId) {
+          try {
+            await db.rpc('bus_decrement_capacity', {
+              p_bus_id: targetBusId,
+              p_shift: studentShift,
+            });
+          } catch (err) {
+            console.error('Failed to compensate bus capacity increment:', err);
+          }
+        }
         console.error('identity_activate_student RPC error:', identityError);
         throw new Error(`Identity activation failed: ${identityError.message || identityError.code}`);
       }
 
       if (!identityResult?.success) {
+        if (targetBusId) {
+          try {
+            await db.rpc('bus_decrement_capacity', {
+              p_bus_id: targetBusId,
+              p_shift: studentShift,
+            });
+          } catch (err) {
+            console.error('Failed to compensate bus capacity increment:', err);
+          }
+        }
         throw new Error('Identity activation failed');
       }
 
@@ -437,7 +583,7 @@ async function approveRenewal(
   const blockDates = computeBlockDatesFromValidUntil(finalValidUntil, deadlineConfig);
 
   const seatWasReleased = !!(student as any).seatReleasedAt;
-  const renewalBusId = overrides?.busId || (student as any).busId || (student as any).currentBusId || (student as any).assignedBusId || null;
+  const renewalBusId = overrides?.busId || (student as any).busId || (student as any).currentBusId || (student as any).busId || null;
 
   // ── Seat reclamation (renewal_after_soft_block) ───────────────────
   // H3: Validate capacity BEFORE assignment. C4: Compensate on failure.
@@ -673,38 +819,60 @@ export async function getMyStatus(uid: string): Promise<{
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function buildStudentData(
+async function buildStudentData(
   app: any,
   approverData: { uid: string; name: string; role: string },
   overrides?: { busId?: string; startYear?: number; endYear?: number }
-): Record<string, any> {
-  const fd = app.form_data || {};
+): Promise<Record<string, any>> {
+  const fd = app.form_data || app.formData || {};
   const si = fd.sessionInfo || {};
-  const startYear = overrides?.startYear || si.sessionStartYear || new Date().getFullYear();
-  const endYear = overrides?.endYear || si.sessionEndYear || startYear + 1;
+  const startYear = overrides?.startYear || si.sessionStartYear || fd.sessionStartYear || new Date().getFullYear();
+  const endYear = overrides?.endYear || si.sessionEndYear || fd.sessionEndYear || (startYear + 1);
+  const durationYears = Math.max(1, endYear - startYear);
+
+  const busId = overrides?.busId || app.bus_id || app.busId || fd.busId || fd.bus_id || fd.selectedBus;
+  const routeId = app.route_id || app.routeId || fd.routeId || fd.route_id || fd.selectedRoute;
+  const stop_name = app.stop_name || fd.stop_name || fd.selected_stop_name || fd.selectedStop;
+  const shift = app.shift || fd.shift || fd.selectedShift || 'Morning';
+
+  const fullName = app.full_name || fd.fullName || app.name || '';
+  const email = app.email || fd.email || '';
+  const enrollmentId = app.enrollment_id || app.enrollmentId || fd.enrollmentId || '';
+
+  const deadlineConfig = await getDeadlineConfig();
+  const validUntilDate = calculateValidUntilDate(startYear, durationYears, deadlineConfig);
+  const validUntilStr = validUntilDate.toISOString();
+  const blockDates = computeBlockDatesFromValidUntil(validUntilDate, deadlineConfig);
 
   return {
-    phone: fd.phoneNumber,
-    altPhone: fd.alternatePhone,
-    parentName: fd.parentName,
-    parentPhone: fd.parentPhone,
-    faculty: app.faculty || fd.faculty,
-    department: app.department || fd.department,
-    gender: fd.gender,
-    dob: fd.dob,
-    enrollmentId: app.enrollment_id || fd.enrollmentId,
-    bloodGroup: fd.bloodGroup,
-    address: fd.address,
-    profilePhotoUrl: fd.profilePhotoUrl,
-    busId: overrides?.busId || app.bus_id,
-    routeId: app.route_id,
-    stopId: app.stop_id,
-    shift: app.shift,
+    applicationId: app.application_id || app.applicationId || app.id || null,
+    fullName,
+    email,
+    phone: fd.phoneNumber || fd.phone || app.phone || '',
+    altPhone: fd.alternatePhone || fd.altPhone || null,
+    parentName: fd.parentName || null,
+    parentPhone: fd.parentPhone || null,
+    faculty: app.faculty || fd.faculty || '',
+    department: app.department || fd.department || '',
+    gender: fd.gender || null,
+    dob: fd.dob || null,
+    enrollmentId,
+    bloodGroup: fd.bloodGroup || null,
+    address: fd.address || null,
+    profilePhotoUrl: fd.profilePhotoUrl || null,
+    busId,
+    routeId,
+    stop_name,
+    shift,
     sessionStartYear: startYear,
     sessionEndYear: endYear,
-    semester: app.semester || fd.semester,
-    durationYears: endYear - startYear,
-    approvedBy: approverData.name,
+    sessionDuration: String(durationYears),
+    semester: app.semester || fd.semester || '',
+    durationYears,
+    validUntil: validUntilStr,
+    softBlock: (typeof blockDates.softBlock === 'string' ? blockDates.softBlock : (blockDates.softBlock as any)?.toISOString()) || null,
+    hardBlock: (typeof blockDates.hardBlock === 'string' ? blockDates.hardBlock : (blockDates.hardBlock as any)?.toISOString()) || null,
+    approvedBy: approverData.name || approverData.uid,
   };
 }
 
@@ -722,23 +890,29 @@ async function postCommitApprovalSideEffects(
   const amount = Number(app.amount_paid || app.form_data?.paymentInfo?.amountPaid || 0);
   if (amount > 0) {
     const paymentMode = app.payment_mode || app.form_data?.paymentInfo?.paymentMode;
+    const studentIdVal = app.form_data?.enrollmentId || app.enrollment_id || app.enrollmentId || studentData.enrollmentId;
+    const studentNameVal = app.form_data?.fullName || app.full_name || studentData.fullName;
+
     if (paymentMode === 'online') {
       tasks.push(
         import('@/domains/payment').then(({ upsertApprovalPayment }) =>
           upsertApprovalPayment({
-            paymentId: app.form_data?.paymentInfo?.razorpayPaymentId || '',
-            studentId: app.enrollment_id,
+            paymentId: app.form_data?.paymentInfo?.razorpayPaymentId || app.payment_id || `pay_${Date.now()}`,
+            studentId: studentIdVal,
             studentUid: app.applicant_uid,
-            studentName: app.full_name,
+            studentName: studentNameVal,
             amount,
             method: 'Online',
             status: 'Completed',
             sessionStartYear: studentData.sessionStartYear,
             sessionEndYear: studentData.sessionEndYear,
             durationYears: studentData.durationYears,
-            validUntil: new Date(studentData.validUntil || Date.now()),
+            validUntil: studentData.validUntil
+              ? new Date(studentData.validUntil)
+              : new Date(Date.UTC(studentData.sessionEndYear || (new Date().getFullYear() + 1), 5, 30, 23, 59, 59, 999)),
             razorpayPaymentId: app.form_data?.paymentInfo?.razorpayPaymentId,
             razorpayOrderId: app.form_data?.paymentInfo?.razorpayOrderId,
+            approvedAt: new Date(),
           })
         ).catch(err => { console.error('Payment upsert failed:', err); })
       );
@@ -746,14 +920,14 @@ async function postCommitApprovalSideEffects(
       tasks.push(
         import('@/domains/payment').then(({ createOfflinePaymentAtApproval }) =>
           createOfflinePaymentAtApproval({
-            studentId: app.enrollment_id,
+            studentId: studentIdVal,
             studentUid: app.applicant_uid,
-            studentName: app.full_name,
+            studentName: studentNameVal,
             amount,
             durationYears: studentData.durationYears,
             sessionStartYear: studentData.sessionStartYear,
             sessionEndYear: studentData.sessionEndYear,
-            validUntil: studentData.validUntil || new Date().toISOString(),
+            validUntil: studentData.validUntil || new Date(Date.UTC(studentData.sessionEndYear || (new Date().getFullYear() + 1), 5, 30, 23, 59, 59, 999)).toISOString(),
             transactionId: app.form_data?.paymentInfo?.paymentReference || '',
             paidAt: app.form_data?.paymentInfo?.paidAt
               ? new Date(app.form_data.paymentInfo.paidAt)

@@ -27,7 +27,7 @@ export interface PaymentRecord {
     student_id?: string;              // Enrollment ID (encrypted for new, plain for legacy)
     student_name?: string;            // Student name (encrypted for new, plain for legacy)
     offline_transaction_id?: string;  // TX ID (encrypted for new, plain for legacy)
-    stop_id?: string;                 // Stop ID (encrypted for new, plain for legacy)
+    stop_name?: string;                 // Stop ID (encrypted for new, plain for legacy)
 
     amount?: number;
     currency?: string;
@@ -59,7 +59,7 @@ export interface CreatePaymentInput {
     studentId?: string;
     studentUid?: string;
     studentName?: string;
-    stopId?: string;
+    stop_name?: string;
     amount?: number;
     method: 'Online' | 'Offline';
     status?: 'Pending' | 'Completed' | 'Rejected';
@@ -87,22 +87,12 @@ export interface CreatePaymentInput {
 // ============================================
 
 class PaymentsSupabaseService {
-    private supabase: SupabaseClient;
-    private isInitialized: boolean = false;
-
-    constructor() {
-        try {
-            this.supabase = getSupabaseServer();
-            this.isInitialized = true;
-        } catch (err) {
-            console.error('[PaymentsSupabaseService] Missing Supabase credentials');
-            this.supabase = null as unknown as SupabaseClient;
-            this.isInitialized = false;
-        }
+    private get supabase(): SupabaseClient {
+        return getSupabaseServer();
     }
 
     isReady(): boolean {
-        return this.isInitialized;
+        return true;
     }
 
 
@@ -120,14 +110,14 @@ class PaymentsSupabaseService {
         const student_name = record.student_name ? decryptData(record.student_name) : undefined;
         const student_id = record.student_id ? decryptData(record.student_id) : undefined;
         const offline_transaction_id = record.offline_transaction_id ? decryptData(record.offline_transaction_id) : undefined;
-        const stop_id = record.stop_id ? decryptData(record.stop_id) : undefined;
+        const stop_name = record.stop_name ? decryptData(record.stop_name) : undefined;
 
         return {
             ...record,
             student_name: student_name !== null ? student_name : undefined,
             student_id: student_id !== null ? student_id : undefined,
             offline_transaction_id: offline_transaction_id !== null ? offline_transaction_id : undefined,
-            stop_id: stop_id !== null ? stop_id : undefined,
+            stop_name: stop_name !== null ? stop_name : undefined,
             // razorpay_payment_id & razorpay_order_id are stored as plaintext for lookup
         };
     }
@@ -185,6 +175,31 @@ class PaymentsSupabaseService {
             // Prepare record - encrypt PII fields before storage
             // Data is stored encrypted in existing columns
             // decryptData() will handle both encrypted and legacy plain-text when reading
+            // Pre-lookup profile data if studentName or studentId is missing to guarantee no NULLs
+            if ((!input.studentName || !input.studentId) && input.studentUid) {
+                try {
+                    const { data: profile } = await this.supabase
+                        .from('student_profiles')
+                        .select('full_name, enrollment_id')
+                        .eq('uid', input.studentUid)
+                        .maybeSingle();
+                    if (profile) {
+                        input.studentName = input.studentName || profile.full_name;
+                        input.studentId = input.studentId || profile.enrollment_id;
+                    }
+                    if (!input.studentName) {
+                        const { data: userRec } = await this.supabase
+                            .from('users')
+                            .select('name')
+                            .eq('uid', input.studentUid)
+                            .maybeSingle();
+                        if (userRec && userRec.name) input.studentName = userRec.name;
+                    }
+                } catch (e) {
+                    console.error('[PaymentsSupabaseService] Profile pre-lookup error:', e);
+                }
+            }
+
             const validUntilIso = input.validUntil?.toISOString();
             const transactionDateIso = input.transactionDate?.toISOString() || new Date().toISOString();
             const documentSignature = this.buildCompletedPaymentSignature(input, {
@@ -193,6 +208,9 @@ class PaymentsSupabaseService {
                 transactionDate: transactionDateIso,
             });
             const approvedBy = this.normalizeApprovedBy(input);
+            const approvedAtIso = input.approvedAt
+                ? input.approvedAt.toISOString()
+                : (input.status === 'Completed' ? new Date().toISOString() : null);
 
             const record: Record<string, unknown> = {
                 payment_id: input.paymentId,
@@ -211,16 +229,13 @@ class PaymentsSupabaseService {
                 student_name: input.studentName ? encryptData(input.studentName) : null,
                 student_id: input.studentId ? encryptData(input.studentId) : null,
                 offline_transaction_id: input.offlineTransactionId ? encryptData(input.offlineTransactionId) : null,
-                // NOTE: stop_id is intentionally excluded - column doesn't exist in Supabase yet
-                // To enable: run 'ALTER TABLE payments ADD COLUMN stop_id TEXT;' in Supabase SQL Editor
-                // Then uncomment: stop_id: input.stopId ? encryptData(input.stopId) : null,
 
                 // NOT encrypted - needed for Razorpay reconciliation/lookup
                 razorpay_payment_id: input.razorpayPaymentId,
                 razorpay_order_id: input.razorpayOrderId,
 
                 approved_by: approvedBy,
-                approved_at: input.approvedAt?.toISOString(),
+                approved_at: approvedAtIso,
             };
 
             if (documentSignature) {
@@ -281,6 +296,31 @@ class PaymentsSupabaseService {
                 }
             }
 
+            // Pre-lookup profile data if studentName or studentId is missing to guarantee no NULLs
+            if ((!input.studentName || !input.studentId) && input.studentUid) {
+                try {
+                    const { data: profile } = await this.supabase
+                        .from('student_profiles')
+                        .select('full_name, enrollment_id')
+                        .eq('uid', input.studentUid)
+                        .maybeSingle();
+                    if (profile) {
+                        input.studentName = input.studentName || profile.full_name;
+                        input.studentId = input.studentId || profile.enrollment_id;
+                    }
+                    if (!input.studentName) {
+                        const { data: userRec } = await this.supabase
+                            .from('users')
+                            .select('name')
+                            .eq('uid', input.studentUid)
+                            .maybeSingle();
+                        if (userRec && userRec.name) input.studentName = userRec.name;
+                    }
+                } catch (e) {
+                    console.error('[PaymentsSupabaseService] Profile pre-lookup error in createPayment:', e);
+                }
+            }
+
             const validUntilIso = input.validUntil?.toISOString();
             const transactionDateIso = input.transactionDate?.toISOString() || new Date().toISOString();
             const documentSignature = this.buildCompletedPaymentSignature(input, {
@@ -289,6 +329,9 @@ class PaymentsSupabaseService {
                 transactionDate: transactionDateIso,
             });
             const approvedBy = this.normalizeApprovedBy(input);
+            const approvedAtIso = input.approvedAt
+                ? input.approvedAt.toISOString()
+                : (input.status === 'Completed' ? new Date().toISOString() : null);
 
             const record: Record<string, unknown> = {
                 payment_id: input.paymentId,
@@ -308,7 +351,7 @@ class PaymentsSupabaseService {
                 razorpay_payment_id: input.razorpayPaymentId,
                 razorpay_order_id: input.razorpayOrderId,
                 approved_by: approvedBy,
-                approved_at: input.approvedAt?.toISOString(),
+                approved_at: approvedAtIso,
             };
 
             if (documentSignature) {
@@ -525,6 +568,52 @@ class PaymentsSupabaseService {
     // READ OPERATIONS
     // ============================================
 
+    private async enrichPaymentWithStudentProfile(record: PaymentRecord): Promise<PaymentRecord> {
+        const decrypted = this.decryptRecord(record);
+        if (!decrypted) return decrypted;
+
+        if (decrypted.student_uid) {
+            try {
+                const { data: profile } = await this.supabase
+                    .from('student_profiles')
+                    .select('full_name, enrollment_id, valid_until')
+                    .eq('uid', decrypted.student_uid)
+                    .maybeSingle();
+
+                if (profile) {
+                    if ((!decrypted.student_name || decrypted.student_name.startsWith('enc:v1:')) && profile.full_name) {
+                        decrypted.student_name = profile.full_name;
+                    }
+                    if ((!decrypted.student_id || decrypted.student_id.startsWith('enc:v1:')) && profile.enrollment_id) {
+                        decrypted.student_id = profile.enrollment_id;
+                    }
+                    if (profile.valid_until) {
+                        const payValidYear = decrypted.valid_until ? new Date(decrypted.valid_until).getUTCFullYear() : 0;
+                        const targetEndYear = decrypted.session_end_year || 0;
+                        if (!decrypted.valid_until || (targetEndYear > 0 && payValidYear < targetEndYear)) {
+                            decrypted.valid_until = profile.valid_until;
+                        }
+                    }
+                }
+            } catch {
+                // Ignore fallback error
+            }
+        }
+
+        if (decrypted.session_end_year) {
+            const payValidYear = decrypted.valid_until ? new Date(decrypted.valid_until).getUTCFullYear() : 0;
+            if (!decrypted.valid_until || payValidYear < decrypted.session_end_year) {
+                decrypted.valid_until = new Date(Date.UTC(decrypted.session_end_year, 5, 30, 23, 59, 59, 999)).toISOString();
+            }
+        }
+
+        return decrypted;
+    }
+
+    private async enrichPaymentsWithStudentProfiles(records: PaymentRecord[]): Promise<PaymentRecord[]> {
+        return Promise.all(records.map(p => this.enrichPaymentWithStudentProfile(p)));
+    }
+
     /**
      * Get payment by ID
      */
@@ -541,7 +630,7 @@ class PaymentsSupabaseService {
             if (error) {
                 return null;
             }
-            return this.decryptRecord(data as PaymentRecord);
+            return await this.enrichPaymentWithStudentProfile(data as PaymentRecord);
         } catch {
             return null;
         }
@@ -557,17 +646,6 @@ class PaymentsSupabaseService {
         if (!this.isReady()) return null;
 
         try {
-            // Cannot search by encrypted value with random IV. 
-            // So this method might fail if we rely on the encrypted column.
-            // However, usually online payments use payment_id = razorpay_payment_id.
-            // So we can try `getPaymentById` instead if they match.
-
-            // For now, attempting exact match on column will fail if encrypted.
-            // I'll leave this query as is, but it will likely return nothing if encrypted.
-            // Given the constraints, I will NOT encrypt razorpay_payment_id column to preserve lookup capability 
-            // OR the user accepts this trade-off. 
-            // Let's TRY to encrypt `student_name` and `offline_transaction_id` ONLY.
-
             const { data, error } = await this.supabase
                 .from('payments')
                 .select('*')
@@ -575,7 +653,7 @@ class PaymentsSupabaseService {
                 .single();
 
             if (error) return null;
-            return this.decryptRecord(data as PaymentRecord);
+            return await this.enrichPaymentWithStudentProfile(data as PaymentRecord);
         } catch {
             return null;
         }
@@ -602,7 +680,7 @@ class PaymentsSupabaseService {
                 .range(offset, offset + limit - 1);
 
             if (error) return [];
-            return (data || []).map(p => this.decryptRecord(p as PaymentRecord));
+            return await this.enrichPaymentsWithStudentProfiles((data || []) as PaymentRecord[]);
         } catch {
             return [];
         }
@@ -629,7 +707,7 @@ class PaymentsSupabaseService {
                 .order('transaction_date', { ascending: true });
 
             if (error) return [];
-            return (data || []).map(p => this.decryptRecord(p as PaymentRecord));
+            return this.enrichPaymentsWithStudentProfiles((data || []) as PaymentRecord[]);
         } catch {
             return [];
         }
@@ -649,7 +727,7 @@ class PaymentsSupabaseService {
                 .limit(limit);
 
             if (error) return [];
-            return (data || []).map(p => this.decryptRecord(p as PaymentRecord));
+            return this.enrichPaymentsWithStudentProfiles((data || []) as PaymentRecord[]);
         } catch {
             return [];
         }
@@ -670,7 +748,7 @@ class PaymentsSupabaseService {
                 .order('created_at', { ascending: true });
 
             if (error) return [];
-            return (data || []).map(p => this.decryptRecord(p as PaymentRecord));
+            return this.enrichPaymentsWithStudentProfiles((data || []) as PaymentRecord[]);
         } catch {
             return [];
         }
@@ -711,8 +789,10 @@ class PaymentsSupabaseService {
                 return { payments: [], total: 0 };
             }
 
+            const payments = await this.enrichPaymentsWithStudentProfiles((data || []) as PaymentRecord[]);
+
             return {
-                payments: (data || []).map(p => this.decryptRecord(p as PaymentRecord)),
+                payments,
                 total: count || 0
             };
         } catch (err) {
@@ -745,7 +825,7 @@ class PaymentsSupabaseService {
                 return [];
             }
 
-            return (data || []).map(p => this.decryptRecord(p as PaymentRecord));
+            return this.enrichPaymentsWithStudentProfiles((data || []) as PaymentRecord[]);
         } catch (err) {
             console.error('[PaymentsSupabaseService] Reporting fetch exception:', err);
             return [];
@@ -862,12 +942,13 @@ class PaymentsSupabaseService {
                 return d;
             });
 
-            const startDate = last7Days[0].toISOString();
+            // Start from 8 days ago UTC to ensure local time zone coverage
+            const startDate = new Date(Date.now() - 8 * 86400000).toISOString();
 
             const { data, error } = await this.supabase
                 .from('payments')
                 .select('amount, transaction_date')
-                .eq('status', 'Completed')
+                .in('status', ['Completed', 'completed'])
                 .gte('transaction_date', startDate)
                 .order('transaction_date', { ascending: true });
 
@@ -880,11 +961,16 @@ class PaymentsSupabaseService {
 
             return last7Days.map(day => {
                 const dateStr = day.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-                const dayISO = day.toISOString().split('T')[0];
 
                 const dayTotal = payments
-                    .filter(p => p.transaction_date?.startsWith(dayISO))
-                    .reduce((sum, p) => sum + (p.amount || 0), 0);
+                    .filter(p => {
+                        if (!p.transaction_date) return false;
+                        const pDate = new Date(p.transaction_date);
+                        return pDate.getFullYear() === day.getFullYear() &&
+                               pDate.getMonth() === day.getMonth() &&
+                               pDate.getDate() === day.getDate();
+                    })
+                    .reduce((sum, p) => sum + Number(p.amount || 0), 0);
 
                 return {
                     date: dateStr,
@@ -918,7 +1004,7 @@ class PaymentsSupabaseService {
             const { data, error } = await this.supabase
                 .from('payments')
                 .select('amount, transaction_date')
-                .eq('status', 'Completed')
+                .in('status', ['Completed', 'completed'])
                 .gte('transaction_date', startDate)
                 .order('transaction_date', { ascending: true });
 
@@ -931,12 +1017,15 @@ class PaymentsSupabaseService {
 
             return last6Months.map(month => {
                 const dateStr = month.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
-                // Use local year and month for consistent filtering with the way last6Months was generated
-                const monthYear = `${month.getFullYear()}-${String(month.getMonth() + 1).padStart(2, '0')}`;
 
                 const monthTotal = payments
-                    .filter(p => p.transaction_date?.startsWith(monthYear))
-                    .reduce((sum, p) => sum + (p.amount || 0), 0);
+                    .filter(p => {
+                        if (!p.transaction_date) return false;
+                        const pDate = new Date(p.transaction_date);
+                        return pDate.getFullYear() === month.getFullYear() &&
+                               pDate.getMonth() === month.getMonth();
+                    })
+                    .reduce((sum, p) => sum + Number(p.amount || 0), 0);
 
                 return {
                     date: dateStr,

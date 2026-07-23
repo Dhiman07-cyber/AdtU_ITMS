@@ -21,7 +21,6 @@ import { createAuditEvent } from '@/domains/audit';
 import { getDeadlineConfig } from '@/lib/deadline-config-service';
 import { calculateValidUntilDate } from '@/lib/utils/date-utils';
 import { fetchOrderDetails } from '@/lib/payment/razorpay.service';
-import { acquireMarker, releaseMarker } from '@/domains/payment/repositories/processed-payments.repository';
 import { getByUid as getStudentByUid, getByEnrollmentId as getStudentByEnrollmentId, applyPaymentValidity } from '@/domains/student';
 import { getById as getApplicationById } from '@/domains/application';
 import * as Notification from '@/domains/notification';
@@ -93,7 +92,9 @@ export async function createOnlinePayment(
         sessionStartYear: request.sessionStartYear,
         sessionEndYear: request.sessionEndYear,
         durationYears: request.durationYears,
-        validUntil: typeof request.validUntil === 'string' ? new Date(request.validUntil) : undefined,
+        validUntil: typeof request.validUntil === 'string'
+            ? new Date(request.validUntil)
+            : ((request.validUntil as any) instanceof Date ? (request.validUntil as any) : undefined),
         transactionDate: now,
         razorpayPaymentId: request.razorpayPaymentId,
         razorpayOrderId: request.razorpayOrderId,
@@ -128,8 +129,6 @@ export async function processCapturedPayment(paymentDetails: {
     const { paymentId, orderId, amount, method = 'Online', notes = {}, source = 'system' } = paymentDetails;
     console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] processCapturedPayment ENTER. paymentId:`, paymentId, `orderId:`, orderId, `amount:`, amount, `source:`, source);
 
-    let markerAcquired = false;
-
     try {
         // 1. Idempotency Check: check if already processed
         const isProcessed = await isPaymentProcessed(paymentId);
@@ -154,29 +153,6 @@ export async function processCapturedPayment(paymentDetails: {
         const deadlineConfig = await getDeadlineConfig();
 
         if (isNewRegistration) {
-            // Atomic idempotency check via PG marker
-            const acquired = await acquireMarker(paymentId, {
-                orderId,
-                amount,
-                enrollmentId: enrollmentId || undefined,
-                userId: userId || undefined,
-                source,
-            });
-
-            if (!acquired) {
-                const supabaseExists = await isPaymentProcessed(paymentId);
-                if (!supabaseExists) {
-                    await releaseMarker(paymentId).catch(() => {});
-                    console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] processCapturedPayment (new registration): marker existed but Supabase ledger missing. Stale marker cleaned.`);
-                    return { status: 'error', error: 'Stale marker cleaned' };
-                }
-                console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] processCapturedPayment (new registration): marker existed, returning already_processed.`);
-                return { status: 'already_processed' };
-            }
-
-            markerAcquired = true;
-            console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] PROCESS_CAPTURED[1] marker acquired`);
-
             let sessionStartYear: number | undefined;
             let sessionEndYear: number | undefined;
             let targetValidUntil: Date;
@@ -300,29 +276,6 @@ export async function processCapturedPayment(paymentDetails: {
                 status: 'completed' as const
             };
 
-            // Atomic idempotency check via PG marker
-            const acquired = await acquireMarker(paymentId, {
-                orderId,
-                amount,
-                enrollmentId: enrollmentId || undefined,
-                userId: studentUid || undefined,
-                source,
-            });
-
-            if (!acquired) {
-                const supabaseExists = await isPaymentProcessed(paymentId);
-                if (!supabaseExists) {
-                    await releaseMarker(paymentId).catch(() => {});
-                    console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] processCapturedPayment (renewal): marker existed but Supabase ledger missing. Stale marker cleaned.`);
-                    return { status: 'error', error: 'Stale marker cleaned' };
-                }
-                console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] processCapturedPayment (renewal): already processed, returning already_processed.`);
-                return { status: 'already_processed' };
-            }
-
-            markerAcquired = true;
-            console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] PROCESS_CAPTURED[1] marker acquired`);
-
             // Save Completed online payment record to Supabase (Immutable Ledger)
             console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] PROCESS_CAPTURED[2] Supabase insert`);
             const result = await paymentsSupabaseService.createPayment({
@@ -424,12 +377,6 @@ export async function processCapturedPayment(paymentDetails: {
             return { status: 'success' };
         }
     } catch (err: any) {
-        if (markerAcquired) {
-            console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] PROCESS_CAPTURED[2] Supabase insert FAILED`);
-            console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] Exception caught in processCapturedPayment:`, err.message || err);
-            await releaseMarker(paymentId).catch(() => {});
-            console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] marker cleaned`);
-        }
         if (err.message === 'ALREADY_PROCESSED') {
             console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] processCapturedPayment returning already_processed`);
             return { status: 'already_processed' };

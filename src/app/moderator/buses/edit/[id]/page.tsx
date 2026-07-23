@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState, useEffect, use } from "react";
 import { useRouter } from "next/navigation";
@@ -322,7 +322,7 @@ export default function EditBusPage({ params }: { params: Promise<{ id: string }
                     </div>
                     {drivers
                       .filter(d => {
-                        const bId = d.assignedBusId || d.busId || d.busAssigned;
+                        const bId = d.busId || d.busId || d.busAssigned;
                         return !bId || bId === id || bId === formData.busId || bId === `bus_${formData.busId}`;
                       })
                       .map(driver => (
@@ -336,11 +336,11 @@ export default function EditBusPage({ params }: { params: Promise<{ id: string }
                     </div>
                     {drivers
                       .filter(d => {
-                        const bId = d.assignedBusId || d.busId || d.busAssigned;
+                        const bId = d.busId || d.busId || d.busAssigned;
                         return bId && bId !== id && bId !== formData.busId && bId !== `bus_${formData.busId}`;
                       })
                       .map(driver => {
-                        const bId = driver.assignedBusId || driver.busId || driver.busAssigned;
+                        const bId = driver.busId || driver.busId || driver.busAssigned;
                         const bus = buses.find(b => b.busId === bId || b.id === bId);
                         return (
                           <SelectItem key={driver.uid} value={driver.uid || (driver as any).id || ''} disabled>

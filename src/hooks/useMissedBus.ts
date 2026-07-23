@@ -17,8 +17,8 @@ export const MISSED_BUS_MESSAGES = {
     SEARCHING: "Searching other buses to help you. We'll notify you shortly.",
     REQUEST_PENDING: "Pickup request sent to nearby buses. We'll notify you when a driver accepts.",
     NO_CANDIDATES_MODAL: "Currently no bus is available to pick you up. Please wait for the next bus or try again later.",
-    REQUEST_ACCEPTED: (busId: string, stopName: string) =>
-        `Good news — Bus ${busId} will pick you up. Please head to ${stopName}.`,
+    REQUEST_ACCEPTED: (busId: string, stop_name: string) =>
+        `Good news — Bus ${busId} will pick you up. Please head to ${stop_name}.`,
     REQUEST_EXPIRED: "Your pickup request expired. Please try again if needed.",
     RATE_LIMITED: "You have reached the missed-bus request limit. Try again later.",
     ALREADY_HAS_PENDING: "You already have a pending or approved missed-bus request."
@@ -28,7 +28,7 @@ interface MissedBusRequest {
     id: string;
     status: 'pending' | 'approved' | 'rejected' | 'expired' | 'cancelled';
     routeId: string;
-    stopId: string;
+    stop_name: string;
     candidateTripId?: string;
     createdAt: string;
     expiresAt: string;
@@ -38,7 +38,7 @@ interface MissedBusRequest {
 interface RaiseRequestParams {
     opId: string;
     routeId: string;
-    stopId: string;
+    stop_name: string;
     assignedTripId?: string;
     assignedBusId?: string;  // Student's assigned bus ID
 }
@@ -130,7 +130,7 @@ export function useMissedBus(
                     idToken: token,
                     opId: params.opId,
                     routeId: params.routeId,
-                    stopId: params.stopId,
+                    stop_name: params.stop_name,
                     assignedTripId: params.assignedTripId,
                     assignedBusId: params.assignedBusId
                 })

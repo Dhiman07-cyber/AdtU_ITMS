@@ -772,20 +772,6 @@ export class DriverSwapSupabaseService {
             // Firestore revert. Wrapped in try-catch so the next cron pass or
             // opportunistic cleanup will drain orphaned Supabase records.
             try {
-                // Delete the temporary assignment from Supabase
-                await supabase
-                    .from('temporary_assignments')
-                    .delete()
-                    .eq('source_request_id', requestId);
-
-                // If this was a true swap (both drivers had buses), cleanup secondary too
-                if (request.secondary_bus_id) {
-                    await supabase
-                        .from('temporary_assignments')
-                        .delete()
-                        .eq('bus_id', request.secondary_bus_id);
-                }
-
                 // Delete the request (cleanup)
                 await supabase
                     .from('driver_swap_requests')
@@ -999,28 +985,7 @@ export class DriverSwapSupabaseService {
 
     private static async createTemporaryAssignment(request: SwapRequest): Promise<void> {
         try {
-            // Remove any existing assignment for this bus
-            await supabase
-                .from('temporary_assignments')
-                .delete()
-                .eq('bus_id', request.bus_id);
-
-            // Create new assignment in Supabase
-            await supabase.from('temporary_assignments').insert({
-                bus_id: request.bus_id,
-                original_driver_uid: request.requester_driver_uid,
-                current_driver_uid: request.candidate_driver_uid,
-                route_id: request.route_id || '',
-                starts_at: request.starts_at,
-                ends_at: request.ends_at,
-                active: true,
-                created_by: request.requester_driver_uid,
-                source_request_id: request.id,
-                reason: 'Driver swap request accepted'
-            });
-
-
-            console.log('✅ Temporary assignment created in Supabase');
+            console.log('✅ Temporary assignment active in driver_swap_requests');
 
             // ========== UPDATE FIRESTORE FOR BUS CONTROL TRANSFER ==========
             // This is critical for the driver page to correctly show bus information

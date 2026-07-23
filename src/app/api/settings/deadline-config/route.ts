@@ -159,9 +159,8 @@ export async function POST(req: NextRequest) {
  * Syncs the abstract rules from DeadlineConfig to concrete dates in SystemConfig
  */
 async function syncSystemConfigDates(deadlineConfig: DeadlineConfig, uid: string) {
-    // Deprecated: Concrete lifecycle dates are no longer synced to system_config to prevent dual sources of truth.
-    // Consumers must query the canonical /api/settings/deadline-config endpoint directly.
-    console.log('ℹ️ syncSystemConfigDates is deprecated and bypassed to maintain a single canonical source of truth.');
+    // Concrete lifecycle dates are queried directly from canonical deadline config endpoint.
+    console.log('ℹ️ syncSystemConfigDates is bypassed to maintain a single canonical source of truth.');
 }
 
 /**

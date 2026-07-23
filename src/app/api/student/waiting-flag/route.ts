@@ -17,7 +17,7 @@ import { getByUid } from '@/domains/student';
  */
 export const POST = withSecurity(
     async (request, { auth, body }) => {
-        const { busId, lat, lng, message, timestamp, routeId, stopName, stopId, stopLat, stopLng } = body as any;
+        const { busId, lat, lng, message, timestamp, routeId, stop_name, stopLat, stopLng } = body as any;
         const studentUid = auth.uid;
         const supabase = getSupabaseServer();
 
@@ -49,7 +49,7 @@ export const POST = withSecurity(
             );
         }
 
-        const studentBusId = studentData.busId || studentData.assignedBusId;
+        const studentBusId = studentData.busId || studentData.busId;
         
         if (!studentBusId || studentBusId !== busId) {
             return NextResponse.json({
@@ -72,8 +72,7 @@ export const POST = withSecurity(
             student_name: studentData.fullName || studentData.name || 'Student',
             bus_id: busId,
             route_id: routeId || 'unknown',
-            stop_id: stopId || 'unknown',
-            stop_name: stopName || 'Unknown Stop',
+            stop_name: stop_name || 'Unknown Stop',
             status: 'raised',
             trip_id: activeTripRes.data?.trip_id || null,
             created_at: new Date(currentTimestamp).toISOString(),

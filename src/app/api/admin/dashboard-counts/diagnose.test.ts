@@ -69,7 +69,6 @@ describe('Diagnose Dashboard Counts API Queries', () => {
 
     // 2. Supabase
     if (supabase) {
-      await runQuery("supabase.academic_calendar_config", () => supabase.from('academic_calendar_config').select('*').eq('is_active', true).maybeSingle());
       await runQuery("supabase.driver_status", () => supabase.from('driver_status').select('*').in('status', ['enroute', 'on_trip']));
       await runQuery("supabase.payments", () => supabase.from('payments').select('amount, method').or('status.eq.Completed,status.eq.completed'));
     }

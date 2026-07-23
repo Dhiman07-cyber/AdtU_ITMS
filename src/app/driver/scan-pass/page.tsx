@@ -93,8 +93,8 @@ export default function DriverScanPassPage() {
 
   // Sync bus ID to ref for stable access during frequent scans
   useEffect(() => {
-    const busId = userData?.busId || userData?.assignedBusId ||
-      (userData?.assignedBusIds && userData.assignedBusIds?.[0]);
+    const busId = userData?.busId || userData?.busId ||
+      (userData?.busIds && userData.busIds?.[0]);
     if (busId) {
       lastBusIdRef.current = busId as string;
     }
@@ -327,8 +327,8 @@ export default function DriverScanPassPage() {
       }
 
       // Use reactive userData with ref fallback to handle intermittent context updates
-      const scannerBusId = userData?.busId || userData?.assignedBusId ||
-        (userData?.assignedBusIds && userData.assignedBusIds[0]) ||
+      const scannerBusId = userData?.busId || userData?.busId ||
+        (userData?.busIds && userData.busIds[0]) ||
         lastBusIdRef.current;
 
       if (!scannerBusId) {
@@ -743,7 +743,7 @@ export default function DriverScanPassPage() {
                     {/* Header with Logo */}
                     <div className="w-full px-4 py-3 flex items-center justify-between border-b border-white/5 bg-gradient-to-r from-[#1a1b2e] to-[#0f1019] relative">
                       <div className="flex items-center gap-2.5">
-                        <Image src="/adtu-new-logo.svg" alt="AdtU" width={96} height={24} className="h-6 w-auto flex-shrink-0" />
+                        <Image src="/adtu-new-logo.svg" alt="AdtU" width={96} height={24} className="h-6 w-auto flex-shrink-0" style={{ width: 'auto', height: 'auto' }} />
                         <span className="text-[10px] font-black text-white/90 uppercase tracking-wider">Assam down town University</span>
                       </div>
                       <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" />

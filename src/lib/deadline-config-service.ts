@@ -15,7 +15,7 @@
  *       ↓
  *   CalendarRepository       (D2 domain persistence layer)
  *       ↓
- *   PostgreSQL               (academic_calendar_config table)
+ *   Firestore                (settings/deadline document)
  *
  * ─── WHAT WAS REMOVED ────────────────────────────────────────────────────────
  *   • adminDb import and all Firestore reads/writes

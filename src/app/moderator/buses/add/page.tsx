@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState, useEffect } from "react";
 import { useAuth } from '@/contexts/auth-context';
@@ -333,7 +333,7 @@ export default function AddBusPage() {
                       Reserved (Category-1)
                     </div>
                     {drivers
-                      .filter(d => !d.assignedBusId && !d.busId && !d.busAssigned)
+                      .filter(d => !d.busId && !d.busId && !d.busAssigned)
                       .map(driver => (
                         <SelectItem key={driver.uid} value={driver.uid || driver.id}>
                           {driver.fullName || driver.name || 'Unknown'}
@@ -344,9 +344,9 @@ export default function AddBusPage() {
                       Assigned (Category-2)
                     </div>
                     {drivers
-                      .filter(d => d.assignedBusId || d.busId || d.busAssigned)
+                      .filter(d => d.busId || d.busId || d.busAssigned)
                       .map(driver => {
-                        const busId = driver.assignedBusId || driver.busId || driver.busAssigned;
+                        const busId = driver.busId || driver.busId || driver.busAssigned;
                         const bus = buses.find(b => b.busId === busId || b.id === busId);
                         return (
                           <SelectItem key={driver.uid} value={driver.uid || driver.id} disabled>

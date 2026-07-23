@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Export Helper Functions
  * Convert Firestore data to Excel with accurate formatting
  * 
@@ -134,12 +134,12 @@ export function formatStudentsForExport(students: any[], buses: any[] = []): any
   return students.map(student => {
     // Find assigned bus
     const assignedBus = buses.find(b =>
-      b.id === student.busId || b.busId === student.busId || b.id === student.assignedBusId || b.busId === student.assignedBusId
+      b.id === student.busId || b.busId === student.busId || b.id === student.busId || b.busId === student.busId
     );
 
     const busInfo = assignedBus
       ? `Bus-${assignedBus.displayIndex || extractNumber(assignedBus.busId || assignedBus.id)} - ${assignedBus.busNumber || assignedBus.licensePlate || assignedBus.plateNumber || 'Unknown'}`
-      : (student.busId || student.assignedBusId) ? 'Assigned (Details Not Found)' : 'Not Assigned';
+      : (student.busId || student.busId) ? 'Assigned (Details Not Found)' : 'Not Assigned';
 
     return {
       'Name': student.fullName || student.name || 'N/A',
@@ -160,7 +160,7 @@ export function formatStudentsForExport(students: any[], buses: any[] = []): any
       'Session End': student.sessionEndYear || 'N/A',
       'Valid Until': student.validUntil ? new Date(student.validUntil).toLocaleDateString() : 'N/A',
       'Shift': student.shift ? String(student.shift).charAt(0).toUpperCase() + String(student.shift).slice(1) : 'N/A',
-      'Route ID': student.routeId || student.assignedRouteId || 'N/A',
+      'Route ID': student.routeId || student.routeId || 'N/A',
       'Pickup Point': student.pickupPoint || 'N/A',
       'Assigned Bus': busInfo,
       'Approved By': student.approvedBy || 'N/A',
@@ -176,12 +176,12 @@ export function formatStudentsForExport(students: any[], buses: any[] = []): any
 export function formatDriversForExport(drivers: any[], buses: any[] = []): any[] {
   return drivers.map(driver => {
     const assignedBus = buses.find(b =>
-      b.id === driver.busId || b.busId === driver.busId || b.id === driver.assignedBusId || b.busId === driver.assignedBusId
+      b.id === driver.busId || b.busId === driver.busId || b.id === driver.busId || b.busId === driver.busId
     );
 
     const busInfo = assignedBus
       ? `Bus-${assignedBus.displayIndex || extractNumber(assignedBus.busId || assignedBus.id)} - ${assignedBus.busNumber || assignedBus.licensePlate || assignedBus.plateNumber || 'Unknown'}`
-      : (driver.busId || driver.assignedBusId) ? 'Assigned (Details Not Found)' : 'Not Assigned';
+      : (driver.busId || driver.busId) ? 'Assigned (Details Not Found)' : 'Not Assigned';
 
     return {
       'Name': driver.fullName || driver.name || 'N/A',
@@ -191,7 +191,7 @@ export function formatDriversForExport(drivers: any[], buses: any[] = []): any[]
       'Driver ID': driver.driverId || driver.employeeId || driver.empId || 'N/A',
       'AADHAR Number': driver.aadharNumber || 'N/A',
       'License Number': driver.licenseNumber || 'N/A',
-      'Route ID': driver.routeId || driver.assignedRouteId || 'N/A',
+      'Route ID': driver.routeId || driver.routeId || 'N/A',
       'Assigned Bus': busInfo,
       'Shift': driver.shift ? String(driver.shift).charAt(0).toUpperCase() + String(driver.shift).slice(1) : 'N/A',
       'Approved By': driver.approvedBy || 'N/A',
@@ -232,7 +232,7 @@ export function formatBusesForExport(buses: any[], routes: any[] = []): any[] {
     const routeNumber = assignedRoute?.routeNumber || assignedRoute?.routeName || 'Not Assigned';
     const stops = assignedRoute?.stops
       ? Array.isArray(assignedRoute.stops)
-        ? assignedRoute.stops.map((s: any) => s.stopName || s.name || s).join(', ')
+        ? assignedRoute.stops.map((s: any) => s.stop_name || s.name || s).join(', ')
         : assignedRoute.stops
       : 'N/A';
 
@@ -258,7 +258,7 @@ export function formatRoutesForExport(routes: any[]): any[] {
   return routes.map(route => {
     const stops = route.stops
       ? Array.isArray(route.stops)
-        ? route.stops.map((s: any) => s.stopName || s.name || s).join(', ')
+        ? route.stops.map((s: any) => s.stop_name || s.name || s).join(', ')
         : route.stops
       : 'N/A';
 
@@ -543,7 +543,7 @@ async function generateReportData(
     sortedStudents.forEach((student, index) => {
       const assignedBus = buses.find(b =>
         b.id === student.busId || b.busId === student.busId ||
-        b.id === student.assignedBusId || b.busId === student.assignedBusId
+        b.id === student.busId || b.busId === student.busId
       );
 
       const status = student.status || 'N/A';
@@ -591,7 +591,7 @@ async function generateReportData(
     drivers.forEach((driver, index) => {
       const assignedBus = buses.find(b =>
         b.id === driver.busId || b.busId === driver.busId ||
-        b.id === driver.assignedBusId || b.busId === driver.assignedBusId ||
+        b.id === driver.busId || b.busId === driver.busId ||
         b.activeDriverId === driver.id || b.assignedDriverId === driver.id
       );
 
@@ -692,7 +692,7 @@ async function generateReportData(
       let stops = 'N/A';
       if (routeInfo && routeInfo.stops) {
         if (Array.isArray(routeInfo.stops)) {
-          stops = routeInfo.stops.map((s: any) => s.stopName || s.name || s).join(', ');
+          stops = routeInfo.stops.map((s: any) => s.stop_name || s.name || s).join(', ');
         } else if (typeof routeInfo.stops === 'string') {
           stops = routeInfo.stops;
         }
@@ -704,8 +704,8 @@ async function generateReportData(
       const totalStudents = students.filter(s =>
         s.busId === bus.id ||
         s.busId === bus.busId ||
-        s.assignedBusId === bus.id ||
-        s.assignedBusId === bus.busId ||
+        s.busId === bus.id ||
+        s.busId === bus.busId ||
         s.currentBusId === bus.id ||
         s.currentBusId === bus.busId
       ).length;

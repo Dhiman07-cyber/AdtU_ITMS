@@ -18,7 +18,7 @@ export const GET = withSecurity(
         // 1. D6: Fetch Driver Profile from driver_profiles
         const { data: driverProfile, error: driverError } = await supabase
             .from('driver_profiles')
-            .select('uid, full_name, shift, license_number, driver_id, employee_id, joining_date, assigned_bus_id, bus_id, assigned_route_id, route_id')
+            .select('uid, full_name, shift, license_number, employee_id, joining_date, bus_id, route_id')
             .eq('uid', uid)
             .maybeSingle();
 
@@ -26,8 +26,8 @@ export const GET = withSecurity(
             return NextResponse.json({ error: 'Driver profile not found' }, { status: 404 });
         }
 
-        const busId = driverProfile.assigned_bus_id || driverProfile.bus_id;
-        const routeId = driverProfile.assigned_route_id || driverProfile.route_id;
+        const busId = driverProfile.bus_id;
+        const routeId = driverProfile.route_id;
 
         // 2. Parallelize everything else
         const [busResult, routeResult, studentCountResult, tripStatus] = await Promise.all([

@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useAuth } from "@/contexts/auth-context";
 import { useRouter } from "next/navigation";
@@ -47,11 +47,11 @@ export default function StudentProfilePage() {
             ...data,
             // Ensure correct field mappings
             fullName: data.fullName || data.name,
-            busId: data.busId || data.assignedBusId,
-            routeId: data.routeId || data.assignedRouteId,
+            busId: data.busId || data.busId,
+            routeId: data.routeId || data.routeId,
             status: data.status || 'pending',
             shift: data.shift || 'Not Set',
-            stopId: data.stopId || data.stopName || 'Not Set',
+            stop_name: data.stop_name || data.stop_name || 'Not Set',
             // Preserve paymentAmount and paid_on from dataService
             paymentAmount: data.paymentAmount,
             paid_on: data.paid_on,
@@ -534,8 +534,8 @@ export default function StudentProfilePage() {
           studentUid={studentData.uid || currentUser?.uid || ''}
           studentName={studentData.fullName || studentData.name || 'Student'}
           enrollmentId={studentData.enrollmentId}
-          busNumber={studentData.busId || studentData.assignedBusId}
-          routeName={studentData.routeId || studentData.assignedRouteId}
+          busNumber={studentData.busId || studentData.busId}
+          routeName={studentData.routeId || studentData.routeId}
           validUntil={studentData.validUntil}
           isActive={hasTransportEntitlement(studentData)}
         />

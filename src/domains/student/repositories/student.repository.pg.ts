@@ -27,10 +27,8 @@
  * profile_photo_url              → profilePhotoUrl
  * bus_id                         → busId
  * route_id                       → routeId
- * assigned_route_id              → assignedRouteId
- * assigned_bus_id                → assignedBusId
- * stop_id                        → stopId
- * stop_name                      → stopName
+ * stop_name                        → stop_name
+ * stop_name                      → stop_name
  * shift                          → shift
  * status                         → status
  * session_duration               → sessionDuration
@@ -71,10 +69,7 @@ const STUDENT_FIELD_MAP: Record<string, string> = {
   profilePhotoUrl: 'profile_photo_url',
   busId: 'bus_id',
   routeId: 'route_id',
-  assignedRouteId: 'assigned_route_id',
-  assignedBusId: 'assigned_bus_id',
-  stopId: 'stop_id',
-  stopName: 'stop_name',
+  stop_name: 'stop_name',
   shift: 'shift',
   status: 'status',
   sessionDuration: 'session_duration',
@@ -134,10 +129,7 @@ function pgRowToStudent(row: Record<string, any>): Student {
     profilePhotoUrl: row.profile_photo_url,
     busId: row.bus_id,
     routeId: row.route_id,
-    assignedRouteId: row.assigned_route_id,
-    assignedBusId: row.assigned_bus_id,
-    stopId: row.stop_id,
-    stopName: row.stop_name,
+    stop_name: row.stop_name,
     shift: row.shift,
     status: row.status,
     sessionDuration: row.session_duration,
@@ -167,12 +159,27 @@ function pgRowToStudent(row: Record<string, any>): Student {
  */
 export async function pgFindByUid(uid: string): Promise<Student | null> {
   const db = getSupabaseServer();
+  const cleanId = decodeURIComponent(uid || '').trim();
 
-  const { data, error } = await db
+  if (!cleanId) return null;
+
+  // 1. Try exact match on uid
+  let { data, error } = await db
     .from('student_profiles')
     .select('*')
-    .eq('uid', uid)
+    .eq('uid', cleanId)
     .maybeSingle();
+
+  // 2. If not found by uid, try matching by enrollment_id
+  if (!data && !error) {
+    const res = await db
+      .from('student_profiles')
+      .select('*')
+      .eq('enrollment_id', cleanId)
+      .maybeSingle();
+    data = res.data;
+    error = res.error;
+  }
 
   if (error) {
     throw new Error(`StudentRepository (PG) read failed: ${error.message}`);
@@ -389,12 +396,10 @@ export async function pgUnassignRoute(routeId: string): Promise<void> {
     .from('student_profiles')
     .update({
       route_id: null,
-      assigned_route_id: null,
-      stop_id: null,
       stop_name: null,
       updated_at: new Date().toISOString(),
     })
-    .or(`route_id.eq.${routeId},assigned_route_id.eq.${routeId}`);
+    .or(`route_id.eq.${routeId},route_id.eq.${routeId}`);
   if (error) throw new Error(`StudentRepository (PG) pgUnassignRoute failed: ${error.message}`);
 }
 
@@ -405,11 +410,20 @@ export async function pgUnassignRoute(routeId: string): Promise<void> {
 export async function pgFindByBusIds(busIds: string[]): Promise<Student[]> {
   if (busIds.length === 0) return [];
   const db = getSupabaseServer();
+  const filterExpr = busIds.flatMap(id => {
+    const safeId = id.replace(/"/g, '""');
+    return [`bus_id.eq."${safeId}"`];
+  }).join(',');
+
   const { data, error } = await db
     .from('student_profiles')
     .select('*')
-    .or(busIds.map(id => `(bus_id.eq.${id},assigned_bus_id.eq.${id})`).join(','));
-  if (error) throw new Error(`StudentRepository (PG) findByBusIds failed: ${error.message}`);
+    .or(filterExpr);
+
+  if (error) {
+    console.error(`StudentRepository (PG) findByBusIds failed:`, error.message);
+    return [];
+  }
   return (data || []).map(pgRowToStudent);
 }
 
@@ -419,11 +433,18 @@ export async function pgFindByBusIds(busIds: string[]): Promise<Student[]> {
 export async function pgFindByRouteIds(routeIds: string[]): Promise<Student[]> {
   if (routeIds.length === 0) return [];
   const db = getSupabaseServer();
+  const filterExpr = routeIds.flatMap(id => {
+    const safeId = id.replace(/"/g, '""');
+    return [`route_id.eq."${safeId}"`];
+  }).join(',');
   const { data, error } = await db
     .from('student_profiles')
     .select('*')
-    .or(routeIds.map(id => `(route_id.eq.${id},assigned_route_id.eq.${id})`).join(','));
-  if (error) throw new Error(`StudentRepository (PG) findByRouteIds failed: ${error.message}`);
+    .or(filterExpr);
+  if (error) {
+    console.error(`StudentRepository (PG) findByRouteIds failed:`, error.message);
+    return [];
+  }
   return (data || []).map(pgRowToStudent);
 }
 
@@ -447,55 +468,56 @@ export async function pgFindByStatuses(statuses: string[]): Promise<Student[]> {
  */
 export async function pgFindSeatOccupying(): Promise<Array<{
   uid: string; busId: string; shift: string; status: string;
-  seatReleasedAt: string | null; stopId: string | null;
+  seatReleasedAt: string | null; stop_name: string | null;
 }>> {
   const db = getSupabaseServer();
   const { data, error } = await db
     .from('student_profiles')
-    .select('uid, assigned_bus_id, bus_id, shift, status, seat_released_at, stop_id')
+    .select('uid, bus_id, shift, status, seat_released_at, stop_name')
     .or('status.eq.active,status.eq.soft_blocked,status.eq.pending_deletion')
-    .not('assigned_bus_id', 'is', null);
+    .not('bus_id', 'is', null);
   if (error) throw new Error(`StudentRepository (PG) findSeatOccupying failed: ${error.message}`);
   return (data || []).map(row => ({
     uid: row.uid,
-    busId: row.assigned_bus_id || row.bus_id,
+    busId: row.bus_id,
     shift: row.shift,
     status: row.status,
     seatReleasedAt: row.seat_released_at,
-    stopId: row.stop_id,
+    stop_name: row.stop_name,
   }));
 }
 
 /**
- * Get bus occupancy stats via the two PostgreSQL views.
- * Views: bus_occupancy_counts_view, bus_stop_counts_view.
+ * Get bus occupancy stats directly from student_profiles table.
  */
 export async function pgGetBusOccupancyStats(): Promise<{
   occupancy: Record<string, { total: number; morning: number; evening: number }>;
   stops: Record<string, Record<string, number>>;
 }> {
   const db = getSupabaseServer();
-  const [occRes, stopRes] = await Promise.all([
-    db.from('bus_occupancy_counts_view').select('*'),
-    db.from('bus_stop_counts_view').select('*'),
-  ]);
-  if (occRes.error) throw new Error(`StudentRepository (PG) occupancyStats occupancy: ${occRes.error.message}`);
-  if (stopRes.error) throw new Error(`StudentRepository (PG) occupancyStats stops: ${stopRes.error.message}`);
+  const { data, error } = await db
+    .from('student_profiles')
+    .select('bus_id, shift, stop_name, status, seat_released_at');
+
+  if (error) throw new Error(`StudentRepository (PG) occupancyStats: ${error.message}`);
 
   const occupancy: Record<string, { total: number; morning: number; evening: number }> = {};
   const stops: Record<string, Record<string, number>> = {};
 
-  for (const row of occRes.data || []) {
-    if (row.bus_id) occupancy[row.bus_id] = {
-      total: Number(row.total_count || 0),
-      morning: Number(row.morning_count || 0),
-      evening: Number(row.evening_count || 0),
-    };
-  }
-  for (const row of stopRes.data || []) {
-    if (row.bus_id && row.stop_id) {
+  for (const row of data || []) {
+    const isActive = row.status === 'active' || (['soft_blocked', 'pending_deletion'].includes(row.status) && !row.seat_released_at);
+    if (!isActive || !row.bus_id) continue;
+
+    if (!occupancy[row.bus_id]) {
+      occupancy[row.bus_id] = { total: 0, morning: 0, evening: 0 };
+    }
+    occupancy[row.bus_id].total += 1;
+    if (row.shift === 'Morning') occupancy[row.bus_id].morning += 1;
+    if (row.shift === 'Evening') occupancy[row.bus_id].evening += 1;
+
+    if (row.stop_name) {
       if (!stops[row.bus_id]) stops[row.bus_id] = {};
-      stops[row.bus_id][row.stop_id] = Number(row.stop_count || 0);
+      stops[row.bus_id][row.stop_name] = (stops[row.bus_id][row.stop_name] || 0) + 1;
     }
   }
   return { occupancy, stops };

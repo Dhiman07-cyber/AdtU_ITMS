@@ -27,8 +27,8 @@ export class StopBusMapper {
     });
   }
   
-  getBusesForStop(stopId: string): string[] {
-    return Array.from(this.stopToBuses.get(stopId) || []);
+  getBusesForStop(stop_name: string): string[] {
+    return Array.from(this.stopToBuses.get(stop_name) || []);
   }
   
   getStopsForBus(busId: string): string[] {
@@ -38,8 +38,8 @@ export class StopBusMapper {
   getBusesForMultipleStops(stopIds: string[]): string[] {
     const busSet = new Set<string>();
     
-    stopIds.forEach(stopId => {
-      const buses = this.stopToBuses.get(stopId);
+    stopIds.forEach(stop_name => {
+      const buses = this.stopToBuses.get(stop_name);
       if (buses) {
         buses.forEach(busId => busSet.add(busId));
       }
@@ -48,16 +48,16 @@ export class StopBusMapper {
     return Array.from(busSet);
   }
   
-  canBusServeStop(busId: string, stopId: string): boolean {
+  canBusServeStop(busId: string, stop_name: string): boolean {
     const stops = this.busToStops.get(busId);
-    return stops ? stops.has(stopId) : false;
+    return stops ? stops.has(stop_name) : false;
   }
   
   canBusServeAllStops(busId: string, stopIds: string[]): boolean {
     const stops = this.busToStops.get(busId);
     if (!stops) return false;
     
-    return stopIds.every(stopId => stops.has(stopId));
+    return stopIds.every(stop_name => stops.has(stop_name));
   }
   
   getCommonBuses(stopIds: string[]): string[] {

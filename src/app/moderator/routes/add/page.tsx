@@ -18,7 +18,7 @@ import { signalCollectionRefresh } from "@/hooks/useEventDrivenRefresh";
 type Stop = {
   name: string;
   sequence: number;
-  stopId: string;
+  stop_name: string;
 };
 
 // Route form data type
@@ -105,22 +105,22 @@ export default function AddRoutePage() {
     }
   }, [currentStopInput, stops]);
 
-  // Generate stopId from stop name
-  const generateStopId = (stopName: string): string => {
-    return stopName
+  // Generate stop_name from stop name
+  const generateStopId = (stop_name: string): string => {
+    return stop_name
       .toLowerCase()
       .replace(/\s+/g, '_')
       .replace(/[^a-z0-9_]/g, '');
   };
 
   // Add stop to the list
-  const addStop = (stopName: string) => {
-    if (!stopName.trim()) return;
+  const addStop = (stop_name: string) => {
+    if (!stop_name.trim()) return;
 
     const newStop: Stop = {
-      name: stopName,
+      name: stop_name,
       sequence: stops.length + 1,
-      stopId: generateStopId(stopName)
+      stop_name: generateStopId(stop_name)
     };
 
     setStops([...stops, newStop]);
@@ -461,7 +461,7 @@ export default function AddRoutePage() {
 
                       <div className="flex-1">
                         <p className="text-gray-200 font-medium">{stop.name}</p>
-                        <p className="text-xs text-gray-500">ID: {stop.stopId}</p>
+                        <p className="text-xs text-gray-500">ID: {stop.stop_name}</p>
                       </div>
 
                       <button

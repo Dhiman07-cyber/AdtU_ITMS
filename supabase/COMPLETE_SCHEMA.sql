@@ -68,7 +68,7 @@ CREATE TABLE IF NOT EXISTS waiting_flags (
   student_name TEXT NOT NULL,
   bus_id TEXT NOT NULL,
   route_id TEXT NOT NULL,
-  stop_id TEXT,
+  stop_name TEXT,
   stop_name TEXT,
   stop_lat DOUBLE PRECISION,
   stop_lng DOUBLE PRECISION,
@@ -106,24 +106,6 @@ CREATE TABLE IF NOT EXISTS driver_location_updates (
 CREATE INDEX IF NOT EXISTS idx_driver_location_updates_driver_uid ON driver_location_updates(driver_uid);
 CREATE INDEX IF NOT EXISTS idx_driver_location_updates_timestamp ON driver_location_updates(timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_driver_location_updates_cleanup ON driver_location_updates(driver_uid, bus_id);
-
--- route_cache table (ORS geometry caching)
-CREATE TABLE IF NOT EXISTS route_cache (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  route_id TEXT NOT NULL UNIQUE,
-  geometry JSONB NOT NULL,
-  distance DOUBLE PRECISION,
-  duration DOUBLE PRECISION,
-  cached_at TIMESTAMPTZ DEFAULT NOW(),
-  expires_at TIMESTAMPTZ,
-  fallback_used BOOLEAN DEFAULT FALSE,
-  fallback_type TEXT DEFAULT 'none',
-  fallback_reason TEXT
-);
-
-CREATE INDEX IF NOT EXISTS idx_route_cache_route_id ON route_cache(route_id);
-CREATE INDEX IF NOT EXISTS idx_route_cache_expires_at ON route_cache(expires_at);
-CREATE INDEX IF NOT EXISTS idx_route_cache_fallback ON route_cache(fallback_used) WHERE fallback_used = TRUE;
 
 -- =====================================================
 -- SECTION 2: DRIVER SWAP SYSTEM TABLES
@@ -580,7 +562,6 @@ ALTER TABLE bus_locations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE driver_status ENABLE ROW LEVEL SECURITY;
 ALTER TABLE waiting_flags ENABLE ROW LEVEL SECURITY;
 ALTER TABLE driver_location_updates ENABLE ROW LEVEL SECURITY;
-ALTER TABLE route_cache ENABLE ROW LEVEL SECURITY;
 ALTER TABLE driver_swap_requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE temporary_assignments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.reassignment_logs ENABLE ROW LEVEL SECURITY;
@@ -712,20 +693,6 @@ CREATE POLICY "driver_location_updates_delete_service" ON driver_location_update
   FOR DELETE TO service_role USING (true);
 
 
--- ========== route_cache policies ==========
-DROP POLICY IF EXISTS "route_cache_select_all" ON route_cache;
-DROP POLICY IF EXISTS "route_cache_select_anon" ON route_cache;
-CREATE POLICY "route_cache_select_anon" ON route_cache
-  FOR SELECT TO anon, authenticated USING (true);
-
-DROP POLICY IF EXISTS "route_cache_insert_service" ON route_cache;
-CREATE POLICY "route_cache_insert_service" ON route_cache
-  FOR INSERT TO service_role WITH CHECK (true);
-
-DROP POLICY IF EXISTS "route_cache_update_service" ON route_cache;
-CREATE POLICY "route_cache_update_service" ON route_cache
-  FOR UPDATE TO service_role USING (true);
-
 -- ========== driver_swap_requests policies (SECURED) ==========
 DROP POLICY IF EXISTS "Drivers can read their swap requests" ON driver_swap_requests;
 DROP POLICY IF EXISTS "driver_swap_requests_select_involved" ON driver_swap_requests;
@@ -835,7 +802,6 @@ GRANT SELECT ON public.waiting_flags TO anon, authenticated;
 GRANT SELECT ON public.active_trips TO anon, authenticated;
 GRANT SELECT ON public.bus_locations TO anon, authenticated;
 GRANT SELECT ON public.driver_status TO anon, authenticated;
-GRANT SELECT ON public.route_cache TO anon, authenticated;
 GRANT SELECT ON public.missed_bus_requests TO anon, authenticated;
 
 -- 3. Core application grants
@@ -1036,7 +1002,7 @@ CREATE TABLE IF NOT EXISTS public.missed_bus_requests (
   op_id TEXT,                      -- client-provided idempotency key
   student_id TEXT NOT NULL,
   route_id TEXT NOT NULL,
-  stop_id TEXT NOT NULL,
+  stop_name TEXT NOT NULL,
   student_sequence INT NULL,       -- cached resolve of stop sequence
   candidate_trip_id UUID NULL,     -- when driver accepts, set the trip id
   trip_candidates JSONB NULL,      -- list of candidate trip IDs & raw ETA
@@ -1052,7 +1018,7 @@ CREATE INDEX IF NOT EXISTS idx_missed_bus_requests_op_id ON public.missed_bus_re
 CREATE INDEX IF NOT EXISTS idx_missed_bus_requests_candidate_trip_id ON public.missed_bus_requests(candidate_trip_id);
 CREATE INDEX IF NOT EXISTS idx_missed_bus_requests_status ON public.missed_bus_requests(status);
 CREATE INDEX IF NOT EXISTS idx_missed_bus_requests_expires_at ON public.missed_bus_requests(expires_at) WHERE status = 'pending';
-CREATE INDEX IF NOT EXISTS idx_missed_bus_requests_route_stop ON public.missed_bus_requests(route_id, stop_id);
+CREATE INDEX IF NOT EXISTS idx_missed_bus_requests_route_stop ON public.missed_bus_requests(route_id, stop_name);
 CREATE INDEX IF NOT EXISTS idx_missed_bus_requests_trip_candidates ON public.missed_bus_requests USING GIN (trip_candidates);
 
 -- Enable RLS for missed_bus_requests
@@ -1106,7 +1072,7 @@ RETURNS TABLE(
   request_id UUID,
   student_id TEXT,
   route_id TEXT,
-  stop_id TEXT,
+  stop_name TEXT,
   student_sequence INT,
   created_at TIMESTAMPTZ,
   expires_at TIMESTAMPTZ
@@ -1117,7 +1083,7 @@ BEGIN
     mbr.id AS request_id,
     mbr.student_id,
     mbr.route_id,
-    mbr.stop_id,
+    mbr.stop_name,
     mbr.student_sequence,
     mbr.created_at,
     mbr.expires_at
@@ -1200,7 +1166,6 @@ COMMENT ON TABLE bus_locations IS 'Real-time GPS coordinates of buses during act
 COMMENT ON TABLE driver_status IS 'Current operational status of drivers';
 COMMENT ON TABLE waiting_flags IS 'Student waiting signals at bus stops';
 COMMENT ON TABLE driver_location_updates IS 'Historical location breadcrumbs for audit/replay';
-COMMENT ON TABLE route_cache IS 'Cached route geometries from OpenRouteService';
 COMMENT ON TABLE public.reassignment_logs IS 'Audit logs for driver/student/route reassignment operations';
 COMMENT ON TABLE public.payments IS 'IMMUTABLE FINANCIAL LEDGER - Payment records are permanent and cannot be deleted. Single source of truth for all payments.';
 COMMENT ON TABLE public.active_trips IS 'Multi-driver lock system - Live trip records with heartbeat for exclusive bus operation';

@@ -34,10 +34,6 @@ try {
   const isProduction = process.env.NODE_ENV === 'production';
   const isTest = process.env.NODE_ENV === 'test' || !!process.env.VITEST;
 
-  if (!isProduction && !isTest) {
-    console.log('🔧 Initializing Firebase Admin SDK...');
-  }
-
   if (process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY) {
     if (!getApps().length) {
       // Process the private key - handle both quoted and unquoted keys, and escaped newlines
@@ -53,10 +49,6 @@ try {
           privateKey: privateKey,
         }),
       });
-
-      if (!isProduction && !isTest) {
-        console.log('✅ Firebase Admin SDK initialized');
-      }
     } else {
       adminApp = getApps()[0];
     }

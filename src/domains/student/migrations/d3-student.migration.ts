@@ -13,7 +13,7 @@
  * Core fields → typed columns:
  *   uid, email, fullName, phone, parentPhone, faculty, department, gender,
  *   dob, enrollmentId, bloodGroup, address, profilePhotoUrl, busId, routeId,
- *   assignedRouteId, stopId, shift, status, sessionDuration, sessionStartYear,
+ *   routeId, stop_name, shift, status, sessionDuration, sessionStartYear,
  *   sessionEndYear, validUntil, softBlock, hardBlock, approvedBy, approvedAt,
  *   createdAt, updatedAt, pendingProfileUpdate, expiryReminderCount, lastExpiryReminderSentAt
  *
@@ -30,8 +30,8 @@ const STUDENTS_COLLECTION = 'students';
 const CORE_FIELDS = new Set([
   'uid', 'email', 'fullName', 'phone', 'altPhone', 'parentName', 'parentPhone',
   'faculty', 'department', 'gender', 'dob', 'enrollmentId', 'bloodGroup',
-  'address', 'profilePhotoUrl', 'busId', 'bus_id', 'routeId', 'assignedRouteId',
-  'assignedBusId', 'stopId', 'stopName', 'shift', 'status', 'sessionDuration',
+  'address', 'profilePhotoUrl', 'busId', 'bus_id', 'routeId', 'routeId',
+  'busId', 'stop_name', 'stop_name', 'shift', 'status', 'sessionDuration',
   'sessionStartYear', 'sessionEndYear', 'semester', 'validUntil', 'softBlock',
   'hardBlock', 'approvedBy', 'approvedAt', 'createdAt', 'updatedAt',
   'pendingProfileUpdate', 'expiryReminderCount', 'lastExpiryReminderSentAt',
@@ -48,10 +48,7 @@ const FIELD_MAP: Record<string, string> = {
   profilePhotoUrl: 'profile_photo_url',
   busId: 'bus_id',
   routeId: 'route_id',
-  assignedRouteId: 'assigned_route_id',
-  assignedBusId: 'assigned_bus_id',
-  stopId: 'stop_id',
-  stopName: 'stop_name',
+  stop_name: 'stop_name',
   sessionDuration: 'session_duration',
   sessionStartYear: 'session_start_year',
   sessionEndYear: 'session_end_year',

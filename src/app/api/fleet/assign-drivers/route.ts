@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import { verifyApiAuth } from '@/lib/security/api-auth';
 import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
@@ -145,8 +145,8 @@ export async function POST(req: NextRequest) {
                     docPath: `drivers/${df.driverId}`,
                     collection: 'drivers',
                     docId: df.driverId,
-                    before: { assigned_bus_id: null, is_reserved: true },
-                    after: { assigned_bus_id: df.finalBusId, is_reserved: df.isReserved },
+                    before: { bus_id: null, is_reserved: true },
+                    after: { bus_id: df.finalBusId, is_reserved: df.isReserved },
                 })),
             ];
 

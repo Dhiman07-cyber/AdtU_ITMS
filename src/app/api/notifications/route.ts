@@ -1,4 +1,4 @@
-/**
+﻿/**
  * GET /api/notifications
  *
  * Returns the current user's notifications from PostgreSQL.
@@ -27,7 +27,7 @@ export const GET = withSecurity(
       const thirtyDaysAgo = new Date();
       thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
-      const userRouteId = (auth as any).routeId || (auth as any).assignedRouteId || null;
+      const userRouteId = (auth as any).routeId || (auth as any).routeId || null;
 
       let unreadCount = 0;
       const notifications = records

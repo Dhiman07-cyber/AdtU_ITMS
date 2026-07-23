@@ -21,7 +21,7 @@ interface RouteSelectionSectionProps {
   buses: any[]; // Using any because Bus type might vary slightly across generic usage
   selectedRouteId: string;
   selectedBusId: string;
-  selectedStopId: string;
+  selected_stop_name: string;
   selectedShift?: string; // Added: shift selection for capacity check
   busAssigned?: string; // Optional restoration of display text
   onReferenceChange: (field: string, value: any) => void; // Generic handler for parent state updates
@@ -38,7 +38,7 @@ export default function RouteSelectionSection({
   buses,
   selectedRouteId,
   selectedBusId,
-  selectedStopId,
+  selected_stop_name,
   selectedShift,
   busAssigned,
   onReferenceChange,
@@ -161,7 +161,7 @@ export default function RouteSelectionSection({
     onReferenceChange('routeId', routeId);
 
     // Clear stop and bus selection
-    onReferenceChange('stopId', '');
+    onReferenceChange('stop_name', '');
     onReferenceChange('busId', '');
     onReferenceChange('busAssigned', '');
     setShowStops(false);
@@ -229,9 +229,9 @@ export default function RouteSelectionSection({
   // Handle Stop Selection
   // NOTE: Per requirements, NO capacity check runs on stop selection
   // Only the route selection triggers the capacity check
-  const handleStopSelect = (stopId: string) => {
-    // We store the stopId (value) which might be an ID or name depending on data
-    onReferenceChange('stopId', stopId);
+  const handleStopSelect = (stop_name: string) => {
+    // We store the stop_name (value) which might be an ID or name depending on data
+    onReferenceChange('stop_name', stop_name);
 
     // Do NOT run any capacity check here - as per requirements:
     // - Shift selection: Nothing happens
@@ -265,15 +265,15 @@ export default function RouteSelectionSection({
   };
 
   // Helper: Detailed Application Capacity Check
-  const checkDetailedCapacity = async (routeId: string, stopId: string, stopName: string, busId?: string) => {
-    if (!routeId || !stopId) return;
+  const checkDetailedCapacity = async (routeId: string, stop_name: string, busId?: string) => {
+    if (!routeId || !stop_name) return;
 
     setCheckingCapacity(true);
     setDetailedCapacityResult(null);
     setSimpleCapacityInfo(null); // Clear simple info to prioritize detailed result
 
     try {
-      const result = await checkCapacityForApplication(routeId, stopId, stopName, busId, selectedShift);
+      const result = await checkCapacityForApplication(routeId, stop_name, busId, selectedShift);
       setDetailedCapacityResult(result);
       if (onCapacityCheckResult) onCapacityCheckResult(result);
 
@@ -310,7 +310,7 @@ export default function RouteSelectionSection({
       );
     }
 
-    const stopNames = route.stops.map((stop: any) => stop.name || stop.stopName || stop);
+    const stopNames = route.stops.map((stop: any) => stop.name || stop.stop_name || stop);
     let displayStops = '';
 
     if (stopNames.length <= 4) {
@@ -331,12 +331,11 @@ export default function RouteSelectionSection({
 
   // Trigger detailed capacity check when route and stop are both selected
   useEffect(() => {
-    if (selectedRouteId && selectedStopId) {
-      const stopObj = stops.find(s => (s.stopId || s.id || s.name) === selectedStopId);
-      const stopName = stopObj ? (stopObj.name || stopObj.stopName || selectedStopId) : selectedStopId;
-      checkDetailedCapacity(selectedRouteId, selectedStopId, stopName, selectedBusId);
+    if (selectedRouteId && selected_stop_name) {
+      const stopObj = stops.find(s => (s.stop_name || s.id || s.name) === selected_stop_name);
+      checkDetailedCapacity(selectedRouteId, selected_stop_name, selectedBusId);
     }
-  }, [selectedRouteId, selectedStopId, selectedBusId, selectedShift, stops]);
+  }, [selectedRouteId, selected_stop_name, selectedBusId, selectedShift, stops]);
 
   return (
     <div className="space-y-6">
@@ -397,7 +396,7 @@ export default function RouteSelectionSection({
                         {stops.map((stop: any, idx) => (
                           <li key={idx} className="text-xs text-slate-300 flex items-start gap-3">
                             <div className="mt-1.5 h-1.5 w-1.5 rounded-full bg-indigo-500 shrink-0 shadow-[0_0_8px_rgba(99,102,241,0.5)]" />
-                            <span className="leading-tight font-medium">{stop.name || stop.stopName || stop}</span>
+                            <span className="leading-tight font-medium">{stop.name || stop.stop_name || stop}</span>
                           </li>
                         ))}
                       </ul>
@@ -413,14 +412,14 @@ export default function RouteSelectionSection({
 
         {/* Slot 3: Pickup Point / Stop Selection */}
         <div className="space-y-1 transition-all duration-300 ease-in-out">
-          <Label htmlFor="stopId" className="block text-[11px] font-bold tracking-wider text-slate-500 uppercase mb-2">
+          <Label htmlFor="stop_name" className="block text-[11px] font-bold tracking-wider text-slate-500 uppercase mb-2">
             Pickup Point / Stop <span className="text-red-500">*</span>
           </Label>
 
           {selectedRouteId ? (
             <Select
-              key={selectedStopId}
-              value={selectedStopId}
+              key={selected_stop_name}
+              value={selected_stop_name}
               onValueChange={handleStopSelect}
               disabled={isReadOnly || stops.length === 0}
             >
@@ -429,8 +428,8 @@ export default function RouteSelectionSection({
               </SelectTrigger>
               <SelectContent className="max-h-[300px] bg-slate-900 border-slate-800">
                 {stops.slice(0, -1).map((stop: any, index: number) => {
-                  const val = stop.stopId || stop.id || stop.name;
-                  const display = stop.name || stop.stopName || val;
+                  const val = stop.stop_name || stop.id || stop.name;
+                  const display = stop.name || stop.stop_name || val;
                   return (
                     <SelectItem key={`${val}-${index}`} value={val} className="text-xs">
                       {display}

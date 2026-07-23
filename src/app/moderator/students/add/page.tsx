@@ -317,10 +317,10 @@ export default function AddStudentForm() {
   };
 
   const handleRefChange = (field: string, value: any) => {
-    // Map 'stopId' to 'pickupPoint' as per form data structure
+    // Map 'stop_name' to 'pickupPoint' as per form data structure
     if (field === 'sessionStartYear') {
       handleSessionStartYearChange(value);
-    } else if (field === 'stopId') {
+    } else if (field === 'stop_name') {
       setFormData(prev => ({ ...prev, pickupPoint: value }));
     } else {
       setFormData(prev => ({ ...prev, [field]: value }));
@@ -417,8 +417,8 @@ export default function AddStudentForm() {
   const handleReferenceChange = (field: string, value: any) => {
     console.log(`🔄 [Moderator] Ref change: ${field} =`, value);
 
-    // Map 'stopId' to 'pickupPoint' as per form data structure
-    if (field === 'stopId') {
+    // Map 'stop_name' to 'pickupPoint' as per form data structure
+    if (field === 'stop_name') {
       setFormData(prev => ({ ...prev, pickupPoint: value }));
     } else {
       setFormData(prev => ({ ...prev, [field]: value }));
@@ -696,7 +696,7 @@ export default function AddStudentForm() {
             sessionStartYear: formData.sessionStartYear,
             sessionEndYear: formData.sessionEndYear,
             validUntil: formData.validUntil,
-            stopId: formData.pickupPoint // Renamed from pickupPoint
+            stop_name: formData.pickupPoint // Renamed from pickupPoint
           }),
         });
 

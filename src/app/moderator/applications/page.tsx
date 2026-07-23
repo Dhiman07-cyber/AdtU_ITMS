@@ -59,29 +59,37 @@ export default function ModeratorApplicationsPage() {
   const fetchRenewalRequests = async () => {
     try {
       setLoadingRenewals(true);
-      // D8: Query PostgreSQL applications table instead of Firestore renewal_requests
-      const { data, error } = await supabase
-        .from('applications')
-        .select('*')
-        .eq('state', 'submitted')
-        .in('application_type', ['renewal', 'renewal_after_soft_block']);
+      if (!currentUser) return;
+      const token = await currentUser.getIdToken();
+      const res = await fetch('/api/applications/all?limit=200', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok) throw new Error(`API error: ${res.status}`);
+      const responseData = await res.json();
+      const apps = responseData.applications || [];
 
-      if (error) throw error;
-      const requests = (data || []).map((row: any) => ({
-        id: row.application_id,
-        studentId: row.applicant_uid,
-        enrollmentId: row.formData?.enrollmentId || row.form_data?.enrollmentId || '',
-        studentName: row.formData?.studentName || row.form_data?.studentName || '',
-        totalFee: row.formData?.totalFee || row.form_data?.totalFee || 0,
-        durationYears: row.formData?.durationYears || row.form_data?.durationYears || 0,
-        paymentMode: row.formData?.paymentMode || row.form_data?.paymentMode || '',
-        paymentId: row.formData?.paymentId || row.form_data?.paymentId || '',
-        receiptImageUrl: row.formData?.receiptImageUrl || row.form_data?.receiptImageUrl || '',
-        studentEmail: row.formData?.studentEmail || row.form_data?.studentEmail || '',
-        paidAt: row.formData?.paidAt || row.form_data?.paidAt || '',
-        status: 'pending',
-        createdAt: row.created_at,
-      }));
+      const requests = apps
+        .filter((row: any) => {
+          const state = row.state || '';
+          const type = row.applicationType || row.application_type || '';
+          return (state === 'submitted' || state === 'awaiting_verification' || state === 'pending') &&
+                 (type === 'renewal' || type === 'renewal_after_soft_block');
+        })
+        .map((row: any) => ({
+          id: row.applicationId || row.application_id || row.id,
+          studentId: row.applicantUid || row.applicant_uid || row.studentId,
+          enrollmentId: row.formData?.enrollmentId || row.form_data?.enrollmentId || '',
+          studentName: row.formData?.studentName || row.form_data?.studentName || row.applicantEmail || '',
+          totalFee: row.formData?.totalFee || row.form_data?.totalFee || 0,
+          durationYears: row.formData?.durationYears || row.form_data?.durationYears || 0,
+          paymentMode: row.formData?.paymentMode || row.form_data?.paymentMode || 'online',
+          paymentId: row.formData?.paymentId || row.form_data?.paymentId || row.paymentId || '',
+          receiptImageUrl: row.formData?.receiptImageUrl || row.form_data?.receiptImageUrl || '',
+          studentEmail: row.formData?.studentEmail || row.form_data?.studentEmail || row.applicantEmail || '',
+          paidAt: row.formData?.paidAt || row.form_data?.paidAt || row.createdAt || row.created_at || '',
+          status: row.state || 'pending',
+          createdAt: row.createdAt || row.created_at,
+        }));
       setRenewalRequests(requests);
     } catch (error) {
       console.error('Error fetching renewal requests:', error);
@@ -174,9 +182,8 @@ export default function ModeratorApplicationsPage() {
           id: s.id,
           fullName: s.fullName || s.name || s.id,
           enrollmentId: s.enrollmentId,
-          stopId: s.stopId || '',
-          stopName: s.stopName || s.stopId || '',
-          assignedBusId: s.busId || s.assignedBusId || appBusId,
+          stop_name: s.stop_name || '',
+          busId: s.busId || s.busId || appBusId,
           shift: s.shift,
           semester: s.semester,
           phone: s.phoneNumber || s.phone,
@@ -186,11 +193,11 @@ export default function ModeratorApplicationsPage() {
       // Convert buses to ReassignmentPanel's BusData format
       const rpBuses: RPBusData[] = buses.map((b: any) => {
         const matchedRoute = routes.find((r: any) => r.routeId === b.routeId || r.id === b.routeId);
-        const rawStops: Array<{ id?: string; stopId?: string; name?: string; sequence?: number }> =
+        const rawStops: Array<{ id?: string; stop_name?: string; name?: string; sequence?: number }> =
           matchedRoute?.stops || b.route?.stops || b.stops || [];
         const stops = rawStops.map((s: any) => ({
-          id: s.id || s.stopId || s.name || '',
-          name: s.name || s.stopId || s.id || '',
+          id: s.id || s.stop_name || s.name || '',
+          name: s.name || s.stop_name || s.id || '',
           sequence: s.sequence ?? 0,
         }));
         return {
@@ -229,8 +236,7 @@ export default function ModeratorApplicationsPage() {
   const openAlternativePicker = (item: any) => {
     const studentShift = (item.formData?.shift || 'Morning').toLowerCase();
     const appBusId = item.formData?.busId || item.formData?.routeId?.replace('route_', 'bus_') || '';
-    const stopId = (item.formData?.stopId || '').toLowerCase().trim();
-    const stopName = item.formData?.stopName || '';
+    const stop_name = item.formData?.stop_name || '';
 
     // Current (full) bus
     const currentBusDoc = buses.find((b: any) => b.id === appBusId || b.busId === appBusId);
@@ -250,12 +256,12 @@ export default function ModeratorApplicationsPage() {
     // Alternative buses (re-use the getCapacityStatus logic to find them)
     const matchingRouteIds: string[] = [];
     routes.forEach((route: any) => {
-      const routeStops = route.stops || [];
-      const hasStop = routeStops.some((stop: any) => {
-        const rsId = (stop.stopId || stop.id || stop.name || '').toLowerCase().trim();
-        const rsName = (stop.name || stop.stopName || '').toLowerCase().trim();
-        const normStopId = stopId;
-        const normStopName = stopName.toLowerCase().trim();
+      const route_stops = route.stops || [];
+      const hasStop = route_stops.some((stop: any) => {
+        const rsId = (stop.stop_name || stop.id || stop.name || '').toLowerCase().trim();
+        const rsName = (stop.name || stop.stop_name || '').toLowerCase().trim();
+        const normStopId = stop_name.toLowerCase().trim();
+        const normStopName = stop_name.toLowerCase().trim();
         return rsId === normStopId || rsName === normStopName ||
           rsName === normStopId || rsId === normStopName;
       });
@@ -340,14 +346,16 @@ export default function ModeratorApplicationsPage() {
   // Freshers/Renewals queue: submitted, current-session (non-upcoming) applications.
   // Upcoming (future-session) applications are split into their own tab so they
   // never mix with the immediately-actionable queue.
-  const applicationApplications = pendingApplications.filter((app: any) =>
-    app.state === 'submitted' && !isUpcomingApplication(app)
-  );
+  const applicationApplications = pendingApplications.filter((app: any) => {
+    const type = app.applicationType || app.application_type || '';
+    const isRenewal = type === 'renewal' || type === 'renewal_after_soft_block';
+    return app.state === 'submitted' && !isUpcomingApplication(app) && !isRenewal;
+  });
 
   // Upcoming queue: submitted future-session applications. Their actionability is
   // derived from the frozen eligibleApproval date (no extra stored state).
   const upcomingApplications = pendingApplications.filter((app: any) =>
-    app.state === 'submitted' && isUpcomingApplication(app)
+    (app.state === 'submitted' && isUpcomingApplication(app)) || app.state === 'verified_upcoming' || app.state === 'pending_seat_allocation'
   );
 
   const getBusDisplayFromRoute = (routeId: string) => {
@@ -360,7 +368,7 @@ export default function ModeratorApplicationsPage() {
       return routeNum ? `Route ${routeNum}` : routeId;
     }
 
-    const busId = route.busId || route.assignedBusId;
+    const busId = route.busId || route.busId;
     if (!busId) return `Route ${route.routeName || routeId}`;
 
     const bus = buses?.find(b => b.busId === busId || b.id === busId);
@@ -406,7 +414,7 @@ export default function ModeratorApplicationsPage() {
     // Real-time check from loaded buses data
     const busId = item.formData?.busId;
     const routeId = item.formData?.routeId;
-    const stopId = item.formData?.stopId;
+    const stop_name = item.formData?.stop_name;
     const studentShift = (item.formData?.shift || 'Morning').toLowerCase();
 
     if (!busId || buses.length === 0) {
@@ -445,17 +453,16 @@ export default function ModeratorApplicationsPage() {
 
     // Bus is full - check if alternatives exist for this stop
     // Find all buses that serve this stop (via routes) and have capacity
-    const stopName = item.formData?.stopName || '';
-    const normalizedStopId = (stopId || '').toLowerCase().trim();
-    const normalizedStopName = stopName.toLowerCase().trim();
+    const normalizedStopId = (stop_name || '').toLowerCase().trim();
+    const normalizedStopName = (stop_name || '').toLowerCase().trim();
 
     // Find routes that have this stop
     const matchingRouteIds: string[] = [];
     routes.forEach((route: any) => {
-      const routeStops = route.stops || [];
-      const hasStop = routeStops.some((stop: any) => {
-        const routeStopId = (stop.stopId || stop.id || stop.name || '').toLowerCase().trim();
-        const routeStopName = (stop.name || stop.stopName || '').toLowerCase().trim();
+      const route_stops = route.stops || [];
+      const hasStop = route_stops.some((stop: any) => {
+        const routeStopId = (stop.stop_name || stop.id || stop.name || '').toLowerCase().trim();
+        const routeStopName = (stop.name || stop.stop_name || '').toLowerCase().trim();
         return routeStopId === normalizedStopId || routeStopName === normalizedStopName ||
           routeStopName === normalizedStopId || routeStopId === normalizedStopName;
       });
@@ -572,6 +579,7 @@ export default function ModeratorApplicationsPage() {
 
         // Format bus/route for toast
         const appItem = pendingApplications.find((app: any) => app.applicationId === applicationId);
+        const isUpcoming = appItem ? isUpcomingApplication(appItem) : false;
         const activeBusId = overrideBusId || appItem?.formData?.busId || appItem?.formData?.routeId?.replace('route_', 'bus_') || '';
         const selectedBus = buses.find((b: any) => (b.id || b.busId) === activeBusId);
         let busLabel = '';
@@ -584,9 +592,11 @@ export default function ModeratorApplicationsPage() {
           routeLabel = `Route-${routeNum || routeIdVal}`;
         }
 
-        const msg = busLabel 
-          ? `Application approved successfully with ${busLabel}${routeLabel ? ` on ${routeLabel}` : ''}!` 
-          : 'Application approved successfully!';
+        const msg = isUpcoming
+          ? 'Upcoming application verified successfully! It will be activated when the new session begins.'
+          : busLabel 
+            ? `Application approved successfully with ${busLabel}${routeLabel ? ` on ${routeLabel}` : ''}!` 
+            : 'Application approved successfully!';
         showToast(msg, 'success');
 
         // Optimistically hide the card
@@ -900,7 +910,7 @@ export default function ModeratorApplicationsPage() {
       )}
 
       {loading || loadingRenewals || routesLoading || busesLoading ? (
-        <div className="flex-1 min-h-[calc(100dvh-120px)] flex justify-center items-center">
+        <div className="flex-1 min-h-[calc(100dvh-48px)] flex justify-center items-center">
           <PremiumPageLoader message="Fetching data..." />
         </div>
       ) : filteredData.length === 0 ? (
@@ -1196,60 +1206,81 @@ export default function ModeratorApplicationsPage() {
                         </div>
 
                         {/* Footer: Actions - Equal Length Grid */}
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-3">
-                          <Button
-                            variant="outline"
-                            className="w-full bg-white hover:bg-gray-100 text-black border-transparent shadow-sm font-medium h-10 gap-2 hover:scale-[1.02] active:scale-[0.98] transition-all"
-                            onClick={() => router.push(`/moderator/applications/${item.applicationId}`)}
-                          >
-                            <Eye className="h-4 w-4" />
-                            View
-                          </Button>
+                        {item.state === 'verified_upcoming' ? (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-3">
+                            <Button
+                              variant="outline"
+                              className="w-full bg-white hover:bg-gray-100 text-black border-transparent shadow-sm font-medium h-10 gap-2 hover:scale-[1.02] active:scale-[0.98] transition-all"
+                              onClick={() => router.push(`/moderator/applications/${item.applicationId}`)}
+                            >
+                              <Eye className="h-4 w-4" />
+                              View
+                            </Button>
+                            <Button
+                              disabled
+                              className="w-full h-10 gap-2 font-medium bg-amber-500/20 text-amber-300 border border-amber-500/30 cursor-not-allowed"
+                              title={item.eligibleApproval ? `Activates on ${new Date(item.eligibleApproval).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}` : 'Awaiting new academic session'}
+                            >
+                              <Calendar className="h-4 w-4" />
+                              Approved (Awaiting Activation)
+                            </Button>
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-3">
+                            <Button
+                              variant="outline"
+                              className="w-full bg-white hover:bg-gray-100 text-black border-transparent shadow-sm font-medium h-10 gap-2 hover:scale-[1.02] active:scale-[0.98] transition-all"
+                              onClick={() => router.push(`/moderator/applications/${item.applicationId}`)}
+                            >
+                              <Eye className="h-4 w-4" />
+                              View
+                            </Button>
 
-                          <Button
-                            className={cn(
-                              "w-full h-10 gap-2 font-medium transition-all",
-                              !canApplicationApprove
-                                ? "bg-emerald-600/30 text-white/50 opacity-60 cursor-pointer border border-emerald-500/10 hover:bg-emerald-600/30"
-                                : (needsCapacityReview && !stagedBuses.has(item.applicationId))
-                                  ? "bg-emerald-600/50 text-white/50 cursor-not-allowed shadow-lg shadow-emerald-900/20"
-                                  : "bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-900/20 hover:shadow-emerald-900/40 hover:scale-[1.02] active:scale-[0.98]"
-                            )}
-                            onClick={() => {
-                              if (!canApplicationApprove) {
-                                showToast("You are not authorized to approve students.", "error");
-                                return;
-                              }
-                              const staged = stagedBuses.get(item.applicationId);
-                              handleApprove(item.applicationId, staged?.busId);
-                            }}
-                            disabled={canApplicationApprove && ((needsCapacityReview && !stagedBuses.has(item.applicationId)) || approving === item.applicationId)}
-                          >
-                            {approving === item.applicationId ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-                            {isUpcoming ? "Verify" : "Approve"}
-                          </Button>
+                            <Button
+                              className={cn(
+                                "w-full h-10 gap-2 font-medium transition-all",
+                                !canApplicationApprove
+                                  ? "bg-emerald-600/30 text-white/50 opacity-60 cursor-pointer border border-emerald-500/10 hover:bg-emerald-600/30"
+                                  : (needsCapacityReview && !stagedBuses.has(item.applicationId))
+                                    ? "bg-emerald-600/50 text-white/50 cursor-not-allowed shadow-lg shadow-emerald-900/20"
+                                    : "bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-900/20 hover:shadow-emerald-900/40 hover:scale-[1.02] active:scale-[0.98]"
+                              )}
+                              onClick={() => {
+                                if (!canApplicationApprove) {
+                                  showToast("You are not authorized to approve students.", "error");
+                                  return;
+                                }
+                                const staged = stagedBuses.get(item.applicationId);
+                                handleApprove(item.applicationId, staged?.busId);
+                              }}
+                              disabled={canApplicationApprove && ((needsCapacityReview && !stagedBuses.has(item.applicationId)) || approving === item.applicationId)}
+                            >
+                              {approving === item.applicationId ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                              {isUpcoming ? "Verify" : "Approve"}
+                            </Button>
 
-                          <Button
-                            variant="outline"
-                            className={cn(
-                              "w-full h-10 gap-2 transition-all",
-                              !canApplicationReject
-                                ? "border-red-500/10 text-red-500/50 bg-red-500/5 opacity-60 cursor-pointer hover:bg-red-500/5 hover:text-red-500/50"
-                                : "border-red-500/20 text-red-400 bg-red-500/5 hover:bg-red-500/10 hover:text-red-300 hover:border-red-500/30 hover:scale-[1.02] active:scale-[0.98]"
-                            )}
-                            onClick={() => {
-                              if (!canApplicationReject) {
-                                showToast("You are not authorized to reject students.", "error");
-                                return;
-                              }
-                              handleRejectClick(item.applicationId);
-                            }}
-                            disabled={canApplicationReject && (rejecting === item.applicationId)}
-                          >
-                            {rejecting === item.applicationId ? <Loader2 className="h-4 w-4 animate-spin" /> : <X className="h-4 w-4" />}
-                            Reject
-                          </Button>
-                        </div>
+                            <Button
+                              variant="outline"
+                              className={cn(
+                                "w-full h-10 gap-2 transition-all",
+                                !canApplicationReject
+                                  ? "border-red-500/10 text-red-500/50 bg-red-500/5 opacity-60 cursor-pointer hover:bg-red-500/5 hover:text-red-500/50"
+                                  : "border-red-500/20 text-red-400 bg-red-500/5 hover:bg-red-500/10 hover:text-red-300 hover:border-red-500/30 hover:scale-[1.02] active:scale-[0.98]"
+                              )}
+                              onClick={() => {
+                                if (!canApplicationReject) {
+                                  showToast("You are not authorized to reject students.", "error");
+                                  return;
+                                }
+                                handleRejectClick(item.applicationId);
+                              }}
+                              disabled={canApplicationReject && (rejecting === item.applicationId)}
+                            >
+                              {rejecting === item.applicationId ? <Loader2 className="h-4 w-4 animate-spin" /> : <X className="h-4 w-4" />}
+                              Reject
+                            </Button>
+                          </div>
+                        )}
 
                       </div>
                     </CardContent>
@@ -1401,8 +1432,8 @@ export default function ModeratorApplicationsPage() {
               capacity: b.capacity || b.totalCapacity || 55,
               shift: b.shift || 'both',
               stops: rawStops.map((s: any) => ({
-                id: s.id || s.stopId || s.name || '',
-                name: s.name || s.stopId || s.id || '',
+                id: s.id || s.stop_name || s.name || '',
+                name: s.name || s.stop_name || s.id || '',
                 sequence: s.sequence ?? 0,
               })),
               load: b.load || { morningCount: 0, eveningCount: 0 },
@@ -1420,7 +1451,7 @@ export default function ModeratorApplicationsPage() {
       {alternativePickerTarget && (
         <AlternativeBusPicker
           applicantName={alternativePickerTarget.item.formData?.fullName || 'Applicant'}
-          applicantStopName={alternativePickerTarget.item.formData?.stopName || alternativePickerTarget.item.formData?.stopId || ''}
+          applicantStopName={alternativePickerTarget.item.formData?.stop_name || alternativePickerTarget.item.formData?.stop_name || ''}
           applicantShift={alternativePickerTarget.item.formData?.shift || 'Morning'}
           currentBus={alternativePickerTarget.currentBus}
           alternatives={alternativePickerTarget.alternatives}

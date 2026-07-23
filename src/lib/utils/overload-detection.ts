@@ -29,11 +29,11 @@ export interface BusWithLoad {
  * - null if no shift is overloaded
  */
 export function detectOverloadedShift(bus: BusWithLoad, threshold: number = 100): OverloadedShift {
-    const load = bus.load || { morningCount: 0, eveningCount: 0 };
+    const load = (bus as any).load || {};
     const capacity = bus.capacity;
 
-    const morningCount = load.morningCount ?? 0;
-    const eveningCount = load.eveningCount ?? 0;
+    const morningCount = Number((bus as any).morningLoad ?? (bus as any).morning_load ?? load.morningCount ?? load.morning_count ?? 0);
+    const eveningCount = Number((bus as any).eveningLoad ?? (bus as any).evening_load ?? load.eveningCount ?? load.evening_count ?? 0);
 
     let morningThresholdCount = (capacity * threshold) / 100;
     let eveningThresholdCount = (capacity * threshold) / 100;

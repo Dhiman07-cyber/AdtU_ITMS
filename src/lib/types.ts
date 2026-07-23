@@ -27,7 +27,7 @@ export interface Student {
   address?: string;
   busId?: string;
   routeId?: string;
-  stopName?: string;
+  stop_name?: string;
   shift?: 'Morning' | 'Evening';
   status?: 'active' | 'inactive' | 'suspended' | 'soft_blocked' | 'pending_deletion' | 'expired';
   profilePhotoUrl?: string;
@@ -76,12 +76,8 @@ export interface Driver {
   phone?: string;
   alternatePhone?: string;
   licenseNumber?: string;
-  assignedBusId?: string;
-  assignedRouteId?: string;
   busId?: string;
   routeId?: string;
-  busAssigned?: string;
-  driverId?: string;
   joiningDate?: string;
   shift?: 'Morning' | 'Evening' | 'Both' | string;
   status?: 'active' | 'inactive' | 'suspended';
@@ -146,7 +142,7 @@ export interface Route {
 
   status: 'active' | 'inactive';
   stops: Array<{
-    stopId?: string;
+    stop_name?: string;
     name: string;
     sequence?: number;
     lat: number;
@@ -189,7 +185,7 @@ export interface Application {
     bloodGroup: string;
     address: string;
     routeId?: string;
-    stopName?: string;
+    stop_name?: string;
     [key: string]: any;
   };
 

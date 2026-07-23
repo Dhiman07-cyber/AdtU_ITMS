@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useAuth } from "@/contexts/auth-context";
@@ -153,7 +153,7 @@ export default function DriverLiveTrackingPage() {
   const [activeWaitRequest, setActiveWaitRequest] = useState<{
     studentId: string;
     studentName: string;
-    stopName: string;
+    stop_name: string;
     timestamp: number;
   } | null>(null);
   const [waitRequestTimer, setWaitRequestTimer] = useState(10);
@@ -209,13 +209,13 @@ export default function DriverLiveTrackingPage() {
     channel
       .on('broadcast', { event: 'wait_request' }, (payload) => {
         console.log("📣 Received wait request:", payload);
-        const { studentId, studentName, stopName, timestamp } = payload.payload;
+        const { studentId, studentName, stop_name, timestamp } = payload.payload;
 
         // Show request
         setActiveWaitRequest({
           studentId,
           studentName,
-          stopName,
+          stop_name,
           timestamp
         });
         setWaitRequestTimer(10); // Reset timer to 10s
@@ -601,8 +601,8 @@ export default function DriverLiveTrackingPage() {
 
         setDriverData(driver);
 
-        if (driver.assignedBusId || driver.busId) {
-          const busId = driver.assignedBusId || driver.busId;
+        if (driver.busId || driver.busId) {
+          const busId = driver.busId || driver.busId;
           if (busId) {
             const bus = await getBusById(busId);
             if (bus) {
@@ -614,8 +614,8 @@ export default function DriverLiveTrackingPage() {
               setBusData(bus);
 
               // Get route data
-              if (driver.assignedRouteId || driver.routeId) {
-                const routeId = driver.assignedRouteId || driver.routeId;
+              if (driver.routeId || driver.routeId) {
+                const routeId = driver.routeId || driver.routeId;
                 if (routeId) {
                   const route = await getRouteById(routeId);
                   if (route) {
@@ -2249,7 +2249,7 @@ export default function DriverLiveTrackingPage() {
                   {activeWaitRequest.studentName}
                 </h2>
                 <p className="text-blue-100 text-center text-sm font-medium uppercase tracking-wide">
-                  Missed Bus • <span className="text-white font-bold">{activeWaitRequest.stopName}</span>
+                  Missed Bus • <span className="text-white font-bold">{activeWaitRequest.stop_name}</span>
                 </p>
                 <p className="text-white/80 text-center text-xs mt-2">
                   Bus is nearby! Waiting for you to accept...
@@ -2259,7 +2259,7 @@ export default function DriverLiveTrackingPage() {
 
             <CardContent className="p-6 pt-8 -mt-6 bg-white dark:bg-gray-900 rounded-t-3xl relative z-0">
               <p className="text-center text-gray-600 dark:text-gray-400 mb-6 font-medium">
-                Has stopped near {activeWaitRequest.stopName}. Can you wait 2 minutes?
+                Has stopped near {activeWaitRequest.stop_name}. Can you wait 2 minutes?
               </p>
 
               <div className="grid grid-cols-2 gap-4">

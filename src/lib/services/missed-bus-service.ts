@@ -38,8 +38,8 @@ export const MESSAGES = {
   SEARCHING: "Searching other buses to help you. We'll notify you shortly.",
   REQUEST_PENDING: "Pickup request sent to nearby buses. We'll notify you when a driver accepts.",
   NO_CANDIDATES_MODAL: "Currently no bus is available to pick you up. Please wait for the next bus or try again later.",
-  REQUEST_ACCEPTED: (busId: string, stopName: string) =>
-    `Good news — Bus ${busId} will pick you up. Please head to ${stopName}.`,
+  REQUEST_ACCEPTED: (busId: string, stop_name: string) =>
+    `Good news — Bus ${busId} will pick you up. Please head to ${stop_name}.`,
   REQUEST_EXPIRED: "Your pickup request expired. Please try again if needed.",
   RATE_LIMITED: "You have reached the missed-bus request limit. Try again later.",
   DRIVER_NOT_ACTIVE: "Driver currently not active. Please wait or try another bus.",
@@ -53,7 +53,7 @@ export interface RaiseRequestInput {
   assignedTripId?: string;
   assignedBusId?: string;  // Student's assigned bus ID
   routeId: string;
-  stopId: string;
+  stop_name: string;
   studentLocation?: { lat: number; lng: number }; // Optional student location
 }
 
@@ -101,7 +101,7 @@ interface TripCandidate {
 }
 
 interface RouteStop {
-  stopId: string;
+  stop_name: string;
   name: string;
   sequence: number;
   lat?: number;
@@ -147,11 +147,11 @@ export class MissedBusService {
    * Implements Stage-1 (assigned bus check) and Stage-2 (candidate search) flow
    */
   async raiseRequest(input: RaiseRequestInput): Promise<RaiseRequestResult> {
-    const { opId, studentId, routeId, stopId, assignedBusId } = input;
+    const { opId, studentId, routeId, stop_name, assignedBusId } = input;
 
     try {
       console.log(`\n🚌 === MISSED BUS REQUEST ===`);
-      console.log(`📋 Input: studentId=${studentId}, routeId=${routeId}, stopId=${stopId}, assignedBusId=${assignedBusId}`);
+      console.log(`📋 Input: studentId=${studentId}, routeId=${routeId}, stop_name=${stop_name}, assignedBusId=${assignedBusId}`);
 
       // STEP 1: Check idempotency - return existing request if opId matches
       const { data: existingByOpId } = await this.supabase
@@ -199,8 +199,8 @@ export class MissedBusService {
       }
 
       // STEP 4: Get student's stop sequence and location from route
-      const studentSequence = await this.getStudentSequence(routeId, stopId);
-      const stopLocation = await this.getStopLocation(routeId, stopId);
+      const studentSequence = await this.getStudentSequence(routeId, stop_name);
+      const stopLocation = await this.getStopLocation(routeId, stop_name);
       console.log(`📍 Student: sequence=${studentSequence ?? 'unknown'}, stopLocation=${stopLocation ? `(${stopLocation.lat},${stopLocation.lng})` : 'unknown'}`);
 
       // ===============================
@@ -336,7 +336,7 @@ export class MissedBusService {
     studentSequence: number | null,
     stopLocation: { lat: number; lng: number } | null
   ): Promise<RaiseRequestResult> {
-    const { opId, studentId, routeId, stopId, assignedBusId } = input;
+    const { opId, studentId, routeId, stop_name, assignedBusId } = input;
     const now = new Date();
     const candidates: TripCandidate[] = [];
 
@@ -446,7 +446,7 @@ export class MissedBusService {
         op_id: opId,
         student_id: studentId,
         route_id: routeId,
-        stop_id: stopId,
+        stop_name: stop_name,
         student_sequence: studentSequence,
         status: 'pending',
         trip_candidates: tripCandidates,
@@ -467,7 +467,7 @@ export class MissedBusService {
     console.log(`\n📝 Missed-bus raise completed in ${elapsed}ms:`, {
       studentId,
       routeId,
-      stopId,
+      stop_name,
       success: true,
       stage: 'pending',
       candidateCount: candidates.length
@@ -514,15 +514,15 @@ export class MissedBusService {
   /**
    * Get stop location from route data
    */
-  private async getStopLocation(routeId: string, stopId: string): Promise<{ lat: number; lng: number } | null> {
+  private async getStopLocation(routeId: string, stop_name: string): Promise<{ lat: number; lng: number } | null> {
     try {
       const route = await routeService.getById(routeId);
       if (route) {
         const stops = route.stops || [];
         const stop = stops.find((s: any) =>
-          s.stopId === stopId ||
-          s.id === stopId ||
-          s.name?.toLowerCase() === stopId.toLowerCase()
+          s.stop_name === stop_name ||
+          s.id === stop_name ||
+          s.name?.toLowerCase() === stop_name.toLowerCase()
         );
         if (stop && stop.lat && stop.lng) {
           return { lat: stop.lat, lng: stop.lng };
@@ -537,15 +537,15 @@ export class MissedBusService {
   /**
    * Get student's stop sequence from route data
    */
-  private async getStudentSequence(routeId: string, stopId: string): Promise<number | null> {
+  private async getStudentSequence(routeId: string, stop_name: string): Promise<number | null> {
     try {
       const route = await routeService.getById(routeId);
       if (route) {
         const stops = route.stops || [];
         const stopIndex = stops.findIndex((s: any) =>
-          s.stopId === stopId ||
-          s.id === stopId ||
-          s.name?.toLowerCase() === stopId.toLowerCase()
+          s.stop_name === stop_name ||
+          s.id === stop_name ||
+          s.name?.toLowerCase() === stop_name.toLowerCase()
         );
         if (stopIndex >= 0) {
           return stopIndex + 1; // 1-indexed sequence

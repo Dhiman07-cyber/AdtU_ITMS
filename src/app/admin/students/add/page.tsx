@@ -344,13 +344,13 @@ export default function AddStudentForm() {
 
   const handleRefChange = (field: string, value: any) => {
     // Determine the field name to update based on component output
-    // The component sends 'routeId', 'busId', 'stopId', 'busAssigned', 'sessionStartYear'
+    // The component sends 'routeId', 'busId', 'stop_name', 'busAssigned', 'sessionStartYear'
     console.log(`🔄 [Admin] Ref change: ${field} =`, value);
 
     if (field === 'sessionStartYear') {
       handleSessionStartYearChange(value);
-    } else if (field === 'stopId') {
-      // Map 'stopId' to 'pickupPoint' as per form data structure
+    } else if (field === 'stop_name') {
+      // Map 'stop_name' to 'pickupPoint' as per form data structure
       setFormData(prev => ({ ...prev, pickupPoint: value }));
     } else {
       setFormData(prev => ({ ...prev, [field]: value }));
@@ -570,7 +570,7 @@ export default function AddStudentForm() {
             sessionStartYear: formData.sessionStartYear,
             sessionEndYear: formData.sessionEndYear,
             validUntil: formData.validUntil,
-            stopId: formData.pickupPoint // Renamed from pickupPoint
+            stop_name: formData.pickupPoint // Renamed from pickupPoint
           }),
         });
 

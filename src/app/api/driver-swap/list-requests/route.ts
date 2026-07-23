@@ -56,16 +56,31 @@ export async function GET(request: Request) {
       response.outgoing = outgoingRequests;
     }
 
-    // Get active assignments (where I'm either original or current driver)
+    // Get active assignments (accepted swap requests currently active)
+    const now = new Date().toISOString();
     const { data: activeAssignments, error: assignmentsError } = await supabase
-      .from('temporary_assignments')
-      .select('id, bus_id, original_driver_uid, current_driver_uid, route_id, starts_at, ends_at, active, created_at, source_request_id, reason')
-      .eq('active', true)
-      .or(`original_driver_uid.eq.${driverUid},current_driver_uid.eq.${driverUid}`)
+      .from('driver_swap_requests')
+      .select('id, bus_id, requester_driver_uid, candidate_driver_uid, route_id, starts_at, ends_at, status, created_at, reason')
+      .eq('status', 'accepted')
+      .lte('starts_at', now)
+      .gt('ends_at', now)
+      .or(`requester_driver_uid.eq.${driverUid},candidate_driver_uid.eq.${driverUid}`)
       .order('created_at', { ascending: false });
 
     if (!assignmentsError && activeAssignments) {
-      response.active = activeAssignments;
+      response.active = activeAssignments.map(a => ({
+        id: a.id,
+        bus_id: a.bus_id,
+        original_driver_uid: a.requester_driver_uid,
+        current_driver_uid: a.candidate_driver_uid,
+        route_id: a.route_id,
+        starts_at: a.starts_at,
+        ends_at: a.ends_at,
+        active: true,
+        created_at: a.created_at,
+        source_request_id: a.id,
+        reason: a.reason
+      }));
     }
 
     // Calculate summary stats

@@ -202,10 +202,10 @@ async function activateOne(
   // Resolve the bus/route/stop/shift from the original application.
   const requestedRouteId = formData.routeId || '';
   const requestedBusId = requestedRouteId ? String(requestedRouteId).replace('route_', 'bus_') : '';
-  const finalStopId = formData.stopId || (formData as any).pickupPoint || '';
+  const final_stop_name = formData.stop_name || (formData as any).pickupPoint || '';
   const shift = normalizeShift(formData.shift);
 
-  if (!requestedBusId || !requestedRouteId || !finalStopId || !shift) {
+  if (!requestedBusId || !requestedRouteId || !final_stop_name || !shift) {
     return { failed: 'Application is missing route/bus/stop/shift' };
   }
 
@@ -253,7 +253,7 @@ async function activateOne(
       sessionStartYear: startYear,
       shift,
       status: 'active',
-      stopId: finalStopId,
+      stop_name: final_stop_name,
       uid: app.applicantUid,
       updatedAt: nowIso,
       validUntil,
@@ -370,7 +370,7 @@ async function activateOne(
     if (err instanceof CapacityFullError) {
       // Case B: Search for compatible alternative buses serving the same stop with deterministically sorted priority
       try {
-        const alternatives = await findDeterministicAlternativeBuses(finalStopId, requestedRouteId, shift, preFetchedBuses, preFetchedRoutes);
+        const alternatives = await findDeterministicAlternativeBuses(final_stop_name, requestedRouteId, shift, preFetchedBuses, preFetchedRoutes);
         for (const altBus of alternatives) {
           try {
             const { postCommitFullAlert } = await attemptActivationWithBus(altBus.busId, altBus.routeId, true);
@@ -447,14 +447,14 @@ async function notifyStudentActivated(app: Application, formData: any, validUnti
 }
 
 async function findDeterministicAlternativeBuses(
-  stopId: string,
+  stop_name: string,
   requestedRouteId: string,
   requestedShift: string,
   preFetchedBuses?: Bus[],
   preFetchedRoutes?: any[]
 ): Promise<Array<{ busId: string; routeId: string; shift: string; currentMembers: number; capacity: number }>> {
   // ponytail: delegate core stop-matching and route-filtering to seatRepository
-  const res = await findAlternatives(stopId, requestedRouteId, requestedShift, preFetchedBuses, preFetchedRoutes);
+  const res = await findAlternatives(stop_name, requestedRouteId, requestedShift, preFetchedBuses, preFetchedRoutes);
   if (!res.success || !res.alternativeBuses) return [];
 
   const alternatives = res.alternativeBuses.map(b => ({

@@ -29,7 +29,7 @@ describe('SeatAssignmentService', () => {
   });
 
   it('delegates assignment validation to the repository unchanged', async () => {
-    const result = await validateAssignment({ routeId: 'r1', stopId: 's1', shift: 'Morning' });
+    const result = await validateAssignment({ routeId: 'r1', stop_name: 's1', shift: 'Morning' });
     expect(result).toEqual({ canAssign: true, message: 'ok' });
   });
 });

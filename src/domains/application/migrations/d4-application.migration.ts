@@ -11,7 +11,7 @@ const CORE_FIELDS = new Set([
   'approvedAt', 'approvedBy', 'approvedById', 'createdAt', 'updatedAt',
   'createdBy', 'applicationVersion', 'needsCapacityReview', 'reassignmentReason',
   'hasAlternativeBuses', 'paymentId', 'applicationType', 'targetSession',
-  'eligibleApproval', 'linkedStudentUid', 'routeId', 'busId', 'stopId',
+  'eligibleApproval', 'linkedStudentUid', 'routeId', 'busId', 'stop_name',
   'shift', 'semester', 'faculty', 'department', 'fullName',
 ]);
 
@@ -43,7 +43,7 @@ const FIELD_MAP: Record<string, string> = {
   linkedStudentUid: 'linked_student_uid',
   routeId: 'route_id',
   busId: 'bus_id',
-  stopId: 'stop_id',
+  stop_name: 'stop_name',
   shift: 'shift',
   semester: 'semester',
   fullName: 'full_name',

@@ -4,7 +4,6 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // D5 Payment owns:
 //   - payments (PostgreSQL) — immutable financial ledger
-//   - processed_payments (PostgreSQL) — idempotency markers (7-day TTL)
 //
 // D5 Payment does NOT own:
 //   - renewal applications — owned by Application domain (D4), application_type='renewal'
@@ -26,7 +25,6 @@
 //   - Payment writes Notification (staff alerts) via Notification domain API
 //
 // FIRESTORE FROZEN COLLECTIONS:
-//   - processed_payments — DO NOT write to Firestore, use PostgreSQL
 //
 // ponytail: Razorpay gateway helpers (order creation, signature verification)
 // and the raw Postgres repository are implementation details, not exposed

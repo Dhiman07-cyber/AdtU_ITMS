@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { verifyApiAuth } from '@/lib/security/api-auth';
 import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
-import { getById } from '@/domains/student';
+import { getById, getByUid, getByEnrollmentId } from '@/domains/student';
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -12,7 +12,14 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     if (permissionDenied) return permissionDenied;
 
     const { id } = await params;
-    const student = await getById(id);
+    const cleanId = decodeURIComponent(id || '').trim();
+    let student = await getById(cleanId);
+    if (!student) {
+      student = await getByUid(cleanId);
+    }
+    if (!student) {
+      student = await getByEnrollmentId(cleanId);
+    }
 
     if (!student) {
       return NextResponse.json({ error: 'Student not found' }, { status: 404 });
@@ -31,21 +38,40 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     // Mapped response matching the expected interface exactly
     const responseData = {
       id: student.id || student.uid,
+      uid: student.uid || student.id,
       name: student.fullName || student.name || '',
+      fullName: student.fullName || student.name || '',
       email: student.email || '',
-      phone: student.phone || '',
-      altPhone: student.altPhone || '',
+      phone: student.phone || (student as any).phoneNumber || '',
+      phoneNumber: student.phone || (student as any).phoneNumber || '',
+      altPhone: student.altPhone || (student as any).alternatePhone || '',
+      alternatePhone: student.altPhone || (student as any).alternatePhone || '',
       enrollmentId: student.enrollmentId || '',
       gender: student.gender || '',
       dob: formattedDob,
       faculty: student.faculty || '',
       department: student.department || '',
+      semester: student.semester || '',
+      bloodGroup: student.bloodGroup || (student as any).blood_group || '',
+      address: student.address || '',
       parentName: student.parentName || '',
       parentPhone: student.parentPhone || '',
-      busId: student.busId || student.assignedBusId || '',
-      routeId: student.routeId || student.assignedRouteId || '',
+      busId: student.busId || (student as any).bus_id || '',
+      routeId: student.routeId || (student as any).route_id || '',
+      shift: student.shift || '',
+      stop_name: student.stop_name || (student as any).pickupPoint || '',
+      pickupPoint: student.stop_name || (student as any).pickupPoint || '',
+      status: student.status || 'active',
+      validUntil: student.validUntil || (student as any).valid_until || null,
+      softBlock: student.softBlock || (student as any).soft_block || null,
+      hardBlock: student.hardBlock || (student as any).hard_block || null,
+      sessionStartYear: student.sessionStartYear || (student as any).session_start_year || null,
+      sessionEndYear: student.sessionEndYear || (student as any).session_end_year || null,
+      sessionDuration: student.sessionDuration || (student as any).session_duration || null,
+      approvedBy: student.approvedBy || (student as any).approved_by || '',
+      approvedAt: student.approvedAt || (student as any).approved_at || null,
       profilePhotoUrl: student.profilePhotoUrl || '',
-      createdAt: student.createdAt || '',
+      createdAt: student.createdAt || (student as any).created_at || '',
     };
 
     return NextResponse.json(responseData);

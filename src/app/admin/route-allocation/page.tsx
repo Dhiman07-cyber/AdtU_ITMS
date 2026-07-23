@@ -111,7 +111,7 @@ interface RouteData {
     routeId: string;
     routeName: string;
     totalStops: number;
-    stops: Array<{ name: string; sequence: number; stopId?: string }>;
+    stops: Array<{ name: string; sequence: number; stop_name?: string }>;
     status?: string;
     active?: boolean;
 }

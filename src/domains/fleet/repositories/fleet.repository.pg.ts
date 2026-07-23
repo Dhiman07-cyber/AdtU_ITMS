@@ -38,12 +38,8 @@
  * phone                      → phone
  * alternatePhone             → alternate_phone
  * licenseNumber              → license_number
- * assignedBusId              → assigned_bus_id
- * assignedRouteId            → assigned_route_id
  * busId                      → bus_id
  * routeId                    → route_id
- * busAssigned                → bus_assigned
- * driverId                   → driver_id
  * joiningDate                → joining_date
  * shift                      → shift
  * status                     → status
@@ -278,6 +274,7 @@ export async function pgReassignStudentsAtomically(plans: Array<{
   fromBusId: string;
   toBusId: string;
   studentShift?: string;
+  stopName?: string;
 }>): Promise<{ success: boolean; processed: number }> {
   const db = getSupabaseServer();
   const { data, error } = await db.rpc('reassign_students_atomically', {

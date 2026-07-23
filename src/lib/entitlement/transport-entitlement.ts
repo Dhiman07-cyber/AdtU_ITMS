@@ -43,7 +43,10 @@ export type EntitlementReason =
   | 'no_account'                  // no student record
   | 'inactive_status'             // status !== 'active' (soft_blocked / hard_blocked / pending_deletion / suspended / inactive)
   | 'past_soft_block'             // status active but past the stored soft-block boundary
-  | 'expired';                    // legacy record with no softBlock, past validUntil
+  | 'expired'                     // legacy record with no softBlock, past validUntil
+  | 'verified_upcoming'           // Future-session application verified/approved by admin, awaiting session start
+  | 'pending_seat_allocation'     // Application verified & paid, in seat queue
+  | 'application_submitted';      // Application submitted, under admin review
 
 export interface EntitlementResult {
   entitled: boolean;
@@ -103,6 +106,18 @@ export function getTransportEntitlement(
   now: Date = new Date()
 ): EntitlementResult {
   if (!student) return { entitled: false, reason: 'no_account' };
+
+  const st = student.status || (student as any).state || (student as any).applicationState;
+
+  if (st === 'verified_upcoming') {
+    return { entitled: false, reason: 'verified_upcoming' };
+  }
+  if (st === 'pending_seat_allocation') {
+    return { entitled: false, reason: 'pending_seat_allocation' };
+  }
+  if (st === 'submitted') {
+    return { entitled: false, reason: 'application_submitted' };
+  }
 
   // (1) Lifecycle state. Only an 'active' student can hold transport entitlement.
   // soft_blocked / hard_blocked / pending_deletion / suspended / inactive → denied.
@@ -170,5 +185,20 @@ export const ENTITLEMENT_MESSAGES: Record<EntitlementReason, { title: string; de
     title: 'Service expired',
     detail:
       'Your bus service validity has expired. Renew your service to restore transport access.',
+  },
+  verified_upcoming: {
+    title: 'Application Verified (Awaiting Session Start)',
+    detail:
+      'Your application for the upcoming academic session has been verified and approved by administrators! Your bus pass and live tracking will automatically activate when the new academic session begins.',
+  },
+  pending_seat_allocation: {
+    title: 'In Seat Allocation Queue',
+    detail:
+      'Your application and payment are verified! You are currently in the seat allocation queue. Your pass will activate as soon as a seat opens up.',
+  },
+  application_submitted: {
+    title: 'Application Under Review',
+    detail:
+      'Your application has been submitted and is currently being reviewed by administrators. This usually takes 1-2 business days.',
   },
 };

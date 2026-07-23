@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 import { adminAuth } from '@/lib/firebase-admin';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import { withSecurity } from '@/lib/security/api-security';
@@ -21,7 +21,7 @@ export const POST = withSecurity(
         return NextResponse.json({ success: false, error: 'Driver not found', requestId }, { status: 404 });
       }
 
-      const driverBusId = driverData.assignedBusId;
+      const driverBusId = driverData.busId;
 
       // 2. Get the waiting flag from Supabase
       const { data: waitingFlag, error: selectError } = await supabase
@@ -37,7 +37,7 @@ export const POST = withSecurity(
 
        // 3. Authorization check: Is this the driver for this bus?
        // Check both assigned bus and any temporary assignments if necessary
-       // For now, matching the original logic: driverData.assignedBusId === waitingFlag.bus_id
+       // For now, matching the original logic: driverData.busId === waitingFlag.bus_id
        if (driverBusId !== waitingFlag.bus_id || !waitingFlag.bus_id) {
          console.warn(`[${requestId}] Driver ${driverUid} unauthorized for flag on bus ${waitingFlag.bus_id || 'NULL'} (assigned to ${driverBusId})`);
          return NextResponse.json({ success: false, error: 'Authorization failed: Driver-bus mismatch', requestId }, { status: 403 });

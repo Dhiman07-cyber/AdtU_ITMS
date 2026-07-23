@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server';
 import { withSecurity } from '@/lib/security/api-security';
 import { RateLimits } from '@/lib/security/rate-limiter';
-import { fetchOrderDetails, fetchPaymentDetails } from '@/lib/payment/razorpay.service';
+import { fetchOrderDetails, fetchPaymentDetails, fetchOrderPayments } from '@/lib/payment/razorpay.service';
 import { processCapturedPayment, isPaymentProcessed } from '@/lib/payment/payment.service';
 import { paymentsSupabaseService } from '@/lib/services/payments-supabase';
 import { z } from 'zod';
-import { getById as getApplicationById } from '@/domains/application';
+import { getByApplicantUid } from '@/domains/application';
 
 const UPSTASH_URL = process.env.UPSTASH_REDIS_REST_URL;
 const UPSTASH_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
@@ -91,7 +91,7 @@ export const GET = withSecurity(
         let isRenewalCompleted = false;
 
         // Check student's application via domain API
-        const appDoc = await getApplicationById(targetUid);
+        const appDoc = await getByApplicantUid(targetUid);
         if (appDoc) {
             const appData = appDoc as any;
             if (appData.state === 'approved' || appData.state === 'verified_upcoming') {
@@ -104,7 +104,7 @@ export const GET = withSecurity(
         // D8: Check student's renewal applications from PostgreSQL instead of Firestore
         let renewalPaymentId = '';
         let renewalOrderId = '';
-        const renewalApp = await import('@/domains/application').then(m => m.getByApplicantUid(targetUid));
+        const renewalApp = await getByApplicantUid(targetUid);
 
         if (renewalApp && (renewalApp.applicationType === 'renewal' || renewalApp.applicationType === 'renewal_after_soft_block')) {
             if (renewalApp.state === 'approved' || renewalApp.state === 'submitted') {
@@ -214,6 +214,27 @@ export const GET = withSecurity(
                 }
             }
 
+            // 1. Fetch payments associated with the order directly from Razorpay
+            if (!razorpayPayment && resolvedOrderId) {
+                try {
+                    console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] recover: fetching payments for order:`, resolvedOrderId);
+                    const orderPayments = await withTimeout(fetchOrderPayments(resolvedOrderId), RAZORPAY_TIMEOUT_MS);
+                    console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] recover: fetched order payments:`, JSON.stringify(orderPayments));
+                    if (orderPayments && orderPayments.items && orderPayments.items.length > 0) {
+                        // Find the first captured or authorized payment, fallback to the first one
+                        const successfulPayment = orderPayments.items.find((p: any) => p.status === 'captured' || p.status === 'authorized');
+                        razorpayPayment = successfulPayment || orderPayments.items[0];
+                        if (razorpayPayment) {
+                            resolvedPaymentId = razorpayPayment.id;
+                            console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] recover: resolved payment from order payments:`, resolvedPaymentId);
+                        }
+                    }
+                } catch (err: any) {
+                    console.warn(`[recover] Failed to fetch order payments for ${resolvedOrderId}:`, err);
+                }
+            }
+
+            // 2. Fallback: Fetch order details to see if status is paid and map from local ledger
             if (!razorpayPayment && resolvedOrderId) {
                 try {
                     console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] recover: fetching order details for:`, resolvedOrderId);
@@ -227,6 +248,10 @@ export const GET = withSecurity(
                                     resolvedPaymentId = supabaseRec.razorpay_payment_id || supabaseRec.payment_id;
                                     console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] recover: mapped orderId to resolvedPaymentId:`, resolvedPaymentId);
                                 }
+                            }
+                            if (resolvedPaymentId) {
+                                razorpayPayment = await withTimeout(fetchPaymentDetails(resolvedPaymentId), RAZORPAY_TIMEOUT_MS);
+                                console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] recover: fetched payment details in fallback:`, JSON.stringify(razorpayPayment));
                             }
                         }
                     }

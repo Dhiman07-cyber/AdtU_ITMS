@@ -12,7 +12,7 @@ import { normalizeShift, areShiftsCompatible, getShiftLoad } from '@/lib/utils/s
  */
 export async function GET(request: NextRequest) {
   try {
-    const auth = await verifyApiAuth(request, ['admin', 'moderator', 'driver', 'student']);
+    const auth = await verifyApiAuth(request);
     if (!auth.authenticated) return auth.response;
 
     const rl = await applyRateLimit(createRateLimitId(auth.uid, 'buses-capacity'), RateLimits.READ);
@@ -47,12 +47,12 @@ export async function GET(request: NextRequest) {
 
 /**
  * POST /api/buses/capacity
- * Body: { routeId, stopId, stopName, busId?, shift? }
+ * Body: { routeId, stop_name, stop_name, busId?, shift? }
  * Comprehensive capacity check for application flow.
  */
 export async function POST(request: NextRequest) {
   try {
-    const auth = await verifyApiAuth(request, ['admin', 'moderator', 'driver', 'student']);
+    const auth = await verifyApiAuth(request);
     if (!auth.authenticated) return auth.response;
 
     const rl = await applyRateLimit(createRateLimitId(auth.uid, 'buses-capacity-check'), RateLimits.READ);
@@ -61,10 +61,11 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { routeId, stopId, stopName, busId: selectedBusId, shift } = body;
+    const { routeId, stop_name, busId: selectedBusId, shift } = body;
+    const resolved_stop_name = stop_name || body.stop_name || body.stop_name;
 
-    if (!routeId || !stopId) {
-      return NextResponse.json({ error: 'routeId and stopId are required' }, { status: 400 });
+    if (!routeId || !resolved_stop_name) {
+      return NextResponse.json({ error: 'routeId and stop_name are required' }, { status: 400 });
     }
 
     const normalizedShift = normalizeShift(shift);
@@ -75,12 +76,9 @@ export async function POST(request: NextRequest) {
       .filter(route => {
         const stops = route.stops || [];
         return stops.some((stop: any) => {
-          const id = (stop.stopId || stop.id || stop.name || '').toLowerCase().trim();
-          const name = (stop.name || '').toLowerCase().trim();
-          const normalizedStopId = (stopId || '').toLowerCase().trim();
-          const normalizedStopName = (stopName || '').toLowerCase().trim();
-          return id === normalizedStopId || name === normalizedStopName ||
-                 id === normalizedStopName || name === normalizedStopId;
+          const name = (stop.stop_name || stop.name || '').toLowerCase().trim();
+          const target = resolved_stop_name.toLowerCase().trim();
+          return name === target;
         });
       })
       .map(route => route.routeId || route.id)

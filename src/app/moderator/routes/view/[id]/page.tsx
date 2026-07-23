@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState, useEffect } from "react";
 import { use } from "react";
@@ -30,7 +30,7 @@ import {
 import { getRouteById, deleteRoute, getAllBuses, getAllDrivers } from "@/lib/dataService";
 
 interface Stop {
-  stopId: string;
+  stop_name: string;
   name: string;
   lat?: number;
   lng?: number;
@@ -73,8 +73,8 @@ interface Driver {
   phone?: string;
   alternatePhone?: string;
   licenseNumber?: string;
-  assignedBusId?: string;
-  assignedRouteId?: string;
+  busId?: string;
+  routeId?: string;
   employeeId?: string;
   joiningDate?: string;
   createdAt?: string;

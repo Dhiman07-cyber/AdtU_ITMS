@@ -14,6 +14,8 @@ import * as studentRepository from '../repositories/student.repository';
 import { getTransportEntitlement, hasTransportEntitlement } from '@/lib/entitlement/transport-entitlement';
 import type { Student } from '../repositories/student.repository';
 import { paymentsSupabaseService } from '@/lib/services/payments-supabase';
+import { computeBlockDatesFromValidUntil } from '@/lib/utils/deadline-computation';
+import { getDeadlineConfig } from '@/lib/deadline-config-service';
 
 export async function getByUid(uid: string): Promise<Student | null> {
   return studentRepository.findByUid(uid);
@@ -64,8 +66,24 @@ export async function applyPaymentValidity(
     ? (student as any).sessionEndYear
     : payment.session_end_year;
 
+  let softBlock: string | undefined;
+  let hardBlock: string | undefined;
+
+  if (finalValidUntil) {
+    try {
+      const deadlineConfig = await getDeadlineConfig();
+      const blockDates = computeBlockDatesFromValidUntil(finalValidUntil, deadlineConfig);
+      softBlock = (typeof blockDates.softBlock === 'string' ? blockDates.softBlock : (blockDates.softBlock as any)?.toISOString());
+      hardBlock = (typeof blockDates.hardBlock === 'string' ? blockDates.hardBlock : (blockDates.hardBlock as any)?.toISOString());
+    } catch (e) {
+      console.error('Failed to compute block dates in applyPaymentValidity:', e);
+    }
+  }
+
   await update(studentUid, {
     validUntil: finalValidUntil?.toISOString() || undefined,
+    softBlock,
+    hardBlock,
     sessionStartYear: payment.session_start_year || (student as any).sessionStartYear,
     sessionEndYear: finalSessionEndYear,
     status: 'active',

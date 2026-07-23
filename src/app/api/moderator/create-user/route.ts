@@ -126,10 +126,7 @@ export async function POST(request: Request) {
       aadharNumber,
       staffId,
       employeeId,
-      driverId,
-      assignedRouteId,
       routeId,
-      assignedBusId,
       busId,
       address,
       bloodGroup,
@@ -241,9 +238,7 @@ export async function POST(request: Request) {
             address: address || '',
             profilePhotoUrl: profilePhotoUrl || '',
             routeId: routeId || null,
-            assignedRouteId: routeId || null,
             busId: busId || null,
-            assignedBusId: busId || null,
             shift: shift || 'Morning',
             approvedBy: approvedBy || 'System (AUTO_MIGRATION)',
             sessionDuration: sessionDuration || '1',
@@ -264,7 +259,7 @@ export async function POST(request: Request) {
           // Without a transaction, a concurrent create-user on the same bus
           // could overfill beyond capacity, or a failure after user creation
           // leaves an orphan student doc.
-          const assignedBusId = studentDocData.busId;
+          const studentBusId = studentDocData.busId;
 
           // ponytail: idempotency check MUST happen BEFORE createStudent, not after.
           const existingStudent = await getStudentById(uid);
@@ -279,11 +274,11 @@ export async function POST(request: Request) {
           });
 
           // Increment capacity in PG (source of truth) only if student is new and bus assigned
-          if (assignedBusId && !alreadyExisted) {
+          if (studentBusId && !alreadyExisted) {
             try {
-              await incrementBusCapacity(assignedBusId, studentDocData.shift);
+              await incrementBusCapacity(studentBusId, studentDocData.shift);
             } catch (pgErr) {
-              console.warn(`⚠️ moderator/create-user: PG capacity increment failed for bus ${assignedBusId}:`, pgErr);
+              console.warn(`⚠️ moderator/create-user: PG capacity increment failed for bus ${studentBusId}:`, pgErr);
             }
           }
         } else if (role === 'driver') {
@@ -296,11 +291,10 @@ export async function POST(request: Request) {
             phone: phone || '',
             altPhone: alternatePhone || '',
             joiningDate: joiningDate || '',
-            driverId: driverId || employeeId || '',
             address: address || '',
             profilePhotoUrl: profilePhotoUrl || '',
-            assignedRouteId: assignedRouteId || routeId || null,
-            assignedBusId: assignedBusId || busId || null,
+            routeId: routeId || null,
+            busId: busId || null,
             shift: shift || 'Both', // Default to Both Shifts if not provided
             approvedBy: approvedBy || 'System (AUTO_MIGRATION)',
             dob: dob || '',
@@ -442,11 +436,10 @@ export async function POST(request: Request) {
           phone: phone || '',
           altPhone: alternatePhone || '',
           joiningDate: joiningDate || '',
-          driverId: driverId || employeeId || '',
           address: address || '',
           profilePhotoUrl: profilePhotoUrl || '',
-          assignedRouteId: assignedRouteId || routeId || undefined,
-          assignedBusId: assignedBusId || busId || undefined,
+          routeId: routeId || undefined,
+          busId: busId || undefined,
           shift: shift || 'Both',
           approvedBy: approvedBy || 'System (AUTO_MIGRATION)',
           dob: dob || '',

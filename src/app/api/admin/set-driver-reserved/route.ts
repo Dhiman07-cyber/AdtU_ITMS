@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 import { verifyApiAuth } from '@/lib/security/api-auth';
 import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
 import { getAllBuses, updateBus } from '@/domains/fleet';
@@ -36,7 +36,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const oldBusId = driverData.assignedBusId || driverData.busId;
+    const oldBusId = driverData.busId || driverData.busId;
 
     console.log(`🔄 Setting driver ${driverUID.substring(0,8)}... as Reserved`);
     console.log(`   Old bus: ${oldBusId}`);

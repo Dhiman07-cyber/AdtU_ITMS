@@ -202,7 +202,7 @@ function TrackBusLive() {
             busId: busData.busId,
             studentId: currentUser.uid,
             studentName: userData?.fullName || 'Student',
-            stopName: studentData?.stopName || 'Current Stop'
+            stop_name: studentData?.stop_name || 'Current Stop'
           })
         });
 
@@ -254,9 +254,9 @@ function TrackBusLive() {
     const result = await raiseMissedBusRequest({
       opId: generateOpId(),
       routeId: routeData.routeId || studentData.routeId,
-      stopId: studentData.stopId || studentData.assignedStop,
-      assignedBusId: studentData.busId || studentData.assignedBusId // Pass student's assigned bus
-    });
+      stop_name: studentData.stop_name || studentData.assignedStop,
+      busId: studentData.busId, // Pass student's assigned bus - assignedBusId in RaiseRequestParams
+    } as any);
 
     if (result.success) {
       addToast(MISSED_BUS_MESSAGES.REQUEST_PENDING, "success");
@@ -526,7 +526,7 @@ function TrackBusLive() {
   const {
     currentLocation: hookBusLocation,
     loading: busLocationLoading
-  } = useBusLocation(busData?.busId || studentData?.busId || studentData?.assignedBusId || '');
+  } = useBusLocation(busData?.busId || studentData?.busId || studentData?.busId || '');
 
 
   // Update local busLocation state whenever hook location changes
@@ -1171,7 +1171,7 @@ function TrackBusLive() {
                 onShowQrCode={() => setShowQrCode(true)}
                 currentLocation={busLocation}
                 loading={busLocationLoading}
-                routeStops={routeData?.stops?.map((s: { name: string; lat: number; lng: number; sequence?: number }) => ({
+                route_stops={routeData?.stops?.map((s: { name: string; lat: number; lng: number; sequence?: number }) => ({
                   name: s.name,
                   lat: s.lat,
                   lng: s.lng,
@@ -1436,7 +1436,7 @@ function TrackBusLive() {
                   {/* Header with university branding */}
                   <div className="relative px-5 py-4 bg-gradient-to-r from-[#1a1b2e] to-[#0f1019] border-b border-white/5">
                     <div className="flex items-center gap-3">
-                      <Image src="/adtu-new-logo.svg" alt="AdtU" width={112} height={28} className="h-7 w-auto" />
+                      <Image src="/adtu-new-logo.svg" alt="AdtU" width={112} height={28} className="h-7 w-auto" style={{ width: 'auto', height: 'auto' }} />
                       <div>
                         <span className="text-xs font-bold text-white/80 block">Assam down town University</span>
                         <span className="text-[10px] font-medium text-white/40">Digital Bus Pass</span>

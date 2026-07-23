@@ -17,7 +17,7 @@ import { signalCollectionRefresh } from '@/hooks/useEventDrivenRefresh';
 type Stop = {
   name: string;
   sequence: number;
-  stopId: string;
+  stop_name: string;
 };
 
 type RouteFormData = {
@@ -97,16 +97,16 @@ export default function AddRoutePage() {
     }
   }, [currentStopInput, stops]);
 
-  const generateStopId = (stopName: string): string => {
-    return stopName.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+  const generateStopId = (stop_name: string): string => {
+    return stop_name.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
   };
 
-  const addStop = (stopName: string) => {
-    if (!stopName.trim()) return;
+  const addStop = (stop_name: string) => {
+    if (!stop_name.trim()) return;
     const newStop: Stop = {
-      name: stopName,
+      name: stop_name,
       sequence: stops.length + 1,
-      stopId: generateStopId(stopName)
+      stop_name: generateStopId(stop_name)
     };
     setStops([...stops, newStop]);
     setCurrentStopInput("");
@@ -365,7 +365,7 @@ export default function AddRoutePage() {
                     >
                       <GripVertical className="h-5 w-5 text-gray-500 cursor-grab" />
                       <div className="bg-blue-600/20 text-blue-400 font-mono w-8 h-8 flex items-center justify-center rounded-lg text-sm">{stop.sequence}</div>
-                      <div className="flex-1 text-gray-200 font-medium">{stop.name} <span className="text-xs text-gray-500 ml-2 font-normal">({stop.stopId})</span></div>
+                      <div className="flex-1 text-gray-200 font-medium">{stop.name} <span className="text-xs text-gray-500 ml-2 font-normal">({stop.stop_name})</span></div>
                       <button type="button" onClick={() => removeStop(i)} className="text-gray-400 hover:text-red-400 p-2 hover:bg-red-500/10 rounded-full transition"><X className="h-4 w-4" /></button>
                     </div>
                   ))}

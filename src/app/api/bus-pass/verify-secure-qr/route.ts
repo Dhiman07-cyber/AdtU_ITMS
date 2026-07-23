@@ -1,4 +1,4 @@
-/**
+﻿/**
  * API Route: Verify Secure QR Token
  * POST /api/bus-pass/verify-secure-qr
  */
@@ -129,8 +129,8 @@ export async function POST(request: NextRequest) {
             });
         }
         const validUntilDate = getValidUntilDate(studentData?.validUntil);
-        const assignedBusId = studentData?.assignedBus || studentData?.busId || studentData?.currentBusId;
-        const busMatchesScanner = scannerBusMatchesStudent(scannerBusId, assignedBusId);
+        const busId = studentData?.assignedBus || studentData?.busId || studentData?.currentBusId;
+        const busMatchesScanner = scannerBusMatchesStudent(scannerBusId, busId);
 
         // CANONICAL entitlement (Phase 3) — same single source of truth as the
         // dashboard / tracking / QR display. Denies soft-blocked, past-soft-block,
@@ -154,14 +154,14 @@ export async function POST(request: NextRequest) {
                 enrollmentId: studentData?.enrollmentId || qrPayload.enrollmentId,
                 gender: studentData?.gender,
                 profilePhotoUrl: studentData?.profilePhotoUrl || studentData?.photoURL,
-                assignedBus: assignedBusId,
-                busId: assignedBusId,
+                assignedBus: busId,
+                busId: busId,
                 assignedShift: studentData?.assignedShift || studentData?.shift,
                 shift: studentData?.assignedShift || studentData?.shift,
                 validUntil: validUntilDate?.toISOString(),
                 status: studentData?.status,
             },
-            isAssigned: Boolean(assignedBusId),
+            isAssigned: Boolean(busId),
             matchesScannerBus: busMatchesScanner,
             canBoard: accountValid && busMatchesScanner,
             sessionActive: accountValid,

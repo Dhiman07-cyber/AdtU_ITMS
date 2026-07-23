@@ -31,6 +31,45 @@ export const GET = withSecurity(
         }
 
         if (!studentData) {
+            // Check if student has an application in PostgreSQL
+            const { data: appRow } = await supabase
+                .from('applications')
+                .select('*')
+                .eq('applicant_uid', uid)
+                .order('created_at', { ascending: false })
+                .limit(1)
+                .maybeSingle();
+
+            if (appRow) {
+                const appState = appRow.state;
+                let reason: any = 'application_submitted';
+                if (appState === 'verified_upcoming') reason = 'verified_upcoming';
+                else if (appState === 'pending_seat_allocation') reason = 'pending_seat_allocation';
+
+                return NextResponse.json({
+                    student: {
+                        uid,
+                        fullName: appRow.form_data?.fullName || appRow.applicant_email,
+                        status: appState,
+                        state: appState,
+                        applicationId: appRow.application_id,
+                        targetSession: appRow.target_session || appRow.form_data?.sessionInfo,
+                        busId: appRow.bus_id || appRow.form_data?.busId,
+                        routeId: appRow.route_id || appRow.form_data?.routeId,
+                        stop_name: appRow.stop_name || appRow.form_data?.stop_name || appRow.form_data?.stop_name || appRow.form_data?.stop_name,
+                        shift: appRow.shift || appRow.form_data?.shift || 'Morning',
+                    },
+                    application: appRow,
+                    bus: null,
+                    route: null,
+                    driver: null,
+                    tripActive: false,
+                    tripData: null,
+                    entitled: false,
+                    entitlementReason: reason,
+                });
+            }
+
             return NextResponse.json({
                 student: null,
                 bus: null,
@@ -61,8 +100,8 @@ export const GET = withSecurity(
             });
         }
 
-        const busId = studentData.busId || studentData.assignedBusId;
-        const routeId = studentData.routeId || studentData.assignedRouteId;
+        const busId = studentData.busId || studentData.busId;
+        const routeId = studentData.routeId || studentData.routeId;
 
         // 2. Parallelize everything else (bus from PG, driver from PG, route from PG)
         const [busData, dbRoute, drivers, tripStatus] = await Promise.all([

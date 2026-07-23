@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState, useEffect, useMemo } from 'react';
 import { useAuth } from "@/contexts/auth-context";
@@ -108,7 +108,7 @@ export default function StudentDashboard() {
 
   // REALTIME SUBSCRIPTIONS
   useEffect(() => {
-    const busId = studentData?.busId || studentData?.assignedBusId;
+    const busId = studentData?.busId || studentData?.busId;
     if (!busId) return;
 
     const channel = supabase
@@ -132,7 +132,7 @@ export default function StudentDashboard() {
       supabase.removeChannel(channel);
       supabase.removeChannel(tripChannel);
     };
-  }, [studentData?.busId, studentData?.assignedBusId]);
+  }, [studentData?.busId, studentData?.busId]);
 
 
   useEffect(() => {
@@ -204,13 +204,19 @@ export default function StudentDashboard() {
                   <div className="flex flex-wrap items-center gap-2 md:gap-3 pl-0 md:pl-[4.5rem]">
                     <Badge className={`px-2.5 py-1 md:px-4 md:py-1.5 text-xs md:text-sm font-semibold shadow-sm md:shadow-lg backdrop-blur-sm ${studentData?.status === 'active'
                       ? 'bg-gradient-to-r from-green-100 to-emerald-100 text-green-700 dark:from-green-900/40 dark:to-emerald-900/40 dark:text-green-400 border border-green-200 dark:border-green-800'
+                      : studentData?.status === 'verified_upcoming'
+                      ? 'bg-gradient-to-r from-indigo-100 to-purple-100 text-indigo-700 dark:from-indigo-900/40 dark:to-purple-900/40 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800'
+                      : studentData?.status === 'pending_seat_allocation'
+                      ? 'bg-gradient-to-r from-amber-100 to-orange-100 text-amber-700 dark:from-amber-900/40 dark:to-orange-900/40 dark:text-amber-300 border border-amber-200 dark:border-amber-800'
                       : 'bg-gradient-to-r from-yellow-100 to-orange-100 text-yellow-700 dark:from-yellow-900/40 dark:to-orange-900/40 dark:text-yellow-400 border border-yellow-200 dark:border-yellow-800'
                       }`}>
-                      <span className={`inline-block w-1.5 h-1.5 md:w-2 md:h-2 rounded-full mr-1.5 md:mr-2 ${studentData?.status === 'active' ? 'bg-green-500 animate-pulse' : 'bg-yellow-500'
+                      <span className={`inline-block w-1.5 h-1.5 md:w-2 md:h-2 rounded-full mr-1.5 md:mr-2 ${studentData?.status === 'active' ? 'bg-green-500 animate-pulse' : studentData?.status === 'verified_upcoming' ? 'bg-indigo-500 animate-pulse' : 'bg-yellow-500'
                         }`} />
                       {studentData?.status === 'active' ? 'Active' :
+                        studentData?.status === 'verified_upcoming' ? 'Verified (Upcoming Session)' :
+                        studentData?.status === 'pending_seat_allocation' ? 'Seat Queue Active' :
                         studentData?.status === 'soft_blocked' ? 'Soft blocked' :
-                          studentData?.status || 'Pending'}
+                        studentData?.status || 'Submitted'}
                     </Badge>
                     {studentData?.semester && (
                       <Badge variant="outline" className="px-2.5 py-1 md:px-4 md:py-1.5 text-xs md:text-sm bg-white/60 dark:bg-gray-800/60 backdrop-blur-sm border-gray-300 dark:border-gray-700 shadow-sm">
@@ -229,7 +235,7 @@ export default function StudentDashboard() {
 
                 {/* Premium Action Buttons — Phase 3: transport actions appear only
                     while the student owns transport access. Non-entitled students
-                    are guided to renewal via the banner below. */}
+                    are guided to renewal or application status. */}
                 {transportEntitled ? (
                   <div className="grid grid-cols-2 sm:flex sm:flex-row gap-3 w-full lg:w-auto mt-2 lg:mt-0">
                     <Link href="/student/track-bus" className="w-full sm:w-auto">
@@ -251,6 +257,15 @@ export default function StudentDashboard() {
                       </Button>
                     </Link>
                   </div>
+                ) : studentData?.status === 'verified_upcoming' || studentData?.status === 'pending_seat_allocation' || studentData?.status === 'submitted' ? (
+                  <Link href={`/apply/status/${studentData?.applicationId || studentData?.uid || ''}`} className="w-full lg:w-auto mt-2 lg:mt-0">
+                    <Button className="w-full sm:w-auto group relative overflow-hidden bg-gradient-to-r from-indigo-500 via-purple-600 to-blue-600 hover:from-indigo-600 hover:via-purple-700 hover:to-blue-700 text-white font-semibold shadow-lg transform hover:-translate-y-0.5 transition-all duration-300 h-10 md:h-11 text-xs md:text-sm">
+                      <span className="relative flex items-center justify-center">
+                        <Clock className="h-3.5 w-3.5 md:h-4 md:w-4 mr-1.5 md:mr-2" />
+                        View Application Status
+                      </span>
+                    </Button>
+                  </Link>
                 ) : (
                   <Link href="/student/renew-services" className="w-full lg:w-auto mt-2 lg:mt-0">
                     <Button className="w-full sm:w-auto group relative overflow-hidden bg-gradient-to-r from-amber-500 via-orange-600 to-red-500 hover:from-amber-600 hover:via-orange-700 hover:to-red-600 text-white font-semibold shadow-lg transform hover:-translate-y-0.5 transition-all duration-300 h-10 md:h-11 text-xs md:text-sm">
@@ -678,7 +693,7 @@ export default function StudentDashboard() {
                                   </div>
                                   <div>
                                     <span className="text-sm font-semibold text-gray-900 dark:text-white whitespace-nowrap block">
-                                      {typeof stop === 'string' ? stop : stop.name || stop.stopId || `Stop ${idx + 1}`}
+                                      {typeof stop === 'string' ? stop : stop.name || stop.stop_name || `Stop ${idx + 1}`}
                                     </span>
                                     <span className="text-xs text-gray-600 dark:text-gray-400 whitespace-nowrap block">
                                       Stop {idx + 1}
@@ -1204,8 +1219,8 @@ export default function StudentDashboard() {
         studentUid={currentUser?.uid || ''}
         studentName={studentName}
         enrollmentId={studentData?.enrollmentId}
-        busNumber={busData?.busNumber || studentData?.busId || studentData?.assignedBusId}
-        routeName={routeData?.routeName || studentData?.routeId || studentData?.assignedRouteId}
+        busNumber={busData?.busNumber || studentData?.busId || studentData?.busId}
+        routeName={routeData?.routeName || studentData?.routeId || studentData?.routeId}
         validUntil={studentData?.validUntil}
         isActive={transportEntitled}
       />

@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+﻿import { NextResponse } from 'next/server';
 import { verifyApiAuth } from '@/lib/security/api-auth';
 import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
 import { getDriverById, updateDriver } from '@/domains/identity';
@@ -18,7 +18,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       'fullName', 'name', 'email', 'phone', 'employeeId', 'profilePhotoUrl', 'phone_number'
     ]);
     const BLOCKED_FIELDS = new Set([
-      'busId', 'routeId', 'role', 'status', 'assignedBusId', 'assignedRouteId'
+      'busId', 'routeId', 'role', 'status', 'busId', 'routeId'
     ]);
 
     const updatedDriverData: Record<string, any> = {};

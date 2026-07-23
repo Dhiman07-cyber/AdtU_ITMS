@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 import { withSecurity } from '@/lib/security/api-security';
 import { EmptySchema } from '@/lib/security/validation-schemas';
 import { RateLimits } from '@/lib/security/rate-limiter';
@@ -21,8 +21,8 @@ export const GET = withSecurity(
                 driverId: data.employeeId || data.driverId || 'N/A',
                 email: data.email,
                 phone: data.phone || data.phoneNumber,
-                assignedBusId: data.assignedBusId || data.busAssigned || null,
-                assignedRouteId: data.assignedRouteId || data.routeId || null,
+                busId: data.busId || data.busAssigned || null,
+                routeId: data.routeId || data.routeId || null,
                 role: 'driver',
                 active: data.status === 'active',
             }));

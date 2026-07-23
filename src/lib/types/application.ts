@@ -92,7 +92,6 @@ export interface AuditLogEntry {
 
 // Application Form Data
 export interface ApplicationFormData {
-  assignedBusId: any;
   // Personal Info
   fullName: string;
   email: string;
@@ -121,7 +120,7 @@ export interface ApplicationFormData {
   routeId?: string;
   busId?: string;
   busAssigned?: string;
-  stopId?: string;
+  stop_name?: string;
   shift?: string;
 
   // Session & Payment
@@ -230,6 +229,12 @@ export interface Application {
    * document to reactivate at approval, instead of creating a new student.
    */
   linkedStudentUid?: string;
+
+  // ── Phase 2 upcoming / seat allocation tracking fields ──
+  verifiedUpcomingAt?: string;
+  verifiedUpcomingBy?: string;
+  verifiedUpcomingById?: string;
+  pendingSeatAllocationAt?: string;
 }
 
 // Student User Profile (post-approval)

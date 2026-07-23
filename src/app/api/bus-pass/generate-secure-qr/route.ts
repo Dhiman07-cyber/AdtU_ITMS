@@ -1,4 +1,4 @@
-/**
+﻿/**
  * API Route: Generate Secure QR Token
  * POST /api/bus-pass/generate-secure-qr
  * 
@@ -99,7 +99,7 @@ export async function POST(request: NextRequest) {
         const secureToken = encryptQRCodeData(targetUid, {
             enrollmentId: studentData?.enrollmentId,
             name: studentData?.fullName || studentData?.name,
-            busId: studentData?.busId || studentData?.assignedBusId
+            busId: studentData?.busId || studentData?.busId
         });
 
         return NextResponse.json({
