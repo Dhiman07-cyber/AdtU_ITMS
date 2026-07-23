@@ -400,4 +400,18 @@ export interface EnhancedBus extends Bus {
   activeDriverId?: string; // Currently active driver (after swap)
 }
 
+// DriverAssignment — canonical source of truth for driver↔bus ownership.
+export interface DriverAssignment {
+  id: string;
+  driverUid: string;
+  busId: string;
+  routeId?: string;
+  assignedAt: string;
+  unassignedAt?: string;
+  assignedBy: string;
+  isActive: boolean;
+  reason: 'assignment' | 'swap' | 'qr_claim' | 'admin_reassign' | 'migration';
+  metadata?: Record<string, any>;
+}
+
 // Types are exported inline above with 'export interface' and 'export type'
