@@ -6,6 +6,7 @@ import { withSecurity } from '@/lib/security/api-security';
 import { StartTripSchema } from '@/lib/security/validation-schemas';
 import { RateLimits } from '@/lib/security/rate-limiter';
 import { formatIdForDisplay } from '@/lib/utils';
+import { getDriverUidByBusId } from '@/domains/fleet/repositories/driver-assignment.repository';
 import crypto from 'crypto';
 
 /**
@@ -26,19 +27,19 @@ export const POST = withSecurity(
     const supabase = getSupabaseServer();
 
     // 1. D9: Parallelize Supabase fetching (Driver and Bus) instead of Firestore
-    const [driverStatusResult, busResult] = await Promise.all([
-      supabase.from('driver_status').select('driver_uid, bus_id').eq('driver_uid', driverUid).maybeSingle(),
-      supabase.from('buses').select('id, bus_number, route_id, route_name, driver_uid').eq('id', busId).maybeSingle(),
+    const [activeTripResult, busResult, assignedDriverUid] = await Promise.all([
+      supabase.from('active_trips').select('driver_id, bus_id').eq('driver_id', driverUid).eq('status', 'active').maybeSingle(),
+      supabase.from('buses').select('id, bus_number, route_id, route_name').eq('id', busId).maybeSingle(),
+      getDriverUidByBusId(busId),
     ]);
 
     const busData = busResult.data;
     if (!busData) return NextResponse.json({ error: 'Bus not found' }, { status: 404 });
 
-    // D9: Check if driver profile exists (via driver_status or buses table)
-    const driverClaimsBus = driverStatusResult.data?.bus_id === busId;
-    const busClaimsDriver = busData.driver_uid === driverUid;
+    const driverHasActiveTrip = activeTripResult.data?.bus_id === busId;
+    const busClaimsDriver = assignedDriverUid === driverUid;
 
-    if (!driverClaimsBus && !busClaimsDriver) {
+    if (!driverHasActiveTrip && !busClaimsDriver) {
       return NextResponse.json({ error: 'Driver is not assigned to this bus' }, { status: 403 });
     }
 
@@ -61,13 +62,7 @@ export const POST = withSecurity(
     const busNumber = formatIdForDisplay(busData?.bus_number || busId);
     const nowIso = new Date().toISOString();
 
-    const initializationTasks: any[] = [
-      // Supabase: Driver Status
-      supabase.from('driver_status').upsert({
-        driver_uid: driverUid, bus_id: busId, route_id: routeId, status: 'on_trip',
-        started_at: nowIso, last_updated_at: nowIso, trip_id: tripId
-      }, { onConflict: 'driver_uid' }),
-    ];
+    const initializationTasks: any[] = [];
 
     if (!isExistingTrip) {
       initializationTasks.push(

@@ -209,12 +209,11 @@ export class MissedBusService {
       console.log(`\n🔍 === STAGE-1: ASSIGNED BUS CHECK ===`);
 
       if (assignedBusId) {
-        // Query for assigned bus's current status
         const { data: assignedBusStatus } = await this.supabase
-          .from('driver_status')
+          .from('active_trips')
           .select('*')
           .eq('bus_id', assignedBusId)
-          .eq('status', 'on_trip')
+          .eq('status', 'active')
           .maybeSingle();
 
         if (assignedBusStatus) {
@@ -268,7 +267,7 @@ export class MissedBusService {
             console.log(`✅ Assigned bus has passed student's stop (bus seq ${busSequence} >= student seq ${studentSequence}) - proceeding to Stage-2`);
           }
         } else {
-          console.log(`📭 Assigned bus ${assignedBusId} is not currently on_trip - proceeding to Stage-2`);
+          console.log(`📭 Assigned bus ${assignedBusId} has no active trip - proceeding to Stage-2`);
         }
       } else {
         console.log(`⚠️ No assignedBusId provided - proceeding to Stage-2`);
@@ -279,25 +278,24 @@ export class MissedBusService {
       // ===============================
       console.log(`\n🔍 === STAGE-2: CANDIDATE SEARCH ===`);
 
-      // Query driver_status for all active drivers on this route
       const { data: activeDrivers, error: driversError } = await this.supabase
-        .from('driver_status')
+        .from('active_trips')
         .select('*')
         .eq('route_id', routeId)
-        .eq('status', 'on_trip');
+        .eq('status', 'active');
 
       if (driversError) {
-        console.error(`❌ Error querying driver_status:`, driversError);
+        console.error(`❌ Error querying active_trips:`, driversError);
       }
 
-      console.log(`🔍 Found ${activeDrivers?.length || 0} on_trip drivers for route ${routeId}`);
+      console.log(`🔍 Found ${activeDrivers?.length || 0} active drivers for route ${routeId}`);
 
       if (!activeDrivers || activeDrivers.length === 0) {
         // Try case-insensitive match
         const { data: allActiveDrivers } = await this.supabase
-          .from('driver_status')
+          .from('active_trips')
           .select('*')
-          .eq('status', 'on_trip');
+          .eq('status', 'active');
 
         const matchingDrivers = allActiveDrivers?.filter(d =>
           d.route_id?.toLowerCase() === routeId?.toLowerCase()
@@ -349,12 +347,9 @@ export class MissedBusService {
         continue;
       }
 
-      // Check heartbeat freshness
-      const heartbeatTime = new Date(driver.last_updated_at);
+      const heartbeatTime = new Date(driver.last_heartbeat);
       const heartbeatAgeSec = (now.getTime() - heartbeatTime.getTime()) / 1000;
 
-      // For driver_status, last_updated_at updates when status changes
-      // But we can also check bus_locations for recent location updates
       const recentLocation = await this.getBusLocation(driver.bus_id);
       let isActive = false;
 
@@ -363,9 +358,8 @@ export class MissedBusService {
         isActive = locationAgeSec < 300; // 5 minutes
         console.log(`  📍 Bus ${driver.bus_id}: location ${locationAgeSec.toFixed(0)}s old, active=${isActive}`);
       } else {
-        // If no recent location, check if driver was recently updated
-        isActive = heartbeatAgeSec < 600; // 10 minutes for driver_status
-        console.log(`  ⏰ Bus ${driver.bus_id}: driver_status ${heartbeatAgeSec.toFixed(0)}s old, active=${isActive}`);
+        isActive = heartbeatAgeSec < 600; // 10 minutes for active trip heartbeat
+        console.log(`  ⏰ Bus ${driver.bus_id}: active_trips last_heartbeat ${heartbeatAgeSec.toFixed(0)}s old, active=${isActive}`);
       }
 
       if (!isActive) {
@@ -403,7 +397,7 @@ export class MissedBusService {
         candidates.push({
           tripId: driver.trip_id || driver.id,
           busId: driver.bus_id,
-          driverId: driver.driver_uid,
+          driverId: driver.driver_id,
           routeId: driver.route_id,
           currentSeq: busSequence,
           eta: etaSeconds,
@@ -608,24 +602,23 @@ export class MissedBusService {
       );
 
       // Get driver's active trip
-      const { data: driverStatus } = await this.supabase
-        .from('driver_status')
-        .select('*')
-        .eq('driver_uid', driverId)
-        .eq('status', 'on_trip')
+      const { data: driverTrip } = await this.supabase
+        .from('active_trips')
+        .select('trip_id, driver_id, bus_id')
+        .eq('driver_id', driverId)
+        .eq('status', 'active')
         .single();
 
-      if (!driverStatus) {
+      if (!driverTrip) {
         return { success: false, result: 'not_active', message: MESSAGES.DRIVER_NOT_ACTIVE };
       }
 
       if (decision === 'accept') {
-        // Atomic update - only succeeds if status is still 'pending'
         const { data: updated, error: updateError } = await this.supabase
           .from('missed_bus_requests')
           .update({
             status: 'approved',
-            candidate_trip_id: driverStatus.trip_id || driverStatus.id,
+            candidate_trip_id: driverTrip.trip_id,
             responded_by: driverId,
             responded_at: new Date().toISOString()
           })

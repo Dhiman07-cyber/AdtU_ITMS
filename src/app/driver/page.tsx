@@ -196,21 +196,22 @@ export default function DriverDashboard() {
     // 1. Initial Status Sync - Direct from Supabase (Bypassing RLS issues)
     const fetchCurrentStatus = async () => {
       try {
-        console.log('🔍 Fetching current driver status from Supabase...');
+        console.log('🔍 Fetching current trip status from Supabase...');
         const { data, error } = await supabase
-          .from('driver_status')
+          .from('active_trips')
           .select('status, bus_id')
-          .eq('driver_uid', currentUser.uid)
+          .eq('driver_id', currentUser.uid)
+          .eq('status', 'active')
           .maybeSingle();
 
         if (error) throw error;
 
         if (data) {
-          console.log('✅ Current status found:', data);
-          const isActive = data.status === 'on_trip' || data.status === 'enroute';
-          setHasActiveTrip(isActive);
+          console.log('✅ Active trip found:', data);
+          setHasActiveTrip(true);
         } else {
-          // If no driver_status row for UID, check by busId as fallback
+          setHasActiveTrip(false);
+          // Fallback: check by busId via API
           if (busId) {
             const response = await authApiFetch(currentUser, '/api/student/trip-status', {
               query: { busId },

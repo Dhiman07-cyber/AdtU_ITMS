@@ -3,6 +3,7 @@ import { getSupabaseServer } from '@/lib/supabase-server';
 import { withSecurity } from '@/lib/security/api-security';
 import { BusIdSchema } from '@/lib/security/validation-schemas';
 import { RateLimits } from '@/lib/security/rate-limiter';
+import { getDriverUidByBusId } from '@/domains/fleet/repositories/driver-assignment.repository';
 
 /**
  * POST /api/driver/check-active-trip
@@ -11,9 +12,6 @@ import { RateLimits } from '@/lib/security/rate-limiter';
  *
  * Checks if there's an active trip for the driver and bus
  * Returns trip data if found, null if not
- *
- * D9: Migrated from Firestore to Supabase. Driver assignment check uses
- * Supabase driver_status + buses tables. Trip lock check uses active_trips.
  */
 export const POST = withSecurity(
   async (request, { auth, body }) => {
@@ -24,26 +22,24 @@ export const POST = withSecurity(
 
     const supabase = getSupabaseServer();
 
-    // D9: Verify driver is assigned to this bus via Supabase
-    const { data: bus, error: busError } = await supabase
-      .from('buses')
-      .select('id, driver_uid')
-      .eq('id', busId)
-      .maybeSingle();
+    // D9: Verify driver is assigned to this bus via driver_assignments
+    const [busResult, assignedDriverUid] = await Promise.all([
+      supabase.from('buses').select('id').eq('id', busId).maybeSingle(),
+      getDriverUidByBusId(busId),
+    ]);
 
-    if (busError || !bus) {
+    if (!busResult.data) {
       return NextResponse.json({ error: 'Bus not found' }, { status: 404 });
     }
 
-    // Check driver assignment
-    const { data: driverStatus } = await supabase
-      .from('driver_status')
-      .select('driver_uid, bus_id')
-      .eq('driver_uid', driverUid)
-      .in('status', ['enroute', 'on_trip'])
+    const { data: activeTripCheck } = await supabase
+      .from('active_trips')
+      .select('driver_id, bus_id')
+      .eq('driver_id', driverUid)
+      .eq('status', 'active')
       .maybeSingle();
 
-    const driverClaimsBus = driverStatus?.bus_id === busId || bus.driver_uid === driverUid;
+    const driverClaimsBus = activeTripCheck?.bus_id === busId || assignedDriverUid === driverUid;
     if (!driverClaimsBus) {
       return NextResponse.json(
         { error: 'Driver is not assigned to this bus' },
@@ -89,37 +85,30 @@ export const POST = withSecurity(
       }
     }
 
-    // D9: Check for active trip using Supabase driver_status
-    const { data: statusData } = await supabase
-      .from('driver_status')
-      .select('id, status, driver_uid, bus_id, started_at, trip_id')
-      .eq('driver_uid', driverUid)
-      .order('last_updated_at', { ascending: false })
-      .limit(1)
+    const { data: myTrip } = await supabase
+      .from('active_trips')
+      .select('trip_id, driver_id, bus_id, start_time')
+      .eq('driver_id', driverUid)
+      .eq('bus_id', busId)
+      .eq('status', 'active')
       .maybeSingle();
 
-    if (statusData) {
-      if ((statusData.status === 'on_trip' || statusData.status === 'enroute') &&
-          statusData.driver_uid === driverUid && statusData.bus_id === busId) {
-        console.log('✅ Active trip found in Supabase');
-
-        const startTime = statusData.started_at ? new Date(statusData.started_at).getTime() : Date.now();
-        const tripId = statusData.trip_id || `trip_${busId}_${startTime}`;
-
-        return NextResponse.json({
-          hasActiveTrip: true,
-          tripData: {
-            tripId: tripId,
-            startTime: startTime,
-            busId: busId,
-            driverUid: driverUid,
-            busStatus: 'enroute'
-          }
-        });
-      }
+    if (myTrip) {
+      console.log('✅ Active trip found in active_trips');
+      const startTime = myTrip.start_time ? new Date(myTrip.start_time).getTime() : Date.now();
+      return NextResponse.json({
+        hasActiveTrip: true,
+        tripData: {
+          tripId: myTrip.trip_id,
+          startTime: startTime,
+          busId: busId,
+          driverUid: driverUid,
+          busStatus: 'enroute'
+        }
+      });
     }
 
-    console.log('ℹ️ No active trip found in Supabase');
+    console.log('ℹ️ No active trip found in active_trips');
     return NextResponse.json({
       hasActiveTrip: false,
       tripData: null,

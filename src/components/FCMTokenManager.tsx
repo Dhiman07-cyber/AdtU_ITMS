@@ -52,9 +52,8 @@ export function FCMTokenManager() {
   const syncToken = useCallback(async (force = false): Promise<void> => {
     if (!currentUser?.uid || !userData) return;
     
-    // SECURITY: Only allow students to register FCM tokens
-    if (userData.role !== 'student') {
-      console.log(`🚫 FCM token registration skipped for non-student role: ${userData.role}`);
+    // SECURITY: Only allow active, approved students to register FCM tokens
+    if (userData.role !== 'student' || userData.status !== 'active') {
       return;
     }
     

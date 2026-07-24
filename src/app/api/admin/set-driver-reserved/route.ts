@@ -3,6 +3,7 @@ import { verifyApiAuth } from '@/lib/security/api-auth';
 import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
 import { getAllBuses, updateBus } from '@/domains/fleet';
 import { getDriverById } from '@/domains/identity';
+import { unassignDriver } from '@/domains/fleet/repositories/driver-assignment.repository';
 
 /**
  * Set a driver as "Reserved" (not assigned to any bus)
@@ -60,6 +61,12 @@ export async function POST(req: NextRequest) {
       await updateBus(busId, updateData as any);
       updatedBuses.push(bus.busNumber || busId);
       console.log(`   🔄 Removed from bus ${bus.busNumber || busId}`);
+    }
+
+    try {
+      await unassignDriver(driverUID, 'admin_reassign');
+    } catch (err) {
+      console.error(`⚠️ Failed to unassign driver ${driverUID} in driver_assignments:`, err);
     }
 
     console.log(`   ✅ Removed driver from ${updatedBuses.length} bus(es): ${updatedBuses.join(', ')}`);

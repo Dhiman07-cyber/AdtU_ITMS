@@ -23,6 +23,7 @@ import { z } from 'zod';
 import { createAuditEvent } from '@/domains/audit';
 import { normalizeShift } from '@/lib/utils/shift-utils';
 import { createUser, createStudent, createDriver, getStudentById } from '@/domains/identity';
+import { assignDriverToBus } from '@/domains/fleet/repositories/driver-assignment.repository';
 import * as routeService from '@/domains/route';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import crypto from 'crypto';
@@ -338,6 +339,17 @@ export const POST = withSecurity<CreateUserBody>(
             // Update bus driver assignment via PG
             if (busId) {
                 await updateBus(busId, { driverUID: uid, activeTripId: null } as any);
+            }
+
+            if (busId) {
+                try {
+                    await assignDriverToBus(uid, busId, {
+                        assignedBy: 'admin',
+                        reason: 'assignment',
+                    });
+                } catch (err) {
+                    console.error(`⚠️ Failed to assign driver ${uid} in driver_assignments:`, err);
+                }
             }
         } else {
             // Moderator or Admin

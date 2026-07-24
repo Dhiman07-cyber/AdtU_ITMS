@@ -6,6 +6,7 @@ import { RateLimits } from '@/lib/security/rate-limiter';
 import { getAllBuses } from '@/domains/fleet';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import { getStudentById } from '@/domains/identity';
+import { getActiveAssignmentByDriverUid } from '@/domains/fleet/repositories/driver-assignment.repository';
 
 /**
  * POST /api/driver/get-pending-profile-requests
@@ -20,9 +21,12 @@ export const POST = withSecurity(
       return NextResponse.json({ success: false, error: 'Firebase Admin not initialized' }, { status: 500 });
     }
 
-    // Get all buses assigned to this driver (from PG)
+    // Get all buses assigned to this driver (from canonical driver_assignments)
+    const assignment = await getActiveAssignmentByDriverUid(driverUid);
     const allBuses = await getAllBuses();
-    const driverBuses = allBuses.filter(b => (b as any).assignedDriverId === driverUid);
+    const driverBuses = assignment
+      ? allBuses.filter(b => (b.busId || b.id || '') === assignment.busId)
+      : [];
     const busIds = driverBuses.map(b => b.busId || b.id || '');
     console.log(`Driver ${driverUid} has buses:`, busIds);
 

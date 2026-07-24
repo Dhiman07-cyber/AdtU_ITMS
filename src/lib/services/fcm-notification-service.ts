@@ -11,6 +11,7 @@
 
 import { messaging } from '@/lib/firebase-admin';
 import { getSupabaseServer } from '@/lib/supabase-server';
+import { getDriverUidByBusId } from '@/domains/fleet/repositories/driver-assignment.repository';
 
 export type TripEventType = 'TRIP_STARTED' | 'TRIP_ENDED';
 export type RouteTopicEventType = TripEventType | 'BUS_CHANGED';
@@ -57,24 +58,18 @@ export async function verifyDriverRouteBinding(
     // D9: Check driver-bus assignment via Supabase instead of Firestore
     const supabase = getSupabaseServer();
 
-    // Check driver_status for active assignment
-    const { data: driverStatus } = await supabase
-      .from('driver_status')
-      .select('bus_id, driver_uid')
-      .eq('driver_uid', driverId)
-      .in('status', ['enroute', 'on_trip'])
+    // Check active_trips for active assignment
+    const { data: activeTrip } = await supabase
+      .from('active_trips')
+      .select('bus_id, driver_id')
+      .eq('driver_id', driverId)
+      .eq('status', 'active')
       .maybeSingle();
 
-    if (driverStatus?.bus_id === busId) return { authorized: true };
+    if (activeTrip?.bus_id === busId) return { authorized: true };
 
-    // Check buses table for driver assignment
-    const { data: bus } = await supabase
-      .from('buses')
-      .select('driver_uid')
-      .eq('id', busId)
-      .maybeSingle();
-
-    if (bus?.driver_uid === driverId) return { authorized: true };
+    const assignedDriverUid = await getDriverUidByBusId(busId);
+    if (assignedDriverUid === driverId) return { authorized: true };
 
     return { authorized: false, reason: 'Driver is not assigned to this bus' };
   } catch (error) {

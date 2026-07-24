@@ -4,6 +4,7 @@ import { adminAuth } from '@/lib/firebase-admin';
 import { getUserById, updateDriver } from '@/domains/identity';
 import { getBusById, createBus } from '@/domains/fleet';
 import * as routeService from '@/domains/route';
+import { assignDriverToBus } from '@/domains/fleet/repositories/driver-assignment.repository';
 
 /**
  * Create Bus API - PostgreSQL-backed
@@ -108,6 +109,16 @@ export async function POST(request: Request) {
         });
       } catch (e) {
         console.error('⚠️ Failed to update driver assignment in PG:', e);
+      }
+
+      try {
+        await assignDriverToBus(driverUID, busId, {
+          routeId,
+          assignedBy: 'admin',
+          reason: 'assignment',
+        });
+      } catch (e) {
+        console.error('⚠️ Failed to write driver_assignments:', e);
       }
     }
 

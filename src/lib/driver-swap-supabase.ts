@@ -10,6 +10,7 @@ import { getSupabaseServer } from '@/lib/supabase-server';
 import { calculateNotificationExpiry } from './notification-expiry';
 import { pgInsertNotification } from '@/domains/notification/repositories/notification.repository.pg';
 import { getValidFcmTokensForUsers } from '@/domains/identity';
+import { assignDriverToBus, unassignDriver } from '@/domains/fleet/repositories/driver-assignment.repository';
 
 // Default notification TTL: 1 day (24 hours)
 const NOTIFICATION_TTL_DAYS = 1;
@@ -594,6 +595,17 @@ export class DriverSwapSupabaseService {
                 console.log('   ✅ From driver reassigned to bus (swap %s)', requestId);
                 console.log('   ✅ To driver set to reserved (swap %s)', requestId);
 
+                try {
+                    await unassignDriver(request.candidate_driver_uid, 'swap_revert');
+                    await assignDriverToBus(request.requester_driver_uid, request.bus_id, {
+                        routeId: request.route_id ?? undefined,
+                        assignedBy: 'swap',
+                        reason: 'swap',
+                    });
+                } catch (err) {
+                    console.error('⚠️ Failed to sync driver_assignments on revert:', err);
+                }
+
             } else {
                 // ========== HANDLE CASE 2: TRUE SWAP (Assigned ↔ Assigned) ==========
                 // After swap: candidate drives primary bus, requester drives secondary bus
@@ -651,6 +663,12 @@ export class DriverSwapSupabaseService {
                     ]);
                     console.log('   ✅ Secondary bus temporarily unassigned (swap %s)', requestId);
 
+                    try {
+                        await unassignDriver(request.requester_driver_uid, 'swap_revert');
+                    } catch (err) {
+                        console.error('⚠️ Failed to sync driver_assignments on partial revert:', err);
+                    }
+
                     await supabase
                         .from('driver_swap_requests')
                         .update({
@@ -694,6 +712,12 @@ export class DriverSwapSupabaseService {
                         }).eq('id', request.bus_id),
                     ]);
                     console.log('   ✅ Primary bus temporarily unassigned (swap %s)', requestId);
+
+                    try {
+                        await unassignDriver(request.candidate_driver_uid, 'swap_revert');
+                    } catch (err) {
+                        console.error('⚠️ Failed to sync driver_assignments on partial revert:', err);
+                    }
 
                     await supabase
                         .from('driver_swap_requests')
@@ -762,6 +786,21 @@ export class DriverSwapSupabaseService {
                     console.log('   ✅ Secondary bus restored to candidate (swap %s)', requestId);
                     console.log('   ✅ Requester restored to primary bus (swap %s)', requestId);
                     console.log('   ✅ Candidate restored to secondary bus (swap %s)', requestId);
+
+                    try {
+                        await assignDriverToBus(request.requester_driver_uid, request.bus_id, {
+                            routeId: request.route_id ?? undefined,
+                            assignedBy: 'swap',
+                            reason: 'swap',
+                        });
+                        await assignDriverToBus(request.candidate_driver_uid, request.secondary_bus_id!, {
+                            routeId: request.secondary_route_id ?? undefined,
+                            assignedBy: 'swap',
+                            reason: 'swap',
+                        });
+                    } catch (err) {
+                        console.error('⚠️ Failed to sync driver_assignments on full revert:', err);
+                    }
                 }
             }
 
@@ -1034,6 +1073,17 @@ export class DriverSwapSupabaseService {
                 console.log('   ✅ From driver (%s) set to reserved', request.id);
                 console.log('   ✅ To driver (%s) assigned to bus %s', request.id, request.bus_id);
 
+                try {
+                    await unassignDriver(request.requester_driver_uid, 'swap');
+                    await assignDriverToBus(request.candidate_driver_uid, request.bus_id, {
+                        routeId: request.route_id ?? undefined,
+                        assignedBy: 'swap',
+                        reason: 'swap',
+                    });
+                } catch (err) {
+                    console.error('⚠️ Failed to sync driver_assignments on assignment activation:', err);
+                }
+
             } else {
                 // SCENARIO 2: True Swap between two active drivers
                 // Both drivers exchange their bus assignments
@@ -1065,6 +1115,21 @@ export class DriverSwapSupabaseService {
                 console.log('   ✅ Secondary bus assigned to requester (swap %s)', request.id);
                 console.log('   ✅ From driver assigned to secondary bus (swap %s)', request.id);
                 console.log('   ✅ To driver assigned to primary bus (swap %s)', request.id);
+
+                try {
+                    await assignDriverToBus(request.requester_driver_uid, request.secondary_bus_id!, {
+                        routeId: request.secondary_route_id ?? undefined,
+                        assignedBy: 'swap',
+                        reason: 'swap',
+                    });
+                    await assignDriverToBus(request.candidate_driver_uid, request.bus_id, {
+                        routeId: request.route_id ?? undefined,
+                        assignedBy: 'swap',
+                        reason: 'swap',
+                    });
+                } catch (err) {
+                    console.error('⚠️ Failed to sync driver_assignments on swap activation:', err);
+                }
             }
 
             console.log('✅ Firestore bus/driver ownership transferred successfully');

@@ -7,6 +7,7 @@
  */
 
 import { formatDateDDMMYYYY } from '@/lib/utils/date-utils';
+import { getDriverUidByBusId, getBusIdByDriverUid } from '@/domains/fleet/repositories/driver-assignment.repository';
 
 type ExcelWorkbook = import('exceljs').Workbook;
 type ExcelJSRuntime = typeof import('exceljs');
@@ -588,12 +589,12 @@ async function generateReportData(
   data.push(driverHeaders);
 
   if (drivers.length > 0) {
+    const busIdPromises = drivers.map(d => getBusIdByDriverUid(d.id));
+    const resolvedBusIds = await Promise.all(busIdPromises);
+
     drivers.forEach((driver, index) => {
-      const assignedBus = buses.find(b =>
-        b.id === driver.busId || b.busId === driver.busId ||
-        b.id === driver.busId || b.busId === driver.busId ||
-        b.activeDriverId === driver.id || b.assignedDriverId === driver.id
-      );
+      const assignedBusId = resolvedBusIds[index];
+      const assignedBus = assignedBusId ? buses.find(b => b.id === assignedBusId || b.busId === assignedBusId) : undefined;
 
       const busAssignment = assignedBus ? `Bus-${extractNumber(assignedBus.busId || assignedBus.id)}` : 'Reserved';
       const status = assignedBus ? 'Active' : 'Reserved';
@@ -678,6 +679,9 @@ async function generateReportData(
       return parseInt(numA) - parseInt(numB);
     });
 
+    const driverPromises = sortedBuses.map(b => getDriverUidByBusId(b.id || b.busId));
+    const driverIds = await Promise.all(driverPromises);
+
     sortedBuses.forEach((bus, index) => {
       let routeInfo = bus.route;
       if (!routeInfo) {
@@ -698,7 +702,7 @@ async function generateReportData(
         }
       }
 
-      const driverIdToFind = bus.activeDriverId || bus.assignedDriverId;
+      const driverIdToFind = driverIds[index];
       const assignedDriver = driverIdToFind ? drivers.find(d => d.id === driverIdToFind) : null;
 
       const totalStudents = students.filter(s =>

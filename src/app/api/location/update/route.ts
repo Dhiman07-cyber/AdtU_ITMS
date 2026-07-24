@@ -88,34 +88,15 @@ export const POST = withSecurity<LocationUpdateBody>(
 
     const supabase = getSupabaseServer();
 
-    const [statusResult, activeTripResult] = await Promise.all([
-      supabase
-        .from('driver_status')
-        .select('status, bus_id, route_id, trip_id')
-        .eq('driver_uid', driverUid)
-        .maybeSingle(),
-      supabase
-        .from('active_trips')
-        .select('trip_id, bus_id, route_id, driver_id, status')
-        .eq('bus_id', busId)
-        .eq('driver_id', driverUid)
-        .eq('status', 'active')
-        .maybeSingle(),
-    ]);
+    const { data: activeTrip, error: activeTripError } = await supabase
+      .from('active_trips')
+      .select('trip_id, bus_id, route_id, driver_id, status')
+      .eq('bus_id', busId)
+      .eq('driver_id', driverUid)
+      .eq('status', 'active')
+      .maybeSingle();
 
-    const statusData = statusResult.data;
-    const activeTrip = activeTripResult.data;
-
-    if (
-      statusResult.error ||
-      activeTripResult.error ||
-      !statusData ||
-      !activeTrip ||
-      statusData.status !== 'on_trip' ||
-      statusData.bus_id !== busId ||
-      statusData.trip_id !== activeTrip.trip_id ||
-      activeTrip.route_id !== routeId
-    ) {
+    if (activeTripError || !activeTrip || activeTrip.route_id !== routeId) {
       return NextResponse.json({ error: 'No active session found for this driver/bus' }, { status: 403 });
     }
 

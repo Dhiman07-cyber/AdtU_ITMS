@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import FormStepper from './components/FormStepper';
 import Step1Personal from './steps/Step1Personal';
@@ -420,20 +420,10 @@ function ApplicationFormContent() {
 
         if (response.ok) {
           const data = await response.json();
-          // If application exists and is not rejected/draft (so submitted, approved, verified), show status card
+          // If application exists and is not rejected/draft (so submitted, approved, verified), redirect to /student dashboard for canonical entitlement lifecycle messaging
           if (data.hasApplication && data.state !== 'rejected' && data.state !== 'draft' && data.state !== 'noDoc') {
-            console.log('✅ User has existing application in state:', data.state);
-
-            // Show toast only once
-            if (!toastShownRef.current) {
-              showToast("Application already submitted. Waiting for approval.", "info");
-              toastShownRef.current = true;
-            }
-
-            setApplicationId(data.applicationId);
-            setApplicationState(data.state);
-            setIsSubmitted(true);
-            setLoadingResources(false);
+            console.log('✅ User has existing application in state:', data.state, '-> Redirecting to /student');
+            router.push('/student');
             return;
           }
         }

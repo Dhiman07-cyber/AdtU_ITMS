@@ -1,4 +1,4 @@
-﻿/**
+/**
  * GET /api/notifications
  *
  * Returns the current user's notifications from PostgreSQL.
@@ -92,7 +92,7 @@ export const GET = withSecurity(
     }
   },
   {
-    requiredRoles: ['admin', 'moderator', 'driver', 'student'],
+    requiredRoles: [],
     rateLimit: { maxRequests: 30, windowMs: 60_000 },
   }
 );

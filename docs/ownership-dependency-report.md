@@ -180,26 +180,26 @@ Dual writes:         1   (assign_drivers_atomically RPC)
 Legacy columns:      4   (new column: driver_assignments.* added)
 ```
 
-### Target After Milestone B — Runtime Migration
+### After PR-005 — Runtime Reader Migration
 
 ```
-Runtime readers:     0   ← must be zero
-Runtime writers:     0   ← must be zero
-Admin readers:      14   (unchanged — admin tools still use old columns)
-Admin writers:       7   (unchanged — admin tools still write old columns)
-Dual writes:         1   (RPC still dual-writes for admin compatibility)
+Runtime readers:     0   (PR-005: all runtime reads of buses.driver_uid / driver_profiles.bus_id migrated)
+Runtime writers:    11   (unchanged — all writes still go to legacy columns)
+Admin readers:      14   (unchanged)
+Admin writers:       7   (unchanged)
+Dual writes:         1   (assign_drivers_atomically RPC)
 Legacy columns:      4
 ```
 
-### Target After Milestone C — Admin + Swap
+### After PR-006 — Admin + Swap Writer Migration (current)
 
 ```
-Runtime readers:     0
-Runtime writers:     0
-Admin readers:       0
-Admin writers:       0
-Dual writes:         1   (RPC can flip to driver_assignments-only after all writers migrated)
-Legacy columns:      4
+Runtime readers:     0   (unchanged — still zero)
+Runtime writers:     5   (6 admin/swap file pairs migrated to assignDriverToBus)
+Admin readers:       6   (dashboard, analytics, swap-status, profile-update, pending-requests migrated)
+Admin writers:       2   (5 admin routes migrated; buses/route + buses/[id] remain)
+Dual writes:         1   (assign_drivers_atomically RPC still dual-writes)
+Legacy columns:      4   (still present, Milestone D target)
 ```
 
 ### Target After Milestone D — Destructive Cleanup
@@ -210,6 +210,11 @@ Runtime writers:     0
 Admin readers:       0
 Admin writers:       0
 Dual writes:         0
-Legacy columns:      0   ← old columns dropped
-Compatibility code:  0   ← old types, mappers, indexes removed
+Legacy tables:       0   (temporary_assignments dropped)
+Legacy columns:      0   (buses.driver_uid, driver_profiles.bus_id, assignedDriverId, activeDriverId dropped)
+Legacy indexes:      0   (idx_buses_driver_uid, idx_driver_profiles_bus_id dropped)
+Legacy RPCs:         0   (get_effective_driver, expire_temporary_assignments dropped if superseded)
+Legacy endpoints:    0   (swap API routes removed)
+Compatibility wrappers: 0 (compat field maps removed)
+Compatibility types:    0 (EnhancedBus, driverUID on Bus, busId on Driver removed)
 ```

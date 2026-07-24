@@ -2,6 +2,7 @@ import * as fleetService from '@/domains/fleet/services/fleet.service';
 import { pgInsertNotification } from '@/domains/notification/repositories/notification.repository.pg';
 import { normalizeShift } from '@/lib/utils/shift-utils';
 import type { ReassignmentPlan } from '@/app/admin/smart-allocation/page';
+import { getDriverUidByBusId } from '@/domains/fleet/repositories/driver-assignment.repository';
 
 interface UndoAction {
   id: string;
@@ -130,14 +131,15 @@ export class ReassignmentService {
       // Driver notifications
       for (const [busId, busPlans] of busPlanGroups) {
         const bus = await fleetService.getBusById(busId);
-        if (bus?.driverUID) {
+        const driverUID = await getDriverUidByBusId(busId);
+        if (driverUID) {
           notificationPromises.push(
             pgInsertNotification({
               title: '👥 New Students Assigned',
               content: `${busPlans.length} new student(s) have been assigned to your bus. Reason: ${reason}`,
               sender: { userId: 'system', userName: 'System', userRole: 'admin' },
-              target: { type: 'specific_users', specificUserIds: [bus.driverUID] },
-              recipientIds: [bus.driverUID],
+              target: { type: 'specific_users', specificUserIds: [driverUID] },
+              recipientIds: [driverUID],
               autoInjectedRecipientIds: [],
               readByUserIds: [],
               metadata: { type: 'reassignment', studentCount: busPlans.length, reason }

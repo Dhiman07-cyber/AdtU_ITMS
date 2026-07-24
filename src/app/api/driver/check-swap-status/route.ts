@@ -4,6 +4,7 @@ import { withSecurity } from '@/lib/security/api-security';
 import { EmptySchema } from '@/lib/security/validation-schemas';
 import { RateLimits } from '@/lib/security/rate-limiter';
 import { getAllBuses } from '@/domains/fleet';
+import { getActiveAssignmentByDriverUid } from '@/domains/fleet/repositories/driver-assignment.repository';
 
 /**
  * Check driver's swap status and trigger cleanup
@@ -12,9 +13,13 @@ import { getAllBuses } from '@/domains/fleet';
 const checkSwapStatusHandler = async (request: Request, { auth }: { auth: any }) => {
   const driverUid = auth.uid;
 
-  // Find driver's assigned bus(es) from PG
+  // Find driver's assigned bus(es) from canonical driver_assignments
+  const assignment = await getActiveAssignmentByDriverUid(driverUid);
+  const assignedBusIds: string[] = [];
+  if (assignment) assignedBusIds.push(assignment.busId);
+
   const allBuses = await getAllBuses();
-  const assignedBuses = allBuses.filter(b => (b as any).assignedDriverId === driverUid || (b as any).driverUID === driverUid);
+  const assignedBuses = allBuses.filter(b => assignedBusIds.includes(b.busId || b.id || ''));
   const activeBuses = allBuses.filter(b => (b as any).activeDriverId === driverUid);
 
   let swapsChecked = 0;

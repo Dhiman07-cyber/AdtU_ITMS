@@ -5,6 +5,7 @@ import { getSupabaseServer } from '@/lib/supabase-server';
 import { getUserById, updateDriver } from '@/domains/identity';
 import { getBusById, updateBus } from '@/domains/fleet';
 import * as routeService from '@/domains/route';
+import { assignDriverToBus, unassignDriver } from '@/domains/fleet/repositories/driver-assignment.repository';
 
 export async function PUT(request: Request) {
     try {
@@ -119,6 +120,12 @@ export async function PUT(request: Request) {
             } catch (err) {
                 console.error(`⚠️ Failed to unassign old driver ${currentDriverId} in PG:`, err);
             }
+
+            try {
+                await unassignDriver(currentDriverId, 'admin_reassign');
+            } catch (err) {
+                console.error(`⚠️ Failed to unassign old driver ${currentDriverId} in driver_assignments:`, err);
+            }
         }
 
         // 2. Assign New Driver in PostgreSQL (if driver changed)
@@ -132,6 +139,16 @@ export async function PUT(request: Request) {
                 });
             } catch (err) {
                 console.error(`⚠️ Failed to assign new driver ${newDriverId} in PG:`, err);
+            }
+
+            try {
+                await assignDriverToBus(newDriverId, busId, {
+                    routeId: finalRouteId,
+                    assignedBy: 'admin',
+                    reason: 'admin_reassign',
+                });
+            } catch (err) {
+                console.error(`⚠️ Failed to assign new driver ${newDriverId} in driver_assignments:`, err);
             }
         } else if (routeChanged && currentDriverId) {
             // If driver didn't change but route did, update existing driver's route

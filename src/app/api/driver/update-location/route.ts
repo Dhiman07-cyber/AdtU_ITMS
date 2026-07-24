@@ -1,3 +1,8 @@
+/**
+ * @deprecated Fully superseded by POST /api/location/update.
+ * Kept for reference only. Zero callers in the codebase.
+ * Remove in Phase 3 destructive cleanup.
+ */
 import { NextResponse } from 'next/server';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import { withSecurity } from '@/lib/security/api-security';

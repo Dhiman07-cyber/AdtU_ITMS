@@ -17,11 +17,12 @@ import {
 import { supabase } from '@/lib/supabase-client';
 import { PremiumPageLoader } from "@/components/LoadingSpinner";
 
-interface DriverStatus {
-  driver_uid: string;
+interface ActiveTrip {
+  trip_id: string;
+  driver_id: string;
   bus_id: string;
   status: string;
-  last_updated: string;
+  start_time: string;
 }
 
 interface Notification {
@@ -39,7 +40,7 @@ interface Notification {
 export default function ModeratorDashboard() {
   const { currentUser, userData } = useAuth();
   const router = useRouter();
-  const [driverStatuses, setDriverStatuses] = useState<DriverStatus[]>([]);
+  const [activeTrips, setActiveTrips] = useState<ActiveTrip[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -59,13 +60,14 @@ export default function ModeratorDashboard() {
     const fetchData = async () => {
       try {
         const { data: statusData, error: statusError } = await supabase
-          .from('driver_status')
-          .select('*');
+          .from('active_trips')
+          .select('*')
+          .eq('status', 'active');
 
         if (statusError) {
           console.error('Error fetching driver statuses:', statusError);
         } else {
-          setDriverStatuses(statusData || []);
+          setActiveTrips(statusData || []);
         }
 
         // Notifications are managed via Firestore (not Supabase).
@@ -104,13 +106,13 @@ export default function ModeratorDashboard() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {driverStatuses.length === 0 ? (
-            <p className="text-muted-foreground">No driver statuses available</p>
+          {activeTrips.length === 0 ? (
+            <p className="text-muted-foreground">No active trips</p>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {driverStatuses.map((status) => (
+              {activeTrips.map((trip) => (
                 <div
-                  key={status.driver_uid}
+                  key={trip.trip_id}
                   className="border rounded-lg p-4 flex items-center justify-between"
                 >
                   <div className="flex items-center space-x-3">
@@ -118,15 +120,11 @@ export default function ModeratorDashboard() {
                       <User className="h-5 w-5 text-blue-600" />
                     </div>
                     <div>
-                      <p className="font-medium">Driver: {status.driver_uid.substring(0, 8)}...</p>
-                      <p className="text-sm text-muted-foreground">Bus: {status.bus_id}</p>
+                      <p className="font-medium">Driver: {trip.driver_id.substring(0, 8)}...</p>
+                      <p className="text-sm text-muted-foreground">Bus: {trip.bus_id}</p>
                     </div>
                   </div>
-                  <Badge
-                    variant={status.status === 'online' ? 'default' : 'secondary'}
-                  >
-                    {status.status}
-                  </Badge>
+                  <Badge variant="default">Active</Badge>
                 </div>
               ))}
             </div>
@@ -196,7 +194,7 @@ export default function ModeratorDashboard() {
                 <Bus className="h-5 w-5 text-purple-600" />
               </div>
               <div>
-                <p className="text-2xl font-bold">{driverStatuses.length}</p>
+                <p className="text-2xl font-bold">{activeTrips.length}</p>
                 <p className="text-sm text-muted-foreground">Active Drivers</p>
               </div>
             </div>
@@ -207,7 +205,7 @@ export default function ModeratorDashboard() {
               </div>
               <div>
                 <p className="text-2xl font-bold">
-                  {driverStatuses.filter(s => s.status === 'online').length}
+                  {activeTrips.filter(t => t.status === 'active').length}
                 </p>
                 <p className="text-sm text-muted-foreground">Buses En Route</p>
               </div>

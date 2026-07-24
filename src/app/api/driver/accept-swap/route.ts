@@ -7,6 +7,7 @@ import { AcceptSwapSchema } from '@/lib/security/validation-schemas';
 import { RateLimits } from '@/lib/security/rate-limiter';
 import { getBusById, updateBus } from '@/domains/fleet';
 import { getStudentsByBusIds } from '@/domains/identity';
+import { assignDriverToBus } from '@/domains/fleet/repositories/driver-assignment.repository';
 
 /**
  * POST /api/driver/accept-swap
@@ -77,6 +78,17 @@ export const POST = withSecurity(
     // 2. Update bus activeDriverId via PG
     await updateBus(busId, { activeTripId: null } as any);
 
+    // 3. Update canonical driver_assignments
+    try {
+      await assignDriverToBus(toDriverUid, busId, {
+        routeId: routeId ?? undefined,
+        assignedBy: 'swap',
+        reason: 'swap',
+      });
+    } catch (err) {
+      console.error('⚠️ Failed to update driver_assignments in swap:', err);
+    }
+
     console.log('📝 Swap accepted:', {
       actorUid: toDriverUid,
       swapRequestId, busId, fromDriverUid, toDriverUid,
@@ -88,18 +100,16 @@ export const POST = withSecurity(
     // Initialize Supabase client
     const supabase = getSupabaseServer();
 
-    // Update driver status in Supabase if there's an active trip
+    // Reassign active trip to the new driver
     if (routeId) {
-      const { error: driverStatusError } = await supabase
-        .from('driver_status')
-        .update({
-          driver_uid: toDriverUid, // Fixed field name to match schema in update-location
-          updated_at: new Date().toISOString()
-        })
-        .match({ bus_id: busId }); // Fixed field names to match schema
+      const { error: activeTripError } = await supabase
+        .from('active_trips')
+        .update({ driver_id: toDriverUid })
+        .eq('bus_id', busId)
+        .eq('status', 'active');
 
-      if (driverStatusError) {
-        console.error('Error updating driver status:', driverStatusError);
+      if (activeTripError) {
+        console.error('Error reassigning active trip:', activeTripError);
       }
 
       // Broadcast to route channel

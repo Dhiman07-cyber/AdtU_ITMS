@@ -35,23 +35,15 @@ export const GET = withSecurity(
         // PERF: Use singleton Supabase client instead of creating one per request
         const supabase = getSupabaseServer();
 
-        // Query driver_status for active trips.
-        // Use order+limit(1) instead of maybeSingle(): if two on_trip rows ever exist for
-        // the same bus (e.g. a stale row from a previous driver alongside the current one),
-        // maybeSingle() throws on multiple rows and the student would lose bus visibility.
-        // Taking the most recently updated row keeps the active bus visible.
-        const { data: rows, error } = await supabase
-            .from('driver_status')
-            .select('id, status, bus_id, driver_uid, started_at, last_updated_at')
+        const { data: trip, error } = await supabase
+            .from('active_trips')
+            .select('trip_id, driver_id, bus_id, start_time, last_heartbeat')
             .eq('bus_id', busId)
-            .in('status', ['on_trip', 'enroute'])
-            .order('last_updated_at', { ascending: false })
-            .limit(1);
-
-        const data = rows && rows.length > 0 ? rows[0] : null;
+            .eq('status', 'active')
+            .maybeSingle();
 
         if (error) {
-            console.error('❌ Error querying driver_status:', error);
+            console.error('❌ Error querying active_trips:', error);
             return NextResponse.json({
                 tripActive: false,
                 error: 'An unexpected error occurred',
@@ -59,19 +51,19 @@ export const GET = withSecurity(
             });
         }
 
-        if (data) {
+        if (trip) {
             console.log(`✅ Active trip found for bus ${busId}:`, {
-                status: data.status,
-                startedAt: data.started_at
+                tripId: trip.trip_id,
+                startedAt: trip.start_time
             });
 
             return NextResponse.json({
                 tripActive: true,
                 tripData: {
-                    status: data.status,
-                    driverUid: data.driver_uid,
-                    startedAt: data.started_at,
-                    lastUpdated: data.last_updated_at
+                    status: 'active',
+                    driverUid: trip.driver_id,
+                    startedAt: trip.start_time,
+                    lastHeartbeat: trip.last_heartbeat
                 }
             });
         }

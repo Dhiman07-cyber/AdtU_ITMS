@@ -1,5 +1,11 @@
 import { describe, it, expect, vi } from 'vitest';
 
+vi.mock('@/domains/fleet/repositories/driver-assignment.repository', () => ({
+  listActiveAssignments: vi.fn().mockResolvedValue([
+    { driverUid: 'd1', busId: 'b1', isActive: true },
+  ]),
+}));
+
 vi.mock('../repositories/analytics.repository', () => {
   const mockBuses = [
     { busId: 'b1', currentMembers: 20, capacity: 55, status: 'active' },

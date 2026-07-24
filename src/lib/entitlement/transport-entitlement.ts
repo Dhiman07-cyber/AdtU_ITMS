@@ -168,37 +168,37 @@ export const ENTITLEMENT_MESSAGES: Record<EntitlementReason, { title: string; de
     detail: 'Your bus transport access is active.',
   },
   no_account: {
-    title: 'No transport account',
-    detail: 'We could not find an active transport profile for your account.',
+    title: 'No Transport Profile Found',
+    detail: 'We could not find an active bus transport profile associated with your account.',
   },
   inactive_status: {
-    title: 'Transport access paused',
+    title: 'Transport Access Suspended',
     detail:
-      'Your bus service is not active. Renew your service to restore transport access. Your account, profile, and payment history are unchanged.',
+      'Your bus service is currently inactive. Please renew your transport subscription to restore bus pass access and live tracking.',
   },
   past_soft_block: {
-    title: 'Renewal required',
+    title: 'Bus Pass Renewal Required',
     detail:
-      'Your bus service period has ended and your seat has been released. Renew and get approved to restore transport access.',
+      'Your previous bus pass validity has ended. Please submit a renewal request to restore your transport access.',
   },
   expired: {
-    title: 'Service expired',
+    title: 'Bus Pass Expired',
     detail:
-      'Your bus service validity has expired. Renew your service to restore transport access.',
+      'Your bus pass validity has expired. Submit a renewal request to reactivate your transport services.',
   },
   verified_upcoming: {
-    title: 'Application Verified (Awaiting Session Start)',
+    title: 'Application Verified & Confirmed',
     detail:
-      'Your application for the upcoming academic session has been verified and approved by administrators! Your bus pass and live tracking will automatically activate when the new academic session begins.',
+      'Your application and payment for the upcoming academic session have been verified. Your digital bus pass and live tracking will activate automatically when the new session starts.',
   },
   pending_seat_allocation: {
-    title: 'In Seat Allocation Queue',
+    title: 'Seat Allocation Queue',
     detail:
-      'Your application and payment are verified! You are currently in the seat allocation queue. Your pass will activate as soon as a seat opens up.',
+      'Your application and payment details are verified. You are currently in the priority seat queue, and your seat will be assigned as soon as capacity becomes available.',
   },
   application_submitted: {
     title: 'Application Under Review',
     detail:
-      'Your application has been submitted and is currently being reviewed by administrators. This usually takes 1-2 business days.',
+      'Your application has been received and is currently being reviewed by transport administration. Verification is typically completed within 1 to 2 business days.',
   },
 };

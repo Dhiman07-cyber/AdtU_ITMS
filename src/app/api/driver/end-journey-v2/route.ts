@@ -2,8 +2,7 @@
  * POST /api/driver/end-journey-v2
  * 
  * End trip with comprehensive event-driven cleanup:
- * - Immediate cleanup of ALL trip-related Supabase tables
- * - Parallel Supabase cleanup
+ * - Parallel Supabase cleanup (driver_location_updates, waiting_flags, missed_bus_requests, device_sessions)
  * - Broadcast notifications
  * - FCM notifications to students
  * - Stale FCM token auto-removal
@@ -22,27 +21,22 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 interface CleanupStats {
-  busLocations: number;
   waitingFlags: number;
   driverLocationUpdates: number;
   activeTrips: number;
-  driverStatus: number;
   missedBusRequests: number;
   deviceSessions: number;
   totalTime: number;
 }
 
 /**
- * Comprehensive Supabase cleanup — ALL trip-related tables
+ * Cleanup trip-related state (non-durable data only)
  * 
  * Tables cleaned on trip end:
- * 1. bus_locations        — Delete all location rows for this bus
- * 2. driver_location_updates — Delete historical breadcrumbs
- * 3. waiting_flags        — Delete raised/acknowledged flags for this bus
- * 4. active_trips         — DELETE rows for this bus/driver
- * 5. driver_status        — Delete driver status row entirely
- * 6. missed_bus_requests  — Expire any pending requests linked to this bus/trip
- * 7. device_sessions      — Clean up driver's device sessions
+ * 1. driver_location_updates — historical breadcrumbs
+ * 2. waiting_flags          — raised/acknowledged flags for this bus
+ * 3. missed_bus_requests    — expire pending requests
+ * 4. device_sessions        — driver's device sessions
  */
 async function cleanupSupabase(
   supabase: any,
@@ -57,20 +51,7 @@ async function cleanupSupabase(
 
   // Execute all cleanup operations in parallel
   const results = await Promise.allSettled([
-    // 1. Delete bus_locations for this bus (current state)
-    (tripId
-      ? supabase.from('bus_locations').delete().eq('bus_id', busId).eq('trip_id', tripId)
-      : supabase.from('bus_locations').delete().eq('bus_id', busId).eq('driver_uid', driverUid)
-    )
-      .then(({ count, error }: { count: number | null, error: any }) => {
-        if (error) console.error('❌ Error deleting bus_locations:', error);
-        else {
-          stats.busLocations = count || 0;
-          console.log(`✅ Deleted ${count || 0} bus_locations`);
-        }
-      }),
-
-    // 2. Delete driver_location_updates for this bus (historical trail)
+    // 1. Delete driver_location_updates for this bus (historical trail)
     supabase
       .from('driver_location_updates')
       .delete()
@@ -96,31 +77,7 @@ async function cleanupSupabase(
         }
       }),
 
-    // 5. DELETE this driver's status row only
-    (tripId
-      ? supabase.from('driver_status').delete().eq('driver_uid', driverUid).eq('trip_id', tripId)
-      : supabase.from('driver_status').delete().eq('driver_uid', driverUid)
-    )
-      .then(({ count, error }: { count: number | null, error: any }) => {
-        if (error) console.error('❌ Error deleting driver_status:', error);
-        else {
-          stats.driverStatus = count || 0;
-          console.log(`✅ Deleted ${count || 0} driver_status row(s)`);
-        }
-      }),
-
-    // 5b. Also delete driver_status by driver_uid (safety fallback)
-    supabase
-      .from('driver_status')
-      .delete()
-      .eq('driver_uid', driverUid)
-      .eq('trip_id', tripId || '')
-      .then(({ count, error }: { count: number | null, error: any }) => {
-        if (error) console.error('❌ Error deleting driver_status by driver_uid:', error);
-        else console.log(`✅ Deleted ${count || 0} driver_status row(s) by driver_uid`);
-      }),
-
-    // 6. Expire any pending missed_bus_requests that reference this bus's route
+    // 4. Expire any pending missed_bus_requests that reference this bus's route
     //    These are no longer actionable once the trip has ended
     supabase
       .from('missed_bus_requests')
@@ -135,7 +92,7 @@ async function cleanupSupabase(
         }
       }),
 
-    // 7. Clean up device sessions for this driver
+    // 5. Clean up device sessions for this driver
     supabase
       .from('device_sessions')
       .delete()
@@ -232,7 +189,7 @@ export const POST = withSecurity(
     // 1. D9: Read bus metadata from Supabase instead of Firestore
     const { data: busData } = await supabase
       .from('buses')
-      .select('id, bus_number, route_id, route_name, driver_uid')
+      .select('id, bus_number, route_id, route_name')
       .eq('id', busId)
       .maybeSingle();
 
@@ -309,11 +266,9 @@ export const POST = withSecurity(
 
     // Prepare cleanup summary
     const cleanupSummary = {
-      busLocations: supabaseStats.busLocations || 0,
       waitingFlags: supabaseStats.waitingFlags || 0,
       driverLocationUpdates: supabaseStats.driverLocationUpdates || 0,
       activeTrips: activeTripId ? 1 : 0,
-      driverStatus: supabaseStats.driverStatus || 0,
       missedBusRequests: supabaseStats.missedBusRequests || 0,
       deviceSessions: supabaseStats.deviceSessions || 0,
       supabaseTime: supabaseStats.totalTime || 0,
@@ -321,11 +276,9 @@ export const POST = withSecurity(
     };
 
     console.log('\n📊 CLEANUP SUMMARY:');
-    console.log(`  Bus Locations: ${cleanupSummary.busLocations}`);
     console.log(`  Waiting Flags: ${cleanupSummary.waitingFlags}`);
     console.log(`  Location Updates: ${cleanupSummary.driverLocationUpdates}`);
     console.log(`  Active Trips Ended: ${cleanupSummary.activeTrips}`);
-    console.log(`  Driver Status: ${cleanupSummary.driverStatus}`);
     console.log(`  Missed Bus Requests: ${cleanupSummary.missedBusRequests}`);
     console.log(`  Device Sessions: ${cleanupSummary.deviceSessions}`);
     console.log(`  Supabase Time: ${cleanupSummary.supabaseTime}ms`);

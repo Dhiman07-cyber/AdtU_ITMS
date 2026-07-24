@@ -9,6 +9,7 @@
  * performs all business computation internally — zero behavior change.
  */
 import * as analyticsRepository from '../repositories/analytics.repository';
+import { listActiveAssignments } from '@/domains/fleet/repositories/driver-assignment.repository';
 
 export async function getPlatformAnalytics() {
   const raw = await analyticsRepository.fetchGA4RawData();
@@ -85,8 +86,10 @@ export async function getDashboardCounts() {
   let highLoadBusCount = 0;
   let activeDrivers = 0;
 
+  const activeAssignments = await listActiveAssignments();
+  activeDrivers = activeAssignments.length;
+
   for (const bus of raw.buses) {
-    if (bus.driverUID || (bus as any).assignedDriverId || (bus as any).activeDriverId) activeDrivers++;
     const currentMembers = bus.currentMembers || 0;
     const capacity = bus.capacity || 55;
     const usagePct = capacity > 0 ? Math.round((currentMembers / capacity) * 100) : 0;

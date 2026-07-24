@@ -5,7 +5,7 @@
  * Returns whether the driver is allowed to open the Track Bus page.
  *
  * D9: Migrated from Firestore to Supabase. Driver-bus assignment check
- * uses Supabase driver_status + buses tables.
+ * uses Supabase active_trips + buses tables.
  *
  * Request body:
  * - busId: string (bus ID to check)
@@ -21,6 +21,7 @@ import { getSupabaseServer } from '@/lib/supabase-server';
 import { withSecurity } from '@/lib/security/api-security';
 import { BusIdSchema } from '@/lib/security/validation-schemas';
 import { RateLimits } from '@/lib/security/rate-limiter';
+import { getDriverUidByBusId } from '@/domains/fleet/repositories/driver-assignment.repository';
 
 export const POST = withSecurity(
     async (request, { auth, body }) => {
@@ -29,30 +30,29 @@ export const POST = withSecurity(
 
         const supabase = getSupabaseServer();
 
-        // D9: Check driver assignment via Supabase instead of Firestore
-        const { data: bus } = await supabase
-            .from('buses')
-            .select('id, driver_uid')
-            .eq('id', busId)
-            .maybeSingle();
+        // D9: Check driver assignment via driver_assignments instead of Firestore
+        const [busResult, assignedDriverUid] = await Promise.all([
+            supabase.from('buses').select('id').eq('id', busId).maybeSingle(),
+            getDriverUidByBusId(busId),
+        ]);
 
-        if (!bus) {
+        if (!busResult.data) {
             return NextResponse.json(
                 { error: 'Bus not found' },
                 { status: 404 }
             );
         }
 
-        // Check if driver is assigned to this bus
-        const { data: driverStatus } = await supabase
-            .from('driver_status')
-            .select('driver_uid, bus_id')
-            .eq('driver_uid', driverId)
-            .in('status', ['enroute', 'on_trip'])
+        // Check if driver has an active trip on this bus
+        const { data: activeTrip } = await supabase
+            .from('active_trips')
+            .select('driver_id, bus_id')
+            .eq('driver_id', driverId)
+            .eq('status', 'active')
             .maybeSingle();
 
-        const driverClaimsBus = driverStatus?.bus_id === busId;
-        const busClaimsDriver = bus.driver_uid === driverId;
+        const driverClaimsBus = activeTrip?.bus_id === busId;
+        const busClaimsDriver = assignedDriverUid === driverId;
 
         if (!driverClaimsBus && !busClaimsDriver) {
             return NextResponse.json({

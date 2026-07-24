@@ -131,19 +131,16 @@ function StudentBusLive() {
             setWaitingFlagId(flags[0].id);
           }
 
-          // Check if there's an active trip for this bus by querying Firestore
           try {
-            // Note: We can't directly access Firestore from client, so we check driver_status in Supabase
-            // which is updated when trips start/end
-            const { data: driverStatus } = await supabase
-              .from('driver_status')
-              .select('*')
+            const { data: activeTrip } = await supabase
+              .from('active_trips')
+              .select('trip_id')
               .eq('bus_id', student.busId)
-              .in('status', ['on_trip', 'enroute'])
+              .eq('status', 'active')
               .maybeSingle();
 
-            setTripActive(!!driverStatus);
-            console.log('🚌 Active trip check:', { active: !!driverStatus, status: driverStatus?.status });
+            setTripActive(!!activeTrip);
+            console.log('🚌 Active trip check:', { active: !!activeTrip });
           } catch (error) {
             console.error('Error checking active trip:', error);
             setTripActive(false);
@@ -166,36 +163,34 @@ function StudentBusLive() {
     }
   }, [userData, router]);
 
-  // Subscribe to driver_status changes to update tripActive in realtime
   useEffect(() => {
     if (!studentData?.busId) return;
 
-    console.log('📡 Subscribing to driver_status for bus:', studentData.busId);
+    console.log('📡 Subscribing to active_trips for bus:', studentData.busId);
 
     const channel = supabase
-      .channel(`driver_status_${studentData.busId}`)
+      .channel(`active_trips_${studentData.busId}`)
       .on(
         'postgres_changes',
         {
           event: '*',
           schema: 'public',
-          table: 'driver_status',
+          table: 'active_trips',
           filter: `bus_id=eq.${studentData.busId}`
         },
         (payload) => {
-          console.log('🚌 Driver status changed:', payload);
+          console.log('🚌 Active trip changed:', payload);
           if (payload.eventType === 'DELETE') {
             setTripActive(false);
           } else if (payload.new) {
-            const newStatus = (payload.new as any).status;
-            setTripActive(newStatus === 'on_trip' || newStatus === 'enroute');
+            setTripActive((payload.new as any).status === 'active');
           }
         }
       )
       .subscribe();
 
     return () => {
-      console.log('🔌 Unsubscribing from driver_status');
+      console.log('🔌 Unsubscribing from active_trips');
       supabase.removeChannel(channel);
     };
   }, [studentData?.busId]);
@@ -605,7 +600,7 @@ function StudentBusLive() {
 
 /**
  * Phase 3 — entitlement decided before the live bus page (and its Supabase
- * driver_status / waiting_flags subscriptions) mounts. Ineligible students see
+ * active_trips / waiting_flags subscriptions) mounts. Ineligible students see
  * the lifecycle/renewal screen and open no transport subscriptions.
  */
 export default function StudentBusPage() {

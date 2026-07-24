@@ -1,4 +1,4 @@
-﻿import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { saveToken, isValidTokenFormat, subscribeToTopic } from '@/lib/services/fcm-token-service';
 import { withSecurity } from '@/lib/security/api-security';
 import { SaveFCMTokenSchema } from '@/lib/security/validation-schemas';
@@ -39,38 +39,28 @@ export const POST = withSecurity(
       );
     }
 
-    // 3. Only allow students to register FCM tokens
+    // 3. Only allow student role to register FCM tokens
     if (auth.role !== 'student') {
-      console.warn(`[${requestId}] FCM token registration denied for non-student role: ${auth.role}`);
       return NextResponse.json({
         success: false,
-        error: 'FCM tokens are only available for student accounts',
+        skipped: true,
+        message: 'FCM tokens are only available for student accounts',
         requestId,
-      }, { status: 403 });
+      }, { status: 200 });
     }
 
-    // 4. Validate user exists in students database in PostgreSQL (canonical source of truth) before saving token
+    // 4. Validate user exists in student_profiles in PostgreSQL and is active (approved)
     const userData = await getStudentById(uid);
-    if (!userData) {
-      console.warn(`[${requestId}] User ${uid} does not exist in PostgreSQL student_profiles`);
+    if (!userData || userData.status !== 'active') {
       return NextResponse.json({
         success: false,
-        error: 'User account not found. Please contact support.',
+        skipped: true,
+        message: 'FCM tokens are only registered for approved active student profiles',
         requestId,
-      }, { status: 404 });
+      }, { status: 200 });
     }
 
-    // 5. Additional validation: Only allow active student accounts
-    if (userData.status === 'inactive' || userData.status === 'suspended') {
-      console.warn(`[${requestId}] Student ${uid} account is not active`);
-      return NextResponse.json({
-        success: false,
-        error: 'Student account is not active. Please contact support.',
-        requestId,
-      }, { status: 403 });
-    }
-
-    // 6. Save token to PostgreSQL (multi-device support)
+    // 5. Save token to PostgreSQL fcm_tokens table (multi-device support)
     const result = await saveToken(uid, 'students', token, platform || 'web');
 
     if (!result.success) {
@@ -81,8 +71,8 @@ export const POST = withSecurity(
       );
     }
 
-    // 7. Topic Subscription: Subscribe to route-specific topic for high-performance notifications
-    const routeId = userData.routeId || userData.route_id || userData.routeId;
+    // 6. Topic Subscription: Subscribe to route-specific topic if student is assigned to a route
+    const routeId = userData?.routeId || userData?.route_id;
     if (routeId) {
       try {
         const topic = `route_${routeId}`;

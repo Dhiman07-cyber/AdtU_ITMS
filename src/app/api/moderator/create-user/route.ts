@@ -12,6 +12,7 @@ import { incrementBusCapacity } from '@/domains/fleet';
 import { createUser, createStudent, createDriver, getStudentById } from '@/domains/identity';
 import { resolveUserRole } from '@/lib/security/role-cache';
 import { getUpdaterInfo } from '@/lib/utils/updatedBy';
+import { assignDriverToBus } from '@/domains/fleet/repositories/driver-assignment.repository';
 
 let adminApp: any;
 let auth: any;
@@ -321,6 +322,15 @@ export async function POST(request: Request) {
             } catch (err) {
               console.warn(`   ⚠️  Bus ${busId} update failed`, err);
             }
+
+            try {
+              await assignDriverToBus(uid, busId, {
+                assignedBy: 'moderator',
+                reason: 'assignment',
+              });
+            } catch (err) {
+              console.warn(`   ⚠️  driver_assignments write failed for ${uid}:`, err);
+            }
           }
         }
 
@@ -463,6 +473,15 @@ export async function POST(request: Request) {
             await updateBus(busId, { driverUID: userDocId, activeTripId: null } as any);
           } catch (err) {
             console.warn('Failed to update bus in fallback mode', err);
+          }
+
+          try {
+            await assignDriverToBus(userDocId, busId, {
+              assignedBy: 'moderator',
+              reason: 'assignment',
+            });
+          } catch (err) {
+            console.warn('Failed to write driver_assignments in fallback mode', err);
           }
         }
       }
