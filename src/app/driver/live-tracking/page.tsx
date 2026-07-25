@@ -1916,7 +1916,7 @@ export default function DriverLiveTrackingPage() {
                   {activeWaitRequest.studentName}
                 </h2>
                 <p className="text-blue-100 text-center text-sm font-medium uppercase tracking-wide">
-                  Missed Bus • <span className="text-white font-bold">{activeWaitRequest.stop_name}</span>
+                  Waiting Request • <span className="text-white font-bold">{activeWaitRequest.stop_name}</span>
                 </p>
                 <p className="text-white/80 text-center text-xs mt-2">
                   Bus is nearby! Waiting for you to accept...

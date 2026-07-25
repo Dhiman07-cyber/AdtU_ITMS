@@ -49,12 +49,6 @@ export const ReassignStudentsSchema = z.object({
     actorName: z.string().min(1).max(200).optional(),
 });
 
-export const AdminSwapBusSchema = z.object({
-    routeId: z.string().min(1).max(100),
-    fromBusId: z.string().min(1).max(100),
-    toBusId: z.string().min(1).max(100),
-});
-
 export const UpdateProfilePhotoSchema = z.object({
     studentUid: z.string().min(1).max(128),
     newProfilePhotoUrl: z.string().url(),

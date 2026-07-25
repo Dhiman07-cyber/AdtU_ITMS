@@ -262,7 +262,6 @@ export const POST = withSecurity(
       waitingFlags: supabaseStats.waitingFlags || 0,
       driverLocationUpdates: supabaseStats.driverLocationUpdates || 0,
       activeTrips: activeTripId ? 1 : 0,
-      missedBusRequests: supabaseStats.missedBusRequests || 0,
       deviceSessions: supabaseStats.deviceSessions || 0,
       supabaseTime: supabaseStats.totalTime || 0,
       totalTime: totalElapsed
@@ -272,7 +271,6 @@ export const POST = withSecurity(
     console.log(`  Waiting Flags: ${cleanupSummary.waitingFlags}`);
     console.log(`  Location Updates: ${cleanupSummary.driverLocationUpdates}`);
     console.log(`  Active Trips Ended: ${cleanupSummary.activeTrips}`);
-    console.log(`  Missed Bus Requests: ${cleanupSummary.missedBusRequests}`);
     console.log(`  Device Sessions: ${cleanupSummary.deviceSessions}`);
     console.log(`  Supabase Time: ${cleanupSummary.supabaseTime}ms`);
     console.log(`  Total Time: ${cleanupSummary.totalTime}ms`);
