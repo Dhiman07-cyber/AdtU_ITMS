@@ -1,6 +1,6 @@
 /**
  * Bus Fee Management Service
- * Handles bus fee storage in PostgreSQL (migrated from Firestore)
+ * Handles bus fee storage in Firestore settings/config collection
  */
 
 import { getSystemConfig, updateSystemConfig } from '@/domains/admin';
@@ -29,7 +29,11 @@ export async function getCurrentBusFee(): Promise<BusFeeData> {
     const config = systemConfigResult.data;
 
     console.log('🔍 Fetching bus fee from system config...');
-    const amount = config.busFee?.amount || 0;
+    const amount = config.busFee?.amount;
+
+    if (typeof amount !== 'number' || amount <= 0) {
+      throw new Error('Bus fee configuration is missing in settings database. Please configure settings and try again later.');
+    }
 
     console.log('📊 Bus fee data from config:', {
       amount: amount,
@@ -44,9 +48,9 @@ export async function getCurrentBusFee(): Promise<BusFeeData> {
       updatedBy: systemConfigResult.updatedByUid || 'system',
       version: 1
     };
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error getting current bus fee:', error);
-    throw new Error('Unstable network detected, please try again later');
+    throw new Error(error.message || 'Unstable network detected, please try again later');
   }
 }
 
@@ -74,14 +78,16 @@ export async function updateBusFee(
       currentConfig.busFee.history = [];
     }
 
-    // Push the previous state to history
-    // Note: The service layer will truncate this history to prevent unbounded growth
+    // Push the previous state to history and retain only latest 3 entries
     currentConfig.busFee.history.push({
       amount: previousAmount,
       updatedAt: systemConfigResult.updatedAt || new Date().toISOString(),
       updatedBy: adminUid,
       version: 1
     });
+    if (currentConfig.busFee.history.length > 3) {
+      currentConfig.busFee.history = currentConfig.busFee.history.slice(-3);
+    }
 
     // Update with new values
     currentConfig.busFee.amount = newAmount;

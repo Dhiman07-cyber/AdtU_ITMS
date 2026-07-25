@@ -6,7 +6,6 @@ import { HandleProfileUpdateSchema } from '@/lib/security/validation-schemas';
 import { RateLimits } from '@/lib/security/rate-limiter';
 import { getBusById, getAllBuses } from '@/domains/fleet';
 import { getStudentById, updateStudent } from '@/domains/identity';
-import { getActiveAssignmentByDriverUid } from '@/domains/fleet/repositories/driver-assignment.repository';
 
 // Configure Cloudinary
 if (process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET && process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME) {
@@ -59,20 +58,21 @@ export const POST = withSecurity(
 
     let isAuthorized = false;
 
-    // Check if driver is assigned to student's bus via canonical driver_assignments
+    // Check if driver is assigned to student's bus (from PG)
     const busId = studentData.busId || studentData.busId;
     if (busId) {
-      const assignment = await getActiveAssignmentByDriverUid(driverUid);
-      if (assignment?.busId === busId) isAuthorized = true;
+      const busData = await getBusById(busId);
+      if (busData) {
+        if ((busData as any).assignedDriverId === driverUid || busData.driverUID === driverUid) {
+          isAuthorized = true;
+        }
+      }
     }
 
     // Also check if driver is assigned to any bus that has this student
     if (!isAuthorized) {
       const allBuses = await getAllBuses();
-      const assignment = await getActiveAssignmentByDriverUid(driverUid);
-      const driverBuses = assignment
-        ? allBuses.filter(b => (b.busId || b.id || '') === assignment.busId)
-        : [];
+      const driverBuses = allBuses.filter(b => (b as any).assignedDriverId === driverUid);
 
       for (const bus of driverBuses) {
         const busId = bus.busId || bus.id || '';

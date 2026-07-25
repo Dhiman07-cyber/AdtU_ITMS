@@ -13,36 +13,9 @@ export const GET = withSecurity(
     try {
       const uid = auth.uid;
 
-      let user = await getUserById(uid);
+      const user = await getUserById(uid);
 
       if (!user) {
-        // Fallback check: Check if user has an active application in PostgreSQL (e.g. submitted, verified_upcoming, pending_seat_allocation)
-        const { getSupabaseServer } = await import('@/lib/supabase-server');
-        const db = getSupabaseServer();
-        const { data: appRow } = await db
-          .from('applications')
-          .select('application_id, applicant_uid, applicant_email, state, form_data')
-          .eq('applicant_uid', uid)
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
-
-        if (appRow && appRow.state !== 'rejected' && appRow.state !== 'draft') {
-          return NextResponse.json({
-            success: true,
-            exists: true,
-            user: {
-              uid: appRow.applicant_uid,
-              email: appRow.applicant_email,
-              name: appRow.form_data?.fullName || appRow.applicant_email,
-              role: 'student',
-              status: appRow.state,
-              state: appRow.state,
-              applicationId: appRow.application_id,
-            },
-          });
-        }
-
         return NextResponse.json({
           success: true,
           exists: false,

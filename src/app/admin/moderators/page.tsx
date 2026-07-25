@@ -485,9 +485,9 @@ export default function AdminModerators() {
                 </TableHeader>
                 {filteredModerators.length > 0 && (
                   <TableBody>
-                    {filteredModerators.map((moderator) => (
+                    {filteredModerators.map((moderator, index) => (
                       <ModeratorRow
-                        key={moderator.id}
+                        key={moderator.uid || moderator.id || `moderator-${index}`}
                         moderator={moderator}
                         onDelete={handleDeleteClick}
                       />

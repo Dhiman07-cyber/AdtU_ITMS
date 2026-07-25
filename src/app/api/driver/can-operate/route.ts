@@ -30,10 +30,11 @@ export const POST = withSecurity(
 
         const supabase = getSupabaseServer();
 
-        // D9: Check driver assignment via driver_assignments instead of Firestore
-        const [busResult, assignedDriverUid] = await Promise.all([
-            supabase.from('buses').select('id').eq('id', busId).maybeSingle(),
+        // Check driver assignment across driver_assignments, buses, driver_profiles, and active_trips
+        const [busResult, assignedDriverUid, driverProfileResult] = await Promise.all([
+            supabase.from('buses').select('id, driver_uid').eq('id', busId).maybeSingle(),
             getDriverUidByBusId(busId),
+            supabase.from('driver_profiles').select('bus_id').eq('uid', driverId).maybeSingle()
         ]);
 
         if (!busResult.data) {
@@ -52,9 +53,10 @@ export const POST = withSecurity(
             .maybeSingle();
 
         const driverClaimsBus = activeTrip?.bus_id === busId;
-        const busClaimsDriver = assignedDriverUid === driverId;
+        const busClaimsDriver = assignedDriverUid === driverId || busResult.data.driver_uid === driverId;
+        const profileClaimsBus = driverProfileResult.data?.bus_id === busId;
 
-        if (!driverClaimsBus && !busClaimsDriver) {
+        if (!driverClaimsBus && !busClaimsDriver && !profileClaimsBus) {
             return NextResponse.json({
                 allowed: false,
                 reason: 'You are not assigned to this bus. Please contact operations.'

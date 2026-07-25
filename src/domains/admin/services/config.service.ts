@@ -61,27 +61,6 @@ export interface LegalConfig {
   sections: LegalConfigSection[];
 }
 
-// ─── Default Configs ─────────────────────────────────────────────────────────
-
-const DEFAULT_LANDING: LandingConfig = {
-  videoPath: 'landing_video/Welcome_Final.mp4',
-  supportPhones: [
-    '+91 93657 71454',
-    '+91 91270 70577',
-    '+91 60039 03319',
-  ],
-  email: 'support@adtu.in',
-};
-
-const DEFAULT_SYSTEM_CONFIG: SystemConfig = {
-  appName: 'AdtU ITMS',
-  busFee: {
-    amount: 10000,
-    version: 1,
-    history: [{ amount: 10000, updatedAt: new Date().toISOString(), updatedBy: 'system' }]
-  }
-};
-
 // ─── Config Cleaning ─────────────────────────────────────────────────────────
 
 const UI_FIELDS_TO_STRIP = ['icon', 'gradient', 'color', 'description', 'label'];
@@ -97,9 +76,8 @@ function cleanConfigForStorage(config: Record<string, unknown>): Record<string, 
 
   const busFee = cleaned.busFee as Record<string, unknown> | undefined;
   if (busFee && Array.isArray(busFee.history)) {
-    const historyLen = busFee.history.length;
-    if (historyLen > 2) {
-      busFee.history = busFee.history.slice(historyLen - 2);
+    if (busFee.history.length > 3) {
+      busFee.history = busFee.history.slice(-3);
     }
   }
 
@@ -110,17 +88,17 @@ function cleanConfigForStorage(config: Record<string, unknown>): Record<string, 
 
 export async function getSystemConfig(): Promise<ConfigResult<SystemConfig>> {
   if (!adminDb) {
-    return { data: DEFAULT_SYSTEM_CONFIG, updatedAt: null, updatedByUid: null };
+    throw new Error('Firebase Admin SDK is not initialized. Please try again later.');
   }
 
   const doc = await adminDb.collection('settings').doc('config').get();
   if (!doc.exists) {
-    return { data: DEFAULT_SYSTEM_CONFIG, updatedAt: null, updatedByUid: null };
+    throw new Error('Configuration missing in settings database. Please configure settings and try again later.');
   }
 
   const data = doc.data() as SystemConfig;
   return {
-    data: { ...DEFAULT_SYSTEM_CONFIG, ...data },
+    data: data,
     updatedAt: data.lastUpdated || data.updatedAt || null,
     updatedByUid: data.updatedBy || null,
   };
@@ -135,7 +113,7 @@ export async function updateSystemConfig(
   }
 
   const doc = await adminDb.collection('settings').doc('config').get();
-  const previous = doc.exists ? (doc.data() as SystemConfig) : DEFAULT_SYSTEM_CONFIG;
+  const previous = doc.exists ? (doc.data() as SystemConfig) : {} as SystemConfig;
 
   const merged = { ...previous, ...data };
   const cleaned = cleanConfigForStorage(merged as Record<string, unknown>);
@@ -150,21 +128,17 @@ export async function updateSystemConfig(
 
 export async function getLandingConfig(): Promise<ConfigResult<LandingConfig>> {
   if (!adminDb) {
-    return { data: { ...DEFAULT_LANDING }, updatedAt: null, updatedByUid: null };
+    throw new Error('Firebase Admin SDK is not initialized. Please try again later.');
   }
 
   const doc = await adminDb.collection('settings').doc('landing').get();
   if (!doc.exists) {
-    return {
-      data: { ...DEFAULT_LANDING },
-      updatedAt: null,
-      updatedByUid: null,
-    };
+    throw new Error('Landing configuration missing in settings database. Please configure settings and try again later.');
   }
 
   const data = doc.data() as LandingConfig;
   return {
-    data: { ...DEFAULT_LANDING, ...data },
+    data: data,
     updatedAt: data.updatedAt || data.lastUpdated || null,
     updatedByUid: data.updatedBy || null,
   };
@@ -179,7 +153,7 @@ export async function updateLandingConfig(
   }
 
   const doc = await adminDb.collection('settings').doc('landing').get();
-  const previous = doc.exists ? (doc.data() as LandingConfig) : DEFAULT_LANDING;
+  const previous = doc.exists ? (doc.data() as LandingConfig) : {} as LandingConfig;
 
   const merged = { ...previous, ...data, updatedAt: new Date().toISOString(), updatedBy: updatedByUid };
   await adminDb.collection('settings').doc('landing').set(merged, { merge: true });
@@ -219,23 +193,18 @@ export async function updateUiConfig(
 // ─── Legal Config (Privacy / Terms) ──────────────────────────────────────────
 
 export async function getLegalConfig(type: 'privacy' | 'terms'): Promise<ConfigResult<LegalConfig>> {
-  const fallbackTitle = type === 'privacy' ? 'Privacy Policy' : 'Terms & Conditions';
   if (!adminDb) {
-    return { data: { title: fallbackTitle, sections: [] }, updatedAt: null, updatedByUid: null };
+    throw new Error('Firebase Admin SDK is not initialized. Please try again later.');
   }
 
   const doc = await adminDb.collection('settings').doc(type).get();
   if (!doc.exists) {
-    return {
-      data: { title: fallbackTitle, sections: [] },
-      updatedAt: null,
-      updatedByUid: null,
-    };
+    throw new Error(`Configuration missing in settings database for ${type}. Please configure settings and try again later.`);
   }
 
   const data = doc.data() as LegalConfig;
   return {
-    data: { title: data.title || fallbackTitle, sections: data.sections || [] },
+    data: data,
     updatedAt: (data as any).updatedAt || (data as any).lastUpdated || null,
     updatedByUid: (data as any).updatedBy || null,
   };
@@ -251,8 +220,7 @@ export async function updateLegalConfig(
   }
 
   const doc = await adminDb.collection('settings').doc(type).get();
-  const fallbackTitle = type === 'privacy' ? 'Privacy Policy' : 'Terms & Conditions';
-  const previous = doc.exists ? (doc.data() as LegalConfig) : { title: fallbackTitle, sections: [] };
+  const previous = doc.exists ? (doc.data() as LegalConfig) : {} as LegalConfig;
 
   const merged = { ...previous, ...data, updatedAt: new Date().toISOString(), updatedBy: updatedByUid };
   await adminDb.collection('settings').doc(type).set(merged, { merge: true });
@@ -279,3 +247,5 @@ export async function upsertMarker(
     updatedAt: new Date().toISOString()
   }, { merge: true });
 }
+
+

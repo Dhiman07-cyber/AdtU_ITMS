@@ -132,7 +132,6 @@ export interface ApplicationFormData {
 
   // Supabase Ledger tracking
   paymentId?: string;
-  existingStudentUid?: string;
 }
 
 // Moderator Profile

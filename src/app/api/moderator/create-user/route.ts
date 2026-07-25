@@ -313,16 +313,9 @@ export async function POST(request: Request) {
             updatedAt: new Date().toISOString(),
           });
 
-          // Update bus driver assignment via PG
+          // Update bus driver assignment via canonical repository
           if (busId) {
-            console.log(`🚌 Updating bus ${busId} with driver ${uid}`);
-            try {
-              await import('@/domains/fleet').then(m => m.updateBus(busId, { driverUID: uid, activeTripId: null } as any));
-              console.log(`   ✅ Bus ${busId} updated successfully`);
-            } catch (err) {
-              console.warn(`   ⚠️  Bus ${busId} update failed`, err);
-            }
-
+            console.log(`🚌 Assigning driver ${uid} to bus ${busId}`);
             try {
               await assignDriverToBus(uid, busId, {
                 assignedBy: 'moderator',
@@ -466,15 +459,8 @@ export async function POST(request: Request) {
           updatedAt: new Date().toISOString(),
         });
 
-        // Update bus driver assignment via PG
+        // Update bus driver assignment via canonical repository
         if (busId) {
-          try {
-            const { updateBus } = await import('@/domains/fleet');
-            await updateBus(busId, { driverUID: userDocId, activeTripId: null } as any);
-          } catch (err) {
-            console.warn('Failed to update bus in fallback mode', err);
-          }
-
           try {
             await assignDriverToBus(userDocId, busId, {
               assignedBy: 'moderator',

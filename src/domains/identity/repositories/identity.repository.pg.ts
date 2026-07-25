@@ -91,6 +91,10 @@ function rowToFirestore(row: Record<string, any>, fieldMap: Record<string, strin
       result[firestoreField] = row[pgCol];
     }
   }
+  if (row.uid) {
+    result.id = row.uid;
+    result.uid = row.uid;
+  }
   return result;
 }
 
@@ -171,7 +175,32 @@ export async function pgFindUserById(uid: string): Promise<IdentityUser | null> 
 
   if (!data) return null;
 
-  return pgRowToUser(data as PgUser);
+  const user = pgRowToUser(data as PgUser);
+
+  // If user is a student, attach student_profiles fields (status, valid_until, soft_block, etc.)
+  if (user.role === 'student') {
+    const { data: studentProfile } = await db
+      .from('student_profiles')
+      .select('status, soft_block, valid_until, bus_id, route_id, shift, enrollment_id, payment_status, current_session')
+      .eq('uid', uid)
+      .maybeSingle();
+
+    if (studentProfile) {
+      user.status = studentProfile.status || 'active';
+      user.softBlock = studentProfile.soft_block;
+      user.validUntil = studentProfile.valid_until;
+      user.busId = studentProfile.bus_id;
+      user.routeId = studentProfile.route_id;
+      user.shift = studentProfile.shift;
+      user.enrollmentId = studentProfile.enrollment_id;
+      user.paymentStatus = studentProfile.payment_status;
+      user.currentSession = studentProfile.current_session;
+    } else {
+      user.status = 'active';
+    }
+  }
+
+  return user;
 }
 
 /**
@@ -395,14 +424,17 @@ export async function pgFindAllStudents(): Promise<Record<string, any>[]> {
 /** Firestore field → PostgreSQL column mapping for driver_profiles */
 const DRIVER_FIELD_MAP: Record<string, string> = {
   uid: 'uid',
+  id: 'uid',
   email: 'email',
   fullName: 'full_name',
   name: 'full_name',
   phone: 'phone',
   alternatePhone: 'alternate_phone',
+  altPhone: 'alternate_phone',
   licenseNumber: 'license_number',
   aadharNumber: 'aadhar_number',
   employeeId: 'employee_id',
+  driverId: 'employee_id',
   address: 'address',
   profilePhotoUrl: 'profile_photo_url',
   busId: 'bus_id',
@@ -413,6 +445,8 @@ const DRIVER_FIELD_MAP: Record<string, string> = {
   tripActive: 'trip_active',
   activeTripId: 'active_trip_id',
   isReserved: 'is_reserved',
+  approvedBy: 'approved_by',
+  dob: 'dob',
   createdAt: 'created_at',
   updatedAt: 'updated_at',
 };

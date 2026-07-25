@@ -1,7 +1,7 @@
 ﻿import { NextResponse } from 'next/server';
 import { headers } from 'next/headers';
 import { adminAuth } from '@/lib/firebase-admin';
-import { getUserById, updateDriver } from '@/domains/identity';
+import { getUserById } from '@/domains/identity';
 import { getBusById, createBus } from '@/domains/fleet';
 import * as routeService from '@/domains/route';
 import { assignDriverToBus } from '@/domains/fleet/repositories/driver-assignment.repository';
@@ -93,24 +93,11 @@ export async function POST(request: Request) {
       routeId: routeId,
       shift: shift,
       status: status,
-      activeDriverId: driverUID || null,
-      assignedDriverId: driverUID || null,
-      driverUID: driverUID || null,
       load: initialLoad
     });
 
-    // Update driver assignment in PostgreSQL (canonical source of truth)
+    // Update driver assignment via canonical repository
     if (driverUID) {
-      try {
-        await updateDriver(driverUID, {
-          busId: busId,
-          routeId: routeId,
-          status: 'active'
-        });
-      } catch (e) {
-        console.error('⚠️ Failed to update driver assignment in PG:', e);
-      }
-
       try {
         await assignDriverToBus(driverUID, busId, {
           routeId,

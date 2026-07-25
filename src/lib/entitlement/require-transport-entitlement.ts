@@ -7,7 +7,7 @@ import { getTransportEntitlement, EntitlementResult } from './transport-entitlem
  *
  * Loads the student document from PostgreSQL and applies the CANONICAL
  * entitlement rule. Use this at the top of any API that delivers transport
- * data or actions (tracking, trip status, waiting flags, missed-bus,
+ * data or actions (tracking, trip status, waiting flags,
  * driver notifications). Returns the student data on success, or a
  * ready-to-return 403 NextResponse when the caller does not currently
  * own transport access.

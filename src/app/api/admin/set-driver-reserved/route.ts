@@ -1,9 +1,8 @@
-﻿import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { verifyApiAuth } from '@/lib/security/api-auth';
 import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
-import { getAllBuses, updateBus } from '@/domains/fleet';
 import { getDriverById } from '@/domains/identity';
-import { unassignDriver } from '@/domains/fleet/repositories/driver-assignment.repository';
+import { unassignDriver, getActiveAssignmentByDriverUid } from '@/domains/fleet/repositories/driver-assignment.repository';
 
 /**
  * Set a driver as "Reserved" (not assigned to any bus)
@@ -37,31 +36,11 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const oldBusId = driverData.busId || driverData.busId;
+    const oldAssignment = await getActiveAssignmentByDriverUid(driverUID);
+    const oldBusId = oldAssignment?.busId ?? driverData.busId;
 
     console.log(`🔄 Setting driver ${driverUID.substring(0,8)}... as Reserved`);
     console.log(`   Old bus: ${oldBusId}`);
-
-    // Remove driver from ALL buses that reference them (from PG)
-    const allBuses = await getAllBuses();
-    const busesToClean = allBuses.filter(b =>
-      (b as any).assignedDriverId === driverUID || (b as any).activeDriverId === driverUID
-    );
-
-    console.log(`   Found ${busesToClean.length} buses with driver assignment`);
-
-    // ponytail: Combine dual updates and update each bus sequentially to ensure transactional correctness
-    const updatedBuses: string[] = [];
-    for (const bus of busesToClean) {
-      const busId = bus.busId || bus.id || '';
-      const updateData: Record<string, any> = { driverUID: null };
-      if ((bus as any).assignedDriverId === driverUID) updateData.assignedDriverId = null;
-      if ((bus as any).activeDriverId === driverUID) updateData.activeDriverId = null;
-
-      await updateBus(busId, updateData as any);
-      updatedBuses.push(bus.busNumber || busId);
-      console.log(`   🔄 Removed from bus ${bus.busNumber || busId}`);
-    }
 
     try {
       await unassignDriver(driverUID, 'admin_reassign');
@@ -69,20 +48,17 @@ export async function POST(req: NextRequest) {
       console.error(`⚠️ Failed to unassign driver ${driverUID} in driver_assignments:`, err);
     }
 
-    console.log(`   ✅ Removed driver from ${updatedBuses.length} bus(es): ${updatedBuses.join(', ')}`);
     console.log(`✅ Driver ${driverUID.substring(0,8)}... is now Reserved`);
 
     return NextResponse.json({
       success: true,
-      message: `${driverData?.fullName || 'Driver'} is now Reserved and available for swap`,
+      message: `${driverData?.fullName || 'Driver'} is now Reserved`,
       driver: {
         uid: driverUID,
         name: driverData?.fullName,
         oldBusId,
         newStatus: 'Reserved'
-      },
-      busesUpdated: updatedBuses.length,
-      busesCleaned: updatedBuses
+      }
     });
 
   } catch (error: any) {

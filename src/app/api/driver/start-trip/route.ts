@@ -1,8 +1,4 @@
 /**
- * @deprecated Fully superseded by POST /api/driver/start-journey-v2.
- * Kept for reference only. Zero callers in the codebase.
- * Remove in Phase 3 destructive cleanup.
- *
  * POST /api/driver/start-trip
  * 
  * Start a trip with exclusive lock acquisition.

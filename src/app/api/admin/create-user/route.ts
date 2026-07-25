@@ -3,10 +3,9 @@ import { adminAuth } from '@/lib/firebase-admin';
 import { getUpdaterInfo } from '@/lib/utils/updatedBy';
 import { calculateRenewalDate } from '@/lib/utils/renewal-utils';
 import { sendBusFullAlert } from '@/lib/busCapacityService';
-import { incrementBusCapacity, getBusById, updateBus } from '@/domains/fleet';
+import { incrementBusCapacity, getBusById } from '@/domains/fleet';
 import { generateOfflinePaymentId } from '@/lib/types/payment';
 import { computeBlockDatesFromValidUntil } from '@/lib/utils/deadline-computation';
-import { DEFAULT_BUS_FEE } from '@/config/runtime';
 import {
     sendStudentAddedNotification,
     getAdminEmailRecipients,
@@ -160,7 +159,13 @@ export const POST = withSecurity<CreateUserBody>(
             }
 
             const blockDates = computeBlockDatesFromValidUntil(finalValidUntil, deadlineConfig);
-            const busFeeAmount = systemConfigResult.data?.busFee?.amount || DEFAULT_BUS_FEE;
+            const busFeeAmount = Number(systemConfigResult.data?.busFee?.amount || 0);
+            if (!busFeeAmount || busFeeAmount <= 0) {
+                return NextResponse.json(
+                    { message: 'Official bus fee is not configured in Firestore settings. Please configure bus fee in settings and try again.' },
+                    { status: 500 }
+                );
+            }
             const totalAmount = busFeeAmount * finalDuration;
             const paymentId = totalAmount > 0 ? generateOfflinePaymentId('new_registration') : null;
 
@@ -336,11 +341,7 @@ export const POST = withSecurity<CreateUserBody>(
                 updatedAt: now,
             });
 
-            // Update bus driver assignment via PG
-            if (busId) {
-                await updateBus(busId, { driverUID: uid, activeTripId: null } as any);
-            }
-
+            // Update bus driver assignment via canonical repository
             if (busId) {
                 try {
                     await assignDriverToBus(uid, busId, {

@@ -96,8 +96,12 @@ export const CreateUserSchema = z.object({
     status: z.string().max(50).optional(),
 });
 
+export const AckWaitingSchema = z.object({
+    waitingFlagId: z.string().uuid(),
+});
+
 export const FirestoreCleanupSchema = z.object({
-    cleanupType: z.enum(['active_trips', 'reassignment_logs', 'driver_location_updates', 'waiting_flags', 'missed_bus_requests', 'all']),
+    cleanupType: z.enum(['active_trips', 'reassignment_logs', 'driver_location_updates', 'waiting_flags', 'all']),
     daysOld: z.number().int().min(1).max(3650).optional(),
 });
 
@@ -267,15 +271,7 @@ export const LocationUpdateSchema = z.object({
 // Driver Schemas
 // ============================================================================
 
-export const DriverSwapRequestSchema = z.object({
-    fromDriverUID: UIDSchema,
-    toDriverUID: UIDSchema,
-    busId: z.string().max(50),
-    routeId: z.string().max(50),
-    startsAt: DateSchema,
-    endsAt: DateSchema,
-    reason: z.string().max(500).optional(),
-});
+
 
 // ============================================================================
 // Trip & Journey Schemas
@@ -327,15 +323,7 @@ export const BusIdSchema = z.object({
 
 export const EmptySchema = z.object({});
 
-/** Swap request body (idToken removed by security wrapper) */
-export const SwapRequestBodySchema = z.object({
-    busId: z.string().min(1).max(100),
-    toDriverUid: z.string().min(1).max(128),
-});
 
-export const AcceptSwapSchema = z.object({
-    swapRequestId: z.string().min(1).max(200),
-});
 
 export const HandleProfileUpdateSchema = z.object({
     requestId: z.string().min(1).max(200),

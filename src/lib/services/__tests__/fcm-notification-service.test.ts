@@ -4,12 +4,10 @@ const {
   mockRunTransaction,
   mockCollectionFn,
   mockSendTopic,
-  mockGetDriverUidByBusId,
 } = vi.hoisted(() => ({
   mockRunTransaction: vi.fn(),
   mockCollectionFn: vi.fn(),
   mockSendTopic: vi.fn(),
-  mockGetDriverUidByBusId: vi.fn(),
 }));
 
 function queryChain(docs: Array<{ id: string }> = []) {
@@ -55,10 +53,6 @@ let mockSupabaseClient: Record<string, any>;
 
 vi.mock('@/lib/supabase-server', () => ({
   getSupabaseServer: () => mockSupabaseClient,
-}));
-
-vi.mock('@/domains/fleet/repositories/driver-assignment.repository', () => ({
-  getDriverUidByBusId: mockGetDriverUidByBusId,
 }));
 
 import { notifyRoute, verifyDriverRouteBinding } from '../fcm-notification-service';
@@ -160,9 +154,9 @@ describe('FCM Notification Service', () => {
   });
 
   describe('verifyDriverRouteBinding', () => {
-    it('authorizes a driver assigned to the bus via active_trips', async () => {
+    it('authorizes a driver assigned to the bus via driver_status', async () => {
       const mockMaybeSingle = vi.fn().mockResolvedValue({
-        data: { bus_id: 'b1', driver_id: 'd1' },
+        data: { bus_id: 'b1', driver_uid: 'd1' },
         error: null,
       });
       mockSupabaseClient.from.mockImplementation((table: string) => {
@@ -179,8 +173,8 @@ describe('FCM Notification Service', () => {
       expect((await verifyDriverRouteBinding('d1', 'r1', 'b1')).authorized).toBe(true);
     });
 
-    it('authorizes a driver referenced by the driver_assignments table', async () => {
-      mockGetDriverUidByBusId.mockResolvedValue('d1');
+    it('authorizes a driver referenced by the buses table', async () => {
+      let callCount = 0;
       mockSupabaseClient.from.mockImplementation((table: string) => {
         const chain: Record<string, any> = {
           select: vi.fn(() => chain),
@@ -189,8 +183,10 @@ describe('FCM Notification Service', () => {
           limit: vi.fn(() => chain),
           maybeSingle: vi.fn(),
         };
-        if (table === 'active_trips') {
-          chain.maybeSingle.mockResolvedValue({ data: { bus_id: 'other', driver_id: 'd1' }, error: null });
+        if (table === 'driver_status') {
+          chain.maybeSingle.mockResolvedValue({ data: { bus_id: 'other', driver_uid: 'd1' }, error: null });
+        } else if (table === 'buses') {
+          chain.maybeSingle.mockResolvedValue({ data: { driver_uid: 'd1' }, error: null });
         }
         return chain;
       });
@@ -199,7 +195,6 @@ describe('FCM Notification Service', () => {
     });
 
     it('rejects an unassigned driver', async () => {
-      mockGetDriverUidByBusId.mockResolvedValue('x');
       mockSupabaseClient.from.mockImplementation((table: string) => {
         const chain: Record<string, any> = {
           select: vi.fn(() => chain),
@@ -208,8 +203,10 @@ describe('FCM Notification Service', () => {
           limit: vi.fn(() => chain),
           maybeSingle: vi.fn(),
         };
-        if (table === 'active_trips') {
-          chain.maybeSingle.mockResolvedValue({ data: { bus_id: 'other', driver_id: 'x' }, error: null });
+        if (table === 'driver_status') {
+          chain.maybeSingle.mockResolvedValue({ data: { bus_id: 'other', driver_uid: 'x' }, error: null });
+        } else if (table === 'buses') {
+          chain.maybeSingle.mockResolvedValue({ data: { driver_uid: 'x' }, error: null });
         }
         return chain;
       });
@@ -218,7 +215,6 @@ describe('FCM Notification Service', () => {
     });
 
     it('rejects when the driver is missing', async () => {
-      mockGetDriverUidByBusId.mockResolvedValue(null);
       mockSupabaseClient.from.mockImplementation((table: string) => {
         const chain: Record<string, any> = {
           select: vi.fn(() => chain),

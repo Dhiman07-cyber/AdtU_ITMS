@@ -16,19 +16,16 @@ This single file contains everything you need - no other SQL files are required.
 
 ## What COMPLETE_SCHEMA.sql Contains
 
-### Tables (11 total)
+### Tables (8 total)
 | Table | Purpose |
 |-------|---------|
 | `bus_locations` | Real-time GPS tracking |
 | `driver_status` | Driver operational status |
 | `waiting_flags` | Student waiting signals |
 | `driver_location_updates` | Historical location breadcrumbs |
-| `driver_swap_requests` | Driver swap requests |
-| `temporary_assignments` | Active driver swaps |
 | `reassignment_logs` | Audit logs for assignments |
 | `payments` | Immutable financial ledger |
 | `active_trips` | Lock management for multi-driver system |
-| `missed_bus_requests` | Student missed-bus pickup requests |
 | `device_sessions` | Single-device session locks |
 
 ### Security Features
@@ -48,7 +45,6 @@ This single file contains everything you need - no other SQL files are required.
 | `payments` | Student owner or service role |
 | `reassignment_logs` | Service role only |
 | `active_trips` | Anon, Authenticated (only active status) |
-| `missed_bus_requests` | Anon, Authenticated |
 | `device_sessions` | Authenticated session owner or service role |
 
 ### Also Includes

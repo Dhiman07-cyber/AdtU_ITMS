@@ -49,18 +49,17 @@
  */
 import { getSupabaseServer } from '@/lib/supabase-server';
 import type { Bus, Driver } from '@/lib/types';
+import { getActiveAssignmentByBusId, listActiveAssignments } from '@/domains/fleet/repositories/driver-assignment.repository';
 
 
 // ─── Bus Field Map ────────────────────────────────────────────────────────────
 
 const BUS_FIELD_MAP: Record<string, string> = {
   id: 'id',
-  // busId removed — bus_id column dropped; was always identical to id
   busNumber: 'bus_number',
   model: 'model',
   year: 'year',
   capacity: 'capacity',
-  driverUID: 'driver_uid',
   driverName: 'driver_name',
   routeId: 'route_id',
   routeName: 'route_name',
@@ -111,17 +110,16 @@ function busDomainToRow(data: Partial<Bus>): Record<string, any> {
 function pgRowToBus(row: Record<string, any>): Bus {
   const bus: Bus = {
     id: row.id,
-    busId: row.id,  // bus_id column dropped; busId domain field now reads from id
+    busId: row.id,
     busNumber: row.bus_number || '',
     model: row.model,
     year: row.year,
     capacity: row.capacity ?? 0,
-    driverUID: row.driver_uid,
+    driverUID: null,
     driverName: row.driver_name,
     routeId: row.route_id,
     routeName: row.route_name,
     status: row.status || 'inactive',
-    // current_passenger_count column dropped; currentPassengerCount now reads from current_members
     currentPassengerCount: row.current_members ?? 0,
     currentMembers: row.current_members ?? 0,
     morningLoad: row.morning_load ?? 0,
@@ -135,13 +133,31 @@ function pgRowToBus(row: Record<string, any>): Bus {
   return bus;
 }
 
+// ─── Driver UID Enrichment ────────────────────────────────────────────────────
+
+async function enrichWithDriverUid(bus: Bus): Promise<Bus> {
+  const assignment = await getActiveAssignmentByBusId(bus.id);
+  if (assignment) bus.driverUID = assignment.driverUid;
+  return bus;
+}
+
+async function enrichBusListWithDriverUid(buses: Bus[]): Promise<Bus[]> {
+  if (buses.length === 0) return buses;
+  const all = await listActiveAssignments();
+  const map = new Map(all.map(a => [a.busId, a.driverUid]));
+  for (const bus of buses) {
+    bus.driverUID = map.get(bus.id) ?? null;
+  }
+  return buses;
+}
+
 // ─── Bus Public API ───────────────────────────────────────────────────────────
 
 export async function pgFindAllBuses(): Promise<Bus[]> {
   const db = getSupabaseServer();
   const { data, error } = await db.from('buses').select('*');
   if (error) throw new Error(`FleetRepository (PG) findAllBuses failed: ${error.message}`);
-  return (data || []).map(pgRowToBus);
+  return enrichBusListWithDriverUid((data || []).map(pgRowToBus));
 }
 
 export async function pgFindBusById(id: string): Promise<Bus | null> {
@@ -149,14 +165,14 @@ export async function pgFindBusById(id: string): Promise<Bus | null> {
   const { data, error } = await db.from('buses').select('*').eq('id', id).maybeSingle();
   if (error) throw new Error(`FleetRepository (PG) findBusById failed: ${error.message}`);
   if (!data) return null;
-  return pgRowToBus(data);
+  return enrichWithDriverUid(pgRowToBus(data));
 }
 
 export async function pgFindBusesByRouteId(routeId: string): Promise<Bus[]> {
   const db = getSupabaseServer();
   const { data, error } = await db.from('buses').select('*').eq('route_id', routeId);
   if (error) throw new Error(`FleetRepository (PG) findBusesByRouteId failed: ${error.message}`);
-  return (data || []).map(pgRowToBus);
+  return enrichBusListWithDriverUid((data || []).map(pgRowToBus));
 }
 
 export async function pgUnassignRoute(routeId: string): Promise<void> {

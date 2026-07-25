@@ -77,32 +77,25 @@ export const useBusLocation = (busId: string) => {
           .from('bus_locations')
           .select('*')
           .eq('bus_id', busId)
+          .neq('lat', 0)
+          .neq('lng', 0)
           .order('timestamp', { ascending: false })
           .limit(1);
 
         if (!qErr && locations && locations.length > 0) {
           const location = locations[0];
-          
-          // CRITICAL: Check if the location is recent (within last 30 minutes)
-          // This prevents showing stale markers from ended trips
-          const locationTime = new Date(location.timestamp).getTime();
-          const now = Date.now();
-          const thirtyMinutesMs = 30 * 60 * 1000;
-
-          if (now - locationTime < thirtyMinutesMs) {
-            const busLocation: BusLocation = {
-              busId: location.bus_id,
-              driverUid: location.driver_uid,
-              lat: location.lat,
-              lng: location.lng,
-              speed: location.speed || 0,
-              heading: location.heading || 0,
-              accuracy: location.accuracy,
-              timestamp: location.timestamp || new Date().toISOString(),
-            };
-            if (isValidLatLng(busLocation.lat, busLocation.lng)) {
-              applyIncomingLocation(busLocation);
-            }
+          const busLocation: BusLocation = {
+            busId: location.bus_id,
+            driverUid: location.driver_uid,
+            lat: location.lat,
+            lng: location.lng,
+            speed: location.speed || 0,
+            heading: location.heading || 0,
+            accuracy: location.accuracy,
+            timestamp: location.timestamp || new Date().toISOString(),
+          };
+          if (isValidLatLng(busLocation.lat, busLocation.lng)) {
+            applyIncomingLocation(busLocation);
           }
         }
       } catch (err) {

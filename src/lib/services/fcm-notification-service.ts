@@ -55,10 +55,9 @@ export async function verifyDriverRouteBinding(
   busId: string
 ): Promise<{ authorized: boolean; reason?: string }> {
   try {
-    // D9: Check driver-bus assignment via Supabase instead of Firestore
     const supabase = getSupabaseServer();
 
-    // Check active_trips for active assignment
+    // 1. Check active_trips for active assignment
     const { data: activeTrip } = await supabase
       .from('active_trips')
       .select('bus_id, driver_id')
@@ -68,8 +67,27 @@ export async function verifyDriverRouteBinding(
 
     if (activeTrip?.bus_id === busId) return { authorized: true };
 
+    // 2. Check canonical driver_assignments table
     const assignedDriverUid = await getDriverUidByBusId(busId);
     if (assignedDriverUid === driverId) return { authorized: true };
+
+    // 3. Check buses table (driver_uid)
+    const { data: bus } = await supabase
+      .from('buses')
+      .select('driver_uid')
+      .eq('id', busId)
+      .maybeSingle();
+
+    if (bus?.driver_uid === driverId) return { authorized: true };
+
+    // 4. Check driver_profiles table (bus_id)
+    const { data: driverProfile } = await supabase
+      .from('driver_profiles')
+      .select('bus_id')
+      .eq('uid', driverId)
+      .maybeSingle();
+
+    if (driverProfile?.bus_id === busId) return { authorized: true };
 
     return { authorized: false, reason: 'Driver is not assigned to this bus' };
   } catch (error) {
@@ -94,17 +112,16 @@ export async function notifyRoute(params: {
     try {
       await acquireNotificationLock(busId, tripId, eventType);
     } catch (error) {
-      if (error instanceof Error && error.message === 'NOTIFICATION_ALREADY_SENT') {
-        return {
-          success: true,
-          successCount: 0,
-          failureCount: 0,
-          totalTokens: 0,
-          batchCount: 0,
-          invalidTokensRemoved: 0,
-          error: 'already_sent',
-        };
-      }
+      console.warn(`[notifyRoute] Skipping push notification for trip ${tripId} (${eventType}):`, error instanceof Error ? error.message : error);
+      return {
+        success: true,
+        successCount: 0,
+        failureCount: 0,
+        totalTokens: 0,
+        batchCount: 0,
+        invalidTokensRemoved: 0,
+        error: error instanceof Error ? error.message : 'already_sent',
+      };
     }
   }
 

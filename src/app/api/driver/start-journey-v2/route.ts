@@ -26,20 +26,22 @@ export const POST = withSecurity(
 
     const supabase = getSupabaseServer();
 
-    // 1. D9: Parallelize Supabase fetching (Driver and Bus) instead of Firestore
-    const [activeTripResult, busResult, assignedDriverUid] = await Promise.all([
+    // 1. Parallelize Supabase fetching (Driver, Bus, Assignments, Profile)
+    const [activeTripResult, busResult, assignedDriverUid, driverProfileResult] = await Promise.all([
       supabase.from('active_trips').select('driver_id, bus_id').eq('driver_id', driverUid).eq('status', 'active').maybeSingle(),
-      supabase.from('buses').select('id, bus_number, route_id, route_name').eq('id', busId).maybeSingle(),
+      supabase.from('buses').select('id, bus_number, route_id, route_name, driver_uid').eq('id', busId).maybeSingle(),
       getDriverUidByBusId(busId),
+      supabase.from('driver_profiles').select('bus_id, route_id').eq('uid', driverUid).maybeSingle()
     ]);
 
     const busData = busResult.data;
     if (!busData) return NextResponse.json({ error: 'Bus not found' }, { status: 404 });
 
     const driverHasActiveTrip = activeTripResult.data?.bus_id === busId;
-    const busClaimsDriver = assignedDriverUid === driverUid;
+    const busClaimsDriver = assignedDriverUid === driverUid || busData.driver_uid === driverUid;
+    const profileClaimsBus = driverProfileResult.data?.bus_id === busId;
 
-    if (!driverHasActiveTrip && !busClaimsDriver) {
+    if (!driverHasActiveTrip && !busClaimsDriver && !profileClaimsBus) {
       return NextResponse.json({ error: 'Driver is not assigned to this bus' }, { status: 403 });
     }
 
@@ -55,41 +57,13 @@ export const POST = withSecurity(
     const tripId = lockResult.tripId || requestedTripId;
     const isExistingTrip = tripId !== requestedTripId;
 
-    // 2. Parallelize State Initialization
+    // 2. State Initialization
+    const effectiveRouteId = routeId || busData?.route_id || driverProfileResult.data?.route_id || 'unassigned_route';
     const stops = (busData as any)?.route?.stops || (busData as any)?.stops || [];
-    const rawRouteName = (busData as any)?.route_name || routeId;
+    const rawRouteName = (busData as any)?.route_name || effectiveRouteId;
     const routeName = formatIdForDisplay(rawRouteName);
     const busNumber = formatIdForDisplay(busData?.bus_number || busId);
     const nowIso = new Date().toISOString();
-
-    const initializationTasks: any[] = [];
-
-    if (!isExistingTrip) {
-      initializationTasks.push(
-        supabase.from('bus_locations').insert({
-          bus_id: busId, route_id: routeId, driver_uid: driverUid, lat: 0, lng: 0, speed: 0,
-          heading: 0, accuracy: 0, timestamp: nowIso, is_snapshot: true, trip_id: tripId
-        })
-      );
-    }
-
-    const initializationResults = await Promise.allSettled(initializationTasks);
-    const initializationFailed = initializationResults.some((result) => (
-      result.status === 'rejected' || Boolean(result.value?.error)
-    ));
-
-    if (initializationFailed) {
-      if (!isExistingTrip) {
-        await tripLockService.endTrip(tripId, driverUid, busId).catch((error) => {
-          console.error('Failed to rollback trip after initialization failure:', error);
-        });
-      }
-
-      return NextResponse.json(
-        { error: 'Failed to initialize journey state' },
-        { status: 500 }
-      );
-    }
 
     // 3. Fire-and-forget Broadcasts and Notifications
     if (!isExistingTrip) (async () => {

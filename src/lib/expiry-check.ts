@@ -165,31 +165,30 @@ export async function sendMidJuneReminder(force: boolean = false): Promise<Expir
 
 async function sendAdminSummary(result: ExpiryCheckResult, title: string, expiryDate: Date) {
   const admins = await getUsersByRole('admin');
+  const adminIds = admins.map(a => a.uid).filter(Boolean);
+  if (adminIds.length === 0) return;
 
-  for (const admin of admins) {
-    const adminId = admin.uid;
-    await pgInsertNotification({
-      title,
-      content: `${result.remindersSent} students were notified about their expiring bus service (${expiryDate.toLocaleDateString()}). Please ensure the Bus Office is prepared for renewals.`,
-      type: 'info',
-      sender: {
-        userId: 'system',
-        userName: 'System',
-        userRole: 'admin'
-      },
-      target: {
-        type: 'specific_users',
-        specificUserIds: [adminId]
-      },
-      recipientIds: [adminId],
-      readByUserIds: [],
-      metadata: {
-        totalChecked: result.totalChecked,
-        remindersSent: result.remindersSent,
-        errors: result.errors.length
-      }
-    });
-  }
+  await pgInsertNotification({
+    title,
+    content: `${result.remindersSent} students were notified about their expiring bus service (${expiryDate.toLocaleDateString()}). Please ensure the Bus Office is prepared for renewals.`,
+    type: 'info',
+    sender: {
+      userId: 'system',
+      userName: 'System',
+      userRole: 'admin'
+    },
+    target: {
+      type: 'specific_users',
+      specificUserIds: adminIds
+    },
+    recipientIds: adminIds,
+    readByUserIds: [],
+    metadata: {
+      totalChecked: result.totalChecked,
+      remindersSent: result.remindersSent,
+      errors: result.errors.length
+    }
+  });
 }
 
 /**

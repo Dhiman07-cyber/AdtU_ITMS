@@ -80,8 +80,8 @@ export async function getActiveAssignmentByBusId(busId: string): Promise<DriverA
     .eq('is_active', true)
     .maybeSingle();
 
-  if (error || !data) return null;
-  return rowToDomain(data);
+  if (!error && data) return rowToDomain(data);
+  return null;
 }
 
 /** Get the active assignment for a driver. */
@@ -94,20 +94,50 @@ export async function getActiveAssignmentByDriverUid(driverUid: string): Promise
     .eq('is_active', true)
     .maybeSingle();
 
-  if (error || !data) return null;
-  return rowToDomain(data);
+  if (!error && data) return rowToDomain(data);
+  return null;
 }
 
 /** Get the driver UID assigned to a bus. Convenience wrapper. */
 export async function getDriverUidByBusId(busId: string): Promise<string | null> {
-  const assignment = await getActiveAssignmentByBusId(busId);
-  return assignment?.driverUid ?? null;
+  const supabase = getSupabaseServer();
+  const { data: assignment } = await supabase
+    .from('driver_assignments')
+    .select('driver_uid')
+    .eq('bus_id', busId)
+    .eq('is_active', true)
+    .maybeSingle();
+
+  if (assignment?.driver_uid) return assignment.driver_uid;
+
+  const { data: bus } = await supabase
+    .from('buses')
+    .select('driver_uid')
+    .eq('id', busId)
+    .maybeSingle();
+
+  return bus?.driver_uid ?? null;
 }
 
 /** Get the bus ID assigned to a driver. Convenience wrapper. */
 export async function getBusIdByDriverUid(driverUid: string): Promise<string | null> {
-  const assignment = await getActiveAssignmentByDriverUid(driverUid);
-  return assignment?.busId ?? null;
+  const supabase = getSupabaseServer();
+  const { data: assignment } = await supabase
+    .from('driver_assignments')
+    .select('bus_id')
+    .eq('driver_uid', driverUid)
+    .eq('is_active', true)
+    .maybeSingle();
+
+  if (assignment?.bus_id) return assignment.bus_id;
+
+  const { data: driver } = await supabase
+    .from('driver_profiles')
+    .select('bus_id')
+    .eq('uid', driverUid)
+    .maybeSingle();
+
+  return driver?.bus_id ?? null;
 }
 
 /** List all active assignments (for fleet dashboard, admin views). */
@@ -179,6 +209,23 @@ export async function assignDriverToBus(
     .eq('is_active', true)
     .or(`driver_uid.eq.${driverUid},bus_id.eq.${busId}`);
 
+  // Sync buses table: clear old assignment for this driver and set on new bus
+  await supabase
+    .from('buses')
+    .update({ driver_uid: '' })
+    .eq('driver_uid', driverUid);
+
+  await supabase
+    .from('buses')
+    .update({ driver_uid: driverUid })
+    .eq('id', busId);
+
+  // Sync driver_profiles table
+  await supabase
+    .from('driver_profiles')
+    .update({ bus_id: busId, route_id: options?.routeId || null })
+    .eq('uid', driverUid);
+
   // Insert the new assignment
   const { data, error } = await supabase
     .from('driver_assignments')
@@ -211,6 +258,16 @@ export async function unassignDriver(driverUid: string, reason = 'admin_reassign
     })
     .eq('driver_uid', driverUid)
     .eq('is_active', true);
+
+  await supabase
+    .from('buses')
+    .update({ driver_uid: '' })
+    .eq('driver_uid', driverUid);
+
+  await supabase
+    .from('driver_profiles')
+    .update({ bus_id: null })
+    .eq('uid', driverUid);
 
   return !error;
 }

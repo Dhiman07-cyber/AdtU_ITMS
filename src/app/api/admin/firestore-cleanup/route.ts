@@ -103,17 +103,6 @@ export const POST = withSecurity(
             results.waitingFlagsDeleted = count || 0;
         }
 
-        // 5. Clean Missed Bus Requests
-        if (cleanupType === 'missed_bus_requests' || cleanupType === 'all') {
-            const { count, error } = await supabase
-                .from('missed_bus_requests')
-                .delete({ count: 'exact' })
-                .lt('created_at', isoCutoff);
-            
-            if (error) console.error('Error cleaning missed_bus_requests:', error);
-            results.missedBusRequestsDeleted = count || 0;
-        }
-
         return NextResponse.json({
             success: true,
             message: `Database cleanup completed for ${cleanupType}`,
@@ -140,14 +129,12 @@ export const GET = withSecurity(
             { count: activeTrips },
             { count: reassignmentLogs },
             { count: locationUpdates },
-            { count: waitingFlags },
-            { count: missedBusRequests }
+            { count: waitingFlags }
         ] = await Promise.all([
             supabase.from('active_trips').select('*', { count: 'exact', head: true }),
             supabase.from('reassignment_logs').select('*', { count: 'exact', head: true }),
             supabase.from('driver_location_updates').select('*', { count: 'exact', head: true }),
-            supabase.from('waiting_flags').select('*', { count: 'exact', head: true }),
-            supabase.from('missed_bus_requests').select('*', { count: 'exact', head: true })
+            supabase.from('waiting_flags').select('*', { count: 'exact', head: true })
         ]);
 
         return NextResponse.json({
@@ -157,8 +144,7 @@ export const GET = withSecurity(
                 reassignmentLogs: reassignmentLogs || 0,
                 locationUpdates: locationUpdates || 0,
                 waitingFlags: waitingFlags || 0,
-                missedBusRequests: missedBusRequests || 0,
-                total: (activeTrips || 0) + (reassignmentLogs || 0) + (locationUpdates || 0) + (waitingFlags || 0) + (missedBusRequests || 0)
+                total: (activeTrips || 0) + (reassignmentLogs || 0) + (locationUpdates || 0) + (waitingFlags || 0)
             }
         });
     },

@@ -94,7 +94,7 @@ export default function EnhancedDatePicker({
   const generateYearOptions = () => {
     const currentYear = new Date().getFullYear();
     const years = [];
-    // For future dates (like swap scheduling), include future years
+    // Include future years
     for (let year = currentYear + 5; year >= 1920; year--) {
       years.push(year);
     }

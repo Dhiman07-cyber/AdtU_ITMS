@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '@/contexts/auth-context';
-import { DEFAULT_BUS_FEE } from '@/config/runtime';
 import FacultyDepartmentSelector from '@/components/faculty-department-selector';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -72,8 +71,7 @@ export default function AddStudentForm() {
   // Helper function to get initial form data from localStorage
   const getInitialFormData = (): StudentFormData => {
     const currentYear = new Date().getUTCFullYear();
-    // Use a transient default for the very first render, it will be updated by the useEffect once config is fetched
-    const defaultValidUntil = calculateValidUntilDate(currentYear, 1, { month: 5, day: 30 }).toISOString();
+    const defaultValidUntil = '';
 
     const defaultData: StudentFormData = {
       name: '',
@@ -157,9 +155,9 @@ export default function AddStudentForm() {
   const [isLoaded, setIsLoaded] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Get bus fee from system config dynamically
-  const [busFee, setBusFee] = useState<number>(DEFAULT_BUS_FEE);
-  const [academicDeadline, setAcademicDeadline] = useState<{ month: number; day: number }>({ month: 5, day: 30 }); // Default June 30
+  // Get bus fee from system config dynamically (no hardcoded fallbacks)
+  const [busFee, setBusFee] = useState<number>(0);
+  const [academicDeadline, setAcademicDeadline] = useState<{ month: number; day: number } | null>(null);
 
   useEffect(() => {
     const fetchSystemConfig = async () => {

@@ -7,11 +7,13 @@ import { getDriverById, updateDriver, deleteDriver as removeDriver } from '@/dom
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const auth = await verifyApiAuth(request, ['admin', 'moderator']);
+    const auth = await verifyApiAuth(request, ['admin', 'moderator', 'driver', 'student']);
     if (!auth.authenticated) return auth.response;
 
-    const permissionDenied = await requireModeratorPermission(auth, 'drivers', 'canView');
-    if (permissionDenied) return permissionDenied;
+    if (auth.role === 'moderator') {
+      const permissionDenied = await requireModeratorPermission(auth, 'drivers', 'canView');
+      if (permissionDenied) return permissionDenied;
+    }
 
     const { id } = await params;
     if (!id) return NextResponse.json({ error: 'Driver ID is required' }, { status: 400 });

@@ -108,7 +108,7 @@ export const GET = withSecurity(
             busId ? getBusById(busId) : Promise.resolve(null),
             routeId ? routeService.getById(routeId) : Promise.resolve(null),
             busId ? getDriversByBusId(busId) : Promise.resolve([]),
-            busId ? supabase.from('active_trips').select('status, start_time, last_heartbeat').eq('bus_id', busId).eq('status', 'active').maybeSingle() : Promise.resolve(null)
+            busId ? supabase.from('driver_status').select('status, started_at, last_updated_at').eq('bus_id', busId).maybeSingle() : Promise.resolve(null)
         ]);
 
         // Process Bus & Route
@@ -129,7 +129,7 @@ export const GET = withSecurity(
         }
 
         // Process Trip Status
-        const isTripActive = tripStatus?.data ? (tripStatus.data.status === 'on_trip' || tripStatus.data.status === 'enroute') : false;
+        const isTripActive = tripStatus?.data ? (tripStatus.data.status === 'active' || tripStatus.data.status === 'on_trip' || tripStatus.data.status === 'enroute') : false;
 
         return NextResponse.json({
             student: studentData,

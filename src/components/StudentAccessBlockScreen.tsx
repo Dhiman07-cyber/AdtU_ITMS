@@ -99,55 +99,36 @@ export default function StudentAccessBlockScreen({
   const isNonEntitledActive = isUpcoming || isQueue || isSubmitted;
   const needsRenewal = !isNonEntitledActive;
 
-  // Visual Theme Tokens (Crisp, fast, solid backgrounds - no heavy blurs/filters)
-  const theme = isUpcoming
-    ? {
-      border: 'border-indigo-500/40',
-      headerGradient: 'from-indigo-950/60 to-purple-950/20',
-      badgeBg: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40',
-      iconBg: 'bg-indigo-600 text-white',
-      titleColor: 'text-indigo-300',
-      cardBg: 'bg-[#0f111a]',
-      statusText: 'Verified • Upcoming Session',
-    }
+  const cardBorderClass = isUpcoming
+    ? 'border-indigo-500'
     : isQueue
-      ? {
-        border: 'border-amber-500/40',
-        headerGradient: 'from-amber-950/60 to-orange-950/20',
-        badgeBg: 'bg-amber-500/20 text-amber-300 border-amber-500/40',
-        iconBg: 'bg-amber-600 text-white',
-        titleColor: 'text-amber-300',
-        cardBg: 'bg-[#14110b]',
-        statusText: 'Verified • Seat Queue Active',
-      }
-      : isSubmitted
-        ? {
-          border: 'border-blue-500/40',
-          headerGradient: 'from-blue-950/60 to-cyan-950/20',
-          badgeBg: 'bg-blue-500/20 text-blue-300 border-blue-500/40',
-          iconBg: 'bg-blue-600 text-white',
-          titleColor: 'text-blue-300',
-          cardBg: 'bg-[#0c121e]',
-          statusText: 'Under Review • Application Submitted',
-        }
-        : {
-          border: 'border-rose-500/40',
-          headerGradient: 'from-rose-950/60 to-red-950/20',
-          badgeBg: 'bg-rose-500/20 text-rose-300 border-rose-500/40',
-          iconBg: 'bg-rose-600 text-white',
-          titleColor: 'text-rose-300',
-          cardBg: 'bg-[#180e11]',
-          statusText: 'Service Inactive • Renewal Required',
-        };
+    ? 'border-amber-500'
+    : isSubmitted
+    ? 'border-blue-500'
+    : 'border-red-500';
+
+  const headerBgClass = isUpcoming
+    ? 'bg-indigo-900/30 border-indigo-700'
+    : isQueue
+    ? 'bg-amber-900/30 border-amber-700'
+    : isSubmitted
+    ? 'bg-blue-900/30 border-blue-700'
+    : 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800';
+
+  const headerTitleClass = isUpcoming
+    ? 'text-indigo-400'
+    : isQueue
+    ? 'text-amber-400'
+    : isSubmitted
+    ? 'text-blue-400'
+    : 'text-red-700 dark:text-red-400';
 
   return (
-    <div className="fixed inset-0 z-[1000] bg-black/80 flex items-center justify-center overflow-y-auto overscroll-contain p-4 sm:p-6">
-      <div className={`max-w-xl w-full ${theme.cardBg} ${theme.border} border rounded-2xl overflow-hidden shadow-2xl`}>
-
-        {/* Header Banner */}
-        <div className={`p-6 sm:p-7 bg-gradient-to-b ${theme.headerGradient} border-b border-white/10`}>
-          <div className="flex items-center gap-4">
-            <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${theme.iconBg} shrink-0`}>
+    <div className="fixed inset-0 z-[1000] bg-background/90 backdrop-blur-sm flex items-start justify-center overflow-y-auto overscroll-contain pt-20 pb-8 px-4">
+      <Card className={`max-w-lg w-full ${cardBorderClass} border-2 shadow-2xl flex flex-col bg-zinc-900`}>
+        <CardHeader className={`${headerBgClass} border-b py-4`}>
+          <div className="flex items-center gap-3">
+            <div className={`p-2 rounded-full ${isUpcoming ? 'bg-indigo-600' : isQueue ? 'bg-amber-600' : isSubmitted ? 'bg-blue-600' : 'bg-red-500'}`}>
               {isUpcoming ? (
                 <Clock className="h-6 w-6 text-white" />
               ) : isQueue ? (
@@ -159,189 +140,138 @@ export default function StudentAccessBlockScreen({
               )}
             </div>
             <div>
-              <div className={`inline-flex items-center px-3 py-0.5 rounded-full text-xs font-medium border ${theme.badgeBg} mb-1.5`}>
-                {theme.statusText}
-              </div>
-              <h1 className="text-lg sm:text-xl font-bold text-white tracking-tight">
+              <CardTitle className={`text-xl ${headerTitleClass}`}>
                 {headlineTitle}
-              </h1>
+              </CardTitle>
+              <CardDescription className="text-zinc-300 mt-1">
+                {isUpcoming
+                  ? 'Application Approved • Awaiting Session Start'
+                  : isQueue
+                  ? 'Application Approved • Seat Queue Active'
+                  : isSubmitted
+                  ? 'Application Submitted • Under Review'
+                  : 'Transport access is restricted'}
+              </CardDescription>
             </div>
           </div>
-        </div>
+        </CardHeader>
 
-        {/* Card Content Body */}
-        <div className="p-6 sm:p-7 space-y-5">
-
-          {/* Main Message Block */}
-          <div className="p-4 rounded-xl bg-white/5 border border-white/10 space-y-1.5">
-            <h2 className="text-xs sm:text-sm font-semibold text-zinc-200">
-              Dear <strong className="text-white font-bold">{studentName}</strong>,
-            </h2>
-            <p className="text-xs sm:text-sm text-zinc-300 leading-relaxed">
-              {headlineDetail}
-            </p>
+        <CardContent className="pt-4 space-y-4">
+          {/* Main Message */}
+          <div className={`p-4 rounded-lg border ${isUpcoming ? 'bg-indigo-950/40 border-indigo-800 text-indigo-200' : isQueue ? 'bg-amber-950/40 border-amber-800 text-amber-200' : isSubmitted ? 'bg-blue-950/40 border-blue-800 text-blue-200' : 'bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800'}`}>
+            <div className="flex gap-3">
+              <AlertTriangle className={`h-6 w-6 flex-shrink-0 mt-1 ${isUpcoming ? 'text-indigo-400' : isQueue ? 'text-amber-400' : isSubmitted ? 'text-blue-400' : 'text-yellow-600 dark:text-yellow-400'}`} />
+              <div className="flex-1">
+                <p className="font-semibold mb-2">
+                  Dear {studentName},
+                </p>
+                <p className="text-sm leading-relaxed opacity-90">
+                  {headlineDetail}
+                </p>
+              </div>
+            </div>
           </div>
 
-          {/* Structured Progress Checklist for Upcoming Session */}
+          {/* Upcoming Session Informational Status Box */}
           {isUpcoming && (
-            <div className="p-4 rounded-xl bg-indigo-950/30 border border-indigo-500/30 space-y-3">
-              <div className="flex items-center gap-2 text-indigo-300 font-bold text-xs uppercase tracking-wider">
-                <Clock className="h-4 w-4 text-indigo-400" />
-                <span>Session Activation Roadmap</span>
+            <div className="p-4 bg-gradient-to-r from-indigo-900/30 to-purple-900/30 border border-indigo-600/50 rounded-xl space-y-3">
+              <div className="flex items-center gap-2 text-indigo-300 font-bold text-base">
+                <Clock className="h-5 w-5 text-indigo-400" />
+                <span>Next Steps for Upcoming Session</span>
               </div>
-              <div className="space-y-2.5 pt-1">
-                <div className="flex items-start gap-2.5">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 mt-1 shrink-0" />
-                  <div>
-                    <h3 className="text-xs font-semibold text-emerald-300">Registration & Verification Completed</h3>
-                    <p className="text-[11px] text-zinc-400">Your application details and payment proof have been verified by transport administration.</p>
-                  </div>
-                </div>
-
-                <div className="flex items-start gap-3">
-                  <span className="w-2 h-2 rounded-full bg-indigo-400 mt-1 shrink-0" />
-                  <div>
-                    <h3 className="text-xs font-semibold text-indigo-300">Awaiting Session Start Date</h3>
-                    <p className="text-[11px] text-zinc-400">Seat allocation and bus assignment will activate automatically when the new academic term starts.</p>
-                  </div>
-                </div>
-
-                <div className="flex items-start gap-3">
-                  <span className="w-2 h-2 rounded-full bg-zinc-600 mt-1 shrink-0" />
-                  <div>
-                    <h3 className="text-xs font-semibold text-zinc-400">Transit Pass & Tracking Activation</h3>
-                    <p className="text-[11px] text-zinc-500">Your digital QR transit pass and live bus tracking portal will unlock on the first day of the new term.</p>
-                  </div>
-                </div>
-              </div>
+              <ul className="text-xs text-indigo-200 space-y-2 list-disc list-inside leading-relaxed">
+                <li>Your seat selection and application details are locked and saved.</li>
+                <li>Your student transit pass and live bus tracking map will automatically unlock when the new session begins.</li>
+                <li>No further action or payment is required from your end.</li>
+              </ul>
             </div>
           )}
 
-          {/* Structured Progress Checklist for Queue */}
-          {isQueue && (
-            <div className="p-4 rounded-xl bg-amber-950/30 border border-amber-500/30 space-y-3">
-              <div className="flex items-center gap-2 text-amber-300 font-bold text-xs uppercase tracking-wider">
-                <AlertTriangle className="h-4 w-4 text-amber-400" />
-                <span>Seat Queue Status</span>
-              </div>
-              <div className="space-y-2.5 pt-1">
-                <div className="flex items-start gap-2.5">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 mt-1 shrink-0" />
-                  <div>
-                    <h3 className="text-xs font-semibold text-emerald-300">Verification Confirmed</h3>
-                    <p className="text-[11px] text-zinc-400">Your application and payment details have been verified.</p>
-                  </div>
-                </div>
-                <div className="flex items-start gap-2.5">
-                  <span className="w-2 h-2 rounded-full bg-amber-400 mt-1 shrink-0" />
-                  <div>
-                    <h3 className="text-xs font-semibold text-amber-300">Priority Seat Queue</h3>
-                    <p className="text-[11px] text-zinc-400">You are queued for seat allocation. Your pass will issue automatically when a seat becomes available.</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Structured Progress Checklist for Submitted Applications */}
-          {isSubmitted && (
-            <div className="p-4 rounded-xl bg-blue-950/30 border border-blue-500/30 space-y-3">
-              <div className="flex items-center gap-2 text-blue-300 font-bold text-xs uppercase tracking-wider">
-                <Clock className="h-4 w-4 text-blue-400" />
-                <span>Verification Timeline</span>
-              </div>
-              <div className="space-y-2.5 pt-1">
-                <div className="flex items-start gap-2.5">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 mt-1 shrink-0" />
-                  <div>
-                    <h3 className="text-xs font-semibold text-emerald-300">Application Submitted</h3>
-                    <p className="text-[11px] text-zinc-400">Registration details and payment proof have been received.</p>
-                  </div>
-                </div>
-                <div className="flex items-start gap-2.5">
-                  <span className="w-2 h-2 rounded-full bg-blue-400 mt-1 shrink-0" />
-                  <div>
-                    <h3 className="text-xs font-semibold text-blue-300">Administrative Review</h3>
-                    <p className="text-[11px] text-zinc-400">Transport administrators are reviewing your documents (typically 1 to 2 business days).</p>
-                  </div>
-                </div>
-                <div className="flex items-start gap-2.5">
-                  <span className="w-2 h-2 rounded-full bg-zinc-600 mt-1 shrink-0" />
-                  <div>
-                    <h3 className="text-xs font-semibold text-zinc-400">Portal & Bus Pass Activation</h3>
-                    <p className="text-[11px] text-zinc-500">Your student dashboard and transit pass will activate upon verification approval.</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Contact Office Info */}
+          {/* Contact Information - when available */}
           {contactInfo && (
-            <div className="p-3.5 rounded-xl bg-white/5 border border-white/10 space-y-1">
-              <h3 className="text-xs font-semibold text-zinc-300 flex items-center gap-2">
-                <Phone className="h-3.5 w-3.5 text-indigo-400" />
-                <span>Transport Office Contact</span>
+            <div className="p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+              <h3 className="font-semibold text-blue-800 dark:text-blue-200 mb-3">
+                Contact Admin Office
               </h3>
-              <div className="text-xs text-zinc-400 space-y-0.5 pl-5">
-                <p>{contactInfo.officeName}: <strong className="text-zinc-200">{contactInfo.phone}</strong></p>
-                <p>Email: <strong className="text-zinc-200">{contactInfo.email}</strong></p>
+              <div className="space-y-2 text-sm text-blue-700 dark:text-blue-300">
+                <div className="flex items-center gap-2">
+                  <Phone className="h-4 w-4" />
+                  <span>{contactInfo.officeName}: {contactInfo.phone}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Mail className="h-4 w-4" />
+                  <span>Email: {contactInfo.email}</span>
+                </div>
               </div>
+              <p className="text-xs text-blue-600 dark:text-blue-400 mt-3">
+                {contactInfo.visitInstructions}
+              </p>
             </div>
           )}
 
-          {/* Renewal CTA — Rendered only for expired/inactive students */}
+          {/* Warning - Dynamic Threshold (only when config is available and needs renewal) */}
+          {needsRenewal && daysUntilDelete > 0 && daysUntilDelete <= (deadlineConfig?.urgentWarningThreshold?.days || 15) && (
+            <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+              <div className="flex items-center gap-2 text-red-700 dark:text-red-400">
+                <AlertTriangle className="h-5 w-5" />
+                <p className="font-semibold text-sm">
+                  URGENT: Only {daysUntilDelete} days remaining before permanent deletion!
+                </p>
+              </div>
+              <p className="text-xs text-red-600 dark:text-red-300 mt-2">
+                After {hardDeleteDateFormatted}, your account and all associated data will be permanently deleted and cannot be recovered.
+              </p>
+            </div>
+          )}
+
+          {/* Renewal CTA — Only rendered when student actually needs to renew */}
           {needsRenewal && (
-            <div className="p-4 rounded-xl bg-emerald-950/40 border border-emerald-500/40 space-y-2.5">
-              <div className="flex items-center gap-2">
-                <CreditCard className="h-4 w-4 text-emerald-400" />
-                <h3 className="font-bold text-emerald-200 text-xs uppercase tracking-wider">
-                  Renew Transport Service
+            <div className="p-4 bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20 border-2 border-green-300 dark:border-green-700 rounded-xl">
+              <div className="flex items-center gap-2 mb-2">
+                <CreditCard className="h-5 w-5 text-green-600" />
+                <h3 className="font-bold text-green-800 dark:text-green-200">
+                  Renew Your Service
                 </h3>
               </div>
-              <p className="text-xs text-zinc-300 leading-relaxed">
-                Submit a renewal request online or offline to reactivate your digital transit pass and live tracking access.
+              <p className="text-sm text-green-700 dark:text-green-300 mb-1">
+                Submit a renewal to get your transport access back.
+              </p>
+              <p className="text-xs text-green-600/90 dark:text-green-300/80 mb-3">
+                After you pay (online or offline), your renewal is reviewed and approved by an administrator. Transport access — tracking, bus pass, and trip access — is restored once your renewal is approved.
               </p>
               <Button
                 onClick={() => router.push('/student/renew-services')}
-                className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-semibold h-10 rounded-lg text-xs"
+                className="w-full bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white shadow-lg"
+                size="lg"
               >
-                <CreditCard className="mr-2 h-4 w-4" />
-                Renew Service Now
-                <ArrowRight className="ml-2 h-4 w-4" />
+                <CreditCard className="mr-2 h-5 w-5" />
+                Renew Service
+                <ArrowRight className="ml-2 h-5 w-5" />
               </Button>
             </div>
           )}
 
-          {/* Bottom Actions */}
-          <div className="flex gap-3 pt-1">
-            <Button
-              onClick={() => window.location.reload()}
-              variant="outline"
-              className="flex-1 bg-white/5 border-white/10 text-zinc-300 hover:bg-white/10 hover:text-white h-9 rounded-lg text-xs"
-            >
-              Refresh Status
-            </Button>
+          {/* Actions */}
+          <div className="flex gap-3 pt-2">
             {onLogout && (
               <Button
                 variant="outline"
-                onClick={async () => {
-                  try {
-                    await onLogout();
-                  } catch (e) {
-                    console.error('Logout error:', e);
-                  }
-                  router.push('/login');
-                }}
-                className="flex-1 bg-white/5 border-white/10 text-zinc-300 hover:bg-white/10 hover:text-white h-9 rounded-lg text-xs"
+                onClick={onLogout}
+                className="flex-1 border-zinc-700 text-zinc-300 hover:bg-zinc-800"
               >
                 Sign Out
               </Button>
             )}
+            <Button
+              onClick={() => router.push('/student')}
+              variant="outline"
+              className="flex-1 border-zinc-700 text-zinc-300 hover:bg-zinc-800"
+            >
+              Back to Dashboard
+            </Button>
           </div>
-
-        </div>
-      </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }

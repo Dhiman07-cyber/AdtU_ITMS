@@ -613,9 +613,9 @@ export default function AdminStudents() {
                           </TableCell>
                         </TableRow>
                       )}
-                      {uniqueFilteredStudents.map((student) => (
+                      {uniqueFilteredStudents.map((student, index) => (
                         <StudentRow
-                          key={student.id}
+                          key={student.uid || student.id || `student-${index}`}
                           student={student}
                           theme={theme}
                           busDisplay={getBusDisplay(student.busId)}

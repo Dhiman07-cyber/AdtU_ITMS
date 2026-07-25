@@ -145,7 +145,7 @@ export default function DriverStudentsPage() {
   const [shiftFilter, setShiftFilter] = useState<string>("all");
 
   // Use Supabase hook for waiting flags - hook expects routeId
-  const { flags: waitingFlags, loading: waitingFlagsLoading, error: waitingFlagsError, acknowledgeFlag } = useWaitingFlags(driverData?.routeId || driverData?.routeId || '');
+  const { flags: waitingFlags, loading: waitingFlagsLoading, error: waitingFlagsError } = useWaitingFlags(driverData?.routeId || driverData?.routeId || '');
 
   // Fetch driver data and students on assigned bus
   useEffect(() => {
@@ -197,14 +197,33 @@ export default function DriverStudentsPage() {
 
   const acknowledgeWaitingFlag = async (flagId: string) => {
     if (!currentUser) return;
+
     setAcknowledging(flagId);
     try {
-      const result = await acknowledgeFlag(flagId, currentUser.uid);
+      // Get Firebase ID token
+      const token = await currentUser.getIdToken();
+
+      // Call ack-waiting API endpoint
+      const response = await fetch('/api/ack-waiting', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          idToken: token,
+          waitingFlagId: flagId
+        })
+      });
+
+      const result = await response.json();
+
       if (!result.success) {
         console.error('Failed to acknowledge waiting flag:', result.error);
+        // Handle error (show notification, etc.)
       }
     } catch (error) {
       console.error('Error acknowledging waiting flag:', error);
+      // Handle error (show notification, etc.)
     } finally {
       setAcknowledging(null);
     }

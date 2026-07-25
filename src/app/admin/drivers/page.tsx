@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useAuth } from '@/contexts/auth-context';
 import { useEffect, useState, useMemo, useCallback, memo } from 'react';
@@ -153,7 +153,7 @@ const DriverRow = memo(function DriverRow({
             <DropdownMenuLabel className={cn("font-semibold px-2 py-1.5 text-sm", theme === 'dark' ? "text-white" : "text-[#111827]")}>Actions</DropdownMenuLabel>
             <DropdownMenuSeparator className={cn(theme === 'dark' ? "bg-gray-600" : "bg-[#E5E7EB]")} />
             <DropdownMenuItem asChild>
-              <Link href={`/admin/drivers/view/${driver.id}`} className={cn(
+              <Link href={`/admin/drivers/view/${driver.uid || driver.id}`} className={cn(
                 "px-2 py-1.5 text-sm",
                 theme === 'dark' ? "text-white hover:bg-gray-800 focus:bg-gray-800" : "text-[#111827] hover:bg-gray-100 focus:bg-gray-100"
               )}>
@@ -162,7 +162,7 @@ const DriverRow = memo(function DriverRow({
               </Link>
             </DropdownMenuItem>
             <DropdownMenuItem asChild>
-              <Link href={`/admin/drivers/edit/${driver.id}`} className={cn(
+              <Link href={`/admin/drivers/edit/${driver.uid || driver.id}`} className={cn(
                 "px-2 py-1.5 text-sm",
                 theme === 'dark' ? "text-white hover:bg-gray-800 focus:bg-gray-800" : "text-[#111827] hover:bg-gray-100 focus:bg-gray-100"
               )}>
@@ -176,7 +176,7 @@ const DriverRow = memo(function DriverRow({
                 "px-2 py-1.5 text-sm cursor-pointer transition-colors",
                 theme === 'dark' ? "text-white hover:!bg-red-600 focus:!bg-red-600" : "text-[#111827] hover:!bg-red-600 focus:!bg-red-600"
               )}
-              onClick={() => onDelete({ id: driver.id, name: driver.name || driver.fullName })}
+              onClick={() => onDelete({ id: driver.uid || driver.id, name: driver.name || driver.fullName })}
             >
               <Trash2 className="mr-2 h-3.5 w-3.5" />
               Delete
@@ -508,12 +508,12 @@ export default function AdminDrivers() {
                 </TableHeader>
                 {filteredDrivers.length > 0 && (
                   <TableBody>
-                    {filteredDrivers.map((driver) => (
+                    {filteredDrivers.map((driver, index) => (
                       <DriverRow
-                        key={driver.id}
+                        key={driver.uid || driver.id || `driver-${index}`}
                         driver={driver}
                         theme={theme}
-                        busDisplay={getBusDisplay(driver.busId || driver.busId)}
+                        busDisplay={getBusDisplay(driver.busId || driver.bus_id)}
                         onDelete={handleDeleteClick}
                       />
                     ))}

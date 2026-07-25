@@ -11,7 +11,7 @@ import { deriveAcademicLifecycle } from '@/lib/utils/deadline-computation';
 
 const SETTINGS_COLLECTION = 'settings';
 const DEADLINE_DOC_ID = 'deadline';
-const REFERENCE_YEAR = 2026;
+
 
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -30,16 +30,22 @@ const getOrdinal = (day: number): string => {
 
 export async function findActiveConfig(): Promise<DeadlineConfig> {
   if (!adminDb) {
-    throw new Error('Firebase Admin SDK is not initialized.');
+    throw new Error('Firebase Admin SDK is not initialized. Please try again later.');
   }
 
   const doc = await adminDb.collection(SETTINGS_COLLECTION).doc(DEADLINE_DOC_ID).get();
-  const firestoreData = doc.exists ? (doc.data() as Record<string, any>) : {};
+  if (!doc.exists) {
+    throw new Error('Deadline configuration not found in Firestore (settings/deadline). Please configure deadline settings and try again later.');
+  }
+  const firestoreData = doc.data() as Record<string, any>;
+  if (!firestoreData.academicSessionStart || typeof firestoreData.academicSessionStart.month !== 'number') {
+    throw new Error('Academic session start is not configured in Firestore deadline settings. Please try again later.');
+  }
 
-  const startMonth = firestoreData.academicSessionStart?.month ?? 6; // default July (0-indexed 6)
-  const startDay = firestoreData.academicSessionStart?.day ?? 1;
-
-  const lifecycle = deriveAcademicLifecycle(startMonth, startDay, REFERENCE_YEAR);
+  const startMonth = firestoreData.academicSessionStart.month;
+  const startDay = firestoreData.academicSessionStart.day || 1;
+  const currentYear = new Date().getFullYear();
+  const lifecycle = deriveAcademicLifecycle(startMonth, startDay, currentYear);
 
   const config: DeadlineConfig = {
     description: firestoreData.description ?? 'Academic Calendar Configuration',
@@ -189,3 +195,5 @@ export async function saveConfig(config: DeadlineConfig, updatedByUid?: string):
 
   await adminDb.collection(SETTINGS_COLLECTION).doc(DEADLINE_DOC_ID).set(payload, { merge: true });
 }
+
+

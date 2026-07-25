@@ -1021,7 +1021,6 @@ RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE
     v_bus_rec JSONB; v_driver_rec JSONB; v_current TEXT; v_is_reserved BOOLEAN;
     v_updated_buses TEXT[] := '{}'; v_updated_drivers TEXT[] := '{}';
-    v_now TIMESTAMPTZ := NOW();
 BEGIN
     FOR v_bus_rec IN SELECT * FROM jsonb_array_elements(p_bus_updates) LOOP
         SELECT driver_uid INTO v_current FROM buses WHERE id = v_bus_rec->>'bus_id' FOR UPDATE;
@@ -1034,7 +1033,7 @@ BEGIN
     END LOOP;
 
     FOR v_bus_rec IN SELECT * FROM jsonb_array_elements(p_bus_updates) LOOP
-        UPDATE buses SET driver_uid = v_bus_rec->>'new_driver_uid', updated_at = v_now WHERE id = v_bus_rec->>'bus_id';
+        UPDATE buses SET driver_uid = v_bus_rec->>'new_driver_uid', updated_at = NOW() WHERE id = v_bus_rec->>'bus_id';
         v_updated_buses := array_append(v_updated_buses, v_bus_rec->>'bus_id');
     END LOOP;
 
@@ -1045,32 +1044,10 @@ BEGIN
             route_id = v_driver_rec->>'new_route_id',
             is_reserved = v_is_reserved,
             status = CASE WHEN v_is_reserved THEN 'reserved' ELSE 'active' END,
-            updated_at = v_now
+            updated_at = NOW()
         WHERE uid = v_driver_rec->>'driver_uid';
         v_updated_drivers := array_append(v_updated_drivers, v_driver_rec->>'driver_uid');
     END LOOP;
-
-    -- Dual-write to driver_assignments (canonical table)
-    -- Deactivate prior active assignments for affected drivers and buses
-    UPDATE driver_assignments SET
-        unassigned_at = v_now,
-        is_active = FALSE
-    WHERE is_active = TRUE AND (
-        driver_uid = ANY(v_updated_drivers) OR bus_id = ANY(v_updated_buses)
-    );
-
-    -- Create new active assignments for each driver update
-    INSERT INTO driver_assignments (driver_uid, bus_id, route_id, assigned_at, assigned_by, is_active, reason)
-    SELECT
-        v_driver_rec->>'driver_uid',
-        v_driver_rec->>'new_bus_id',
-        v_driver_rec->>'new_route_id',
-        v_now,
-        'admin',
-        TRUE,
-        CASE WHEN (v_driver_rec->>'is_reserved')::boolean THEN 'admin_reassign' ELSE 'assignment' END
-    FROM jsonb_array_elements(p_driver_updates) AS v_driver_rec
-    WHERE v_driver_rec->>'new_bus_id' IS NOT NULL;
 
     RETURN jsonb_build_object('success', true, 'updatedBuses', to_jsonb(v_updated_buses), 'updatedDrivers', to_jsonb(v_updated_drivers));
 END;
@@ -2095,7 +2072,9 @@ BEGIN
         FROM public.applications
         WHERE state = 'verified_upcoming'
           AND (
-              (target_session->>'startYear')::INTEGER = p_session_year
+              target_session IS NULL
+              OR target_session->>'startYear' IS NULL
+              OR (target_session->>'startYear')::INTEGER = p_session_year
           )
         FOR UPDATE SKIP LOCKED   -- skip any already being processed
     LOOP

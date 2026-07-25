@@ -22,10 +22,11 @@ export const POST = withSecurity(
 
     const supabase = getSupabaseServer();
 
-    // D9: Verify driver is assigned to this bus via driver_assignments
-    const [busResult, assignedDriverUid] = await Promise.all([
-      supabase.from('buses').select('id').eq('id', busId).maybeSingle(),
+    // Verify driver assignment across active_trips, driver_assignments, buses, and driver_profiles
+    const [busResult, assignedDriverUid, driverProfileResult] = await Promise.all([
+      supabase.from('buses').select('id, driver_uid').eq('id', busId).maybeSingle(),
       getDriverUidByBusId(busId),
+      supabase.from('driver_profiles').select('bus_id').eq('uid', driverUid).maybeSingle()
     ]);
 
     if (!busResult.data) {
@@ -39,7 +40,12 @@ export const POST = withSecurity(
       .eq('status', 'active')
       .maybeSingle();
 
-    const driverClaimsBus = activeTripCheck?.bus_id === busId || assignedDriverUid === driverUid;
+    const driverClaimsBus =
+      activeTripCheck?.bus_id === busId ||
+      assignedDriverUid === driverUid ||
+      busResult.data.driver_uid === driverUid ||
+      driverProfileResult.data?.bus_id === busId;
+
     if (!driverClaimsBus) {
       return NextResponse.json(
         { error: 'Driver is not assigned to this bus' },

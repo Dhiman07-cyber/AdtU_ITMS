@@ -2,10 +2,10 @@
 import { headers } from 'next/headers';
 import { adminAuth } from '@/lib/firebase-admin';
 import { getSupabaseServer } from '@/lib/supabase-server';
-import { getUserById, updateDriver } from '@/domains/identity';
+import { getUserById } from '@/domains/identity';
 import { getBusById, updateBus } from '@/domains/fleet';
 import * as routeService from '@/domains/route';
-import { assignDriverToBus, unassignDriver } from '@/domains/fleet/repositories/driver-assignment.repository';
+import { assignDriverToBus, unassignDriver, getActiveAssignmentByBusId } from '@/domains/fleet/repositories/driver-assignment.repository';
 
 export async function PUT(request: Request) {
     try {
@@ -83,10 +83,11 @@ export async function PUT(request: Request) {
         }
 
         // ---------------------------------------------------------
-        // 2. Driver Logic
+        // 2. Driver Logic — resolve current driver from canonical source
         // ---------------------------------------------------------
         const newDriverId = driverUID;
-        const currentDriverId = oldBusData.assignedDriverId || oldBusData.driverUID;
+        const currentAssignment = await getActiveAssignmentByBusId(busId);
+        const currentDriverId = currentAssignment?.driverUid ?? null;
 
         if (newDriverId && newDriverId !== currentDriverId) {
             if (oldBusData.activeTripId) {
@@ -108,19 +109,10 @@ export async function PUT(request: Request) {
             }
         }
 
-        // ─── COMMIT TO POSTGRESQL (Canonical Source of Truth) ───
+        // ─── COMMIT — canonical source of truth ───
 
-        // 1. Unassign Old Driver in PostgreSQL (if driver changed)
+        // 1. Unassign old driver via canonical repository
         if (newDriverId && newDriverId !== currentDriverId && currentDriverId) {
-            try {
-                await updateDriver(currentDriverId, {
-                    busId: null,
-                    routeId: null,
-                });
-            } catch (err) {
-                console.error(`⚠️ Failed to unassign old driver ${currentDriverId} in PG:`, err);
-            }
-
             try {
                 await unassignDriver(currentDriverId, 'admin_reassign');
             } catch (err) {
@@ -128,19 +120,9 @@ export async function PUT(request: Request) {
             }
         }
 
-        // 2. Assign New Driver in PostgreSQL (if driver changed)
+        // 2. Assign new driver via canonical repository
         if (newDriverId && newDriverId !== currentDriverId) {
             const finalRouteId = routeChanged ? newRouteId : oldBusData.routeId;
-            try {
-                await updateDriver(newDriverId, {
-                    busId: busId,
-                    routeId: finalRouteId,
-                    status: 'active'
-                });
-            } catch (err) {
-                console.error(`⚠️ Failed to assign new driver ${newDriverId} in PG:`, err);
-            }
-
             try {
                 await assignDriverToBus(newDriverId, busId, {
                     routeId: finalRouteId,
@@ -149,15 +131,6 @@ export async function PUT(request: Request) {
                 });
             } catch (err) {
                 console.error(`⚠️ Failed to assign new driver ${newDriverId} in driver_assignments:`, err);
-            }
-        } else if (routeChanged && currentDriverId) {
-            // If driver didn't change but route did, update existing driver's route
-            try {
-                await updateDriver(currentDriverId, {
-                    routeId: newRouteId,
-                });
-            } catch (err) {
-                console.error(`⚠️ Failed to update existing driver ${currentDriverId} route in PG:`, err);
             }
         }
 
@@ -170,11 +143,6 @@ export async function PUT(request: Request) {
         if (shift) busUpdates.shift = newShift;
         busUpdates.load = { morningCount: inputMorning, eveningCount: inputEvening };
         busUpdates.currentMembers = newCurrentMembers;
-        if (newDriverId !== undefined) {
-            busUpdates.assignedDriverId = newDriverId || null;
-            busUpdates.activeDriverId = newDriverId || null;
-            busUpdates.driverUID = newDriverId || null;
-        }
         if (routeId) {
             busUpdates.routeId = routeId;
         }

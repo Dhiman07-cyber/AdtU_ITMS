@@ -2,7 +2,7 @@
  * POST /api/driver/end-journey-v2
  * 
  * End trip with comprehensive event-driven cleanup:
- * - Parallel Supabase cleanup (driver_location_updates, waiting_flags, missed_bus_requests, device_sessions)
+ * - Parallel Supabase cleanup (driver_location_updates, waiting_flags, device_sessions)
  * - Broadcast notifications
  * - FCM notifications to students
  * - Stale FCM token auto-removal
@@ -24,7 +24,6 @@ interface CleanupStats {
   waitingFlags: number;
   driverLocationUpdates: number;
   activeTrips: number;
-  missedBusRequests: number;
   deviceSessions: number;
   totalTime: number;
 }
@@ -35,8 +34,7 @@ interface CleanupStats {
  * Tables cleaned on trip end:
  * 1. driver_location_updates — historical breadcrumbs
  * 2. waiting_flags          — raised/acknowledged flags for this bus
- * 3. missed_bus_requests    — expire pending requests
- * 4. device_sessions        — driver's device sessions
+ * 3. device_sessions        — driver's device sessions
  */
 async function cleanupSupabase(
   supabase: any,
@@ -77,22 +75,7 @@ async function cleanupSupabase(
         }
       }),
 
-    // 4. Expire any pending missed_bus_requests that reference this bus's route
-    //    These are no longer actionable once the trip has ended
-    supabase
-      .from('missed_bus_requests')
-      .update({ status: 'expired' })
-      .eq('status', 'pending')
-      .eq('route_id', routeId)
-      .then(({ count, error }: { count: number | null, error: any }) => {
-        if (error) console.error('❌ Error expiring missed_bus_requests:', error);
-        else {
-          stats.missedBusRequests = count || 0;
-          console.log(`✅ Expired ${count || 0} missed_bus_requests`);
-        }
-      }),
-
-    // 5. Clean up device sessions for this driver
+    // 4. Clean up device sessions for this driver
     supabase
       .from('device_sessions')
       .delete()
@@ -103,6 +86,16 @@ async function cleanupSupabase(
           stats.deviceSessions = count || 0;
           console.log(`✅ Deleted ${count || 0} device_sessions`);
         }
+      }),
+
+    // 5. Update driver_status to idle
+    supabase
+      .from('driver_status')
+      .update({ status: 'idle', trip_id: null })
+      .eq('driver_uid', driverUid)
+      .then(({ error }: { error: any }) => {
+        if (error) console.error('❌ Error updating driver_status on end trip:', error);
+        else console.log('✅ Updated driver_status to idle');
       })
   ]);
 

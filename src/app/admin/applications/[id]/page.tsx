@@ -22,7 +22,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { Application } from '@/lib/types/application';
 import { deriveAcademicLifecycle } from '@/lib/utils/deadline-computation';
-import { isUpcomingApplication, resolveApplicationType } from '@/lib/utils/application-eligibility';
+import { isUpcomingApplication } from '@/lib/utils/application-eligibility';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { SectionCard } from '@/components/application/section-card';
 import { StatusBadge } from '@/components/application/status-badge';
@@ -171,14 +171,7 @@ export default function AdminApplicationDetailPage() {
     }
   }, [application, busData, allBuses, allRoutes, stagedBus]);
 
-  const isUpcoming = isUpcomingApplication(application);
-  const appType = resolveApplicationType(application);
-  const isRenewal = appType === 'renewal' || appType === 'renewal_after_soft_block';
-
-  // For upcoming applications, Reassignment Required is NOT needed now — only if session activation cron ran and failed auto-approval (state === 'pending_seat_allocation')
-  const isReassignmentRequired = isUpcoming
-    ? application?.state === 'pending_seat_allocation'
-    : capacityStatus.needsCapacityReview;
+  const isReassignmentRequired = capacityStatus.needsCapacityReview;
 
   const openReassignment = async () => {
     if (!application || !busData) return;
@@ -679,11 +672,6 @@ export default function AdminApplicationDetailPage() {
   const [pendingUseModified, setPendingUseModified] = useState(false);
 
   const checkCapacityAndApprove = (useModified: boolean) => {
-    // Upcoming session applications MUST NOT check current session bus capacity or open capacity warning modal!
-    if (isUpcoming) {
-      handleApprove(useModified);
-      return;
-    }
     if (stagedBus) {
       // Staged bus chosen, bypass original capacity check
       handleApprove(useModified);
@@ -985,16 +973,16 @@ export default function AdminApplicationDetailPage() {
                             checkCapacityAndApprove(false);
                           }
                         }}
-                        disabled={processing || (!isUpcoming && capacityStatus.needsCapacityReview && !stagedBus)}
+                        disabled={processing || (capacityStatus.needsCapacityReview && !stagedBus)}
                         className={cn(
                           "flex-1 md:flex-none gap-2 h-11 px-6 md:min-w-[120px]",
-                          (!isUpcoming && capacityStatus.needsCapacityReview && !stagedBus)
+                          (capacityStatus.needsCapacityReview && !stagedBus)
                             ? "bg-emerald-600/50 text-white/50 cursor-not-allowed shadow-lg shadow-emerald-900/20"
                             : "bg-emerald-600 hover:bg-emerald-700 text-white shadow-xl shadow-emerald-900/10"
                         )}
                       >
                         {processing ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
-                        {isUpcoming ? "Verify" : "Approve"}
+                        {isUpcomingApplication(application) ? "Verify" : "Approve"}
                       </Button>
                       {application.formData?.paymentInfo?.paymentMode === 'online' && (
                         <Button
@@ -1078,9 +1066,7 @@ export default function AdminApplicationDetailPage() {
                 <div className="flex items-center gap-2 justify-between w-full">
                   <div className="flex items-center gap-2">
                     <div className="h-5 w-1 bg-emerald-500 rounded-full"></div>
-                    <h3 className="text-[11px] font-bold text-zinc-500 uppercase tracking-[0.2em]">
-                      {isRenewal ? "Renewal Pass Configuration" : isUpcoming ? "Upcoming Session Configuration" : "Service Configuration"}
-                    </h3>
+                    <h3 className="text-[11px] font-bold text-zinc-500 uppercase tracking-[0.2em]">Service Configuration</h3>
                   </div>
                   {hasUnsavedChanges && (
                     <Badge variant="outline" className="bg-amber-500/10 text-amber-400 border-amber-500/20 text-[10px] py-0.5 px-2 font-medium animate-pulse">
@@ -1092,142 +1078,73 @@ export default function AdminApplicationDetailPage() {
 
                 {/* Content */}
                 <div className="grid grid-cols-2 gap-x-8 gap-y-5">
-                  {isRenewal ? (
-                    <>
-                      <InfoRow label="Application Type" value="Pass Renewal Application" />
-                      <InfoRow label="Existing Student UID" value={(application.formData as any)?.existingStudentUid || application.applicantUid} isMono />
-                      <InfoRow label="Target Session" value={`${sessionStartYear} - ${sessionEndYear}`} />
-                      <InfoRow label="Renewed Shift" value={application.formData?.shift || 'Flexible'} />
-                      <div className="flex flex-col gap-1 min-w-0">
-                        <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Renewed Route</span>
-                        <span className="text-[14px] font-semibold text-zinc-300">
-                          {application.formData?.routeId ? `Route ${application.formData.routeId.replace('route_', '')}` : 'Not Assigned'}
-                        </span>
-                      </div>
-                      <InfoRow
-                        label="Renewed Bus Stop"
-                        value={(() => {
-                          const raw_stop_name = application.formData?.stop_name || (application.formData as any)?.pickupPoint;
-                          if (!raw_stop_name) return '—';
-                          let stop_display = raw_stop_name;
-                          if (routeData?.stops) {
-                            const stop = routeData.stops.find((s: any) => s.id === raw_stop_name || s.stop_name === raw_stop_name || s.name === raw_stop_name);
-                            stop_display = stop ? stop.name || stop.stop_name || raw_stop_name : raw_stop_name;
-                          }
-                          return stop_display.charAt(0).toUpperCase() + stop_display.slice(1);
-                        })()}
-                      />
-                      <InfoRow
-                        label="Pass Validity"
-                        value={deadlineConfig ? getDerivedValidUntilText() : 'Loading...'}
-                      />
-                      <InfoRow label="Renewal Status" value={application.state === 'approved' ? 'Pass Renewed' : 'Pending Renewal Review'} />
-                    </>
-                  ) : isUpcoming ? (
-                    <>
-                      <InfoRow label="Application Type" value="Future Session Pass Application" />
-                      <InfoRow label="Target Academic Session" value={`${sessionStartYear} - ${sessionEndYear}`} />
-                      <InfoRow label="Target Start Date" value={`July 1, ${sessionStartYear}`} />
-                      <InfoRow label="Requested Shift" value={application.formData?.shift || 'Flexible'} />
-                      <div className="flex flex-col gap-1 min-w-0">
-                        <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Requested Route</span>
-                        <span className="text-[14px] font-semibold text-zinc-300">
-                          {application.formData?.routeId ? `Route ${application.formData.routeId.replace('route_', '')}` : 'Not Assigned'}
-                        </span>
-                      </div>
-                      <InfoRow
-                        label="Requested Bus Stop"
-                        value={(() => {
-                          const raw_stop_name = application.formData?.stop_name || (application.formData as any)?.pickupPoint;
-                          if (!raw_stop_name) return '—';
-                          let stop_display = raw_stop_name;
-                          if (routeData?.stops) {
-                            const stop = routeData.stops.find((s: any) => s.id === raw_stop_name || s.stop_name === raw_stop_name || s.name === raw_stop_name);
-                            stop_display = stop ? stop.name || stop.stop_name || raw_stop_name : raw_stop_name;
-                          }
-                          return stop_display.charAt(0).toUpperCase() + stop_display.slice(1);
-                        })()}
-                      />
-                      <InfoRow
-                        label="Eligible Activation Date"
-                        value={application.eligibleApproval ? new Date(application.eligibleApproval).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Session Start'}
-                      />
-                      <InfoRow
-                        label="Activation Status"
-                        value={application.state === 'verified_upcoming' ? 'Verified (Awaiting Session Activation)' : (application.state === 'pending_seat_allocation' ? 'Pending Seat Allocation' : 'Submitted (Pending Verification)')}
-                      />
-                    </>
-                  ) : (
-                    <>
-                      <div className="flex flex-col gap-1 min-w-0">
-                        <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Route Assignment</span>
-                        <div className="flex items-center gap-2">
-                          <span className="text-[14px] font-semibold text-zinc-300">
-                            {application.formData?.routeId ? `Route ${application.formData.routeId.replace('route_', '')}` : 'Not Assigned'}
-                          </span>
-                          {routeError && !application.formData?.busId && (
-                            <Badge variant="destructive" className="h-5 text-[10px] px-1.5 py-0" title="The assigned route doesn't exist or was deleted">
-                              <AlertTriangle className="h-3 w-3 mr-1" />
-                              Missing
-                            </Badge>
-                          )}
-                        </div>
-                      </div>
-                      <InfoRow label="Bus Number" value={busData?.busNumber || 'PENDING'} isMono />
-                      <InfoRow label="Operating Shift" value={application.formData?.shift || 'Flexible'} />
-                      <div className="flex flex-col gap-1.5 min-w-0">
-                        <Label className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Start Year</Label>
-                        <Select
-                          value={sessionStartYear.toString()}
-                          onValueChange={(value) => {
-                            const start = parseInt(value);
-                            setSessionStartYear(start);
-                            setSessionEndYear(start + 1);
-                          }}
-                          disabled={application.state !== 'submitted'}
-                        >
-                          <SelectTrigger className="h-9 bg-white/5 border-white/10 hover:bg-white/10 text-white text-xs rounded-lg transition-colors focus:ring-1 focus:ring-indigo-500">
-                            <SelectValue placeholder="Start Year" />
-                          </SelectTrigger>
-                          <SelectContent className="bg-[#12131A] border-slate-800 text-white">
-                            <SelectItem value={sessionStartYearBase.toString()}>{sessionStartYearBase}</SelectItem>
-                            <SelectItem value={nextSessionStartYear.toString()}>{nextSessionStartYear}</SelectItem>
-                            {sessionStartYear !== sessionStartYearBase && sessionStartYear !== nextSessionStartYear && sessionStartYear !== 0 && (
-                              <SelectItem value={sessionStartYear.toString()}>{sessionStartYear}</SelectItem>
-                            )}
-                          </SelectContent>
-                        </Select>
-                      </div>
+                  <div className="flex flex-col gap-1 min-w-0">
+                    <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Route Assignment</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[14px] font-semibold text-zinc-300">
+                        {application.formData?.routeId ? `Route ${application.formData.routeId.replace('route_', '')}` : 'Not Assigned'}
+                      </span>
+                      {routeError && !application.formData?.busId && !application.formData?.busId && (
+                        <Badge variant="destructive" className="h-5 text-[10px] px-1.5 py-0" title="The assigned route doesn't exist or was deleted">
+                          <AlertTriangle className="h-3 w-3 mr-1" />
+                          Missing
+                        </Badge>
+                      )}
+                    </div>
+                  </div>
+                  <InfoRow label="Bus Number" value={busData?.busNumber || 'PENDING'} isMono />
+                  <InfoRow label="Operating Shift" value={application.formData?.shift || 'Flexible'} />
+                  <div className="flex flex-col gap-1.5 min-w-0">
+                    <Label className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Start Year</Label>
+                    <Select
+                      value={sessionStartYear.toString()}
+                      onValueChange={(value) => {
+                        const start = parseInt(value);
+                        setSessionStartYear(start);
+                        setSessionEndYear(start + 1);
+                      }}
+                      disabled={application.state !== 'submitted'}
+                    >
+                      <SelectTrigger className="h-9 bg-white/5 border-white/10 hover:bg-white/10 text-white text-xs rounded-lg transition-colors focus:ring-1 focus:ring-indigo-500">
+                        <SelectValue placeholder="Start Year" />
+                      </SelectTrigger>
+                      <SelectContent className="bg-[#12131A] border-slate-800 text-white">
+                        <SelectItem value={sessionStartYearBase.toString()}>{sessionStartYearBase}</SelectItem>
+                        <SelectItem value={nextSessionStartYear.toString()}>{nextSessionStartYear}</SelectItem>
+                        {sessionStartYear !== sessionStartYearBase && sessionStartYear !== nextSessionStartYear && sessionStartYear !== 0 && (
+                          <SelectItem value={sessionStartYear.toString()}>{sessionStartYear}</SelectItem>
+                        )}
+                      </SelectContent>
+                    </Select>
+                  </div>
 
-                      <InfoRow
-                        label="End Year"
-                        value={sessionEndYear ? sessionEndYear.toString() : '—'}
-                      />
+                  <InfoRow
+                    label="End Year"
+                    value={sessionEndYear ? sessionEndYear.toString() : '—'}
+                  />
 
-                      <InfoRow
-                        label="Valid Until"
-                        value={deadlineConfig ? getDerivedValidUntilText() : 'Loading...'}
-                      />
+                  <InfoRow
+                    label="Valid Until"
+                    value={deadlineConfig ? getDerivedValidUntilText() : 'Loading...'}
+                  />
 
-                      <InfoRow
-                        label="Assigned Pilot"
-                        value={(application as any).assignedDriverName || driverData?.name || driverData?.fullName || busData?.driverName || 'Allocating Pilot...'}
-                      />
-                      <InfoRow
-                        label="Bus Stop"
-                        value={(() => {
-                          const raw_stop_name = application.formData?.stop_name || (application.formData as any)?.pickupPoint;
-                          if (!raw_stop_name) return '—';
-                          let stop_display = raw_stop_name;
-                          if (routeData?.stops) {
-                            const stop = routeData.stops.find((s: any) => s.id === raw_stop_name || s.stop_name === raw_stop_name || s.name === raw_stop_name);
-                            stop_display = stop ? stop.name || stop.stop_name || raw_stop_name : raw_stop_name;
-                          }
-                          return stop_display.charAt(0).toUpperCase() + stop_display.slice(1);
-                        })()}
-                      />
-                    </>
-                  )}
+                  <InfoRow
+                    label="Assigned Pilot"
+                    value={(application as any).assignedDriverName || driverData?.name || driverData?.fullName || busData?.driverName || 'Allocating Pilot...'}
+                  />
+                  <InfoRow
+                    label="Bus Stop"
+                    value={(() => {
+                      const raw_stop_name = application.formData?.stop_name || (application.formData as any)?.pickupPoint;
+                      if (!raw_stop_name) return '—';
+                      let stop_display = raw_stop_name;
+                      if (routeData?.stops) {
+                        const stop = routeData.stops.find((s: any) => s.id === raw_stop_name || s.stop_name === raw_stop_name || s.name === raw_stop_name);
+                        stop_display = stop ? stop.name || stop.stop_name || raw_stop_name : raw_stop_name;
+                      }
+                      return stop_display.charAt(0).toUpperCase() + stop_display.slice(1);
+                    })()}
+                  />
 
                   {stagedBus && (
                     <div className="col-span-2 mt-4 p-4 rounded-xl border border-purple-500/30 bg-purple-500/5 text-purple-200 shadow-lg shadow-purple-950/20">

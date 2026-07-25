@@ -208,7 +208,6 @@ export function computeNetAssignments(
         }
 
         if (op.type === "swap") {
-            // Swap: two drivers exchange buses
             const swapDriverId = op.swapDriverId;
             if (!swapDriverId) continue;
 

@@ -96,11 +96,11 @@ export const POST = withSecurity<LocationUpdateBody>(
       .eq('status', 'active')
       .maybeSingle();
 
-    if (activeTripError || !activeTrip || activeTrip.route_id !== routeId) {
+    if (activeTripError || !activeTrip) {
       return NextResponse.json({ error: 'No active session found for this driver/bus' }, { status: 403 });
     }
 
-    if (tripId && activeTrip.trip_id !== tripId) {
+    if (tripId && activeTrip.trip_id !== tripId && String(activeTrip.trip_id) !== String(tripId)) {
       return NextResponse.json({ error: 'Trip mismatch for location update' }, { status: 403 });
     }
 
@@ -128,7 +128,7 @@ export const POST = withSecurity<LocationUpdateBody>(
     const timestampIso = now.toISOString();
     const commonData = {
       bus_id: busId,
-      route_id: routeId,
+      route_id: routeId || activeTrip.route_id,
       driver_uid: driverUid,
       lat: latNum,
       lng: lngNum,
@@ -157,7 +157,8 @@ export const POST = withSecurity<LocationUpdateBody>(
 
     const failedWrite = writeResults.find(writeFailed);
     if (failedWrite) {
-      return NextResponse.json({ error: 'Failed to save location update' }, { status: 500 });
+      const writeErr = failedWrite.status === 'rejected' ? failedWrite.reason : (failedWrite.value as any)?.error;
+      return NextResponse.json({ error: 'Failed to save location update', details: writeErr?.message }, { status: 500 });
     }
 
     return NextResponse.json({

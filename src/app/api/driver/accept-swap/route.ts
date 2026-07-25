@@ -127,74 +127,8 @@ export const POST = withSecurity(
       });
     }
 
-    // Send FCM notification to all students on the bus
-    try {
-      const students = await getStudentsByBusIds([busId]);
-      const studentIds = students.map((s: any) => s.uid);
-      const fcmTokens: string[] = [];
-
-      // Fetch FCM tokens concurrently
-      const tokenSnapshots = await Promise.all(
-        studentIds.map((uid: string) => adminDb.collection('fcm_tokens').where('userUid', '==', uid).get())
-      );
-
-      for (const snapshot of tokenSnapshots) {
-        snapshot.docs.forEach((tokenDoc: any) => {
-          fcmTokens.push(tokenDoc.data().deviceToken);
-        });
-      }
-
-      if (fcmTokens.length > 0 && adminAuth.messaging) {
-        await adminAuth.messaging().sendEach(
-          fcmTokens.map(token => ({
-            token,
-            notification: {
-              title: 'Driver Changed',
-              body: `Your bus driver has been changed for this trip`
-            },
-            data: {
-              type: 'driver_swapped',
-              busId,
-              newDriverUid: toDriverUid
-            }
-          }))
-        );
-      }
-    } catch (fcmError) {
-      console.error('Error sending FCM notifications:', fcmError);
-    }
-
-    // Notify the original driver
-    try {
-      const tokensSnapshot = await adminDb
-        .collection('fcm_tokens')
-        .where('userUid', '==', fromDriverUid)
-        .get();
-
-      const driverTokens: string[] = [];
-      tokensSnapshot.docs.forEach((tokenDoc: any) => {
-        driverTokens.push(tokenDoc.data().deviceToken);
-      });
-
-      if (driverTokens.length > 0 && adminAuth.messaging) {
-        await adminAuth.messaging().sendEach(
-          driverTokens.map(token => ({
-            token,
-            notification: {
-              title: 'Swap Request Accepted',
-              body: `The driver has accepted your swap request`
-            },
-            data: {
-              type: 'swap_accepted',
-              swapRequestId,
-              busId
-            }
-          }))
-        );
-      }
-    } catch (fcmError) {
-      console.error('Error sending FCM notification:', fcmError);
-    }
+    // Note: DriverSwapSupabase.acceptSwapRequest already handles durable state updates, 
+    // notifications in PostgreSQL, and real-time broadcasts. Legacy Firestore FCM manual sends removed.
 
     return NextResponse.json({
       success: true,

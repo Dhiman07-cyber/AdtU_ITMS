@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState, useEffect, useMemo } from 'react';
 import { useAuth } from "@/contexts/auth-context";
@@ -20,7 +20,6 @@ import Link from 'next/link';
 import { motion } from "framer-motion";
 import StudentQRDisplay from "@/components/bus-pass/StudentQRDisplay";
 import { getTransportEntitlement } from '@/lib/entitlement/transport-entitlement';
-import StudentAccessBlockScreen from '@/components/StudentAccessBlockScreen';
 import { supabase } from '@/lib/supabase-client';
 import { authApiFetch } from '@/lib/secure-api-client';
 // SPARK PLAN SAFETY: Migrated to usePaginatedCollection
@@ -29,7 +28,7 @@ import { authApiFetch } from '@/lib/secure-api-client';
 import { PremiumPageLoader } from "@/components/LoadingSpinner";
 
 export default function StudentDashboard() {
-  const { userData, currentUser, signOut } = useAuth();
+  const { userData, currentUser } = useAuth();
   const router = useRouter();
   const [showQRModal, setShowQRModal] = useState(false);
   const [studentData, setStudentData] = useState<any>(null);
@@ -113,10 +112,13 @@ export default function StudentDashboard() {
     if (!busId) return;
 
     const channel = supabase
-      .channel(`active_trips_${busId}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'active_trips', filter: `bus_id=eq.${busId}` }, (payload) => {
+      .channel(`dashboard_driver_status_${busId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'driver_status', filter: `bus_id=eq.${busId}` }, (payload) => {
           if (payload.eventType === 'DELETE') setTripActive(false);
-          else if (payload.new) setTripActive((payload.new as any).status === 'active');
+          else if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
+            const newStatus = (payload.new as any).status;
+            setTripActive(newStatus === 'on_trip' || newStatus === 'enroute');
+          }
       })
       .subscribe();
 
@@ -142,34 +144,24 @@ export default function StudentDashboard() {
   // Note: Expiration checking is handled by AuthContext's isExpired state
   // No need for additional blocking logic here as it's already handled in StudentAuthWrapper
 
-  // Early entitlement check using auth-context userData to prevent loader flash
-  const earlyEntitlement = userData ? getTransportEntitlement(userData) : null;
-  const isEarlyBlocked = earlyEntitlement && !earlyEntitlement.entitled;
-
-  if (loading && !isEarlyBlocked) {
-    return <PremiumPageLoader message="Verifying Account..." subMessage="Checking transport access..." />;
+  if (loading) {
+    return <PremiumPageLoader message="Loading Dashboard" subMessage="Preparing your student portal..." />;
   }
 
+  // Extract key information with better fallbacks
+  const hasPayment = studentData?.paymentInfo?.amountPaid > 0 || studentData?.amountPaid > 0;
+  const paymentAmount = studentData?.paymentInfo?.amountPaid || studentData?.amountPaid || 0;
+  const paymentVerified = studentData?.paymentInfo?.paymentVerified || studentData?.paymentVerified;
+  // If student is approved (status === 'active'), payment should be considered approved
+  const isPaymentApproved = paymentVerified || (studentData?.status === 'active' && hasPayment);
+  const validUntil = studentData?.validUntil ? new Date(studentData.validUntil) : null;
+  // Display-only hint for the renewal banner. NOT used for transport gating.
+  const isExpired = validUntil ? validUntil < new Date() : false;
   // CANONICAL entitlement (Phase 3) — the single answer the dashboard uses to gate
-  // every transport feature or present full-screen lifecycle screen.
-  const entitlement = getTransportEntitlement(studentData ?? userData);
-  const transportEntitled = entitlement.entitled;
-
-  if (!transportEntitled) {
-    return (
-      <StudentAccessBlockScreen
-        validUntil={studentData?.validUntil ?? (userData as any)?.validUntil ?? null}
-        studentName={studentData?.fullName || studentData?.name || (userData as any)?.fullName || (userData as any)?.name || 'Student'}
-        reason={entitlement.reason}
-        onLogout={signOut}
-      />
-    );
-  }
-
+  // every transport feature (QR generation, Track Bus / View Pass actions).
+  const transportEntitled = getTransportEntitlement(studentData ?? userData).entitled;
   const studentName = studentData?.fullName || studentData?.name || userData?.name || 'Student';
   const studentShift = studentData?.shift || 'Not Set';
-  const validUntil = studentData?.validUntil ? new Date(studentData.validUntil) : null;
-  const isExpired = validUntil ? validUntil < new Date() : false;
 
   // Get session years properly
   const sessionStartYear = studentData?.sessionStartYear || studentData?.sessionHistory?.[0]?.start;
@@ -366,7 +358,7 @@ export default function StudentDashboard() {
 
           {/* Enhanced Premium Stats Grid - Mobile Optimized */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-6 lg:gap-8 animate-slide-in-up">
-            {/* Current Status Card — Uses tripActive from Supabase active_trips (dynamic) */}
+            {/* Current Status Card - Uses tripActive from Supabase driver_status (dynamic) */}
             <div className="group cursor-pointer h-full">
               <Card className={`relative overflow-hidden border-2 border-white shadow-lg hover:shadow-xl md:hover:shadow-2xl transition-all duration-500 hover:scale-[1.02] h-full ${tripActive
                 ? 'border-green-400/50 shadow-green-500/20 bg-gradient-to-br from-emerald-900/40 via-green-900/40 to-teal-900/40' // Active Green Theme - Trip is running

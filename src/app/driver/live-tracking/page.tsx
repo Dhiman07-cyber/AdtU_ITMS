@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useAuth } from "@/contexts/auth-context";
@@ -96,17 +96,7 @@ export default function DriverLiveTrackingPage() {
 
   // Map center
   const [mapCenter, setMapCenter] = useState<[number, number]>([0, 0]); // Default center
-  const [hasActiveSwapRequest, setHasActiveSwapRequest] = useState(false);
-  const [swapPeriodInfo, setSwapPeriodInfo] = useState<{
-    startTime: Date | null;
-    endTime: Date | null;
-  } | null>(null);
-  // Track whether current user is sender (requester) or receiver (candidate) of the swap
-  const [swapRole, setSwapRole] = useState<'sender' | 'receiver' | null>(null);
-  // Track swap type: 'assignment' (to reserved driver) or 'exchange' (true swap between two assigned drivers)
-  const [swapType, setSwapType] = useState<'assignment' | 'exchange' | null>(null);
 
-  const [swapRequestLoading, setSwapRequestLoading] = useState(true);
 
   // Map Full Screen State
   const [isFullScreenMap, setIsFullScreenMap] = useState(false);
@@ -444,131 +434,7 @@ export default function DriverLiveTrackingPage() {
 
   // NOTE: Cache clearing removed for production - caching is now enabled
 
-  // Check for active (ACCEPTED) swap requests - only blocks BEFORE the swap period starts
-  useEffect(() => {
-    const checkActiveSwapRequests = async () => {
-      if (!currentUser) {
-        setSwapRequestLoading(false);
-        return;
-      }
 
-      try {
-        const idToken = await currentUser.getIdToken();
-
-        // Check for ACCEPTED outgoing swaps (driver initiated a swap that was accepted)
-        const outgoingResponse = await fetch(
-          `/api/driver-swap/requests?type=outgoing&status=accepted`,
-          {
-            headers: { Authorization: `Bearer ${idToken}` }
-          }
-        );
-
-        // Also check for ACCEPTED incoming swaps (driver accepted someone else's swap request)
-        const incomingResponse = await fetch(
-          `/api/driver-swap/requests?type=incoming&status=accepted`,
-          {
-            headers: { Authorization: `Bearer ${idToken}` }
-          }
-        );
-
-        let hasActiveSwap = false;
-        let swapPeriodStarted = false;
-        let pendingSwapPeriod: { startTime: Date; endTime: Date } | null = null;
-        let detectedSwapRole: 'sender' | 'receiver' | null = null;
-        let detectedSwapType: 'assignment' | 'exchange' | null = null;
-        const now = new Date();
-
-        if (outgoingResponse.ok) {
-          const outgoingData = await outgoingResponse.json();
-          if (outgoingData.requests && outgoingData.requests.length > 0) {
-            console.log('📋 Active outgoing swaps (accepted):', outgoingData.requests.length);
-
-            // Check if any swap period has started
-            for (const swap of outgoingData.requests) {
-              const startTime = swap.timePeriod?.startTime ? new Date(swap.timePeriod.startTime) : null;
-              const endTime = swap.timePeriod?.endTime ? new Date(swap.timePeriod.endTime) : null;
-
-              // If we're within the swap period, driver should be allowed to use live tracking
-              // (they've swapped out, so they're currently "off duty" for their original bus)
-              if (startTime && endTime && now >= startTime && now <= endTime) {
-                swapPeriodStarted = true;
-                console.log('✅ Outgoing swap period is ACTIVE - swap requester is off-duty');
-              } else if (startTime && endTime && now < startTime) {
-                // Store swap period info for display
-                pendingSwapPeriod = { startTime, endTime };
-                // Current user is the SENDER (requester who initiated the swap)
-                detectedSwapRole = 'sender';
-                // Determine swap type: exchange if there's a secondary bus, otherwise assignment
-                detectedSwapType = swap.secondaryBusId ? 'exchange' : 'assignment';
-                console.log('📤 User is SENDER of this swap, type:', detectedSwapType);
-              }
-            }
-
-            // Only block if swap period hasn't started yet
-            if (!swapPeriodStarted) {
-              hasActiveSwap = true;
-            }
-          }
-        }
-
-        if (incomingResponse.ok) {
-          const incomingData = await incomingResponse.json();
-          if (incomingData.requests && incomingData.requests.length > 0) {
-            console.log('📋 Active incoming swaps (accepted):', incomingData.requests.length);
-
-            // Check if any swap period has started
-            for (const swap of incomingData.requests) {
-              const startTime = swap.timePeriod?.startTime ? new Date(swap.timePeriod.startTime) : null;
-              const endTime = swap.timePeriod?.endTime ? new Date(swap.timePeriod.endTime) : null;
-
-              // If we're within the swap period, the acceptor should be allowed to drive
-              if (startTime && endTime && now >= startTime && now <= endTime) {
-                swapPeriodStarted = true;
-                console.log('✅ Incoming swap period is ACTIVE - acceptor can drive the swapped bus');
-              } else if (startTime && endTime && now < startTime) {
-                // Store swap period info for display
-                pendingSwapPeriod = { startTime, endTime };
-                // Current user is the RECEIVER (candidate who accepted the swap)
-                detectedSwapRole = 'receiver';
-                // Determine swap type: exchange if there's a secondary bus, otherwise assignment
-                detectedSwapType = swap.secondaryBusId ? 'exchange' : 'assignment';
-                console.log('📥 User is RECEIVER of this swap, type:', detectedSwapType);
-              }
-            }
-
-            // Only block if swap period hasn't started yet
-            if (!swapPeriodStarted) {
-              hasActiveSwap = true;
-            }
-          }
-        }
-
-        // If swap period has started, don't block access - driver has temporary assignment
-        if (swapPeriodStarted) {
-          hasActiveSwap = false;
-          setSwapPeriodInfo(null);
-          setSwapRole(null);
-          setSwapType(null);
-          console.log('🚌 Swap period in progress - allowing live tracking access');
-        } else if (hasActiveSwap && pendingSwapPeriod) {
-          // Store the swap period info for display
-          setSwapPeriodInfo(pendingSwapPeriod);
-          setSwapRole(detectedSwapRole);
-          setSwapType(detectedSwapType);
-          console.log('⏳ Swap period not started yet - showing time info, role:', detectedSwapRole, 'type:', detectedSwapType);
-        }
-
-        setHasActiveSwapRequest(hasActiveSwap);
-        console.log('🔄 Has active swap blocking access:', hasActiveSwap, '| Swap period started:', swapPeriodStarted, '| Role:', detectedSwapRole);
-      } catch (error) {
-        console.error('Error checking swap requests:', error);
-      } finally {
-        setSwapRequestLoading(false);
-      }
-    };
-
-    checkActiveSwapRequests();
-  }, [currentUser]);
 
   // Fetch driver, bus, and route data
   useEffect(() => {
@@ -1416,6 +1282,8 @@ export default function DriverLiveTrackingPage() {
     try {
       setLoading(true);
 
+      // TODO (QR Runtime): Add pre-trip validation rules here.
+      // The upcoming QR runtime will enforce: "driver may only operate after Start Trip."
       // ========================================
       // DEVICE SESSION CHECK (Multi-Device Protection)
       // ========================================
@@ -1738,7 +1606,7 @@ export default function DriverLiveTrackingPage() {
   };
 
 
-  if (loading || swapRequestLoading) {
+  if (loading) {
     return (
       <div className="flex-1 min-h-[calc(100dvh-120px)] flex items-center justify-center bg-gray-50 dark:bg-[#020817]">
         <PremiumPageLoader
@@ -1749,189 +1617,7 @@ export default function DriverLiveTrackingPage() {
     );
   }
 
-  // Show message if driver has active (accepted) swap
-  if (hasActiveSwapRequest) {
-    const formatDateTime = (date: Date | null) => {
-      if (!date) return 'N/A';
-      return date.toLocaleString('en-IN', {
-        weekday: 'short',
-        day: 'numeric',
-        month: 'short',
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: true
-      });
-    };
 
-    const formatTimeOnly = (date: Date | null) => {
-      if (!date) return 'N/A';
-      return date.toLocaleString('en-IN', {
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: true
-      });
-    };
-
-    return (
-      <div className={`flex-1 min-h-[calc(100dvh-120px)] flex items-center justify-center p-4 ${swapRole === 'sender' && swapType === 'assignment'
-        ? 'bg-gradient-to-br from-green-50 via-emerald-50 to-teal-50 dark:from-gray-950 dark:via-green-950/30 dark:to-emerald-950/20'
-        : 'bg-gradient-to-br from-amber-50 via-orange-50 to-yellow-50 dark:from-gray-950 dark:via-amber-950/30 dark:to-orange-950/20'
-        }`}>
-        <Card className="max-w-lg w-full border-0 shadow-2xl bg-white/90 dark:bg-gray-900/90 backdrop-blur-xl rounded-3xl overflow-hidden">
-          {/* Header with gradient - different colors based on role */}
-          <div className={`relative p-6 pb-8 ${swapRole === 'sender' && swapType === 'assignment'
-            ? 'bg-gradient-to-r from-green-500 via-emerald-500 to-green-600'
-            : 'bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600'
-            }`}>
-            <div className="absolute inset-0 bg-[url('/noise.png')] opacity-10" />
-            <div className="relative flex flex-col items-center text-center">
-              {/* Icon */}
-              <div className="mb-4 p-4 bg-white/20 backdrop-blur-md rounded-2xl border border-white/30 shadow-lg">
-                {swapRole === 'sender' && swapType === 'assignment' ? (
-                  <CheckCircle className="w-10 h-10 text-white" />
-                ) : (
-                  <Clock className="w-10 h-10 text-white" />
-                )}
-              </div>
-              <h1 className="text-2xl font-bold text-white tracking-tight">
-                {swapRole === 'sender' && swapType === 'assignment'
-                  ? 'Swap Request Active'
-                  : swapType === 'exchange'
-                    ? 'Bus Exchange Scheduled'
-                    : 'Swap Scheduled'}
-              </h1>
-              <p className={`text-sm mt-1 font-medium ${swapRole === 'sender' && swapType === 'assignment' ? 'text-green-100' : 'text-amber-100'
-                }`}>
-                {swapRole === 'sender' && swapType === 'assignment'
-                  ? 'Your swap request has been accepted'
-                  : swapType === 'exchange'
-                    ? 'Waiting for exchange period to begin'
-                    : 'Waiting for swap period to begin'}
-              </p>
-            </div>
-          </div>
-
-          <CardContent className="p-6 -mt-4">
-            {/* Main Info Card */}
-            <div className={`rounded-2xl p-5 border shadow-sm ${swapRole === 'sender' && swapType === 'assignment'
-              ? 'bg-gradient-to-br from-green-50 to-emerald-50 dark:from-gray-800 dark:to-green-900/20 border-green-200 dark:border-green-800/50'
-              : 'bg-gradient-to-br from-amber-50 to-orange-50 dark:from-gray-800 dark:to-amber-900/20 border-amber-200 dark:border-amber-800/50'
-              }`}>
-              <div className="text-center mb-4">
-                <p className="text-gray-600 dark:text-gray-400 text-sm">
-                  {swapRole === 'sender' && swapType === 'assignment' ? (
-                    <>
-                      Your swap request has been <span className="font-bold text-green-600 dark:text-green-400">accepted</span>!
-                      Another driver will temporarily cover your duty.
-                    </>
-                  ) : swapType === 'exchange' ? (
-                    <>
-                      You have a <span className="font-bold text-amber-600 dark:text-amber-400">bus exchange</span> scheduled.
-                      Both drivers will swap buses once the exchange period begins.
-                    </>
-                  ) : (
-                    <>
-                      You have an <span className="font-bold text-amber-600 dark:text-amber-400">accepted swap</span> that hasn't started yet.
-                    </>
-                  )}
-                </p>
-              </div>
-
-              {/* Swap Period Times */}
-              {swapPeriodInfo && (
-                <div className="grid grid-cols-2 gap-3 mt-4">
-                  <div className="bg-white dark:bg-gray-800 rounded-xl p-4 border border-green-200 dark:border-green-800/50 text-center shadow-sm">
-                    <div className="flex items-center justify-center gap-1.5 mb-2">
-                      <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-                      <span className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wider font-semibold">
-                        {swapRole === 'sender' && swapType === 'assignment' ? 'Off-Duty From' : 'Access From'}
-                      </span>
-                    </div>
-                    <p className="text-lg font-bold text-green-600 dark:text-green-400">
-                      {formatTimeOnly(swapPeriodInfo.startTime)}
-                    </p>
-                    <p className="text-xs text-gray-400 mt-0.5">
-                      {swapPeriodInfo.startTime?.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
-                    </p>
-                  </div>
-                  <div className="bg-white dark:bg-gray-800 rounded-xl p-4 border border-red-200 dark:border-red-800/50 text-center shadow-sm">
-                    <div className="flex items-center justify-center gap-1.5 mb-2">
-                      <div className="w-2 h-2 bg-red-500 rounded-full" />
-                      <span className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wider font-semibold">
-                        {swapRole === 'sender' && swapType === 'assignment' ? 'Off-Duty Until' : 'Access Until'}
-                      </span>
-                    </div>
-                    <p className="text-lg font-bold text-red-600 dark:text-red-400">
-                      {formatTimeOnly(swapPeriodInfo.endTime)}
-                    </p>
-                    <p className="text-xs text-gray-400 mt-0.5">
-                      {swapPeriodInfo.endTime?.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
-                    </p>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Info Message - Different based on role */}
-            <div className={`mt-4 p-4 rounded-xl border ${swapRole === 'sender' && swapType === 'assignment'
-              ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800/50'
-              : 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800/50'
-              }`}>
-              <div className="flex gap-3">
-                <AlertCircle className={`w-5 h-5 flex-shrink-0 mt-0.5 ${swapRole === 'sender' && swapType === 'assignment' ? 'text-green-500' : 'text-blue-500'
-                  }`} />
-                <div className={`text-sm ${swapRole === 'sender' && swapType === 'assignment'
-                  ? 'text-green-700 dark:text-green-300'
-                  : 'text-blue-700 dark:text-blue-300'
-                  }`}>
-                  <p className="font-medium">
-                    {swapRole === 'sender' && swapType === 'assignment'
-                      ? 'Duty Coverage'
-                      : swapType === 'exchange'
-                        ? 'Bus Exchange Info'
-                        : 'Live Tracking Access'}
-                  </p>
-                  <p className={`mt-1 ${swapRole === 'sender' && swapType === 'assignment'
-                    ? 'text-green-600 dark:text-green-400'
-                    : 'text-blue-600 dark:text-blue-400'
-                    }`}>
-                    {swapRole === 'sender' && swapType === 'assignment' ? (
-                      <>
-                        The replacement driver will operate your bus during this period.
-                        You'll be notified when the swap period ends.
-                      </>
-                    ) : swapType === 'exchange' ? (
-                      <>
-                        You and the other driver will exchange buses at <strong>{swapPeriodInfo ? formatTimeOnly(swapPeriodInfo.startTime) : 'the scheduled time'}</strong>.
-                        You can then start driving your temporary bus.
-                      </>
-                    ) : (
-                      <>
-                        You can start the trip and share your live location once the swap period begins at <strong>{swapPeriodInfo ? formatTimeOnly(swapPeriodInfo.startTime) : 'the scheduled time'}</strong>.
-                      </>
-                    )}
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {/* Action Button */}
-            <div className="mt-6">
-              <Button
-                onClick={() => router.push('/driver/swap-request')}
-                className={`w-full h-12 font-bold rounded-xl shadow-lg transition-all active:scale-[0.98] ${swapRole === 'sender' && swapType === 'assignment'
-                  ? 'bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 shadow-green-500/20'
-                  : 'bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 shadow-amber-500/20'
-                  } text-white`}
-              >
-                View Swap Details
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
 
   // =====================================================
   // MULTI-DRIVER LOCK BLOCKING UI
@@ -2158,18 +1844,6 @@ export default function DriverLiveTrackingPage() {
                 <div className="flex items-start gap-3">
                   <div className="mt-1 h-2 w-2 rounded-full bg-blue-500 flex-shrink-0"></div>
                   <p className="text-sm text-muted-foreground">
-                    <strong>Accept a Swap Request:</strong> Another driver can request to swap their bus duty with you
-                  </p>
-                </div>
-                <div className="flex items-start gap-3">
-                  <div className="mt-1 h-2 w-2 rounded-full bg-blue-500 flex-shrink-0"></div>
-                  <p className="text-sm text-muted-foreground">
-                    <strong>View Incoming Requests:</strong> Check your swap requests page for pending assignments
-                  </p>
-                </div>
-                <div className="flex items-start gap-3">
-                  <div className="mt-1 h-2 w-2 rounded-full bg-blue-500 flex-shrink-0"></div>
-                  <p className="text-sm text-muted-foreground">
                     <strong>Start Driving:</strong> Once assigned, you can start tracking trips on this page
                   </p>
                 </div>
@@ -2177,13 +1851,6 @@ export default function DriverLiveTrackingPage() {
             </div>
 
             <div className="pt-4 flex flex-col sm:flex-row gap-3">
-              <Button
-                onClick={() => router.push('/driver/swap-request')}
-                className="flex-1 h-12 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white shadow-lg hover:shadow-xl transition-all duration-300 text-base font-semibold"
-              >
-                <span className="mr-2">📥</span>
-                View Incoming Requests
-              </Button>
               <Button
                 onClick={() => router.push('/driver')}
                 variant="outline"

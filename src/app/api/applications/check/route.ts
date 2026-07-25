@@ -6,7 +6,7 @@ export async function GET(request: NextRequest) {
   try {
     const token = request.headers.get('Authorization')?.replace('Bearer ', '');
     if (!token) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      return NextResponse.json({ hasApplication: false, authenticated: false });
     }
 
     const decodedToken = await adminAuth.verifyIdToken(token);
@@ -14,12 +14,8 @@ export async function GET(request: NextRequest) {
 
     const result = await checkApplication(uid);
 
-    return NextResponse.json(result);
+    return NextResponse.json({ ...result, authenticated: true });
   } catch (error: any) {
-    console.error('Error checking application:', error);
-    return NextResponse.json(
-      { error: 'Failed to check application' },
-      { status: 500 }
-    );
+    return NextResponse.json({ hasApplication: false, authenticated: false });
   }
 }

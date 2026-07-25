@@ -1,98 +1,102 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    
+
     // ============================================================================
-    // IDENTITY COLLECTIONS — CLIENT ACCESS BLOCKED (PostgreSQL is source of truth)
-    // D1 Identity has been fully migrated to PostgreSQL.
-    // Client-side access to these collections is blocked.
-    // Admin SDK (server-side) bypasses security rules entirely.
+    // MIGRATED TO SUPABASE POSTGRESQL — CLIENT ACCESS BLOCKED
+    // All identity, application, fleet, tracking, notification, and payment
+    // domain collections have been migrated to Supabase PostgreSQL.
+    // Direct client access via Firebase Client SDK is blocked to protect quota.
+    // Server-side Firebase Admin SDK bypasses these security rules automatically.
     // ============================================================================
 
+    // Identity Collections (Migrated to Supabase Pg)
     match /unauthUsers/{userId} {
       allow read, write: if false;
     }
-
     match /users/{userId} {
       allow read, write: if false;
     }
-
     match /students/{studentId} {
       allow read, write: if false;
     }
-
     match /drivers/{driverId} {
       allow read, write: if false;
     }
-
     match /admins/{adminId} {
       allow read, write: if false;
     }
-
     match /moderators/{moderatorId} {
       allow read, write: if false;
     }
 
-    // ============================================================================
-    // NON-IDENTITY COLLECTIONS (not yet migrated — retain authenticated access)
-    // ============================================================================
-
+    // Fleet & Route Collections (Migrated to Supabase Pg)
     match /buses/{busId} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null;
+      allow read, write: if false;
     }
-
     match /routes/{routeId} {
       allow read, write: if false;
     }
 
-    match /notifications/{notificationId} {
-      allow read: if request.auth != null;
-      allow create: if request.auth != null;
-      allow update, delete: if false;
-    }
-
+    // Application & Payment Collections (Migrated to Supabase Pg)
     match /applications/{applicationId} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null;
+      allow read, write: if false;
     }
-
-    match /audit_logs/{logId} {
+    match /payments/{paymentId} {
+      allow read, write: if false;
+    }
+    match /processed_payments/{paymentId} {
+      allow read, write: if false;
+    }
+    match /profile_update_requests/{requestId} {
       allow read, write: if false;
     }
 
-    match /activity_logs/{logId} {
-      allow read: if request.auth != null;
-      allow write: if false;
-    }
-
+    // Realtime, Tracking & Trip Collections (Migrated to Supabase Pg)
     match /waiting_flags/{flagId} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null;
+      allow read, write: if false;
+    }
+    match /bus_locations/{locationId} {
+      allow read, write: if false;
+    }
+    match /driver_location_updates/{updateId} {
+      allow read, write: if false;
+    }
+    match /real_time_locations/{locationId} {
+      allow read, write: if false;
+    }
+    match /trip_sessions/{tripId} {
+      allow read, write: if false;
+    }
+    match /trip_logs/{logId} {
+      allow read, write: if false;
     }
 
-    match /swap_requests/{requestId} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null;
+    // Notification & FCM Collections (Migrated to Supabase Pg)
+    match /notifications/{notificationId} {
+      allow read, write: if false;
     }
-
-    match /driver_swap_requests/{requestId} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null;
-    }
-
-    match /driver_swap_audit/{auditId} {
-      allow read: if request.auth != null;
-      allow write: if false;
-    }
-
     match /fcmTokens/{token} {
-      allow read, write: if request.auth != null;
+      allow read, write: if false;
     }
 
-    match /feedbacks/{feedbackId} {
-      allow read, write: if request.auth != null;
+    // Audit & Rate Limit Collections (Migrated to Supabase Pg / Server-Side)
+    match /audit_logs/{logId} {
+      allow read, write: if false;
     }
+    match /activity_logs/{logId} {
+      allow read, write: if false;
+    }
+    match /audit_failures/{failureId} {
+      allow read, write: if false;
+    }
+    match /rateLimits/{limitId} {
+      allow read, write: if false;
+    }
+
+    // ============================================================================
+    // FIRESTORE EXCLUSIVE COLLECTIONS (Settings & User Feedback)
+    // ============================================================================
 
     match /settings/{settingId} {
       allow read: if request.auth != null;
@@ -104,49 +108,10 @@ service cloud.firestore {
       allow write: if false;
     }
 
-    match /rateLimits/{limitId} {
-      allow read, write: if false;
-    }
-
-    match /processed_payments/{paymentId} {
-      allow read, write: if false;
-    }
-
-    match /payments/{paymentId} {
-      allow read, write: if false;
-    }
-
-    match /bus_locations/{locationId} {
+    match /feedbacks/{feedbackId} {
       allow read: if request.auth != null;
-      allow write: if request.auth != null;
-    }
-
-    match /trip_sessions/{tripId} {
-      allow read: if request.auth != null;
-      allow write: if false;
-    }
-
-    match /profile_update_requests/{requestId} {
-      allow read, write: if request.auth != null;
-    }
-
-    match /trip_logs/{logId} {
-      allow read: if request.auth != null;
-      allow write: if false;
-    }
-
-    match /real_time_locations/{locationId} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null;
-    }
-
-    match /audit_failures/{failureId} {
-      allow read, write: if false;
-    }
-
-    match /driver_location_updates/{updateId} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null;
+      allow create: if request.auth != null;
+      allow update, delete: if false;
     }
   }
 }

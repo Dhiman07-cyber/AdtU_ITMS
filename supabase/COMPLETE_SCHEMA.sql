@@ -69,6 +69,7 @@ CREATE TABLE IF NOT EXISTS waiting_flags (
   bus_id TEXT NOT NULL,
   route_id TEXT NOT NULL,
   stop_name TEXT,
+  stop_name TEXT,
   stop_lat DOUBLE PRECISION,
   stop_lng DOUBLE PRECISION,
   status TEXT NOT NULL DEFAULT 'raised' CHECK (status IN ('raised', 'acknowledged', 'boarded', 'expired', 'cancelled', 'removed')),
@@ -79,11 +80,15 @@ CREATE TABLE IF NOT EXISTS waiting_flags (
   ack_by_driver_uid TEXT
 );
 
--- ponytail: 9 indexes → 2. Removed idx_waiting_flags_{student_uid,bus_id,status,trip,active,bus_student,active_raised}.
--- (student_uid, status) covers all student-side queries; (route_id) covers the driver hook fetch.
--- Add back individual bus_id or composite (bus_id, student_uid) only if query plans show seq scans for driver lookups.
-CREATE INDEX IF NOT EXISTS idx_waiting_flags_student_active ON waiting_flags(student_uid, status);
+CREATE INDEX IF NOT EXISTS idx_waiting_flags_student_uid ON waiting_flags(student_uid);
+CREATE INDEX IF NOT EXISTS idx_waiting_flags_bus_id ON waiting_flags(bus_id);
 CREATE INDEX IF NOT EXISTS idx_waiting_flags_route_id ON waiting_flags(route_id);
+CREATE INDEX IF NOT EXISTS idx_waiting_flags_status ON waiting_flags(status);
+CREATE INDEX IF NOT EXISTS idx_waiting_flags_trip ON waiting_flags(trip_id);
+CREATE INDEX IF NOT EXISTS idx_waiting_flags_active ON waiting_flags(bus_id, status);
+CREATE INDEX IF NOT EXISTS idx_waiting_flags_student_active ON waiting_flags(student_uid, status);
+CREATE INDEX IF NOT EXISTS idx_waiting_flags_bus_student ON waiting_flags(bus_id, student_uid);
+CREATE INDEX IF NOT EXISTS idx_waiting_flags_active_raised ON waiting_flags(bus_id, student_uid) WHERE status = 'raised';
 
 -- driver_location_updates table (historical breadcrumbs)
 CREATE TABLE IF NOT EXISTS driver_location_updates (
@@ -102,109 +107,7 @@ CREATE INDEX IF NOT EXISTS idx_driver_location_updates_driver_uid ON driver_loca
 CREATE INDEX IF NOT EXISTS idx_driver_location_updates_timestamp ON driver_location_updates(timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_driver_location_updates_cleanup ON driver_location_updates(driver_uid, bus_id);
 
--- =====================================================
--- SECTION 2: DRIVER SWAP SYSTEM TABLES
--- =====================================================
-
--- driver_swap_requests table
-CREATE TABLE IF NOT EXISTS driver_swap_requests (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  -- Requester (fromDriver) info
-  requester_driver_uid TEXT NOT NULL,
-  requester_name TEXT NOT NULL,
-  -- Target (toDriver) info  
-  candidate_driver_uid TEXT NOT NULL,
-  candidate_name TEXT NOT NULL,
-  -- Primary bus/route being swapped
-  bus_id TEXT NOT NULL,
-  bus_number TEXT,
-  route_id TEXT,
-  route_name TEXT,
-  -- Secondary bus/route for true swaps (both drivers have buses)
-  secondary_bus_id TEXT,
-  secondary_bus_number TEXT,
-  secondary_route_id TEXT,
-  secondary_route_name TEXT,
-  -- Swap timing
-  starts_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  ends_at TIMESTAMPTZ NOT NULL,
-  expires_at TIMESTAMPTZ, -- When acceptance window expires
-  -- Swap details
-  swap_type TEXT DEFAULT 'assignment' CHECK (swap_type IN ('assignment', 'swap')),
-  reason TEXT,
-  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'rejected', 'cancelled', 'expired')),
-  -- Timestamps
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  -- Action tracking
-  accepted_by TEXT,
-  accepted_at TIMESTAMPTZ,
-  rejected_by TEXT,
-  rejected_at TIMESTAMPTZ,
-  cancelled_by TEXT,
-  cancelled_at TIMESTAMPTZ,
-  -- Additional metadata
-  meta JSONB DEFAULT '{}'::jsonb
-);
-
--- Add missing columns if table already exists
-DO $$
-BEGIN
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'driver_swap_requests' AND column_name = 'bus_number') THEN
-        ALTER TABLE driver_swap_requests ADD COLUMN bus_number TEXT;
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'driver_swap_requests' AND column_name = 'route_name') THEN
-        ALTER TABLE driver_swap_requests ADD COLUMN route_name TEXT;
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'driver_swap_requests' AND column_name = 'secondary_bus_id') THEN
-        ALTER TABLE driver_swap_requests ADD COLUMN secondary_bus_id TEXT;
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'driver_swap_requests' AND column_name = 'secondary_bus_number') THEN
-        ALTER TABLE driver_swap_requests ADD COLUMN secondary_bus_number TEXT;
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'driver_swap_requests' AND column_name = 'secondary_route_id') THEN
-        ALTER TABLE driver_swap_requests ADD COLUMN secondary_route_id TEXT;
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'driver_swap_requests' AND column_name = 'secondary_route_name') THEN
-        ALTER TABLE driver_swap_requests ADD COLUMN secondary_route_name TEXT;
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'driver_swap_requests' AND column_name = 'swap_type') THEN
-        ALTER TABLE driver_swap_requests ADD COLUMN swap_type TEXT DEFAULT 'assignment';
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'driver_swap_requests' AND column_name = 'expires_at') THEN
-        ALTER TABLE driver_swap_requests ADD COLUMN expires_at TIMESTAMPTZ;
-    END IF;
-END $$;
-
-CREATE INDEX IF NOT EXISTS idx_swap_requests_requester ON driver_swap_requests(requester_driver_uid);
-CREATE INDEX IF NOT EXISTS idx_swap_requests_candidate ON driver_swap_requests(candidate_driver_uid);
-CREATE INDEX IF NOT EXISTS idx_swap_requests_bus ON driver_swap_requests(bus_id);
-CREATE INDEX IF NOT EXISTS idx_swap_requests_status ON driver_swap_requests(status);
-CREATE INDEX IF NOT EXISTS idx_swap_requests_created ON driver_swap_requests(created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_swap_requests_active ON driver_swap_requests(status) WHERE status IN ('pending', 'accepted');
-CREATE INDEX IF NOT EXISTS idx_swap_requests_pending_expires ON driver_swap_requests(status, expires_at) WHERE status = 'pending';
-
--- temporary_assignments table
-CREATE TABLE IF NOT EXISTS temporary_assignments (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  bus_id TEXT NOT NULL UNIQUE,
-  original_driver_uid TEXT NOT NULL,
-  current_driver_uid TEXT NOT NULL,
-  route_id TEXT NOT NULL,
-  starts_at TIMESTAMPTZ NOT NULL,
-  ends_at TIMESTAMPTZ,
-  active BOOLEAN NOT NULL DEFAULT true,
-  created_by TEXT NOT NULL,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  source_request_id UUID REFERENCES driver_swap_requests(id),
-  reason TEXT
-);
-
-CREATE INDEX IF NOT EXISTS idx_temp_assignments_bus ON temporary_assignments(bus_id);
-CREATE INDEX IF NOT EXISTS idx_temp_assignments_current_driver ON temporary_assignments(current_driver_uid);
-CREATE INDEX IF NOT EXISTS idx_temp_assignments_active ON temporary_assignments(active) WHERE active = true;
-CREATE INDEX IF NOT EXISTS idx_temp_assignments_expires ON temporary_assignments(ends_at) WHERE active = true;
-CREATE INDEX IF NOT EXISTS idx_temp_assignments_source_request ON temporary_assignments(source_request_id);
+-- (Section 2 Driver Swap System Tables purged - feature deprecated)
 
 -- =====================================================
 -- SECTION 3: REASSIGNMENT LOGS TABLE
@@ -421,11 +324,6 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
-DROP TRIGGER IF EXISTS update_swap_requests_updated_at ON driver_swap_requests;
-CREATE TRIGGER update_swap_requests_updated_at
-  BEFORE UPDATE ON driver_swap_requests
-  FOR EACH ROW
-  EXECUTE FUNCTION update_updated_at_column();
 
 -- Trigger for updated_at (reassignment logs)
 CREATE OR REPLACE FUNCTION update_reassignment_logs_updated_at()
@@ -557,8 +455,7 @@ ALTER TABLE bus_locations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE driver_status ENABLE ROW LEVEL SECURITY;
 ALTER TABLE waiting_flags ENABLE ROW LEVEL SECURITY;
 ALTER TABLE driver_location_updates ENABLE ROW LEVEL SECURITY;
-ALTER TABLE driver_swap_requests ENABLE ROW LEVEL SECURITY;
-ALTER TABLE temporary_assignments ENABLE ROW LEVEL SECURITY;
+
 ALTER TABLE public.reassignment_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.payments ENABLE ROW LEVEL SECURITY;
 
@@ -688,50 +585,7 @@ CREATE POLICY "driver_location_updates_delete_service" ON driver_location_update
   FOR DELETE TO service_role USING (true);
 
 
--- ========== driver_swap_requests policies (SECURED) ==========
-DROP POLICY IF EXISTS "Drivers can read their swap requests" ON driver_swap_requests;
-DROP POLICY IF EXISTS "driver_swap_requests_select_involved" ON driver_swap_requests;
-CREATE POLICY "driver_swap_requests_select_involved" ON driver_swap_requests
-  FOR SELECT TO authenticated
-  USING (
-    auth.uid()::text = requester_driver_uid 
-    OR auth.uid()::text = candidate_driver_uid
-    OR auth.role() = 'service_role'
-  );
 
-DROP POLICY IF EXISTS "Drivers can create swap requests" ON driver_swap_requests;
-CREATE POLICY "Drivers can create swap requests" ON driver_swap_requests
-  FOR INSERT TO authenticated
-  WITH CHECK (auth.uid()::text = requester_driver_uid);
-
-DROP POLICY IF EXISTS "Requester can cancel pending requests" ON driver_swap_requests;
-CREATE POLICY "Requester can cancel pending requests" ON driver_swap_requests
-  FOR UPDATE TO authenticated
-  USING (auth.uid()::text = requester_driver_uid AND status = 'pending');
-
--- ========== temporary_assignments policies (SECURED) ==========
-DROP POLICY IF EXISTS "Only service role can manage assignments" ON temporary_assignments;
-DROP POLICY IF EXISTS "Drivers can read their assignments" ON temporary_assignments;
-DROP POLICY IF EXISTS "temporary_assignments_select_involved" ON temporary_assignments;
-CREATE POLICY "temporary_assignments_select_involved" ON temporary_assignments
-  FOR SELECT TO authenticated
-  USING (
-    auth.uid()::text = original_driver_uid 
-    OR auth.uid()::text = current_driver_uid
-    OR auth.role() = 'service_role'
-  );
-
-DROP POLICY IF EXISTS "temporary_assignments_insert_service" ON temporary_assignments;
-CREATE POLICY "temporary_assignments_insert_service" ON temporary_assignments
-  FOR INSERT TO service_role WITH CHECK (true);
-
-DROP POLICY IF EXISTS "temporary_assignments_update_service" ON temporary_assignments;
-CREATE POLICY "temporary_assignments_update_service" ON temporary_assignments
-  FOR UPDATE TO service_role USING (true);
-
-DROP POLICY IF EXISTS "temporary_assignments_delete_service" ON temporary_assignments;
-CREATE POLICY "temporary_assignments_delete_service" ON temporary_assignments
-  FOR DELETE TO service_role USING (true);
 
 -- ========== reassignment_logs policies (SECURED) ==========
 DROP POLICY IF EXISTS "reassignment_logs_select_all" ON public.reassignment_logs;
@@ -789,21 +643,6 @@ REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO service_role;
 
 GRANT EXECUTE ON FUNCTION public.check_bus_lock(TEXT) TO anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.get_effective_driver(TEXT) TO authenticated;
-GRANT EXECUTE ON FUNCTION public.get_pending_missed_bus_requests_for_trip(UUID) TO authenticated;
-
--- 2. Explicitly allow anon/authenticated read access to tracking tables
-GRANT SELECT ON public.waiting_flags TO anon, authenticated;
-GRANT SELECT ON public.active_trips TO anon, authenticated;
-GRANT SELECT ON public.bus_locations TO anon, authenticated;
-GRANT SELECT ON public.driver_status TO anon, authenticated;
-GRANT SELECT ON public.missed_bus_requests TO anon, authenticated;
-
--- 3. Core application grants
-GRANT SELECT ON driver_swap_requests TO authenticated;
-GRANT INSERT ON driver_swap_requests TO authenticated;
-GRANT UPDATE ON driver_swap_requests TO authenticated;
-GRANT SELECT ON temporary_assignments TO authenticated;
 GRANT SELECT ON public.payments TO authenticated;
 
 -- =====================================================
@@ -832,15 +671,7 @@ BEGIN
     ALTER PUBLICATION supabase_realtime ADD TABLE payments;
   END IF;
   
-  -- Driver Swap Requests: Enable realtime for instant swap updates
-  IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'driver_swap_requests') THEN
-    ALTER PUBLICATION supabase_realtime ADD TABLE driver_swap_requests;
-  END IF;
-  
-  -- Temporary Assignments: Enable realtime for active assignment updates  
-  IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'temporary_assignments') THEN
-    ALTER PUBLICATION supabase_realtime ADD TABLE temporary_assignments;
-  END IF;
+
   
   -- Active Trips: Enable realtime for multi-driver lock system
   IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'active_trips') THEN
@@ -1164,7 +995,6 @@ COMMENT ON TABLE driver_location_updates IS 'Historical location breadcrumbs for
 COMMENT ON TABLE public.reassignment_logs IS 'Audit logs for driver/student/route reassignment operations';
 COMMENT ON TABLE public.payments IS 'IMMUTABLE FINANCIAL LEDGER - Payment records are permanent and cannot be deleted. Single source of truth for all payments.';
 COMMENT ON TABLE public.active_trips IS 'Multi-driver lock system - Live trip records with heartbeat for exclusive bus operation';
-COMMENT ON TABLE public.missed_bus_requests IS 'Student missed-bus pickup requests - allows students to request alternate bus pickup when they miss their assigned bus.';
 
 -- =====================================================
 -- COMPLETION MESSAGE
@@ -1173,7 +1003,7 @@ COMMENT ON TABLE public.missed_bus_requests IS 'Student missed-bus pickup reques
 DO $$
 BEGIN
   RAISE NOTICE '✅ ADTU Bus XQ System - Complete Database Setup Done!';
-  RAISE NOTICE '📋 All 12 tables created (including active_trips for multi-driver lock, missed_bus_requests for pickup requests)';
+  RAISE NOTICE '📋 All core tables created (including active_trips for multi-driver lock)';
   RAISE NOTICE '🔒 Security-hardened RLS policies applied';
   RAISE NOTICE '⚡ All indexes created for performance';
   RAISE NOTICE '🔄 Helper functions and triggers added';

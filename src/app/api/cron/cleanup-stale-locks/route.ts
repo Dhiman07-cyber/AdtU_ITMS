@@ -100,6 +100,10 @@ export async function GET(request: Request) {
                         // from a new trip that may have started on the same bus between
                         // the Supabase RPC cleanup and these deletes.
                         await Promise.allSettled([
+                            // Delete driver_status — scoped to this trip's driver
+                            supabase.from('driver_status').delete()
+                                .eq('driver_uid', lock.cleaned_driver_id)
+                                .eq('bus_id', lock.cleaned_bus_id),
                             // Delete bus_locations — scoped to this trip
                             supabase.from('bus_locations').delete()
                                 .eq('bus_id', lock.cleaned_bus_id)
