@@ -42,8 +42,7 @@ export const POST = withSecurity(
         const { data: updatedData, error: updateError } = await supabase
             .from('waiting_flags')
             .update({
-                status: 'picked_up',
-                boarded_at: new Date().toISOString(),
+                status: 'boarded',
                 ack_by_driver_uid: driverUid
             })
             .eq('id', flagId)
@@ -64,17 +63,17 @@ export const POST = withSecurity(
             supabase.channel(`waiting_flags_${flagData.bus_id}`).send({
                 type: 'broadcast',
                 event: 'waiting_flag_updated',
-                payload: { flagId, studentUid: flagData.student_uid, status: 'picked_up', timestamp: new Date().toISOString() }
+                payload: { flagId, studentUid: flagData.student_uid, status: 'boarded', timestamp: new Date().toISOString() }
             }),
             supabase.channel(`student_${flagData.student_uid}`).send({
                 type: 'broadcast',
                 event: 'flag_acknowledged',
-                payload: { flagId, busId: flagData.bus_id, status: 'picked_up', ackByDriverUid: driverUid, timestamp: new Date().toISOString(), message: 'Driver has arrived!' }
+                payload: { flagId, busId: flagData.bus_id, status: 'boarded', ackByDriverUid: driverUid, timestamp: new Date().toISOString(), message: 'Driver has arrived!' }
             }),
             supabase.channel(`route_${flagData.route_id}`).send({
                 type: 'broadcast',
                 event: 'waiting_flag_updated',
-                payload: { flagId, studentUid: flagData.student_uid, busId: flagData.bus_id, routeId: flagData.route_id, status: 'picked_up', timestamp: new Date().toISOString() }
+                payload: { flagId, studentUid: flagData.student_uid, busId: flagData.bus_id, routeId: flagData.route_id, status: 'boarded', timestamp: new Date().toISOString() }
             })
         ]);
 

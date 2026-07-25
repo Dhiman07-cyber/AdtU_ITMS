@@ -236,8 +236,12 @@ export function computeDatesForStudent(params: ComputeDateParams): ComputedDates
         ? simulationMode!.customYear
         : studentSessionEndYear;
 
-    const startMonth = config.academicSessionStart?.month ?? 6; // default July
-    const startDay = config.academicSessionStart?.day ?? 1;
+    if (!config?.academicSessionStart || typeof config.academicSessionStart.month !== 'number') {
+        throw new Error('Academic session start configuration missing in deadline settings. Please configure settings and try again later.');
+    }
+
+    const startMonth = config.academicSessionStart.month;
+    const startDay = config.academicSessionStart.day || 1;
 
     const lifecycle = deriveAcademicLifecycle(startMonth, startDay, effectiveYear);
 
@@ -325,7 +329,7 @@ export function validateDateConfig(
         return { valid: false, error: `Invalid day: ${day}. Must be 1-31.` };
     }
 
-    const testDate = new Date(2024, month, day);
+    const testDate = new Date(new Date().getFullYear(), month, day);
 
     if (testDate.getMonth() !== month) {
         const monthNames = [
@@ -530,8 +534,12 @@ export function computeBlockDatesFromValidUntil(
     const validUntilDate = typeof validUntil === 'string' ? new Date(validUntil) : validUntil;
     const validUntilYear = validUntilDate.getUTCFullYear();
 
-    const startMonth = config.academicSessionStart?.month ?? 6;
-    const startDay = config.academicSessionStart?.day ?? 1;
+    if (!config?.academicSessionStart || typeof config.academicSessionStart.month !== 'number') {
+        throw new Error('Academic session start configuration missing in deadline settings. Please configure settings and try again later.');
+    }
+
+    const startMonth = config.academicSessionStart.month;
+    const startDay = config.academicSessionStart.day || 1;
 
     const lifecycle = deriveAcademicLifecycle(startMonth, startDay, validUntilYear);
 

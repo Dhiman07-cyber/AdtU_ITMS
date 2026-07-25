@@ -107,25 +107,6 @@ export async function POST(req: NextRequest) {
             );
         }
 
-        // Validate dependency rules: block updates to Academic Session Start if active records exist
-        const hasDependencies = await checkDependencies();
-        if (hasDependencies) {
-            const currentConfig = await getDeadlineConfig();
-            const currentStart = currentConfig.academicSessionStart;
-            const submittedStart = config.academicSessionStart;
-
-            if (
-                currentStart &&
-                submittedStart &&
-                (currentStart.month !== submittedStart.month || currentStart.day !== submittedStart.day)
-            ) {
-                return NextResponse.json(
-                    { message: 'Cannot modify Academic Session Start once dependent student or application records exist in the system.' },
-                    { status: 400 }
-                );
-            }
-        }
-
         // Validate date fields
         const validationError = validateDateConfig(config);
         if (validationError) {

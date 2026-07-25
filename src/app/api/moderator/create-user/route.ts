@@ -12,6 +12,7 @@ import { incrementBusCapacity } from '@/domains/fleet';
 import { createUser, createStudent, createDriver, getStudentById } from '@/domains/identity';
 import { resolveUserRole } from '@/lib/security/role-cache';
 import { getUpdaterInfo } from '@/lib/utils/updatedBy';
+import { assignDriverToBus } from '@/domains/fleet/repositories/driver-assignment.repository';
 
 let adminApp: any;
 let auth: any;
@@ -312,14 +313,16 @@ export async function POST(request: Request) {
             updatedAt: new Date().toISOString(),
           });
 
-          // Update bus driver assignment via PG
+          // Update bus driver assignment via canonical repository
           if (busId) {
-            console.log(`🚌 Updating bus ${busId} with driver ${uid}`);
+            console.log(`🚌 Assigning driver ${uid} to bus ${busId}`);
             try {
-              await import('@/domains/fleet').then(m => m.updateBus(busId, { driverUID: uid, activeTripId: null } as any));
-              console.log(`   ✅ Bus ${busId} updated successfully`);
+              await assignDriverToBus(uid, busId, {
+                assignedBy: 'moderator',
+                reason: 'assignment',
+              });
             } catch (err) {
-              console.warn(`   ⚠️  Bus ${busId} update failed`, err);
+              console.warn(`   ⚠️  driver_assignments write failed for ${uid}:`, err);
             }
           }
         }
@@ -456,13 +459,15 @@ export async function POST(request: Request) {
           updatedAt: new Date().toISOString(),
         });
 
-        // Update bus driver assignment via PG
+        // Update bus driver assignment via canonical repository
         if (busId) {
           try {
-            const { updateBus } = await import('@/domains/fleet');
-            await updateBus(busId, { driverUID: userDocId, activeTripId: null } as any);
+            await assignDriverToBus(userDocId, busId, {
+              assignedBy: 'moderator',
+              reason: 'assignment',
+            });
           } catch (err) {
-            console.warn('Failed to update bus in fallback mode', err);
+            console.warn('Failed to write driver_assignments in fallback mode', err);
           }
         }
       }

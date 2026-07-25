@@ -54,7 +54,6 @@ export async function verifyDriverRouteBinding(
   busId: string
 ): Promise<{ authorized: boolean; reason?: string }> {
   try {
-    // D9: Check driver-bus assignment via Supabase instead of Firestore
     const supabase = getSupabaseServer();
 
     // Check driver_status for active assignment

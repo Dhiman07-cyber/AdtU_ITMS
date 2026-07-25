@@ -3,10 +3,9 @@ import { adminAuth } from '@/lib/firebase-admin';
 import { getUpdaterInfo } from '@/lib/utils/updatedBy';
 import { calculateRenewalDate } from '@/lib/utils/renewal-utils';
 import { sendBusFullAlert } from '@/lib/busCapacityService';
-import { incrementBusCapacity, getBusById, updateBus } from '@/domains/fleet';
+import { incrementBusCapacity, getBusById } from '@/domains/fleet';
 import { generateOfflinePaymentId } from '@/lib/types/payment';
 import { computeBlockDatesFromValidUntil } from '@/lib/utils/deadline-computation';
-import { DEFAULT_BUS_FEE } from '@/config/runtime';
 import {
     sendStudentAddedNotification,
     getAdminEmailRecipients,
@@ -23,6 +22,7 @@ import { z } from 'zod';
 import { createAuditEvent } from '@/domains/audit';
 import { normalizeShift } from '@/lib/utils/shift-utils';
 import { createUser, createStudent, createDriver, getStudentById } from '@/domains/identity';
+import { assignDriverToBus } from '@/domains/fleet/repositories/driver-assignment.repository';
 import * as routeService from '@/domains/route';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import crypto from 'crypto';
@@ -159,7 +159,13 @@ export const POST = withSecurity<CreateUserBody>(
             }
 
             const blockDates = computeBlockDatesFromValidUntil(finalValidUntil, deadlineConfig);
-            const busFeeAmount = systemConfigResult.data?.busFee?.amount || DEFAULT_BUS_FEE;
+            const busFeeAmount = Number(systemConfigResult.data?.busFee?.amount || 0);
+            if (!busFeeAmount || busFeeAmount <= 0) {
+                return NextResponse.json(
+                    { message: 'Official bus fee is not configured in Firestore settings. Please configure bus fee in settings and try again.' },
+                    { status: 500 }
+                );
+            }
             const totalAmount = busFeeAmount * finalDuration;
             const paymentId = totalAmount > 0 ? generateOfflinePaymentId('new_registration') : null;
 
@@ -335,9 +341,16 @@ export const POST = withSecurity<CreateUserBody>(
                 updatedAt: now,
             });
 
-            // Update bus driver assignment via PG
+            // Update bus driver assignment via canonical repository
             if (busId) {
-                await updateBus(busId, { driverUID: uid, activeTripId: null } as any);
+                try {
+                    await assignDriverToBus(uid, busId, {
+                        assignedBy: 'admin',
+                        reason: 'assignment',
+                    });
+                } catch (err) {
+                    console.error(`⚠️ Failed to assign driver ${uid} in driver_assignments:`, err);
+                }
             }
         } else {
             // Moderator or Admin

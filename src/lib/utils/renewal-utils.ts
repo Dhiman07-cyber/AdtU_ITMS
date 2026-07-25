@@ -9,6 +9,11 @@ import { SimulationConfig } from '@/lib/types/simulation-config';
 import { DeadlineConfig } from '@/lib/types/deadline-config';
 import { deriveAcademicLifecycle } from './deadline-computation';
 
+const MONTH_NAMES = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+];
+
 /**
  * Calculate new validUntil date for renewal
  * Follows July-aligned academic cycle rules
@@ -118,8 +123,12 @@ function shouldBlockAccess(
     return false;
   }
 
-  const startMonth = config.academicSessionStart?.month ?? 6;
-  const startDay = config.academicSessionStart?.day ?? 1;
+  if (!config?.academicSessionStart || typeof config.academicSessionStart.month !== 'number') {
+    throw new Error('Academic session start configuration missing in settings. Please configure settings and try again later.');
+  }
+
+  const startMonth = config.academicSessionStart.month;
+  const startDay = config.academicSessionStart.day || 1;
   const lifecycle = deriveAcademicLifecycle(startMonth, startDay, sessionEndYear);
   const softBlockDate = lifecycle.softBlock;
 
@@ -164,8 +173,12 @@ function shouldHardDelete(
   const validDate = new Date(validUntil);
   let sessionEndYear = validDate.getUTCFullYear();
 
-  const startMonth = config.academicSessionStart?.month ?? 6;
-  const startDay = config.academicSessionStart?.day ?? 1;
+  if (!config?.academicSessionStart || typeof config.academicSessionStart.month !== 'number') {
+    throw new Error('Academic session start configuration missing in settings. Please configure settings and try again later.');
+  }
+
+  const startMonth = config.academicSessionStart.month;
+  const startDay = config.academicSessionStart.day || 1;
   const lifecycle = deriveAcademicLifecycle(startMonth, startDay, sessionEndYear);
   const hardDeleteDate = lifecycle.hardDelete;
 
@@ -198,8 +211,8 @@ export function getBlockingMessage(
 
   const nextYear = referenceYear + 1;
 
-  const renewalMonthName = config.renewalDeadline.monthName || "June";
-  const hardDeleteMonthName = config.hardDelete.monthName || "August";
+  const renewalMonthName = config.renewalDeadline?.monthName || MONTH_NAMES[config.renewalDeadline?.month || 0];
+  const hardDeleteMonthName = config.hardDelete?.monthName || MONTH_NAMES[config.hardDelete?.month || 0];
 
   const renewalDeadlineText = `${renewalMonthName} ${config.renewalDeadline.day}, ${referenceYear}`;
   const nextDeadlineText = `${hardDeleteMonthName} ${config.hardDelete.day}, ${nextYear}`;
@@ -342,8 +355,12 @@ export function getDaysUntilHardDelete(
     sessionEndYear = new Date(validUntil).getUTCFullYear();
   }
 
-  const startMonth = config.academicSessionStart?.month ?? 6;
-  const startDay = config.academicSessionStart?.day ?? 1;
+  if (!config?.academicSessionStart || typeof config.academicSessionStart.month !== 'number') {
+    throw new Error('Academic session start configuration missing in settings. Please configure settings and try again later.');
+  }
+
+  const startMonth = config.academicSessionStart.month;
+  const startDay = config.academicSessionStart.day || 1;
   const lifecycle = deriveAcademicLifecycle(startMonth, startDay, sessionEndYear);
   const hardDeleteDate = lifecycle.hardDelete;
 
@@ -372,8 +389,12 @@ export function getHardDeleteDate(
     sessionEndYear = new Date(validUntil).getUTCFullYear();
   }
 
-  const startMonth = config.academicSessionStart?.month ?? 6;
-  const startDay = config.academicSessionStart?.day ?? 1;
+  if (!config?.academicSessionStart || typeof config.academicSessionStart.month !== 'number') {
+    throw new Error('Academic session start configuration missing in settings. Please configure settings and try again later.');
+  }
+
+  const startMonth = config.academicSessionStart.month;
+  const startDay = config.academicSessionStart.day || 1;
   const lifecycle = deriveAcademicLifecycle(startMonth, startDay, sessionEndYear);
   return lifecycle.hardDelete;
 }

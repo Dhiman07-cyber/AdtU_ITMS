@@ -337,67 +337,32 @@ export interface RateLimitEntry {
   lastAction: Timestamp | string;
   [key: string]: any;
 }
-
-// Driver Swap Request type
-export interface DriverSwapRequest {
-  id: string;
-  fromDriverUID: string;
-  fromDriverName?: string;
-  toDriverUID: string;
-  toDriverName?: string;
+// DriverAssignment — canonical source of truth for driver↔bus ownership.
+export interface EnhancedBus {
   busId: string;
-  busNumber?: string;
-  routeId: string;
+  busNumber: string;
+  assignedDriverId: string | null;
+  activeDriverId: string | null;
+  driverUid?: string;
+  driverName?: string | null;
+  capacity?: number;
+  status?: string;
+  routeId?: string;
   routeName?: string;
-  fromBusNumber?: string;
-  toBusNumber?: string;
-  // Swap type: 'assignment' (to reserved driver) or 'swap' (between two active drivers)
-  swapType?: 'assignment' | 'swap';
-  // Secondary bus info for true swap scenarios
-  secondaryBusId?: string | null;
-  secondaryBusNumber?: string | null;
-  secondaryRouteId?: string | null;
-  secondaryRouteName?: string | null;
-  status: 'pending' | 'accepted' | 'rejected' | 'expired' | 'cancelled';
-  timePeriod?: {
-    type: 'first_trip' | 'one_day' | 'two_days' | 'custom';
-    duration?: number; // in hours for custom
-    startTime?: string;
-    endTime?: string;
-  };
-  reason?: string;
-  actor?: string; // who accepted/rejected
-  createdAt: Timestamp | string;
-  updatedAt?: Timestamp | string;
-  expiresAt: Timestamp | string;
-  acceptedAt?: Timestamp | string;
-  rejectedAt?: Timestamp | string;
-  cancelledAt?: Timestamp | string;
-  auditMeta?: Record<string, any>;
+  registrationNumber?: string;
 }
 
-// Driver Swap Audit type
-export interface DriverSwapAudit {
+export interface DriverAssignment {
   id: string;
-  requestId: string;
+  driverUid: string;
   busId: string;
-  action: 'created' | 'accepted' | 'rejected' | 'expired' | 'reverted' | 'cancelled';
-  actorUID: string;
-  actorName?: string;
-  actorRole?: string;
-  fromDriverUID: string;
-  toDriverUID?: string;
-  beforeSnapshot?: Record<string, any>;
-  afterSnapshot?: Record<string, any>;
-  revertToken?: string;
-  timestamp: Timestamp | string;
+  routeId?: string;
+  assignedAt: string;
+  unassignedAt?: string;
+  assignedBy: string;
+  isActive: boolean;
+  reason: 'assignment' | 'qr_claim' | 'admin_reassign' | 'migration';
   metadata?: Record<string, any>;
-}
-
-// Enhanced Bus type with activeDriverId
-export interface EnhancedBus extends Bus {
-  assignedDriverId?: string; // Permanent/scheduled driver
-  activeDriverId?: string; // Currently active driver (after swap)
 }
 
 // Types are exported inline above with 'export interface' and 'export type'

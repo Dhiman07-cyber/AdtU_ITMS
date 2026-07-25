@@ -74,7 +74,11 @@ export const POST = withSecurity(
         supabase.from('bus_locations').insert({
           bus_id: busId, route_id: routeId, driver_uid: driverUid, lat: 0, lng: 0, speed: 0,
           heading: 0, accuracy: 0, timestamp: nowIso, is_snapshot: true, trip_id: tripId
-        })
+        }),
+        supabase.from('driver_status').upsert({
+          driver_uid: driverUid, bus_id: busId, route_id: routeId, status: 'on_trip',
+          started_at: nowIso, last_updated_at: nowIso, trip_id: tripId
+        }, { onConflict: 'driver_uid' })
       );
     }
 

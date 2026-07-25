@@ -703,35 +703,6 @@ function NotificationCardV2({
                 })()}
               </div>
 
-              {/* Only show Action Required for pending swap requests, not for acceptance/completion notifications */}
-              {notification.title.toLowerCase().includes('swap') &&
-                !notification.title.toLowerCase().includes('accepted') &&
-                !notification.title.toLowerCase().includes('completed') &&
-                !notification.title.toLowerCase().includes('ended') &&
-                !notification.title.toLowerCase().includes('rejected') &&
-                !notification.title.toLowerCase().includes('cancelled') &&
-                !notification.title.toLowerCase().includes('expired') &&
-                !notification.content.toLowerCase().includes('has been accepted') &&
-                !notification.content.toLowerCase().includes('accepted your') && (
-                  <div className="mt-6">
-                    <Link href="/driver/swap-request?tab=incoming" className={`group flex items-center justify-between p-4 rounded-xl bg-gradient-to-r ${roleTheme.accent} text-white hover:scale-[1.01] active:scale-95 transition-all shadow-lg ${roleTheme.glow}`}>
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 bg-white/15 rounded-lg flex items-center justify-center">
-                          <AlertCircle className="h-5 w-5 text-white" />
-                        </div>
-                        <div>
-                          <span className="block font-black text-sm leading-tight text-white tracking-tight">Action Required</span>
-                          <span className="text-white/70 text-[10px] font-bold tracking-wide">Respond to this swap request</span>
-                        </div>
-                      </div>
-                      <div className="w-7 h-7 rounded-full bg-white/10 flex items-center justify-center transition-transform group-hover:translate-x-1">
-                        <ExternalLink className="h-3.5 w-3.5" />
-                      </div>
-                    </Link>
-                  </div>
-                )}
-
-
             </div>
 
             {/* Modal Footer */}

@@ -17,16 +17,8 @@
       "schedule": "0 0 * * *"
     },
     {
-      "path": "/api/cron/cleanup-swaps",
-      "schedule": "30 22 * * 6"
-    },
-    {
       "path": "/api/cron/cleanup-stale-locks",
       "schedule": "0 4 * * *"
-    },
-    {
-      "path": "/api/cron/cleanup-missed-bus",
-      "schedule": "5 4 * * *"
     },
     {
       "path": "/api/cron/integrity-sweep",

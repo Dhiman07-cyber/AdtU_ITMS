@@ -91,6 +91,10 @@ function rowToFirestore(row: Record<string, any>, fieldMap: Record<string, strin
       result[firestoreField] = row[pgCol];
     }
   }
+  if (row.uid) {
+    result.id = row.uid;
+    result.uid = row.uid;
+  }
   return result;
 }
 
@@ -395,14 +399,17 @@ export async function pgFindAllStudents(): Promise<Record<string, any>[]> {
 /** Firestore field → PostgreSQL column mapping for driver_profiles */
 const DRIVER_FIELD_MAP: Record<string, string> = {
   uid: 'uid',
+  id: 'uid',
   email: 'email',
   fullName: 'full_name',
   name: 'full_name',
   phone: 'phone',
   alternatePhone: 'alternate_phone',
+  altPhone: 'alternate_phone',
   licenseNumber: 'license_number',
   aadharNumber: 'aadhar_number',
   employeeId: 'employee_id',
+  driverId: 'employee_id',
   address: 'address',
   profilePhotoUrl: 'profile_photo_url',
   busId: 'bus_id',
@@ -413,6 +420,8 @@ const DRIVER_FIELD_MAP: Record<string, string> = {
   tripActive: 'trip_active',
   activeTripId: 'active_trip_id',
   isReserved: 'is_reserved',
+  approvedBy: 'approved_by',
+  dob: 'dob',
   createdAt: 'created_at',
   updatedAt: 'updated_at',
 };

@@ -56,23 +56,6 @@ const CRON_JOBS = [
         safe: true,
     },
     {
-        id: 'cleanup-swaps',
-        name: 'Driver Swap Cleanup',
-        endpoint: '/api/cron/cleanup-swaps',
-        method: 'GET',
-        schedule: 'Daily at 00:00 UTC',
-        category: 'Maintenance',
-        description: 'Manages driver swap request lifecycle - expires pending requests, ends accepted swaps, and cleans up old documents.',
-        details: [
-            'Expires pending requests past acceptance window',
-            'Reverts accepted swaps that have passed their time period',
-            'Deletes swap documents older than 7 days',
-        ],
-        icon: RefreshCw,
-        color: 'purple',
-        safe: true,
-    },
-    {
         id: 'expiry-check-main',
         name: 'Expiry Check (Main)',
         endpoint: '/api/cron/expiry-check?type=main',

@@ -961,7 +961,7 @@ function InteractiveDiceSection2({
       subtitle: "Stage 04 • Be first to know, always",
       desc: [
         "Get official alerts the moment bus timings change — no confusion, no missed rides.",
-        "Driver swap or route changes? You’re notified instantly through the ITMS platform.",
+        "Schedule or route changes? You’re notified instantly through the ITMS platform.",
       ],
       badge: "Live Alerts",
       badgeColor: "bg-amber-500/10 text-amber-300 border-amber-500/20",
@@ -1255,7 +1255,7 @@ function LearningCarousel() {
     },
     {
       title: "Official alerts for schedule changes",
-      desc: "Timing changed? Driver swapped? Get an official notification instantly — so you're never caught off guard.",
+      desc: "Timing changed? Route reassigned? Get an official notification instantly — so you're never caught off guard.",
       icon: <Bell className="w-6 h-6 text-orange-400" />,
       tag: "Dispatch Alerts",
       accent: "border-orange-500/25",

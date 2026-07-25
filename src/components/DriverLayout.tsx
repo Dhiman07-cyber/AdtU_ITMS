@@ -3,9 +3,8 @@
 import { ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Home, Users, Navigation, User, QrCode, RefreshCcw } from "lucide-react";
+import { Home, Users, Navigation, User, QrCode } from "lucide-react";
 import { cn } from "@/lib/utils";
-import DriverSwapBanner from "@/components/DriverSwapBanner";
 
 interface DriverLayoutProps {
   children: ReactNode;
@@ -18,13 +17,11 @@ export default function DriverLayout({ children }: DriverLayoutProps) {
     { href: "/driver", icon: Home, label: "Dashboard" },
     { href: "/driver/live-tracking", icon: Navigation, label: "Start Trip" },
     { href: "/driver/scan-pass", icon: QrCode, label: "Scan Pass" },
-    { href: "/driver/swap-request", icon: RefreshCcw, label: "Swap" },
     { href: "/driver/students", icon: Users, label: "Students" },
   ];
 
   return (
     <>
-      {/* DriverSwapBanner removed as per user request */}
       <div className="flex-1 flex flex-col pt-12 md:pb-0"> {/* Add top padding for fixed navbar, bottom padding handled by pages */}
         {children}
       </div>

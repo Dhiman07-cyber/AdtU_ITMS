@@ -99,12 +99,7 @@ export const ESTIMATED_DAILY_RECONNECTS = 10;
 // ============================================================================
 
 /**
- * Default bus fee amount (INR) used as fallback when system config is unavailable.
- * The authoritative value is in Firestore `config/system` → busFee.amount.
- */
-export const DEFAULT_BUS_FEE = 10_000;
-
-/**
  * Static application name constant.
  */
 export const APP_NAME = "AdtU Bus Services";
+

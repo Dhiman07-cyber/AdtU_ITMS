@@ -10,11 +10,13 @@ import { getBusById, updateBus, removeBus } from '@/domains/fleet/services/fleet
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const auth = await verifyApiAuth(request, ['admin', 'moderator']);
+    const auth = await verifyApiAuth(request, ['admin', 'moderator', 'driver', 'student']);
     if (!auth.authenticated) return auth.response;
 
-    const permissionDenied = await requireModeratorPermission(auth, 'buses', 'canView');
-    if (permissionDenied) return permissionDenied;
+    if (auth.role === 'moderator') {
+      const permissionDenied = await requireModeratorPermission(auth, 'buses', 'canView');
+      if (permissionDenied) return permissionDenied;
+    }
 
     const { id } = await params;
     if (!id) return NextResponse.json({ error: 'Bus ID is required' }, { status: 400 });

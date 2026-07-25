@@ -24,12 +24,11 @@ import {
 import {
   getStudentByUid,
   getBusById,
-  getRouteById
+  getRouteById,
 } from "@/lib/dataService";
 import { supabase } from "@/lib/supabase-client";
 import { useToast } from "@/contexts/toast-context";
 import dynamic from "next/dynamic";
-import { useMissedBus, generateOpId, MISSED_BUS_MESSAGES } from "@/hooks/useMissedBus";
 import { useBusLocation } from '@/hooks/useBusLocation';
 import TransportEntitlementGuard from "@/components/transport/TransportEntitlementGuard";
 import { formatIdForDisplay } from "@/lib/utils";
@@ -72,10 +71,6 @@ function TrackBusLive() {
   const [distanceToBus, setDistanceToBus] = useState<number | null>(null);
   const [tripActive, setTripActive] = useState(false);
 
-  // Missed bus feature state
-  const [missedBusModalOpen, setMissedBusModalOpen] = useState(false);
-  const [missedBusModalMessage, setMissedBusModalMessage] = useState<string | null>(null);
-
   const [showManualLocation, setShowManualLocation] = useState(false);
   const [isFullScreenMap, setIsFullScreenMap] = useState(false);
   const [showQrCode, setShowQrCode] = useState(false); // Show student's QR code
@@ -113,189 +108,6 @@ function TrackBusLive() {
       if (interval) clearInterval(interval);
     };
   }, [pendingRaise, countdown]);
-
-  // Initialize missed bus hook
-  const getIdToken = useCallback(async () => {
-    return currentUser?.getIdToken() || null;
-  }, [currentUser]);
-
-  const {
-    loading: missedBusLoading,
-    error: missedBusError,
-    activeRequest: missedBusActiveRequest,
-    raiseRequest: raiseMissedBusRequest,
-    cancelRequest: cancelMissedBusRequest,
-    refreshStatus: refreshMissedBusStatus,
-    clearError: clearMissedBusError
-  } = useMissedBus(getIdToken, currentUser?.uid || null);
-
-  // New state for wait request
-  const [waitRequestPending, setWaitRequestPending] = useState(false);
-  const [waitRequestStatus, setWaitRequestStatus] = useState<'pending' | 'accepted' | 'rejected' | null>(null);
-
-  // Handle raising missed bus request
-  const handleRaiseMissedBusRequest = async () => {
-    if (!currentUser || !routeData || !studentData) {
-      addToast("Unable to raise missed bus request - missing data", "error");
-      return;
-    }
-
-    // Check if student already has a pending waiting flag
-    if (isWaiting) {
-      addToast("Please cancel your waiting flag first before requesting missed bus pickup.", "error");
-      return;
-    }
-
-    // Check if there's already an active missed bus request
-    if (missedBusActiveRequest) {
-      setMissedBusModalMessage(MISSED_BUS_MESSAGES.ALREADY_HAS_PENDING);
-      setMissedBusModalOpen(true);
-      return;
-    }
-
-    // NEW LOGIC: Check if assigned bus is nearby and active
-    // If bus is active (tripActive) AND within 100m (0.1km), request driver to wait directly
-    if (tripActive && distanceToBus !== null && distanceToBus < 0.1) {
-      console.log("🛑 Bus is nearby (<100m) and active. Requesting driver to wait...");
-
-      let responseChannel: ReturnType<typeof supabase.channel> | null = null;
-      try {
-        setWaitRequestPending(true);
-        setWaitRequestStatus('pending');
-
-        const idToken = await currentUser.getIdToken();
-
-        // Subscribe to response channel FIRST to ensure we don't miss the reply
-        responseChannel = supabase.channel(`student_wait_response_${currentUser.uid}`);
-
-        responseChannel
-          .on('broadcast', { event: 'wait_accepted' }, async () => {
-            console.log("✅ Driver EXPECTED the wait request!");
-            setWaitRequestStatus('accepted');
-            setWaitRequestPending(false);
-            addToast("Driver agreed to wait! Hurry up and board the bus!", "success");
-            // Clean up channel after short delay
-            setTimeout(() => supabase.removeChannel(responseChannel!), 5000);
-          })
-          .on('broadcast', { event: 'wait_rejected' }, async () => {
-            console.log("❌ Driver REJECTED the wait request.");
-            setWaitRequestStatus('rejected');
-            setWaitRequestPending(false);
-            addToast("Driver cannot wait. Searching for other buses...", "info");
-
-            // Fallback to standard logic immediately
-            await proceedWithStandardMissedBusRequest();
-
-            // Clean up channel
-            setTimeout(() => supabase.removeChannel(responseChannel!), 5000);
-          })
-          .subscribe();
-
-        // Send request
-        const response = await fetch('/api/driver/request-wait', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            idToken,
-            busId: busData.busId,
-            studentId: currentUser.uid,
-            studentName: userData?.fullName || 'Student',
-            stop_name: studentData?.stop_name || 'Current Stop'
-          })
-        });
-
-        if (!response.ok) {
-          throw new Error('Failed to send wait request');
-        }
-
-        addToast("Asking driver to wait... (10s)", "info");
-
-        // Set safety timeout (15s) - slightly longer than driver's 10s timer
-        // BUGFIX: Use callback form of setState to avoid stale closure reading
-        // the initial 'pending' value forever.
-        setTimeout(async () => {
-          setWaitRequestStatus((current) => {
-            if (current === 'pending') {
-              console.log("⏱️ Wait request timed out. Proceeding with standard logic.");
-              setWaitRequestPending(false);
-              if (responseChannel) supabase.removeChannel(responseChannel);
-              // Fire-and-forget the fallback — we can't await inside setState
-              proceedWithStandardMissedBusRequest();
-              return 'rejected';
-            }
-            return current; // Already resolved, do nothing
-          });
-        }, 15000);
-
-        return; // Stop here, let the async response handle next steps
-
-      } catch (error) {
-        console.error("Error requesting wait:", error);
-        setWaitRequestPending(false);
-        // On error, just fallback
-        await proceedWithStandardMissedBusRequest();
-      } finally {
-        // Ensure channel is always cleaned up on all exit paths
-        if (responseChannel) {
-          supabase.removeChannel(responseChannel);
-        }
-      }
-      return;
-    }
-
-    // Standard logic fallback
-    await proceedWithStandardMissedBusRequest();
-  };
-
-  // Helper for standard logic (extracted to avoid duplication)
-  const proceedWithStandardMissedBusRequest = async () => {
-    const result = await raiseMissedBusRequest({
-      opId: generateOpId(),
-      routeId: routeData.routeId || studentData.routeId,
-      stop_name: studentData.stop_name || studentData.assignedStop,
-      busId: studentData.busId, // Pass student's assigned bus - assignedBusId in RaiseRequestParams
-    } as any);
-
-    if (result.success) {
-      addToast(MISSED_BUS_MESSAGES.REQUEST_PENDING, "success");
-    } else {
-      // Handle different failure stages
-      if (result.stage === 'maintenance') {
-        addToast(MISSED_BUS_MESSAGES.MAINTENANCE_TOAST, "error");
-      } else if (result.stage === 'no_candidates') {
-        setMissedBusModalMessage(MISSED_BUS_MESSAGES.NO_CANDIDATES_MODAL);
-        setMissedBusModalOpen(true);
-      } else if (result.stage === 'assigned_nearby') {
-        // This case might still happen if distance calculation differs on server
-        setMissedBusModalMessage(MISSED_BUS_MESSAGES.ASSIGNED_NEARBY);
-        setMissedBusModalOpen(true);
-      } else if (result.stage === 'assigned_on_way') {
-        setMissedBusModalMessage(MISSED_BUS_MESSAGES.ASSIGNED_BUS_ON_WAY);
-        setMissedBusModalOpen(true);
-      } else if (result.stage === 'rate_limited') {
-        addToast(MISSED_BUS_MESSAGES.RATE_LIMITED, "error");
-      } else if (result.stage === 'already_pending') {
-        setMissedBusModalMessage(MISSED_BUS_MESSAGES.ALREADY_HAS_PENDING);
-        setMissedBusModalOpen(true);
-      } else {
-        addToast(result.message || "Failed to raise missed bus request", "error");
-      }
-    }
-  };
-
-  // Handle cancelling missed bus request
-  const handleCancelMissedBusRequest = async () => {
-    if (!missedBusActiveRequest) return;
-
-    const success = await cancelMissedBusRequest(missedBusActiveRequest.id);
-    if (success) {
-      addToast("Missed bus request cancelled", "success");
-    } else {
-      addToast("Failed to cancel missed bus request", "error");
-    }
-  };
 
   const locationWatchIdRef = useRef<number | null>(null);
   const hasShownLocationErrorRef = useRef(false);
@@ -1364,61 +1176,10 @@ function TrackBusLive() {
               </Card>
             </div>
 
-            {/* Missed Bus Request Card REMOVED as per request */}
           </div>
         </div>
 
-        {/* Missed Bus Modal */}
-        {
-          missedBusModalOpen && missedBusModalMessage && (
-            <>
-              <div
-                className="fixed inset-0 z-[10001] bg-black/60 backdrop-blur-sm"
-                onClick={() => {
-                  setMissedBusModalOpen(false);
-                  setMissedBusModalMessage(null);
-                }}
-              />
-              <div className="fixed inset-0 z-[10002] flex items-center justify-center p-4 pointer-events-none">
-                <div className="pointer-events-auto w-full max-w-md bg-white dark:bg-gray-900 rounded-2xl overflow-hidden shadow-2xl border border-gray-200 dark:border-gray-700 animate-in zoom-in-95 fade-in duration-200">
-                  <div className="relative px-6 py-5 bg-gradient-to-r from-amber-500 to-orange-500">
-                    <div className="flex items-center gap-3">
-                      <div className="p-2 rounded-xl bg-white/20">
-                        <AlertTriangle className="h-6 w-6 text-white" />
-                      </div>
-                      <div>
-                        <h3 className="text-lg font-bold text-white">Missed Bus Request</h3>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => {
-                        setMissedBusModalOpen(false);
-                        setMissedBusModalMessage(null);
-                      }}
-                      className="absolute top-4 right-4 w-8 h-8 bg-white/20 hover:bg-white/30 rounded-full flex items-center justify-center text-white transition-all"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
-                  </div>
-                  <div className="p-6">
-                    <p className="text-gray-700 dark:text-gray-300 text-center font-medium">
-                      {missedBusModalMessage}
-                    </p>
-                    <Button
-                      onClick={() => {
-                        setMissedBusModalOpen(false);
-                        setMissedBusModalMessage(null);
-                      }}
-                      className="w-full mt-6 bg-gradient-to-r from-amber-500 to-orange-500 text-white font-semibold py-3"
-                    >
-                      Got it
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            </>
-          )
-        }
+
 
         {/* Fullscreen QR Code Overlay - Shows on map when QR button is clicked */}
         {

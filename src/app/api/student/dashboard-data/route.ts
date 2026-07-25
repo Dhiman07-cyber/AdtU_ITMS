@@ -129,7 +129,7 @@ export const GET = withSecurity(
         }
 
         // Process Trip Status
-        const isTripActive = tripStatus?.data ? (tripStatus.data.status === 'on_trip' || tripStatus.data.status === 'enroute') : false;
+        const isTripActive = tripStatus?.data ? (tripStatus.data.status === 'active' || tripStatus.data.status === 'on_trip' || tripStatus.data.status === 'enroute') : false;
 
         return NextResponse.json({
             student: studentData,

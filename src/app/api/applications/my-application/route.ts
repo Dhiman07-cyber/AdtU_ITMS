@@ -6,7 +6,7 @@ export async function GET(request: NextRequest) {
   try {
     const token = request.headers.get('Authorization')?.replace('Bearer ', '');
     if (!token) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      return NextResponse.json({ application: null, authenticated: false });
     }
 
     const decodedToken = await adminAuth.verifyIdToken(token);
@@ -14,12 +14,8 @@ export async function GET(request: NextRequest) {
 
     const application = await getMyApplication(uid);
 
-    return NextResponse.json({ application });
+    return NextResponse.json({ application, authenticated: true });
   } catch (error: any) {
-    console.error('Error fetching application:', error);
-    return NextResponse.json(
-      { error: 'Failed to fetch application' },
-      { status: 500 }
-    );
+    return NextResponse.json({ application: null, authenticated: false });
   }
 }

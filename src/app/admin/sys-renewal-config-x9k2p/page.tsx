@@ -44,7 +44,6 @@ import {
     ScrollText
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { DEFAULT_BUS_FEE } from '@/config/runtime';
 import { PremiumPageLoader } from '@/components/LoadingSpinner';
 import { DeadlineConfig } from '@/lib/types/deadline-config';
 import { deriveAcademicLifecycle } from '@/lib/utils/deadline-computation';
@@ -314,8 +313,8 @@ export default function SystemRenewalConfigPage() {
         mapProvider?: 'guwahati';
     }>({
         appName: 'AdtU Bus Services',
-        busFee: DEFAULT_BUS_FEE,
-        paymentExport: { startYear: 2027, interval: 1 },
+        busFee: 0,
+        paymentExport: { startYear: new Date().getFullYear(), interval: 1 },
         version: 'v2.4.0',
         mapProvider: 'guwahati'
     });
@@ -327,8 +326,8 @@ export default function SystemRenewalConfigPage() {
         mapProvider?: 'guwahati';
     }>({
         appName: 'AdtU Bus Services',
-        busFee: DEFAULT_BUS_FEE,
-        paymentExport: { startYear: 2027, interval: 1 },
+        busFee: 0,
+        paymentExport: { startYear: new Date().getFullYear(), interval: 1 },
         version: 'v2.4.0',
         mapProvider: 'guwahati'
     });
@@ -358,7 +357,7 @@ export default function SystemRenewalConfigPage() {
     const calculateDerivedMilestones = (sessionStart: MonthDayValue) => {
         const startMonth = sessionStart.month;
         const startDay = sessionStart.day;
-        const referenceYear = 2026;
+        const referenceYear = new Date().getFullYear();
 
         const lifecycle = deriveAcademicLifecycle(startMonth, startDay, referenceYear);
 
@@ -468,9 +467,9 @@ export default function SystemRenewalConfigPage() {
                 const config = data.config;
                 const newSystemConfig = {
                     appName: config.appName || 'AdtU Bus Services',
-                    busFee: config.busFee?.amount || DEFAULT_BUS_FEE,
+                    busFee: config.busFee?.amount ?? 0,
                     paymentExport: {
-                        startYear: config.paymentExport?.startYear || 2027,
+                        startYear: config.paymentExport?.startYear || new Date().getFullYear(),
                         interval: config.paymentExport?.interval || 1
                     },
                     version: config.version || 'v2.4.0',

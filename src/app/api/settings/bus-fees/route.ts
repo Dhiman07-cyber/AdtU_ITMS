@@ -2,25 +2,29 @@ import { NextRequest, NextResponse } from 'next/server';
 import { adminAuth } from '@/lib/firebase-admin';
 import { pgInsertNotification } from '@/domains/notification/repositories/notification.repository.pg';
 import { getSystemConfig, updateSystemConfig } from '@/domains/admin';
-import { DEFAULT_BUS_FEE } from '@/config/runtime';
 import { getUserById, getAdminById } from '@/domains/identity';
 
-// GET: Retrieve bus fees from system config (PostgreSQL)
+// GET: Retrieve bus fees from system config (Firestore settings/config)
 export async function GET(req: NextRequest) {
   try {
     const systemConfigResult = await getSystemConfig();
-    // Access busFee from system config
-    const busFeeData = systemConfigResult.data?.busFee || { amount: DEFAULT_BUS_FEE };
+    const busFeeAmount = systemConfigResult.data?.busFee?.amount;
+    if (typeof busFeeAmount !== 'number') {
+      return NextResponse.json(
+        { message: 'Bus fee configuration is missing in Firestore settings. Please try again later.' },
+        { status: 503 }
+      );
+    }
 
     return NextResponse.json({
-      amount: busFeeData.amount,
-      fees: busFeeData.amount
+      amount: busFeeAmount,
+      fees: busFeeAmount
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error fetching bus fees:', error);
     return NextResponse.json(
-      { message: 'Failed to fetch bus fees' },
-      { status: 500 }
+      { message: error?.message || 'Unstable network detected, please try again later' },
+      { status: 503 }
     );
   }
 }
@@ -51,7 +55,7 @@ export async function POST(req: NextRequest) {
 
     // Get current config
     const systemConfigResult = await getSystemConfig();
-    const oldAmount = systemConfigResult.data?.busFee?.amount || DEFAULT_BUS_FEE;
+    const oldAmount = systemConfigResult.data?.busFee?.amount || 0;
 
     // Prepare updated bus fee data
     // Note: The service will handle truncation of history
@@ -60,6 +64,7 @@ export async function POST(req: NextRequest) {
       amount: oldAmount,
       updatedAt: systemConfigResult.data?.busFee?.updatedAt || new Date().toISOString(),
     };
+    const combinedHistory = [...existingHistory, newHistoryEntry].slice(-3);
 
     // Construct new config object
     // We clone the existing config to preserve other fields
@@ -69,7 +74,7 @@ export async function POST(req: NextRequest) {
         amount: amount,
         updatedAt: new Date().toISOString(),
         version: (systemConfigResult.data?.busFee?.version || 0) + 1,
-        history: [...existingHistory, newHistoryEntry]
+        history: combinedHistory
       }
     };
 

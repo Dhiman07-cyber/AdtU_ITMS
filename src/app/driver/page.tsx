@@ -28,41 +28,6 @@ export default function DriverDashboard() {
 
   // NOTE: Cache clearing removed for production - caching is now enabled
 
-  // Check for expired swaps on mount
-  useEffect(() => {
-    if (!currentUser?.uid) return;
-
-    const checkExpiredSwaps = async () => {
-      try {
-        console.log('🔍 Checking for expired swap requests...');
-        const response = await authApiFetch(currentUser, '/api/driver-swap/check-expired', {
-          method: 'POST',
-          cache: 'no-store',
-          timeoutMs: 10000,
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          if (data.expired > 0) {
-            console.log(`✅ Expired ${data.expired} swap(s) - data will refresh automatically`);
-            // Real-time listeners will automatically pick up the changes
-          }
-        }
-      } catch (error) {
-        console.error('Error checking expired swaps:', error);
-        // Non-critical error, don't block UI
-      }
-    };
-
-    // Check immediately on mount
-    checkExpiredSwaps();
-
-    // Set up interval to check every 5 minutes
-    const interval = setInterval(checkExpiredSwaps, 5 * 60 * 1000);
-
-    return () => clearInterval(interval);
-  }, [currentUser?.uid]);
-
   // ── QUOTA-SAFE: One-time fetch driver/bus/route data ──────────────────────
   const [driverDataFirestore, setDriverDataFirestore] = useState<any>(null);
   const [assignedBusData, setAssignedBusData] = useState<any>(null);
@@ -98,91 +63,20 @@ export default function DriverDashboard() {
     fetchDashboardData();
   }, [currentUser]);
 
-  // Sync buses, routes and students lists for UI components that expect arrays
-  const [buses, setBuses] = useState<any[]>([]);
   const [routes, setRoutes] = useState<any[]>([]);
   const [students, setStudents] = useState<any[]>([]);
 
   useEffect(() => {
-    if (assignedBusData) setBuses([assignedBusData]);
     if (assignedRouteData) setRoutes([assignedRouteData]);
-  }, [assignedBusData, assignedRouteData]);
+  }, [assignedRouteData]);
 
   // Use Firestore data
   const driverData = driverDataFirestore;
 
   const busData = useMemo(() => {
-    // First try to use directly fetched assigned bus data
-    if (assignedBusData) {
-      if (typeof window !== 'undefined') console.log('🚌 Using directly fetched assigned bus data:', assignedBusData);
-      return assignedBusData;
-    }
-
-    if (!driverData || !buses.length) {
-      if (typeof window !== 'undefined') console.log('❌ Missing data - driverData:', !!driverData, 'buses:', buses.length);
-      return null;
-    }
-
-    if (typeof window !== 'undefined') {
-      console.log('🔍 Driver data:', driverData);
-      console.log('🚌 Available buses:', buses.length);
-      console.log('🔍 Driver UID:', currentUser?.uid);
-    }
-
-    // First check if driver is activeDriverId on any bus (temporary swap)
-    const activeBus = buses.find(b => b.activeDriverId === currentUser?.uid);
-    if (activeBus) {
-      if (typeof window !== 'undefined') console.log('🚌 Found bus where driver is activeDriverId:', activeBus);
-      return { ...activeBus, isTemporaryAssignment: true };
-    }
-
-    // Then check assignedDriverId (permanent assignment)
-    const assignedBus = buses.find(b => {
-      const matches = b.assignedDriverId === currentUser?.uid ||
-        b.driverUid === currentUser?.uid ||
-        b.driver_uid === currentUser?.uid;
-      return matches;
-    });
-
-    if (assignedBus && !assignedBus.activeDriverId) {
-      if (typeof window !== 'undefined') console.log('🚌 Found bus where driver is assignedDriverId:', assignedBus);
-      return { ...assignedBus, isTemporaryAssignment: false };
-    }
-
-    // Legacy check with bus ID from driver data
-    let busId = driverData.busId || driverData.busId || driverData.busDetails ||
-      (Array.isArray(driverData.busIds) ? driverData.busIds[0] : driverData.busIds) ||
-      (Array.isArray(driverData.busId) ? driverData.busId[0] : driverData.busId);
-
-    // Clean up the bus ID if it has special formatting
-    if (busId) {
-      if (busId.includes('(')) {
-        busId = busId.split('(')[0].trim();
-      }
-      if (busId.startsWith('route_')) {
-        busId = busId.replace('route_', 'bus_');
-      }
-    }
-
-    if (busId) {
-      const bus = buses.find(b =>
-        b.busId === busId ||
-        b.id === busId ||
-        b.busNumber === busId
-      );
-      if (bus) {
-        // Check if this driver is still the active driver
-        const effectiveDriver = bus.activeDriverId || bus.assignedDriverId || bus.driverUid;
-        if (effectiveDriver === currentUser?.uid) {
-          if (typeof window !== 'undefined') console.log('🚌 Found bus data via busId fallback:', bus);
-          return bus;
-        }
-      }
-    }
-
-    if (typeof window !== 'undefined') console.log('❌ No bus data found or driver not active');
+    if (assignedBusData) return assignedBusData;
     return null;
-  }, [driverData, buses, currentUser, assignedBusData]);
+  }, [assignedBusData]);
 
   // Sync hasActiveTrip with Supabase and API (Robust Version)
   useEffect(() => {
@@ -840,7 +734,6 @@ export default function DriverDashboard() {
                     )}
                   </div>
 
-                  {/* View Details link removed as the page has been replaced by Swap and Live Tracking */}
                 </div>
               ) : (
                 <div className="text-center py-8">
@@ -942,36 +835,6 @@ export default function DriverDashboard() {
                     <p className="text-[10px] sm:text-xs text-gray-600 dark:text-gray-400 font-medium">View assigned</p>
 
                     <div className="mt-1 sm:mt-3 flex items-center gap-1 text-green-600 dark:text-green-400 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-                      <span className="text-[10px] sm:text-xs font-bold">Open</span>
-                      <ArrowRight className="h-2 w-2 sm:h-3 sm:w-3 group-hover:translate-x-1 transition-transform duration-300" />
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </Link>
-
-          <Link href="/driver/swap-request" className="group relative block">
-            <div className="absolute inset-0 bg-gradient-to-br from-amber-500 to-orange-600 opacity-0 group-hover:opacity-10 blur-xl transition-all duration-300 rounded-3xl" />
-
-            <Card className="relative overflow-hidden border-0 shadow-xl hover:shadow-2xl transition-all duration-300 hover:scale-[1.02] bg-white/70 dark:bg-gray-900/70 backdrop-blur-xl border border-white/20 dark:border-gray-700/30">
-              <div className="absolute inset-0 bg-gradient-to-br from-amber-500/10 via-orange-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
-              <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-br from-amber-400 to-orange-600 opacity-5 rounded-bl-full" />
-
-              <CardContent className="relative p-3 sm:p-6">
-                <div className="flex items-start gap-2 sm:gap-4">
-                  <div className="relative">
-                    <div className="absolute inset-0 bg-gradient-to-br from-amber-500 to-orange-600 rounded-xl blur-lg opacity-0 group-hover:opacity-30 transition-all duration-300" />
-                    <div className="relative p-2 sm:p-4 rounded-xl bg-gradient-to-br from-amber-500 to-orange-600 shadow-2xl group-hover:scale-105 transition-all duration-300">
-                      <ArrowRight className="h-4 w-4 sm:h-6 sm:w-6 text-white" />
-                    </div>
-                  </div>
-
-                  <div className="flex-1">
-                    <h4 className="text-xs sm:text-sm font-bold text-gray-900 dark:text-white mb-0.5 sm:mb-1 group-hover:text-amber-600 dark:group-hover:text-amber-400 transition-colors">Driver Swap</h4>
-                    <p className="text-[10px] sm:text-xs text-gray-600 dark:text-gray-400 font-medium">Request swap</p>
-
-                    <div className="mt-1 sm:mt-3 flex items-center gap-1 text-amber-600 dark:text-amber-400 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
                       <span className="text-[10px] sm:text-xs font-bold">Open</span>
                       <ArrowRight className="h-2 w-2 sm:h-3 sm:w-3 group-hover:translate-x-1 transition-transform duration-300" />
                     </div>
