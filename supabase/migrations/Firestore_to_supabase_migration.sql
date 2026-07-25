@@ -2072,7 +2072,9 @@ BEGIN
         FROM public.applications
         WHERE state = 'verified_upcoming'
           AND (
-              (target_session->>'startYear')::INTEGER = p_session_year
+              target_session IS NULL
+              OR target_session->>'startYear' IS NULL
+              OR (target_session->>'startYear')::INTEGER = p_session_year
           )
         FOR UPDATE SKIP LOCKED   -- skip any already being processed
     LOOP

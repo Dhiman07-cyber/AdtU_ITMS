@@ -121,7 +121,9 @@ export function getTransportEntitlement(
 
   // (1) Lifecycle state. Only an 'active' student can hold transport entitlement.
   // soft_blocked / hard_blocked / pending_deletion / suspended / inactive → denied.
-  if (student.status !== 'active') {
+  const effectiveStatus = st || (student.validUntil || student.softBlock || student.busId || student.role === 'student' ? 'active' : null);
+
+  if (effectiveStatus !== 'active') {
     return { entitled: false, reason: 'inactive_status' };
   }
 

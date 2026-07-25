@@ -111,62 +111,69 @@ export async function activateUpcomingSessionApplications(opts: {
   const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0));
   const normalizedActivationDate = new Date(Date.UTC(activationDate.getUTCFullYear(), activationDate.getUTCMonth(), activationDate.getUTCDate(), 0, 0, 0, 0));
 
-  // 1. Activation Gate Comparison
-  if (today.getTime() < normalizedActivationDate.getTime()) {
-    summary.activationReached = false;
-    summary.completedAt = new Date().toISOString();
-    return summary;
-  }
+  // 1. Automated Cron Activation Gate Comparisons (only enforced for automated cron runs)
+  if (opts.trigger === 'cron') {
+    if (today.getTime() < normalizedActivationDate.getTime()) {
+      console.log(`⏳ [session-activation] Current date ${today.toISOString()} is before session activation date ${normalizedActivationDate.toISOString()}. Skipping automated cron activation.`);
+      summary.activationReached = false;
+      summary.completedAt = new Date().toISOString();
+      return summary;
+    }
 
-  // 2. Check Soft Block Completion Marker
-  const softBlockMarkerData = await findMarker(`soft_block_completed_${currentSessionStartYear}`);
-  if (!softBlockMarkerData) {
-    console.log(`⚠️ Soft Block completion marker 'soft_block_completed_${currentSessionStartYear}' is missing. Postponing session activation.`);
-    summary.activationReached = false;
-    summary.completedAt = new Date().toISOString();
-    return summary;
-  }
+    // 2. Check Soft Block Completion Marker
+    const softBlockMarkerData = await findMarker(`soft_block_completed_${currentSessionStartYear}`);
+    if (!softBlockMarkerData) {
+      console.log(`⚠️ Soft Block completion marker 'soft_block_completed_${currentSessionStartYear}' is missing. Postponing automated cron session activation.`);
+      summary.activationReached = false;
+      summary.completedAt = new Date().toISOString();
+      return summary;
+    }
 
-  // 3. Check Activation Marker (if marker already exists, exit immediately)
-  const activationMarkerData = await findMarker(`activation_${currentSessionStartYear}`);
-  if (activationMarkerData) {
-    summary.activationReached = false;
-    summary.completedAt = new Date().toISOString();
-    return summary;
+    // 3. Check Activation Marker (if marker already exists, exit immediately)
+    const activationMarkerData = await findMarker(`activation_${currentSessionStartYear}`);
+    if (activationMarkerData) {
+      console.log(`ℹ️ [session-activation] Activation marker 'activation_${currentSessionStartYear}' already exists. Skipping automated cron activation.`);
+      summary.activationReached = false;
+      summary.completedAt = new Date().toISOString();
+      return summary;
+    }
   }
 
   summary.activationReached = true;
 
-  // 4. Use atomic bulk activation RPC
-  const { data: rpcResult, error: rpcError } = await getSupabaseServer().rpc('activate_session_batch', {
-    p_session_year: currentSessionStartYear,
-  });
+  // 4. Fetch all verified_upcoming applications
+  const upcomingApps = await getAllByState('verified_upcoming');
 
-  if (rpcError) {
-    console.error('activate_session_batch RPC error:', rpcError);
-    summary.failed = 1;
-    summary.errors.push({ applicationId: 'bulk', error: rpcError.message });
-    summary.completedAt = new Date().toISOString();
-    return summary;
+  // Pre-fetch fleet buses and routes for optimization
+  const preFetchedBuses = await fleetService.getAllBuses().catch(() => []);
+  const preFetchedRoutes = await routeService.getAll().catch(() => []);
+
+  for (const app of upcomingApps) {
+    const targetStartYear = Number((app as any).targetSession?.startYear);
+    
+    // Filter for current session unless triggered manually by admin
+    if (opts.trigger === 'cron' && targetStartYear && targetStartYear !== currentSessionStartYear) {
+      summary.skipped++;
+      continue;
+    }
+
+    summary.scanned++;
+
+    const res = await activateOne(app, config, opts.trigger, preFetchedBuses, preFetchedRoutes);
+
+    if (res === 'activated') {
+      summary.activated++;
+    } else if (res === 'pending') {
+      summary.pendingSeatAllocation++;
+    } else if (res === 'skipped') {
+      summary.skipped++;
+    } else if (typeof res === 'object' && res.failed) {
+      summary.failed++;
+      summary.errors.push({ applicationId: app.applicationId, error: res.failed });
+    }
   }
-
-  if (!rpcResult?.success) {
-    console.error('activate_session_batch RPC failed:', rpcResult?.error);
-    summary.failed = 1;
-    summary.errors.push({ applicationId: 'bulk', error: rpcResult?.error || 'Unknown error' });
-    summary.completedAt = new Date().toISOString();
-    return summary;
-  }
-
-  // Map RPC result to summary
-  summary.activated = rpcResult.processed || 0;
-  summary.pendingSeatAllocation = rpcResult.pending || 0;
-  summary.failed = rpcResult.failed || 0;
-  summary.errors = rpcResult.errors || [];
-  summary.scanned = summary.activated + summary.pendingSeatAllocation + summary.failed;
 
   // Check remaining verified_upcoming applications for the current session
-  const { getAllByState } = await import('@/domains/application');
   const remainingApps = await getAllByState('verified_upcoming');
   const hasRemainingForCurrentSession = remainingApps.some(app => {
     const targetStartYear = Number((app as any).targetSession?.startYear);
@@ -228,7 +235,8 @@ async function activateOne(
   const attemptActivationWithBus = async (targetBusId: string, targetRouteId: string, isAlternative: boolean) => {
     const studentDoc = {
       address: formData.address,
-      alternatePhone: formData.alternatePhone || '',
+      altPhone: formData.altPhone || formData.alternatePhone || formData.alt_phone || '',
+      alternatePhone: formData.altPhone || formData.alternatePhone || formData.alt_phone || '',
       approvedAt: nowIso,
       approvedBy: trigger === 'cron' ? 'System (Session Activation)' : 'Admin (Manual Session Activation)',
       bloodGroup: formData.bloodGroup,
@@ -244,7 +252,8 @@ async function activateOne(
       gender: formData.gender,
       parentName: formData.parentName,
       parentPhone: formData.parentPhone,
-      phoneNumber: formData.phoneNumber,
+      phone: formData.phone || formData.phoneNumber || formData.phoneNumber || '',
+      phoneNumber: formData.phone || formData.phoneNumber || formData.phoneNumber || '',
       profilePhotoUrl: formData.profilePhotoUrl || '',
       role: 'student',
       routeId: targetRouteId,
@@ -395,6 +404,8 @@ async function activateOne(
 
       // Case C: Selected Bus Full and no compatible alternatives available. Move to pending_seat_allocation.
       try {
+        const wasAlreadyPending = app.state === 'pending_seat_allocation';
+
         // Update application state in PG
         await applicationRepo.update(appId, {
           state: 'pending_seat_allocation',
@@ -413,7 +424,7 @@ async function activateOne(
           summary: 'Application pending seat allocation: ' + (formData.fullName || ''),
           severity: 'high',
           metadata: {
-            before: { applicationId: appId, state: 'verified_upcoming' },
+            before: { applicationId: appId, state: app.state },
             after: { applicationId: appId, state: 'pending_seat_allocation' },
             busId: requestedBusId,
             shift,
@@ -423,9 +434,12 @@ async function activateOne(
           },
         });
 
-        await notifyPendingSeatAllocation(appId, app, formData).catch((e) =>
-          console.error('[session-activation] pending-seat notify failed:', e?.message || e)
-        );
+        // Only send notification when transitioning to pending_seat_allocation for the FIRST time!
+        if (!wasAlreadyPending) {
+          await notifyPendingSeatAllocation(appId, app, formData).catch((e) =>
+            console.error('[session-activation] pending-seat notify failed:', e?.message || e)
+          );
+        }
       } catch (e: any) {
         if (e instanceof StateChangedError) return 'skipped';
         return { failed: `pending-state-write failed: ${e?.message || e}` };
@@ -497,21 +511,19 @@ async function notifyPendingSeatAllocation(appId: string, app: Application, form
     (await import('@/domains/identity')).getUsersByRole('admin'),
     (await import('@/domains/identity')).getUsersByRole('moderator'),
   ]);
-  const recipients = [
+  const recipients = Array.from(new Set([
     ...admins.map((u: any) => u.uid || u.id),
     ...moderators.map((u: any) => u.uid || u.id),
-  ];
+  ])).filter(Boolean);
   if (recipients.length === 0) return;
 
-  for (const staffId of recipients) {
-    await Notification.createNotification(
-      { userId: 'system', userName: 'System', userRole: 'admin' },
-      { type: 'specific_users', specificUserIds: [staffId] },
-      `${formData.fullName} (${formData.enrollmentId}) has a verified application and completed payment but no seat is available. Please assign a seat or wait for one to free up.`,
-      'Verified application needs manual seat allocation',
-      { applicationId: appId, reviewPage: `/admin/applications/${appId}` }
-    ).catch(() => {});
-  }
+  await Notification.createNotification(
+    { userId: 'system', userName: 'System', userRole: 'admin' },
+    { type: 'specific_users', specificUserIds: recipients },
+    `${formData.fullName} (${formData.enrollmentId}) has a verified application and completed payment but no seat is available. Please assign a seat or wait for one to free up.`,
+    'Verified application needs manual seat allocation',
+    { applicationId: appId, reviewPage: `/admin/applications/${appId}` }
+  ).catch(() => {});
 }
 
 export async function activateSingleApplication(

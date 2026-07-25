@@ -551,8 +551,94 @@ export default function ModeratorApplicationsPage() {
     return data;
   }, [activeSection, applicationApplications, upcomingApplications, renewalRequests, searchQuery, shiftFilter, processedIds]);
 
+  const [reassignModalTarget, setReassignModalTarget] = useState<{ applicationId: string; studentName?: string; busName?: string; shift?: string } | null>(null);
+
+  const handleRetryActivation = async (applicationId: string, itemData?: any) => {
+    if (!currentUser) return;
+    setApproving(applicationId);
+    try {
+      const token = await currentUser.getIdToken();
+      const response = await fetch('/api/admin/run-session-activation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ applicationId }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (response.ok) {
+        const summary = data?.summary || data || {};
+        const activatedCount = summary.activated ?? data?.activated ?? 0;
+
+        if (activatedCount > 0) {
+          showToast('Student application re-approved and seat allocated successfully!', 'success');
+          setProcessedIds((prev) => {
+            const next = new Set(prev);
+            next.add(applicationId);
+            return next;
+          });
+          await handleRefresh();
+          setError('');
+        } else {
+          // Capacity full — open dark reddish warning modal card
+          const studentName = itemData?.formData?.fullName || itemData?.full_name || itemData?.applicantEmail || 'Student';
+          const routeId = itemData?.routeId || itemData?.formData?.routeId || '';
+          const busName = getBusDisplayFromRoute(routeId);
+          const shift = (itemData?.shift || itemData?.formData?.shift || 'Morning');
+          setReassignModalTarget({
+            applicationId,
+            studentName,
+            busName,
+            shift,
+          });
+        }
+      } else {
+        const studentName = itemData?.formData?.fullName || itemData?.full_name || itemData?.applicantEmail || 'Student';
+        const routeId = itemData?.routeId || itemData?.formData?.routeId || '';
+        const busName = getBusDisplayFromRoute(routeId);
+        const shift = (itemData?.shift || itemData?.formData?.shift || 'Morning');
+        setReassignModalTarget({
+          applicationId,
+          studentName,
+          busName,
+          shift,
+        });
+      }
+    } catch (err) {
+      console.error('Re-approval error:', err);
+      const studentName = itemData?.formData?.fullName || itemData?.full_name || itemData?.applicantEmail || 'Student';
+      const routeId = itemData?.routeId || itemData?.formData?.routeId || '';
+      const busName = getBusDisplayFromRoute(routeId);
+      const shift = (itemData?.shift || itemData?.formData?.shift || 'Morning');
+      setReassignModalTarget({
+        applicationId,
+        studentName,
+        busName,
+        shift,
+      });
+    } finally {
+      setApproving(null);
+    }
+  };
+
   const handleApprove = async (applicationId: string, overrideBusId?: string) => {
     if (!currentUser) return;
+
+    const appItem = pendingApplications.find((app: any) => app.applicationId === applicationId);
+    const capStatus = appItem ? getCapacityStatus(appItem) : null;
+
+    if (capStatus?.needsCapacityReview && capStatus.reassignmentReason === 'bus_full_only_option' && !overrideBusId) {
+      const studentName = appItem?.formData?.fullName || appItem?.full_name || appItem?.applicantEmail || 'Student';
+      const routeId = appItem?.routeId || appItem?.formData?.routeId || '';
+      const busName = getBusDisplayFromRoute(routeId);
+      const shift = (appItem?.shift || appItem?.formData?.shift || 'Morning');
+      setReassignModalTarget({
+        applicationId,
+        studentName,
+        busName,
+        shift,
+      });
+      return false;
+    }
+
     setApproving(applicationId);
     try {
       const token = await currentUser.getIdToken();
@@ -568,8 +654,17 @@ export default function ModeratorApplicationsPage() {
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
-        setError(errorData.error || "Failed to approve application");
+        const errorData = await response.json().catch(() => ({}));
+        const studentName = appItem?.formData?.fullName || appItem?.full_name || appItem?.applicantEmail || 'Student';
+        const routeId = appItem?.routeId || appItem?.formData?.routeId || '';
+        const busName = getBusDisplayFromRoute(routeId);
+        const shift = (appItem?.shift || appItem?.formData?.shift || 'Morning');
+        setReassignModalTarget({
+          applicationId,
+          studentName,
+          busName,
+          shift,
+        });
         return false;
       } else {
         setError("");
@@ -578,7 +673,6 @@ export default function ModeratorApplicationsPage() {
         setStagedBusesTrigger(prev => prev + 1);
 
         // Format bus/route for toast
-        const appItem = pendingApplications.find((app: any) => app.applicationId === applicationId);
         const isUpcoming = appItem ? isUpcomingApplication(appItem) : false;
         const activeBusId = overrideBusId || appItem?.formData?.busId || appItem?.formData?.routeId?.replace('route_', 'bus_') || '';
         const selectedBus = buses.find((b: any) => (b.id || b.busId) === activeBusId);
@@ -609,7 +703,17 @@ export default function ModeratorApplicationsPage() {
         return true;
       }
     } catch (error) {
-      setError("Failed to approve application");
+      console.error("Error approving application:", error);
+      const studentName = appItem?.formData?.fullName || appItem?.full_name || appItem?.applicantEmail || 'Student';
+      const routeId = appItem?.routeId || appItem?.formData?.routeId || '';
+      const busName = getBusDisplayFromRoute(routeId);
+      const shift = (appItem?.shift || appItem?.formData?.shift || 'Morning');
+      setReassignModalTarget({
+        applicationId,
+        studentName,
+        busName,
+        shift,
+      });
       return false;
     } finally {
       setApproving(null);
@@ -665,6 +769,9 @@ export default function ModeratorApplicationsPage() {
 
   const handleApproveRenewal = async (requestId: string) => {
     if (!currentUser) return;
+    const renewalItem = renewalRequests.find(r => r.id === requestId);
+    const busName = renewalItem?.busNumber ? `Bus ${renewalItem.busNumber}` : 'Requested Bus';
+
     setApproving(requestId);
     try {
       const token = await currentUser.getIdToken();
@@ -681,12 +788,23 @@ export default function ModeratorApplicationsPage() {
         showToast('Renewal request approved successfully', 'success');
         setRenewalRequests(prev => prev.filter(r => r.id !== requestId));
       } else {
-        const errorData = await response.json();
-        setError(errorData.error || 'Failed to approve renewal request');
+        const studentName = renewalItem?.studentName || 'Student';
+        setReassignModalTarget({
+          applicationId: requestId,
+          studentName,
+          busName,
+          shift: 'Morning',
+        });
       }
     } catch (error) {
       console.error('Error approving renewal:', error);
-      setError('Failed to approve renewal request');
+      const studentName = renewalItem?.studentName || 'Student';
+      setReassignModalTarget({
+        applicationId: requestId,
+        studentName,
+        busName,
+        shift: 'Morning',
+      });
     } finally {
       setApproving(null);
     }
@@ -1225,6 +1343,46 @@ export default function ModeratorApplicationsPage() {
                               Approved (Awaiting Activation)
                             </Button>
                           </div>
+                        ) : item.state === 'pending_seat_allocation' ? (
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-3">
+                            <Button
+                              variant="outline"
+                              className="w-full bg-white hover:bg-gray-100 text-black border-transparent shadow-sm font-medium h-10 gap-2 hover:scale-[1.02] active:scale-[0.98] transition-all"
+                              onClick={() => router.push(`/moderator/applications/${item.applicationId}`)}
+                            >
+                              <Eye className="h-4 w-4" />
+                              View
+                            </Button>
+                            <Button
+                              className="w-full h-10 gap-2 font-medium bg-amber-600 hover:bg-amber-500 text-white shadow-lg"
+                              onClick={() => handleRetryActivation(item.applicationId, item)}
+                              disabled={!canApplicationApprove || approving === item.applicationId}
+                              title="Re-approve application — succeeds if a seat is available"
+                            >
+                              {approving === item.applicationId ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                              Re-Approve
+                            </Button>
+                            <Button
+                              variant="outline"
+                              className={cn(
+                                "w-full h-10 gap-2 transition-all",
+                                !canApplicationReject
+                                  ? "border-red-500/10 text-red-500/50 bg-red-500/5 opacity-60 cursor-pointer hover:bg-red-500/5 hover:text-red-500/50"
+                                  : "border-red-500/20 text-red-400 bg-red-500/5 hover:bg-red-500/10 hover:text-red-300 hover:border-red-500/30 hover:scale-[1.02] active:scale-[0.98]"
+                              )}
+                              onClick={() => {
+                                if (!canApplicationReject) {
+                                  showToast("You are not authorized to reject students.", "error");
+                                  return;
+                                }
+                                handleRejectClick(item.applicationId);
+                              }}
+                              disabled={canApplicationReject && (rejecting === item.applicationId)}
+                            >
+                              {rejecting === item.applicationId ? <Loader2 className="h-4 w-4 animate-spin" /> : <X className="h-4 w-4" />}
+                              Reject
+                            </Button>
+                          </div>
                         ) : (
                           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-3">
                             <Button
@@ -1412,6 +1570,73 @@ export default function ModeratorApplicationsPage() {
               Confirm Rejection
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Capacity Full / Unable to Re-Approve Reddish Confirmation Pop-up Card */}
+      <Dialog open={!!reassignModalTarget} onOpenChange={(open) => !open && setReassignModalTarget(null)}>
+        <DialogContent className="max-w-xl w-full bg-[#180e11] border border-rose-500/40 text-white p-0 rounded-2xl overflow-hidden shadow-2xl">
+          {/* Header Banner */}
+          <div className="p-6 sm:p-7 bg-gradient-to-b from-rose-950/60 to-red-950/20 border-b border-white/10">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 rounded-xl flex items-center justify-center bg-rose-600 text-white shrink-0 shadow-lg">
+                <AlertTriangle className="h-6 w-6 text-white" />
+              </div>
+              <div>
+                <div className="inline-flex items-center px-3 py-0.5 rounded-full text-xs font-medium border bg-rose-500/20 text-rose-300 border-rose-500/40 mb-1.5">
+                  Capacity Full • Seat Unavailable
+                </div>
+                <h1 className="text-lg sm:text-xl font-bold text-white tracking-tight">
+                  No Seats Available for Re-Approval
+                </h1>
+              </div>
+            </div>
+          </div>
+
+          {/* Body Content */}
+          <div className="p-6 sm:p-7 space-y-5">
+            <div className="p-4 rounded-xl bg-white/5 border border-white/10 space-y-2">
+              <h2 className="text-sm font-semibold text-zinc-200">
+                Application for <strong className="text-white font-bold">{reassignModalTarget?.studentName}</strong>
+              </h2>
+              <p className="text-xs sm:text-sm text-zinc-300 leading-relaxed">
+                No seats are currently available on <strong className="text-rose-300">{reassignModalTarget?.busName}</strong> for the <strong className="text-zinc-100">{reassignModalTarget?.shift}</strong> shift, and no alternative buses serving this stop have free capacity.
+              </p>
+            </div>
+
+            <div className="p-4 rounded-xl bg-rose-950/40 border border-rose-900/50 space-y-2">
+              <div className="flex items-center gap-2 text-rose-300 text-xs font-semibold uppercase tracking-wider">
+                <ArrowRightLeft className="h-4 w-4 text-rose-400" />
+                How to Make a Seat Available
+              </div>
+              <p className="text-xs text-zinc-300 leading-relaxed">
+                To free up a seat for <strong className="text-white">{reassignModalTarget?.studentName}</strong>, navigate to <strong className="text-rose-300">Student Reassignment</strong> and transfer an existing active student on <strong className="text-rose-300">{reassignModalTarget?.busName}</strong> to another bus or route.
+              </p>
+            </div>
+
+            {/* Footer Buttons */}
+            <div className="flex flex-row justify-between items-center gap-3 pt-2">
+              <Button
+                type="button"
+                variant="outline"
+                className="w-1/2 bg-white/5 hover:bg-white/10 text-zinc-300 hover:text-white border-white/10 h-11 font-medium rounded-xl transition-all"
+                onClick={() => setReassignModalTarget(null)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                className="w-1/2 bg-white/5 hover:bg-white/10 text-white border-white/10 h-11 font-medium rounded-xl transition-all"
+                onClick={() => {
+                  setReassignModalTarget(null);
+                  router.push('/moderator/smart-allocation');
+                }}
+              >
+                Reassign Student
+              </Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
 

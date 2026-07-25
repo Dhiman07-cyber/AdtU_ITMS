@@ -175,7 +175,32 @@ export async function pgFindUserById(uid: string): Promise<IdentityUser | null> 
 
   if (!data) return null;
 
-  return pgRowToUser(data as PgUser);
+  const user = pgRowToUser(data as PgUser);
+
+  // If user is a student, attach student_profiles fields (status, valid_until, soft_block, etc.)
+  if (user.role === 'student') {
+    const { data: studentProfile } = await db
+      .from('student_profiles')
+      .select('status, soft_block, valid_until, bus_id, route_id, shift, enrollment_id, payment_status, current_session')
+      .eq('uid', uid)
+      .maybeSingle();
+
+    if (studentProfile) {
+      user.status = studentProfile.status || 'active';
+      user.softBlock = studentProfile.soft_block;
+      user.validUntil = studentProfile.valid_until;
+      user.busId = studentProfile.bus_id;
+      user.routeId = studentProfile.route_id;
+      user.shift = studentProfile.shift;
+      user.enrollmentId = studentProfile.enrollment_id;
+      user.paymentStatus = studentProfile.payment_status;
+      user.currentSession = studentProfile.current_session;
+    } else {
+      user.status = 'active';
+    }
+  }
+
+  return user;
 }
 
 /**

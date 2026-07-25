@@ -148,7 +148,8 @@ export async function createOverloadNotification(
           `**Status:** Bus is currently at FULL capacity (${busInfo.currentMembers}/${busInfo.capacity})\n\n` +
           `**Action Required:** Please review capacity reallocation or consider adding additional bus service for this route.\n\n` +
           `[View Smart Allocation](/admin/smart-allocation)`,
-        targetType: 'all_admins_moderators',
+        targetType: 'all_role',
+        targetRole: 'admin',
       }),
     });
 
@@ -192,7 +193,8 @@ export async function createNearCapacityNotification(
           `• Available: ${futureAvailableSeats} seat(s)\n\n` +
           `**Recommended Action:** Review bus allocation and consider capacity expansion if trend continues.\n\n` +
           `[View Smart Allocation](/admin/smart-allocation)`,
-        targetType: 'all_admins_moderators',
+        targetType: 'all_role',
+        targetRole: 'admin',
       }),
     });
 

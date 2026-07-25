@@ -146,7 +146,29 @@ export async function deleteStudent(uid: string): Promise<void> {
 // ─── Driver Profiles ────────────────────────────────────────────────────────
 
 export async function getDriverById(uid: string): Promise<Record<string, any> | null> {
-  return repoFindDriverById(uid);
+  const driver = await repoFindDriverById(uid);
+  if (driver) return driver;
+
+  // Fallback: If profile row is missing in driver_profiles, check users table
+  try {
+    const user = await repoFindUserById(uid);
+    if (user && user.role === 'driver') {
+      const fallbackDriver = {
+        uid: user.uid,
+        email: user.email || '',
+        fullName: user.name || 'Driver',
+        shift: 'Both',
+        status: 'active',
+      };
+      // Auto-insert into driver_profiles so it exists permanently
+      await repoInsertDriver(fallbackDriver).catch(() => {});
+      return fallbackDriver;
+    }
+  } catch (err) {
+    console.error('[getDriverById] Fallback resolution failed:', err);
+  }
+
+  return null;
 }
 
 export async function getDriversByStatus(status: string): Promise<Record<string, any>[]> {

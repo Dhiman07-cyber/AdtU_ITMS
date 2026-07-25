@@ -147,50 +147,52 @@ function TrackBusLive() {
     return `${hrs}h ${mins}m`;
   };
 
-  // Get student's current location 
+  // Get student's current location with low-accuracy fallback
   useEffect(() => {
-    // Start location tracking immediately to show distance to bus
     if (!navigator.geolocation) {
       console.warn("Geolocation not supported");
       return;
     }
 
-    console.log("Starting location tracking for student (HIGH ACCURACY)...");
+    console.log("Starting location tracking for student...");
 
-    // Get initial position immediately
+    const handleLocationSuccess = (position: GeolocationPosition) => {
+      const locationData = {
+        lat: position.coords.latitude,
+        lng: position.coords.longitude,
+        accuracy: position.coords.accuracy,
+      };
+      setStudentLocation(locationData);
+    };
+
+    const handleLocationError = (err: GeolocationPositionError) => {
+      console.warn("High-accuracy location failed, falling back to low-accuracy:", err.message);
+      navigator.geolocation.getCurrentPosition(
+        handleLocationSuccess,
+        (fallbackErr) => {
+          console.warn("Low-accuracy location failed:", fallbackErr.message);
+        },
+        { enableHighAccuracy: false, timeout: 10000, maximumAge: 60000 }
+      );
+    };
+
+    // Get initial position with 5s timeout fallback
     navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const initial = {
-          lat: position.coords.latitude,
-          lng: position.coords.longitude,
-          accuracy: position.coords.accuracy,
-        };
-        setStudentLocation(initial);
-        console.log("Initial student location caught:", initial);
-      },
-      (err) => console.log("Initial location error:", err.message),
-      { enableHighAccuracy: true }
+      handleLocationSuccess,
+      handleLocationError,
+      { enableHighAccuracy: true, timeout: 5000, maximumAge: 10000 }
     );
 
-
-
-    // Watch position continuously when waiting
+    // Watch position continuously
     locationWatchIdRef.current = navigator.geolocation.watchPosition(
-      (position) => {
-        const newLocation = {
-          lat: position.coords.latitude,
-          lng: position.coords.longitude,
-          accuracy: position.coords.accuracy,
-        };
-        setStudentLocation(newLocation);
-      },
+      handleLocationSuccess,
       (error) => {
         console.debug("Location watch error:", error.message);
       },
       {
-        enableHighAccuracy: true, // Use GPS for better accuracy
+        enableHighAccuracy: true,
         timeout: 10000,
-        maximumAge: 0,
+        maximumAge: 10000,
       }
     );
 
@@ -201,6 +203,34 @@ function TrackBusLive() {
       }
     };
   }, []); // Run once on mount
+
+  // Fallback to assigned bus stop location if device GPS is unavailable
+  useEffect(() => {
+    if (studentLocation) return;
+
+    if (studentData?.stop_lat && studentData?.stop_lng) {
+      setStudentLocation({
+        lat: Number(studentData.stop_lat),
+        lng: Number(studentData.stop_lng),
+        accuracy: 100,
+      });
+      return;
+    }
+
+    if (routeData?.stops && Array.isArray(routeData.stops) && (studentData?.stop_name || studentData?.assignedStop)) {
+      const stopName = (studentData.stop_name || studentData.assignedStop || '').toLowerCase();
+      const matchedStop = routeData.stops.find((s: any) =>
+        s.name && s.name.toLowerCase().includes(stopName)
+      );
+      if (matchedStop && matchedStop.lat && matchedStop.lng) {
+        setStudentLocation({
+          lat: Number(matchedStop.lat),
+          lng: Number(matchedStop.lng),
+          accuracy: 100,
+        });
+      }
+    }
+  }, [studentLocation, studentData, routeData]);
 
   // Cleanup wait flag broadcast channel on unmount
   useEffect(() => {
@@ -229,26 +259,35 @@ function TrackBusLive() {
       }
 
       try {
-        // Optimization: Use userData from context instead of re-fetching student doc
+        // Optimization: Use userData from context + dashboard-data fallback
         const student = userData;
         setStudentData(student);
 
-        // Run subsequent queries in parallel to significantly reduce waterfall loading
+        const targetBusId = student?.busId || student?.bus_id;
+        const targetRouteId = student?.routeId || student?.route_id;
+
         const queries = [];
 
-        let busPromise = Promise.resolve(null);
-        if (student.busId) {
-          busPromise = getBusById(student.busId).then(bus => {
-            if (bus) setBusData(bus);
+        let fetchedBus: any = null;
+        let fetchedRoute: any = null;
+
+        if (targetBusId) {
+          const busPromise = getBusById(targetBusId).then(bus => {
+            if (bus) {
+              fetchedBus = bus;
+              setBusData(bus);
+            }
             return bus;
           });
           queries.push(busPromise);
         }
 
-        let routePromise = Promise.resolve(null);
-        if (student.routeId) {
-          routePromise = getRouteById(student.routeId).then(route => {
-            if (route) setRouteData(route);
+        if (targetRouteId) {
+          const routePromise = getRouteById(targetRouteId).then(route => {
+            if (route) {
+              fetchedRoute = route;
+              setRouteData(route);
+            }
             return route;
           });
           queries.push(routePromise);
@@ -280,6 +319,23 @@ function TrackBusLive() {
 
         // Fetch all independently
         await Promise.all(queries);
+
+        // Fallback: If bus or route is still missing, fetch comprehensive dashboard data from Supabase API
+        if (!fetchedBus || !fetchedRoute) {
+          try {
+            const dashRes = await fetch('/api/student/dashboard-data', {
+              headers: { 'Authorization': `Bearer ${idToken}` }
+            });
+            if (dashRes.ok) {
+              const dash = await dashRes.json();
+              if (dash.student) setStudentData(dash.student);
+              if (dash.bus) setBusData(dash.bus);
+              if (dash.route) setRouteData(dash.route);
+            }
+          } catch (dashErr) {
+            console.error("Dashboard data fallback error:", dashErr);
+          }
+        }
 
         setDataLoading(false);
       } catch (error) {
@@ -1071,13 +1127,13 @@ function TrackBusLive() {
                     <div className="text-center border-x border-slate-200 dark:border-slate-700">
                       <p className="text-[8px] font-bold text-slate-400 uppercase mb-1">ETA</p>
                       <div className="text-[10px] font-black text-blue-500">
-                        {eta || "--"}
+                        {eta || "Unavailable"}
                       </div>
                     </div>
                     <div className="text-center">
                       <p className="text-[8px] font-bold text-slate-400 uppercase mb-1">Distance</p>
                       <div className="text-[10px] font-black text-slate-700 dark:text-slate-200">
-                        {distanceToBus !== null ? `${distanceToBus.toFixed(1)}km` : "--"}
+                        {distanceToBus !== null ? `${distanceToBus.toFixed(1)}km` : "Unavailable"}
                       </div>
                     </div>
                   </div>

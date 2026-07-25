@@ -215,16 +215,41 @@ const GuwahatiMap = forwardRef<GuwahatiMapHandles, Props>(({
     zoomIn: () => mapRef.current?.zoomIn(),
     zoomOut: () => mapRef.current?.zoomOut(),
     recenter: () => {
-      const pos = busPosition ? [busPosition.lng, busPosition.lat] : [ADTU_COORDS.lng, ADTU_COORDS.lat];
-      mapRef.current?.flyTo({ center: pos as any, zoom: 15.5 });
+      let target: [number, number] | null = null;
+      if (busPosition && (busPosition.lat !== 0 || busPosition.lng !== 0)) {
+        target = [busPosition.lng, busPosition.lat];
+      } else if (center && (center[0] !== 0 || center[1] !== 0)) {
+        target = [center[1], center[0]];
+      } else {
+        const userPoint = points?.find((p) => p.kind === "student" || p.kind === "driver" || p.kind === "waiting");
+        if (userPoint && (userPoint.lat !== 0 || userPoint.lng !== 0)) {
+          target = [userPoint.lng, userPoint.lat];
+        }
+      }
+      if (!target) {
+        target = [ADTU_COORDS.lng, ADTU_COORDS.lat];
+      }
+      mapRef.current?.flyTo({ center: target as any, zoom: 15.5 });
     }
   }));
 
   const pmtilesUrl = useMemo(() => getGuwahatiPmtilesUrl(), []);
   const effectiveCenter = useMemo<[number, number]>(() => {
-    const base = center ?? (busPosition ? [busPosition.lat, busPosition.lng] : [ADTU_COORDS.lat, ADTU_COORDS.lng]);
+    let base: [number, number];
+    if (busPosition && (busPosition.lat !== 0 || busPosition.lng !== 0)) {
+      base = [busPosition.lat, busPosition.lng];
+    } else if (center && (center[0] !== 0 || center[1] !== 0)) {
+      base = center;
+    } else {
+      const userPoint = points?.find((p) => p.kind === "student" || p.kind === "driver" || p.kind === "waiting");
+      if (userPoint && (userPoint.lat !== 0 || userPoint.lng !== 0)) {
+        base = [userPoint.lat, userPoint.lng];
+      } else {
+        base = [ADTU_COORDS.lat, ADTU_COORDS.lng];
+      }
+    }
     return restrictToGuwahati ? [clampLatLngToBounds(base[0], base[1]).lat, clampLatLngToBounds(base[0], base[1]).lng] : base;
-  }, [center, busPosition, restrictToGuwahati]);
+  }, [center, busPosition, points, restrictToGuwahati]);
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;

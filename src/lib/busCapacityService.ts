@@ -252,7 +252,7 @@ export async function sendBusFullAlert(busId: string, busNumber: string, routeId
     const routeNum = routeId.replace(/[^0-9]/g, '');
     const formattedRoute = `Route-${routeNum || routeId}`;
 
-    for (const userId of recipientUIDs) {
+    if (recipientUIDs.length > 0) {
       await pgInsertNotification({
         title: 'Bus Capacity Full',
         content: `${formattedBus} on ${formattedRoute} has reached full capacity. Consider increasing capacity or adding another bus.`,
@@ -264,9 +264,9 @@ export async function sendBusFullAlert(busId: string, busNumber: string, routeId
         },
         target: {
           type: 'specific_users',
-          specificUserIds: [userId]
+          specificUserIds: recipientUIDs
         },
-        recipientIds: [userId],
+        recipientIds: recipientUIDs,
         autoInjectedRecipientIds: [],
         readByUserIds: [],
         expiresAt: expiryDate.toISOString(),
@@ -298,32 +298,30 @@ async function sendHighDemandAlert(routeId: string, stop_name: string): Promise<
     expiryDate.setDate(expiryDate.getDate() + 1);
     expiryDate.setHours(23, 59, 59, 999);
 
-    for (const staffId of allStaffUIDs) {
-      await pgInsertNotification({
-        title: 'High Demand Alert',
-        content: `All buses serving ${stop_name} (${routeId}) are at full capacity. Students are unable to register. Action required: Increase capacity or add buses to this route.`,
-        type: 'emergency',
-        sender: {
-          userId: 'system',
-          userName: 'System',
-          userRole: 'admin'
-        },
-        target: {
-          type: 'specific_users',
-          specificUserIds: [staffId]
-        },
-        recipientIds: [staffId],
-        autoInjectedRecipientIds: [],
-        readByUserIds: [],
-        expiresAt: expiryDate.toISOString(),
-        metadata: {
-          routeId,
-          stop_name,
-          action: '/admin/buses',
-          priority: 'critical'
-        }
-      });
-    }
+    await pgInsertNotification({
+      title: 'High Demand Alert',
+      content: `All buses serving ${stop_name} (${routeId}) are at full capacity. Students are unable to register. Action required: Increase capacity or add buses to this route.`,
+      type: 'emergency',
+      sender: {
+        userId: 'system',
+        userName: 'System',
+        userRole: 'admin'
+      },
+      target: {
+        type: 'specific_users',
+        specificUserIds: allStaffUIDs
+      },
+      recipientIds: allStaffUIDs,
+      autoInjectedRecipientIds: [],
+      readByUserIds: [],
+      expiresAt: expiryDate.toISOString(),
+      metadata: {
+        routeId,
+        stop_name,
+        action: '/admin/buses',
+        priority: 'critical'
+      }
+    });
 
     console.log(`📢 High-demand alert sent to ${allStaffUIDs.length} staff member(s)`);
   } catch (error) {

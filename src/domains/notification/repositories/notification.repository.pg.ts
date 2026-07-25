@@ -284,6 +284,25 @@ export async function pgInsertNotification(
   const db = getSupabaseServer();
   const row = notificationToPgRow(input);
 
+  // Production-grade deduplication: Check if identical notification was created in last 15 seconds
+  const fifteenSecondsAgo = new Date(Date.now() - 15_000).toISOString();
+  const senderUserId = input.sender?.userId || 'system';
+
+  const { data: existing } = await db
+    .from('notifications')
+    .select('id')
+    .eq('title', input.title)
+    .eq('content', input.content)
+    .eq('sender_user_id', senderUserId)
+    .gte('created_at', fifteenSecondsAgo)
+    .limit(1)
+    .maybeSingle();
+
+  if (existing?.id) {
+    console.log(`ℹ️ [pgInsertNotification] Deduplicated identical notification: ${existing.id}`);
+    return existing.id;
+  }
+
   const { data, error } = await db
     .from('notifications')
     .insert(row)

@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useState, useEffect, useMemo } from "react";
 import { useAuth } from "@/contexts/auth-context";
@@ -227,7 +227,7 @@ export default function DriverDashboard() {
   }, [busData, studentCount]);
 
   const routeStopCount = useMemo(() => {
-    return routeData?.stops?.length || 0;
+    return routeData?.totalStops ?? (Array.isArray(routeData?.stops) ? routeData.stops.length : 0);
   }, [routeData]);
 
   // Calculate route distance information
