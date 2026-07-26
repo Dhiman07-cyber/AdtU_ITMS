@@ -9,6 +9,7 @@ import {
 import { RateLimits } from '@/lib/security/rate-limiter';
 import { getTransportEntitlement } from '@/lib/entitlement/transport-entitlement';
 import { getByUid } from '@/domains/student';
+import { emitEvent } from '@/domains/realtime/event-emitter';
 
 /**
  * POST /api/student/waiting-flag
@@ -102,21 +103,10 @@ export const POST = withSecurity(
             return NextResponse.json({ error: 'Failed to create waiting flag' }, { status: 500 });
         }
 
-        // 4. Non-blocking Broadcast (Background)
-        (async () => {
-            try {
-                const channel = supabase.channel(`waiting_flags_${busId}`);
-                await channel.subscribe();
-                await channel.send({
-                    type: 'broadcast',
-                    event: 'waiting_flag_created',
-                    payload: insertData
-                });
-                await supabase.removeChannel(channel);
-            } catch (err) {
-                console.warn('Broadcast failed (non-critical):', err);
-            }
-        })();
+        // 4. Non-blocking Broadcast via WebSocket (Background)
+        emitEvent(`waiting_flags_${busId}`, 'waiting_flag_created', insertData).catch(err => {
+            console.warn('Broadcast failed (non-critical):', err);
+        });
 
         return NextResponse.json({
             success: true,
@@ -161,21 +151,10 @@ export const DELETE = withSecurity(
             return NextResponse.json({ error: 'Cannot cancel waiting flag that is already boarded, cancelled, or expired' }, { status: 409 });
         }
 
-        // 2. Non-blocking Broadcast (Background)
-        (async () => {
-            try {
-                const channel = supabase.channel(`waiting_flags_${busId}`);
-                await channel.subscribe();
-                await channel.send({
-                    type: 'broadcast',
-                    event: 'waiting_flag_removed',
-                    payload: { flagId, studentUid }
-                });
-                await supabase.removeChannel(channel);
-            } catch (err) {
-                console.warn('Broadcast failed (non-critical):', err);
-            }
-        })();
+        // 2. Non-blocking Broadcast via WebSocket (Background)
+        emitEvent(`waiting_flags_${busId}`, 'waiting_flag_removed', { flagId, studentUid }).catch(err => {
+            console.warn('Broadcast failed (non-critical):', err);
+        });
 
         return NextResponse.json({ success: true });
     },

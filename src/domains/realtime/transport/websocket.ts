@@ -1,8 +1,6 @@
-import type { RealtimeTransport } from '../contracts/transport';
-
 const PRIVILEGED_TOKEN = process.env.WS_PRIVILEGED_TOKEN || '__server__';
 
-export class WebSocketTransport implements RealtimeTransport {
+export class WebSocketTransport {
   readonly name = 'websocket';
 
   private ws: any | null = null;
@@ -49,12 +47,6 @@ export class WebSocketTransport implements RealtimeTransport {
       return;
     }
     this.ws.send(JSON.stringify({ type: 'broadcast', channel, event, payload }));
-  }
-
-  async subscribe(_channel: string, _event: string, _handler: (payload: any) => void): Promise<void> {
-  }
-
-  async unsubscribe(_channel: string, _event?: string): Promise<void> {
   }
 
   async disconnect(): Promise<void> {

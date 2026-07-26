@@ -26,7 +26,7 @@ import {
   getBusById,
   getRouteById,
 } from "@/lib/dataService";
-import { supabase } from "@/lib/supabase-client";
+import { WebSocketClient } from '@/domains/realtime/ws-client';
 import { useToast } from "@/contexts/toast-context";
 import dynamic from "next/dynamic";
 import { useBusLocation } from '@/hooks/useBusLocation';
@@ -113,7 +113,7 @@ function TrackBusLive() {
   const hasShownLocationErrorRef = useRef(false);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const hasShownArrivalToastRef = useRef(false); // Track if 100m arrival toast shown
-  const waitFlagBroadcastChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+
 
   // Calculate distance between two points (Haversine formula)
   const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
@@ -232,15 +232,7 @@ function TrackBusLive() {
     }
   }, [studentLocation, studentData, routeData]);
 
-  // Cleanup wait flag broadcast channel on unmount
-  useEffect(() => {
-    return () => {
-      if (waitFlagBroadcastChannelRef.current) {
-        supabase.removeChannel(waitFlagBroadcastChannelRef.current);
-        waitFlagBroadcastChannelRef.current = null;
-      }
-    };
-  }, []);
+
 
   // Fetch student data
   useEffect(() => {
@@ -358,35 +350,33 @@ function TrackBusLive() {
     return () => window.removeEventListener('focus', handleFocus);
   }, [loading, currentUser, userData, router, addToast]);
 
-  // Subscribe to acknowledgment channel for instant feedback
+  // Subscribe to acknowledgment events via WebSocket
   useEffect(() => {
     if (!currentUser?.uid || !isWaiting) return;
 
-    console.log("🔔 Subscribing to student acknowledgment channel");
+    console.log("🔔 Subscribing to student acknowledgment channel via WS");
 
-    const channel = supabase
-      .channel(`student_${currentUser.uid}`, {
-        config: {
-          broadcast: { self: false }
+    let wsClient: WebSocketClient | null = null;
+    const initWs = async () => {
+      const token = await currentUser.getIdToken();
+      const url = process.env.NEXT_PUBLIC_WS_URL || `ws://${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}:3001`;
+      wsClient = new WebSocketClient({ url, token });
+      wsClient.connect();
+      wsClient.subscribe(`student_${currentUser.uid}`, (payload: any) => {
+        if (payload.event === 'wait_response') {
+          const msg = payload.response === 'accepted' ? 'Driver will wait for you!' : 'Driver could not wait. Please proceed to the stop.';
+          addToast(msg, payload.response === 'accepted' ? 'success' : 'info');
+          return;
         }
-      })
-      .on("broadcast", { event: "flag_acknowledged" }, (payload) => {
-        console.log("✅ Flag acknowledged by driver:", payload);
-
-        // Clear waiting state
         setIsWaiting(false);
         setCurrentFlagId(null);
-
-        // Show success notification
-        addToast("🎉 Driver has acknowledged your flag! They're on the way!", "success");
-      })
-      .subscribe((status) => {
-        console.log("📡 Student acknowledgment channel status:", status);
+        addToast("Driver has acknowledged your flag! They're on the way!", "success");
       });
+    };
+    initWs();
 
     return () => {
-      console.log("🧹 Cleaning up student acknowledgment channel");
-      supabase.removeChannel(channel);
+      if (wsClient) wsClient.disconnect();
     };
   }, [currentUser?.uid, isWaiting, addToast]);
 
@@ -443,67 +433,37 @@ function TrackBusLive() {
     // Run the check immediately
     checkActiveTrip();
 
-    // Subscribe to realtime changes on driver_status table
-    const driverStatusChannel = supabase
-      .channel(`driver_status_${busData.busId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*", // Listen to INSERT, UPDATE, DELETE
-          schema: "public",
-          table: "driver_status",
-          filter: `bus_id=eq.${busData.busId}`
-        },
-        (payload) => {
-          console.log("📡 Driver status change received:", payload);
-
-          if (payload.eventType === "DELETE") {
-            // Driver ended trip (deleted their status)
-            setTripActive(false);
-            setBusLocation(null);
-            console.log("🛑 Trip ended - driver_status deleted");
-          } else if (payload.new) {
-            const newStatus = (payload.new as any).status;
-            const isActive = newStatus === "on_trip" || newStatus === "enroute";
-            setTripActive(isActive);
-            console.log("🚀 Trip status updated via realtime:", isActive);
-          }
-        }
-      )
-      .subscribe((status) => {
-        if (status === "SUBSCRIBED") {
-          console.log("✅ Subscribed to driver_status changes for bus:", busData.busId);
+    // Subscribe to trip status broadcasts via WebSocket
+    let tripWsClient: WebSocketClient | null = null;
+    const initTripWs = async () => {
+      if (!currentUser) return;
+      const token = await currentUser.getIdToken();
+      const url = process.env.NEXT_PUBLIC_WS_URL || `ws://${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}:3001`;
+      tripWsClient = new WebSocketClient({ url, token });
+      tripWsClient.connect();
+      tripWsClient.subscribe(`trip-status-${busData.busId}`, (payload: any) => {
+        console.log("🚦 Trip status broadcast:", payload.event);
+        if (payload.event === "trip_started") {
+          setTripActive(true);
+          addToast(`🚌 Trip started for ${formatIdForDisplay(payload.routeId || payload.busId)}!`, "success");
+        } else if (payload.event === "trip_ended") {
+          setTripActive(false);
+          setBusLocation(null);
+          setIsFullScreenMap(false);
+          setIsWaiting(false);
+          setCurrentFlagId(null);
+          addToast(`🏁 Trip for ${formatIdForDisplay(payload.busNumber || payload.busId)} has ended`, "success");
         }
       });
-
-    // Also subscribe to trip_started/ended broadcast (instant WebSocket notification)
-    const tripNotificationChannel = supabase
-      .channel(`trip-status-${busData.busId}`)
-      .on("broadcast", { event: "trip_started" }, (payload) => {
-        console.log("🚀 Trip started broadcast received:", payload);
-        setTripActive(true);
-        const routeName = payload.payload?.routeName || payload.payload?.routeId;
-        addToast(`🚌 Trip started for ${formatIdForDisplay(routeName)}!`, "success");
-      })
-      .on("broadcast", { event: "trip_ended" }, (payload) => {
-        console.log("🛑 Trip ended broadcast received:", payload);
-        setTripActive(false);
-        setBusLocation(null);
-        setIsFullScreenMap(false);
-        setIsWaiting(false);
-        setCurrentFlagId(null);
-        const busNum = payload.payload?.busNumber || payload.payload?.busId;
-        addToast(`🏁 Trip for ${formatIdForDisplay(busNum)} has ended`, "success");
-      })
-      .subscribe();
+    };
+    initTripWs();
 
     // Also set up periodic checks every 30 seconds as fallback
     const interval = setInterval(checkActiveTrip, 30000);
 
     return () => {
       clearInterval(interval);
-      supabase.removeChannel(driverStatusChannel);
-      supabase.removeChannel(tripNotificationChannel);
+      if (tripWsClient) tripWsClient.disconnect();
     };
   }, [busData?.busId, addToast]);
 
@@ -567,47 +527,39 @@ function TrackBusLive() {
     }
   }, [busLocation, studentLocation, tripActive, addToast]);
 
-  // Subscribe to waiting flag changes for this student
+  // Subscribe to waiting flag changes via WebSocket
   useEffect(() => {
     if (!currentUser?.uid || !busData?.busId) return;
 
-    const waitingFlagChannel = supabase
-      .channel(`waiting_flag_${currentUser.uid}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "waiting_flags",
-          filter: `student_uid=eq.${currentUser.uid}`
-        },
-        (payload) => {
-          console.log("📡 Waiting flag change received:", payload);
+    let wsClient: WebSocketClient | null = null;
+    const initWs = async () => {
+      const token = await currentUser.getIdToken();
+      const url = process.env.NEXT_PUBLIC_WS_URL || `ws://${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}:3001`;
+      wsClient = new WebSocketClient({ url, token });
+      wsClient.connect();
+      wsClient.subscribe(`waiting_flags_${busData.busId}`, (payload: any) => {
+        const flagStudentUid = payload.student_uid || payload.studentUid;
+        if (flagStudentUid !== currentUser.uid) return;
+        console.log("📡 Waiting flag change received:", payload);
 
-          if (payload.eventType === "DELETE" ||
-            (payload.new && (payload.new as any).status === "boarded") ||
-            (payload.new && (payload.new as any).status === "cancelled") ||
-            (payload.new && (payload.new as any).status === "removed") ||
-            (payload.new && (payload.new as any).status === "picked_up")) {
-            // Flag was removed or marked as completed
-            setIsWaiting(false);
-            setCurrentFlagId(null);
-            if (payload.eventType === "DELETE") {
-              addToast("🎉 You've been picked up! Have a safe journey.", "success");
-            }
-          } else if (payload.new && (payload.new as any).status === "acknowledged") {
-            addToast("👋 Driver has acknowledged your waiting flag!", "success");
+        if (payload.event === 'waiting_flag_removed' ||
+            payload.status === 'boarded' ||
+            payload.status === 'cancelled' ||
+            payload.status === 'picked_up') {
+          setIsWaiting(false);
+          setCurrentFlagId(null);
+          if (payload.event === 'waiting_flag_removed') {
+            addToast("🎉 You've been picked up! Have a safe journey.", "success");
           }
-        }
-      )
-      .subscribe((status) => {
-        if (status === "SUBSCRIBED") {
-          console.log("✅ Subscribed to waiting flag changes for student:", currentUser.uid);
+        } else if (payload.status === "acknowledged") {
+          addToast("👋 Driver has acknowledged your waiting flag!", "success");
         }
       });
+    };
+    initWs();
 
     return () => {
-      supabase.removeChannel(waitingFlagChannel);
+      if (wsClient) wsClient.disconnect();
     };
   }, [currentUser?.uid, busData?.busId, addToast]);
 
@@ -829,62 +781,35 @@ function TrackBusLive() {
     handleRaiseWaitingFlagRef.current = handleRaiseWaitingFlag;
   }, [currentUser, busData, routeData, studentData, tripActive, addToast]);
 
-  // Remove waiting flag
+  // Remove waiting flag via API
   const handleRemoveWaitingFlag = async () => {
-    if (!currentFlagId) return;
+    if (!currentFlagId || !currentUser) return;
 
     try {
       setSubmittingFlag(true);
-
-      // Delete from Supabase
-      const { error } = await supabase
-        .from("waiting_flags")
-        .update({ status: 'cancelled' })
-        .eq("id", currentFlagId);
-
-      if (error) throw error;
-
-      // Broadcast removal to driver
-      const channel = supabase.channel(`waiting_flags_${busData.busId}`);
-      waitFlagBroadcastChannelRef.current = channel;
-      const broadcastResult = await channel.send({
-        type: "broadcast",
-        event: "waiting_flag_removed",
-        payload: {
-          flagId: currentFlagId,
-          studentUid: currentUser?.uid,
-        },
+      const token = await currentUser.getIdToken();
+      const response = await fetch('/api/student/waiting-flag', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ idToken: token, flagId: currentFlagId, busId: busData?.busId }),
       });
 
-      if (broadcastResult !== 'ok') {
-        console.warn("Broadcast warning:", broadcastResult);
+      if (!response.ok) {
+        const result = await response.json().catch(() => ({}));
+        throw new Error(result.error || `Failed to cancel waiting flag (${response.status})`);
       }
-
-      // Remove the one-shot broadcast channel so it doesn't leak on repeated cancels.
-      supabase.removeChannel(channel);
-      waitFlagBroadcastChannelRef.current = null;
 
       setIsWaiting(false);
       setCurrentFlagId(null);
-      // NOTE: Do NOT clear busLocation or tripActive here.
-      // The trip continues regardless of the student's waiting flag.
       setEta(null);
       setDistanceToBus(null);
-
-      // Clear arrival notification flag
       sessionStorage.removeItem(`notified_arrival_${currentFlagId}`);
-
       addToast("Waiting flag removed", "success");
 
     } catch (error: any) {
       console.error("Error removing waiting flag:", error);
       addToast("Failed to remove waiting flag", "error");
     } finally {
-      // Ensure broadcast channel is always cleaned up
-      if (waitFlagBroadcastChannelRef.current) {
-        supabase.removeChannel(waitFlagBroadcastChannelRef.current);
-        waitFlagBroadcastChannelRef.current = null;
-      }
       setSubmittingFlag(false);
     }
   };

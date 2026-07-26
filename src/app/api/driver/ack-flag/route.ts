@@ -4,6 +4,7 @@ import { withSecurity } from '@/lib/security/api-security';
 import { MarkBoardedSchema } from '@/lib/security/validation-schemas';
 import { RateLimits } from '@/lib/security/rate-limiter';
 import { getDriverById } from '@/domains/identity';
+import { emitEvent } from '@/domains/realtime/event-emitter';
 
 /**
  * POST /api/driver/ack-flag
@@ -98,51 +99,13 @@ export const POST = withSecurity(
       );
     }
 
-    // Broadcast to multiple channels for instant UI updates
+    // Broadcast via WebSocket
     try {
-      // 1. Broadcast to waiting_flags channel (for driver UI update)
-      const flagsChannel = supabase.channel(`waiting_flags_${flagData.bus_id}`);
-      await flagsChannel.send({
-        type: 'broadcast',
-        event: 'waiting_flag_acknowledged',
-        payload: {
-          flagId,
-          studentUid: flagData.student_uid,
-          status: 'acknowledged'
-        }
-      });
-      await supabase.removeChannel(flagsChannel);
-
-      // 2. Broadcast to student-specific channel (for student UI update)
-      const studentChannel = supabase.channel(`student_${flagData.student_uid}`);
-      await studentChannel.send({
-        type: 'broadcast',
-        event: 'flag_acknowledged',
-        payload: {
-          flagId,
-          busId: flagData.bus_id,
-          ackByDriverUid: driverUid,
-          timestamp: new Date().toISOString(),
-          message: 'Driver has acknowledged your waiting flag!'
-        }
-      });
-      await supabase.removeChannel(studentChannel);
-
-      // 3. Broadcast to route channel (for admin/monitoring)
-      const routeChannel = supabase.channel(`route_${flagData.route_id}`);
-      await routeChannel.send({
-        type: 'broadcast',
-        event: 'waiting_flag_acknowledged',
-        payload: {
-          flagId,
-          studentUid: flagData.student_uid,
-          busId: flagData.bus_id,
-          routeId: flagData.route_id,
-          ackByDriverUid: driverUid,
-          timestamp: new Date().toISOString()
-        }
-      });
-      await supabase.removeChannel(routeChannel);
+      const ts = new Date().toISOString();
+      await Promise.allSettled([
+        emitEvent(`waiting_flags_${flagData.bus_id}`, 'waiting_flag_acknowledged', { flagId, studentUid: flagData.student_uid, status: 'acknowledged' }),
+        emitEvent(`student_${flagData.student_uid}`, 'flag_acknowledged', { flagId, busId: flagData.bus_id, ackByDriverUid: driverUid, timestamp: ts, message: 'Driver has acknowledged your waiting flag!' }),
+      ]);
     } catch (broadcastError) {
       console.error('Broadcast error (non-critical):', broadcastError);
     }

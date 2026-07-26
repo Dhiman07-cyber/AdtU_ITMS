@@ -29,28 +29,29 @@ export class MetricsService {
   get uptime() { return Date.now() - this.startTime; }
 
   snapshot() {
+    const s = this.state;
     return {
       uptime: this.uptime,
       startTime: this.startTime,
       connections: {
         active: connectionRegistry.size,
-        accepted: this.get('connectionsAccepted'),
-        rejected: this.get('connectionsRejected'),
+        accepted: s.connectionsAccepted,
+        rejected: s.connectionsRejected,
       },
-      messages: { sent: this.get('messagesSent'), received: this.get('messagesReceived') },
-      auth: { successes: this.get('authSuccesses'), failures: this.get('authFailures') },
-      broadcasts: { sent: this.get('broadcastsSent'), channels: subscriptionManager.getChannelCount() },
+      messages: { sent: s.messagesSent, received: s.messagesReceived },
+      auth: { successes: s.authSuccesses, failures: s.authFailures },
+      broadcasts: { sent: s.broadcastsSent, channels: subscriptionManager.getChannelCount() },
       subscriptions: { active: sessionManager.size, channels: subscriptionManager.getChannelCount() },
       security: {
-        rateLimitBlocks: this.get('rateLimitBlocks'),
-        invalidMessages: this.get('invalidMessages'),
-        payloadTooLarge: this.get('payloadTooLarge'),
-        replayDetected: this.get('replayDetected'),
+        rateLimitBlocks: s.rateLimitBlocks,
+        invalidMessages: s.invalidMessages,
+        payloadTooLarge: s.payloadTooLarge,
+        replayDetected: s.replayDetected,
       },
-      performance: { slowHandlers: this.get('slowHandlers'), queueDropped: this.get('queueDropped') },
-      errors: this.get('errors'),
-      heartbeatTimeouts: this.get('heartbeatTimeouts'),
-      reconnectsHandled: this.get('reconnectsHandled'),
+      performance: { slowHandlers: s.slowHandlers, queueDropped: s.queueDropped },
+      errors: s.errors,
+      heartbeatTimeouts: s.heartbeatTimeouts,
+      reconnectsHandled: s.reconnectsHandled,
     };
   }
 

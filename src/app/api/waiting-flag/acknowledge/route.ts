@@ -12,6 +12,7 @@ import { NextResponse } from 'next/server';
 import { auth } from '@/lib/firebase-admin';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import { checkRateLimit, createRateLimitId } from '@/lib/security/rate-limiter';
+import { emitEvent } from '@/domains/realtime/event-emitter';
 
 export async function POST(request: Request) {
   const startTime = Date.now();
@@ -170,34 +171,28 @@ export async function POST(request: Request) {
       );
     }
 
-    // Broadcast to student
+    // Broadcast via WebSocket
+    const ts = new Date().toISOString();
+    const flagEvent = action === 'acknowledge' ? 'waiting_flag_acknowledged'
+      : action === 'boarded' ? 'waiting_flag_boarded'
+      : 'waiting_flag_cancelled';
+
     if (action === 'acknowledge') {
-      const studentChannel = supabase.channel(`student_${flag.student_uid}`);
-      await studentChannel.send({
-        type: 'broadcast',
-        event: 'flag_acknowledged',
-        payload: {
-          flagId,
-          driverUid,
-          driverName: driverProfile.full_name || 'Driver',
-          timestamp: new Date().toISOString()
-        }
-      });
+      emitEvent(`student_${flag.student_uid}`, 'flag_acknowledged', {
+        flagId,
+        driverUid,
+        driverName: driverProfile.full_name || 'Driver',
+        timestamp: ts
+      }).catch(() => {});
     }
 
-    // Broadcast update to all drivers on this bus
-    const busChannel = supabase.channel(`waiting_flags_${flag.bus_id}`);
-    await busChannel.send({
-      type: 'broadcast',
-      event: 'waiting_flag_updated',
-      payload: {
-        flagId,
-        status: newStatus,
-        action,
-        driverUid,
-        timestamp: new Date().toISOString()
-      }
-    });
+    emitEvent(`waiting_flags_${flag.bus_id}`, flagEvent, {
+      flagId,
+      status: newStatus,
+      action,
+      driverUid,
+      timestamp: ts
+    }).catch(() => {});
 
     // Log operation (audit_logs moved to Supabase)
 

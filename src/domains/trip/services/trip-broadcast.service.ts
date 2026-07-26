@@ -1,14 +1,6 @@
 import { getActiveTransport, initializeTransport } from '@/domains/realtime/transport-manager';
-import type { RealtimeTransport } from '@/domains/realtime/contracts/transport';
 
-let transportOverride: RealtimeTransport | null = null;
-
-export function setBroadcastTransport(t: RealtimeTransport) {
-  transportOverride = t;
-}
-
-async function getTransport(): Promise<RealtimeTransport> {
-  if (transportOverride) return transportOverride;
+async function getTransport() {
   await initializeTransport();
   return getActiveTransport();
 }
@@ -26,7 +18,6 @@ export async function broadcastTripEvent(params: {
   const transport = await getTransport();
   const channels = [
     `trip-status-${params.busId}`,
-    `bus_${params.busId}_students`,
     `bus_location_${params.busId}`,
   ];
 

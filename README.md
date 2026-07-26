@@ -33,7 +33,7 @@ The system is built on **four core invariants**:
         *   **Audit logs** (`reassignment_logs`, `audit_logs`)
     *   **Firebase Auth**: Used **strictly for user authentication and ID token verification** (zero Firestore database dependencies).
 
-3.  **Real-Time Data Conservation**: WebSockets via Supabase Realtime Channels (`supabase.channel()`) deliver instant sub-second GPS map updates and waiting flag changes without Firestore quota limits.
+3.  **Real-Time Data Conservation**: A dedicated WebSocket server (port 3001) delivers instant sub-second GPS map updates and waiting flag changes without Firestore quota limits.
 
 4.  **Deterministic & Reversible**: Critical admin actions (like mass reassignment) are designed to be atomic with ready-to-use **Rollback** options.
 
@@ -89,9 +89,9 @@ iii. Bus reassignment for route changes.
 | :--- | :--- | :--- |
 | **Primary DB** | **Supabase (PostgreSQL)** | ALL domain entities & operational data: Profiles, Buses, Routes, Trips, Waiting Flags, Payments, Applications, Audit Logs |
 | **Auth** | **Firebase Auth** | User authentication and ID token verification ONLY (zero Firestore DB calls) |
-| **Realtime** | **Supabase Realtime** | Sub-second WebSockets for GPS tracking and waiting flag updates |
+| **Realtime** | **Custom WebSocket Server (port 3001)** | Sub-second WebSockets for GPS tracking and waiting flag updates |
 | **Push Notifications** | **FCM (Firebase Cloud Messaging)** | Topic-based route push alerts (`route_{routeId}`) |
-| **Tracking** | **Geolocation API** | Broadcasts driver device coordinates to Supabase |
+| **Tracking** | **Geolocation API** | Sends driver device coordinates to API route for persistence |
 | **Storage** | **Supabase Storage** | Encrypted archives and payment proofs |
 
 ---

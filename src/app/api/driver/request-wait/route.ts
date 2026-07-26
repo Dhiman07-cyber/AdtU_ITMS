@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
-import { getSupabaseServer } from '@/lib/supabase-server';
 import { withSecurity } from '@/lib/security/api-security';
 import { RequestWaitSchema } from '@/lib/security/validation-schemas';
 import { RateLimits } from '@/lib/security/rate-limiter';
+import { emitEvent } from '@/domains/realtime/event-emitter';
 
 /**
  * POST /api/driver/request-wait
@@ -24,22 +24,12 @@ export const POST = withSecurity(
 
         console.log(`📣 Requesting wait for student ${studentId} on bus ${busId}`);
 
-        // Initialize Supabase client
-        const supabase = getSupabaseServer();
-
-        // Broadcast to driver channel
-        // Channel name: driver_wait_request_{busId}
-        const channel = supabase.channel(`driver_wait_request_${busId}`);
-
-        await channel.send({
-            type: 'broadcast',
-            event: 'wait_request',
-            payload: {
-                studentId,
-                studentName,
-                stop_name: resolved_stop_name,
-                timestamp: Date.now()
-            }
+        // Broadcast to driver channel via WebSocket
+        await emitEvent(`driver_wait_request_${busId}`, 'wait_request', {
+            studentId,
+            studentName,
+            stop_name: resolved_stop_name,
+            timestamp: Date.now()
         });
 
         return NextResponse.json({ success: true });

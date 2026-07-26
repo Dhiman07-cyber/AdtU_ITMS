@@ -3,6 +3,7 @@ import { withSecurity } from '@/lib/security/api-security';
 import { LocationUpdateBodySchema } from '@/lib/security/validation-schemas';
 import { RateLimits } from '@/lib/security/rate-limiter';
 import { processUpdate } from '@/domains/gps';
+import { emitEvent } from '@/domains/realtime/event-emitter';
 
 export const POST = withSecurity(
   async (_request, { auth, body }) => {
@@ -25,6 +26,14 @@ export const POST = withSecurity(
     if (!result.accepted) {
       return NextResponse.json({ error: result.reason }, { status: 400 });
     }
+
+    // Non-blocking broadcast via WebSocket
+    emitEvent(`bus_location_${busId}`, 'bus_location_update', {
+      busId, driverUid,
+      lat: Number(lat), lng: Number(lng),
+      accuracy, speed, heading: heading || 0,
+      timestamp: new Date().toISOString(),
+    }).catch((err: Error) => console.warn('Location broadcast failed:', err));
 
     return NextResponse.json({
       success: true,

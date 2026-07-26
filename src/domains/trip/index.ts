@@ -21,7 +21,7 @@ export { parseQRPayload, encodeQRContract, validateQRContract } from './qr-contr
 export type { QRContract } from './qr-contract';
 export { ManualTripInitiationStrategy, QRCodeTripInitiationStrategy, getInitiationStrategy } from './initiation-strategies';
 export type { InitiationInput, InitiationResult, TripInitiationStrategy } from './initiation-strategies';
-export { broadcastTripEvent, setBroadcastTransport } from './services/trip-broadcast.service';
+export { broadcastTripEvent } from './services/trip-broadcast.service';
 export { dispatchTripNotification } from './services/trip-notification.service';
 export { cleanupTrip } from './services/trip-cleanup.service';
 export { verifyDriverBusAssignment, checkNoConflict, resolveRouteId, resolveRouteName } from './services/trip-validation.service';

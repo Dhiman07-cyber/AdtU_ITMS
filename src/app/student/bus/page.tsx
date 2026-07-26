@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { getBusById, getRouteById, getStudentByUid, getBusesByRouteId } from "@/lib/dataService";
 import { supabase } from "@/lib/supabase-client";
+import { WebSocketClient } from '@/domains/realtime/ws-client';
 import DynamicStudentMap from "@/components/DynamicStudentMap";
 import { useGeolocation } from "@/hooks/useGeolocation";
 import LocationPermissionModal from "@/components/LocationPermissionModal";
@@ -166,39 +167,31 @@ function StudentBusLive() {
     }
   }, [userData, router]);
 
-  // Subscribe to driver_status changes to update tripActive in realtime
+  // Subscribe to trip status broadcasts via WebSocket
   useEffect(() => {
     if (!studentData?.busId) return;
 
-    console.log('📡 Subscribing to driver_status for bus:', studentData.busId);
+    console.log('📡 Subscribing to trip status for bus:', studentData.busId);
 
-    const channel = supabase
-      .channel(`driver_status_${studentData.busId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'driver_status',
-          filter: `bus_id=eq.${studentData.busId}`
-        },
-        (payload) => {
-          console.log('🚌 Driver status changed:', payload);
-          if (payload.eventType === 'DELETE') {
-            setTripActive(false);
-          } else if (payload.new) {
-            const newStatus = (payload.new as any).status;
-            setTripActive(newStatus === 'on_trip' || newStatus === 'enroute');
-          }
-        }
-      )
-      .subscribe();
+    let wsClient: WebSocketClient | null = null;
+    const initWs = async () => {
+      if (!currentUser) return;
+      const token = await currentUser.getIdToken();
+      const url = process.env.NEXT_PUBLIC_WS_URL || `ws://${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}:3001`;
+      wsClient = new WebSocketClient({ url, token });
+      wsClient.connect();
+      wsClient.subscribe(`trip-status-${studentData.busId}`, (payload: any) => {
+        console.log('🚦 Trip status broadcast:', payload.event);
+        if (payload.event === 'trip_started') setTripActive(true);
+        else if (payload.event === 'trip_ended') setTripActive(false);
+      });
+    };
+    initWs();
 
     return () => {
-      console.log('🔌 Unsubscribing from driver_status');
-      supabase.removeChannel(channel);
+      if (wsClient) wsClient.disconnect();
     };
-  }, [studentData?.busId]);
+  }, [studentData?.busId, currentUser]);
 
   // Show location modal if permission denied
   useEffect(() => {

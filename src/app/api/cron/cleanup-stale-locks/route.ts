@@ -18,6 +18,7 @@
 import { NextResponse } from 'next/server';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import crypto from 'crypto';
+import { emitEvent } from '@/domains/realtime/event-emitter';
 
 // Configuration — 10 minutes; university buses commonly pass through
 // connectivity dead zones (tunnels, parking garages) where heartbeats
@@ -82,18 +83,13 @@ export async function GET(request: Request) {
                 // For each cleaned lock, comprehensive cleanup
                 for (const lock of cleanedLocks) {
                     try {
-                        // Broadcast lock release
-                        const channel = supabase.channel(`trip-status-${lock.cleaned_bus_id}`);
-                        await channel.send({
-                            type: 'broadcast',
-                            event: 'trip_ended',
-                            payload: {
-                                busId: lock.cleaned_bus_id,
-                                tripId: lock.cleaned_trip_id,
-                                reason: 'heartbeat_timeout',
-                                timestamp: new Date().toISOString()
-                            }
-                        });
+                        // Broadcast trip end via WebSocket
+                        emitEvent(`trip-status-${lock.cleaned_bus_id}`, 'trip_ended', {
+                            busId: lock.cleaned_bus_id,
+                            tripId: lock.cleaned_trip_id,
+                            reason: 'heartbeat_timeout',
+                            timestamp: new Date().toISOString()
+                        }).catch(() => {});
 
                         // Comprehensive cleanup of ALL trip-related tables.
                         // Scoped by trip_id (not just bus_id) to avoid deleting data

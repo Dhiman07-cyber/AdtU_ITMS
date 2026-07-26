@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "@/contexts/auth-context";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
@@ -144,8 +144,12 @@ export default function DriverStudentsPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [shiftFilter, setShiftFilter] = useState<string>("all");
 
-  // Use Supabase hook for waiting flags - hook expects routeId
-  const { flags: waitingFlags, loading: waitingFlagsLoading, error: waitingFlagsError } = useWaitingFlags(driverData?.routeId || driverData?.routeId || '');
+  // WebSocket hook for waiting flags - uses busId for subscribing to waiting_flags_{busId}
+  const getWaitingFlagToken = useCallback(async () => {
+    if (!currentUser) return null;
+    return currentUser.getIdToken();
+  }, [currentUser]);
+  const { flags: waitingFlags, loading: waitingFlagsLoading, error: waitingFlagsError } = useWaitingFlags(driverData?.busId || '', getWaitingFlagToken);
 
   // Fetch driver data and students on assigned bus
   useEffect(() => {

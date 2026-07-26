@@ -18,6 +18,7 @@ import {
 import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import { supabase } from "@/lib/supabase-client";
 import { authApiFetch } from "@/lib/secure-api-client";
+import { WebSocketClient } from '@/domains/realtime/ws-client';
 import { formatIdForDisplay } from "@/lib/utils";
 
 export default function DriverDashboard() {
@@ -123,25 +124,25 @@ export default function DriverDashboard() {
 
     fetchCurrentStatus();
 
-    // 2. Broadcast Listener only (FREE — no DB reads)
-    // Trip events are pushed from server API routes via broadcast, so no postgres_changes needed.
-    let tripBroadcastChannel: any = null;
-    if (busId) {
-      tripBroadcastChannel = supabase
-        .channel(`trip-status-${busId}`)
-        .on('broadcast', { event: 'trip_started' }, () => {
-          console.log('🚀 Trip started broadcast (dashboard)');
-          setHasActiveTrip(true);
-        })
-        .on('broadcast', { event: 'trip_ended' }, () => {
-          console.log('🏁 Trip ended broadcast (dashboard)');
-          setHasActiveTrip(false);
-        })
-        .subscribe();
-    }
+    // 2. Broadcast Listener via WebSocket
+    // Trip events are pushed from server API routes via emitEvent → WS server.
+    let tripWsClient: WebSocketClient | null = null;
+    const initTripWs = async () => {
+      if (!busId || !currentUser) return;
+      const token = await currentUser.getIdToken();
+      const url = process.env.NEXT_PUBLIC_WS_URL || `ws://${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}:3001`;
+      tripWsClient = new WebSocketClient({ url, token });
+      tripWsClient.connect();
+      tripWsClient.subscribe(`trip-status-${busId}`, (payload: any) => {
+        console.log('🚦 Trip status broadcast received:', payload.event);
+        if (payload.event === 'trip_started') setHasActiveTrip(true);
+        else if (payload.event === 'trip_ended') setHasActiveTrip(false);
+      });
+    };
+    initTripWs();
 
     return () => {
-      if (tripBroadcastChannel) supabase.removeChannel(tripBroadcastChannel);
+      if (tripWsClient) tripWsClient.disconnect();
     };
   }, [currentUser?.uid, busData?.busId, busData?.id]);
 
