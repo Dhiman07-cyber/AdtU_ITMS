@@ -1,9 +1,10 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useAuth } from '@/contexts/auth-context';
 import dynamic from 'next/dynamic';
 import { supabase } from '@/lib/supabase-client';
+import { WebSocketClient } from '@/domains/realtime/ws-client';
 
 // Dynamic import for vector PMTiles map
 const GuwahatiMap = dynamic(() => import('@/components/maps/GuwahatiMap'), {
@@ -62,6 +63,7 @@ function DynamicStudentMap({
   onWaitingFlagRemove 
 }: DynamicStudentMapProps) {
   const { currentUser } = useAuth();
+  const wsRef = useRef<WebSocketClient | null>(null);
   const [busLocation, setBusLocation] = useState<BusLocation | null>(null);
   const [waitingFlags, setWaitingFlags] = useState<WaitingFlag[]>([]);
   const [isWaiting, setIsWaiting] = useState(false);
@@ -106,78 +108,69 @@ function DynamicStudentMap({
     return null;
   }, [journeyActive, busLocation]);
 
-  // Subscribe to real-time bus location updates
+  // Subscribe to real-time bus location updates via WebSocket
   useEffect(() => {
-    if (!busId || !routeId) {
+    if (!busId || !routeId || !currentUser) {
       setBusLocation(null);
       setLoading(false);
       return;
     }
 
-    console.log('🔄 Subscribing to bus location updates for bus:', busId);
+    const initWs = async () => {
+      const token = await currentUser.getIdToken();
+      const url = process.env.NEXT_PUBLIC_WS_URL || `ws://${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}:3001`;
+      const client = new WebSocketClient({ url, token });
+      wsRef.current = client;
+      client.connect();
 
-    const locationChannel = supabase
-      .channel(`bus_location_${busId}`) // Keep for compatibility if needed, but primary is location_update
-      .on('broadcast', { event: 'bus_location_update' }, (payload) => {
-        console.log('📍 Received bus location update:', payload);
-        setBusLocation(payload.payload);
-      })
-      .subscribe();
-
-    const statusChannel = supabase
-      .channel(`trip-status-${busId}`)
-      .on('broadcast', { event: 'trip_ended' }, (payload) => {
-        console.log('🏁 Trip ended, clearing bus location:', payload);
-        setBusLocation(null);
-      })
-      .subscribe();
-
-    return () => {
-      console.log('🔌 Unsubscribing from bus location and status updates');
-      supabase.removeChannel(locationChannel);
-      supabase.removeChannel(statusChannel);
-    };
-  }, [busId, routeId]);
-
-  // Subscribe to real-time waiting flags - always subscribe to see flags
-  useEffect(() => {
-    if (!busId) return;
-
-    console.log('🔄 Subscribing to waiting flags for bus:', busId);
-
-    const channel = supabase
-      .channel(`waiting_flags_${busId}`)
-      .on('broadcast', { event: 'waiting_flag_created' }, (payload) => {
-        console.log('🚩 Received waiting flag created:', payload);
-        setWaitingFlags(prev => [...prev, payload.payload]);
-        if (payload.payload.student_uid === currentUser?.uid) {
-          setIsWaiting(true);
-          setCurrentFlagId(payload.payload.id);
-          onWaitingFlagCreate?.(payload.payload.id);
-        }
-      })
-      .on('broadcast', { event: 'waiting_flag_removed' }, (payload) => {
-        console.log('🚩 Received waiting flag removed:', payload);
-        setWaitingFlags(prev => prev.filter(flag => flag.id !== payload.payload.flagId));
-        if (payload.payload.studentUid === currentUser?.uid) {
-          setIsWaiting(false);
-          setCurrentFlagId(null);
-          onWaitingFlagRemove?.(payload.payload.flagId);
-        }
-      })
-      .on('broadcast', { event: 'trip_ended' }, (payload) => {
-        console.log('🏁 Trip ended, clearing all waiting flags:', payload);
-        setWaitingFlags([]);
-        setIsWaiting(false);
-        setCurrentFlagId(null);
-      })
-      .subscribe((status) => {
-        console.log('📡 Waiting flags channel status:', status);
+      client.subscribe(`bus_location_${busId}`, (payload: any) => {
+        setBusLocation(payload.payload || payload);
       });
 
+      client.subscribe(`trip-status-${busId}`, (payload: any) => {
+        if (payload.event === 'trip_ended' || payload.payload?.event === 'trip_ended') {
+          setBusLocation(null);
+        }
+      });
+    };
+
+    initWs();
+
     return () => {
-      console.log('🔌 Unsubscribing from waiting flags');
-      supabase.removeChannel(channel);
+      if (wsRef.current) {
+        wsRef.current.disconnect();
+        wsRef.current = null;
+      }
+    };
+  }, [busId, routeId, currentUser]);
+
+  // Subscribe to real-time waiting flags via WebSocket
+  useEffect(() => {
+    if (!busId || !currentUser || !wsRef.current) return;
+
+    const client = wsRef.current;
+
+    const unsubCreated = client.subscribe(`waiting_flags_${busId}`, (payload: any) => {
+      const data = payload.payload || payload;
+      if (data.event === 'waiting_flag_removed' || data.flagId) {
+        setWaitingFlags(prev => prev.filter(flag => flag.id !== data.flagId));
+        if (data.studentUid === currentUser?.uid) {
+          setIsWaiting(false);
+          setCurrentFlagId(null);
+          onWaitingFlagRemove?.(data.flagId);
+        }
+        return;
+      }
+      setWaitingFlags(prev => [...prev, data]);
+      if (data.student_uid === currentUser?.uid) {
+        setIsWaiting(true);
+        setCurrentFlagId(data.id);
+        onWaitingFlagCreate?.(data.id);
+      }
+    });
+
+    return () => {
+      unsubCreated();
     };
   }, [busId, currentUser?.uid, onWaitingFlagCreate, onWaitingFlagRemove]);
 

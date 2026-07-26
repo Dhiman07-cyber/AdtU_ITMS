@@ -21,6 +21,7 @@ import { motion } from "framer-motion";
 import StudentQRDisplay from "@/components/bus-pass/StudentQRDisplay";
 import { getTransportEntitlement } from '@/lib/entitlement/transport-entitlement';
 import { supabase } from '@/lib/supabase-client';
+import { WebSocketClient } from '@/domains/realtime/ws-client';
 import { authApiFetch } from '@/lib/secure-api-client';
 // SPARK PLAN SAFETY: Migrated to usePaginatedCollection
 
@@ -106,33 +107,31 @@ export default function StudentDashboard() {
     }
   }, [currentUser, studentData]);
 
-  // REALTIME SUBSCRIPTIONS
+  // REALTIME SUBSCRIPTIONS — WebSocket primary
   useEffect(() => {
-    const busId = studentData?.busId || studentData?.busId;
-    if (!busId) return;
+    const busId = studentData?.busId;
+    if (!busId || !currentUser) return;
 
-    const channel = supabase
-      .channel(`dashboard_driver_status_${busId}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'driver_status', filter: `bus_id=eq.${busId}` }, (payload) => {
-          if (payload.eventType === 'DELETE') setTripActive(false);
-          else if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
-            const newStatus = (payload.new as any).status;
-            setTripActive(newStatus === 'on_trip' || newStatus === 'enroute');
-          }
-      })
-      .subscribe();
+    let wsClient: WebSocketClient | null = null;
 
-    const tripChannel = supabase
-      .channel(`trip-status-${busId}`)
-      .on('broadcast', { event: 'trip_started' }, () => setTripActive(true))
-      .on('broadcast', { event: 'trip_ended' }, () => setTripActive(false))
-      .subscribe();
+    const init = async () => {
+      const token = await currentUser.getIdToken();
+      const url = process.env.NEXT_PUBLIC_WS_URL || `ws://${window.location.hostname}:3001`;
+      wsClient = new WebSocketClient({ url, token });
+      wsClient.connect();
+
+      wsClient.subscribe(`trip-status-${busId}`, (payload: any) => {
+        if (payload.event === 'trip_started') setTripActive(true);
+        else if (payload.event === 'trip_ended') setTripActive(false);
+      });
+    };
+
+    init();
 
     return () => {
-      supabase.removeChannel(channel);
-      supabase.removeChannel(tripChannel);
+      wsClient?.disconnect();
     };
-  }, [studentData?.busId, studentData?.busId]);
+  }, [studentData?.busId, currentUser]);
 
 
   useEffect(() => {

@@ -106,8 +106,26 @@ CREATE TABLE IF NOT EXISTS driver_location_updates (
 CREATE INDEX IF NOT EXISTS idx_driver_location_updates_driver_uid ON driver_location_updates(driver_uid);
 CREATE INDEX IF NOT EXISTS idx_driver_location_updates_timestamp ON driver_location_updates(timestamp DESC);
 CREATE INDEX IF NOT EXISTS idx_driver_location_updates_cleanup ON driver_location_updates(driver_uid, bus_id);
+-- =====================================================
+-- SECTION 2: CANONICAL DRIVER-BUS ASSIGNMENTS
+-- =====================================================
 
--- (Section 2 Driver Swap System Tables purged - feature deprecated)
+CREATE TABLE IF NOT EXISTS public.driver_assignments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  driver_uid TEXT NOT NULL,
+  bus_id TEXT NOT NULL,
+  route_id TEXT,
+  assigned_at TIMESTAMPTZ DEFAULT NOW(),
+  unassigned_at TIMESTAMPTZ,
+  assigned_by TEXT DEFAULT 'system',
+  is_active BOOLEAN DEFAULT TRUE,
+  reason TEXT DEFAULT 'assignment',
+  metadata JSONB DEFAULT '{}'::jsonb
+);
+
+CREATE INDEX IF NOT EXISTS idx_da_active_bus ON public.driver_assignments(bus_id) WHERE is_active = TRUE;
+CREATE INDEX IF NOT EXISTS idx_da_active_driver ON public.driver_assignments(driver_uid) WHERE is_active = TRUE;
+CREATE INDEX IF NOT EXISTS idx_da_history_bus ON public.driver_assignments(bus_id, assigned_at DESC);
 
 -- =====================================================
 -- SECTION 3: REASSIGNMENT LOGS TABLE
@@ -818,106 +836,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
--- =====================================================
--- SECTION 10: MISSED BUS REQUESTS (Student Pickup Requests)
--- =====================================================
-
--- missed_bus_requests table (student pickup requests for alternate buses)
-CREATE TABLE IF NOT EXISTS public.missed_bus_requests (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  op_id TEXT,                      -- client-provided idempotency key
-  student_id TEXT NOT NULL,
-  route_id TEXT NOT NULL,
-  stop_name TEXT NOT NULL,
-  student_sequence INT NULL,       -- cached resolve of stop sequence
-  candidate_trip_id UUID NULL,     -- when driver accepts, set the trip id
-  trip_candidates JSONB NULL,      -- list of candidate trip IDs & raw ETA
-  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected', 'expired', 'cancelled')),
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  expires_at TIMESTAMPTZ,
-  responded_by TEXT NULL,
-  responded_at TIMESTAMPTZ NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_missed_bus_requests_student_id ON public.missed_bus_requests(student_id);
-CREATE INDEX IF NOT EXISTS idx_missed_bus_requests_op_id ON public.missed_bus_requests(op_id);
-CREATE INDEX IF NOT EXISTS idx_missed_bus_requests_candidate_trip_id ON public.missed_bus_requests(candidate_trip_id);
-CREATE INDEX IF NOT EXISTS idx_missed_bus_requests_status ON public.missed_bus_requests(status);
-CREATE INDEX IF NOT EXISTS idx_missed_bus_requests_expires_at ON public.missed_bus_requests(expires_at) WHERE status = 'pending';
-CREATE INDEX IF NOT EXISTS idx_missed_bus_requests_route_stop ON public.missed_bus_requests(route_id, stop_name);
-CREATE INDEX IF NOT EXISTS idx_missed_bus_requests_trip_candidates ON public.missed_bus_requests USING GIN (trip_candidates);
-
--- Enable RLS for missed_bus_requests
-ALTER TABLE public.missed_bus_requests ENABLE ROW LEVEL SECURITY;
-
-DROP POLICY IF EXISTS "missed_bus_requests_select_own" ON public.missed_bus_requests;
-DROP POLICY IF EXISTS "missed_bus_requests_select_anon" ON public.missed_bus_requests;
-CREATE POLICY "missed_bus_requests_select_anon" ON public.missed_bus_requests
-  FOR SELECT TO anon, authenticated USING (true);
-
-DROP POLICY IF EXISTS "missed_bus_requests_insert_service" ON public.missed_bus_requests;
-CREATE POLICY "missed_bus_requests_insert_service" ON public.missed_bus_requests
-  FOR INSERT TO service_role WITH CHECK (true);
-
-DROP POLICY IF EXISTS "missed_bus_requests_update_service" ON public.missed_bus_requests;
-CREATE POLICY "missed_bus_requests_update_service" ON public.missed_bus_requests
-  FOR UPDATE TO service_role USING (true);
-
-DROP POLICY IF EXISTS "missed_bus_requests_delete_service" ON public.missed_bus_requests;
-CREATE POLICY "missed_bus_requests_delete_service" ON public.missed_bus_requests
-  FOR DELETE TO service_role USING (true);
-
-GRANT SELECT ON public.missed_bus_requests TO authenticated;
-
--- Enable realtime for missed_bus_requests
-DO $$ 
-BEGIN 
-  IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'missed_bus_requests') THEN
-    ALTER PUBLICATION supabase_realtime ADD TABLE missed_bus_requests;
-  END IF;
-END $$;
-
--- Function to expire stale missed bus requests
-CREATE OR REPLACE FUNCTION expire_missed_bus_requests()
-RETURNS INTEGER AS $$
-DECLARE
-  expired_count INTEGER := 0;
-BEGIN
-  UPDATE public.missed_bus_requests
-  SET status = 'expired'
-  WHERE status = 'pending'
-    AND expires_at < NOW();
-  GET DIAGNOSTICS expired_count = ROW_COUNT;
-  RETURN expired_count;
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
-
--- Function to get pending missed bus requests for a trip
-CREATE OR REPLACE FUNCTION get_pending_missed_bus_requests_for_trip(p_trip_id UUID)
-RETURNS TABLE(
-  request_id UUID,
-  student_id TEXT,
-  route_id TEXT,
-  stop_name TEXT,
-  student_sequence INT,
-  created_at TIMESTAMPTZ,
-  expires_at TIMESTAMPTZ
-) AS $$
-BEGIN
-  RETURN QUERY
-  SELECT 
-    mbr.id AS request_id,
-    mbr.student_id,
-    mbr.route_id,
-    mbr.stop_name,
-    mbr.student_sequence,
-    mbr.created_at,
-    mbr.expires_at
-  FROM public.missed_bus_requests mbr
-  WHERE mbr.status = 'pending'
-    AND mbr.trip_candidates ? p_trip_id::text;
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+-- (Section 10 Missed Bus Requests purged - feature deprecated)
 
 -- device_sessions table (single-device session management)
 CREATE TABLE IF NOT EXISTS public.device_sessions (

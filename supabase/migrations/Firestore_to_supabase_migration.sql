@@ -1196,7 +1196,7 @@ CREATE INDEX IF NOT EXISTS idx_buses_evening_load ON buses(evening_load);
 -- idx_routes_route_id removed: route_id column dropped (was always identical to id).
 CREATE INDEX IF NOT EXISTS idx_routes_status ON routes(status);
 
--- Indexes for active_trips, bus_locations, driver_status, waiting_flags, driver_location_updates, driver_swap_requests, temporary_assignments, missed_bus_requests, device_sessions, reassignment_logs, and payments are defined in COMPLETE_SCHEMA.sql.
+-- Indexes for active_trips, bus_locations, driver_status, waiting_flags, driver_location_updates, temporary_assignments, device_sessions, reassignment_logs, and payments are defined in COMPLETE_SCHEMA.sql.
 CREATE INDEX IF NOT EXISTS idx_temp_assignments_source_request ON temporary_assignments(source_request_id);
 
 -- Processed payments

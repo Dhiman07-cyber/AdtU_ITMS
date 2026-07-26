@@ -356,7 +356,7 @@ export default function DriverDashboard() {
                   </Button>
                 ) : (
                   <Button
-                    onClick={() => router.push('/driver/live-tracking')}
+                    onClick={() => router.push('/driver/trip/start')}
                     disabled={busData?.status === 'inactive'}
                     className={`group relative overflow-hidden font-bold shadow-xl transform transition-all duration-300 px-3 py-6 sm:px-6 sm:py-3 rounded-2xl border ${busData?.status === 'inactive'
                       ? 'bg-gray-600 text-gray-300 border-gray-500 cursor-not-allowed opacity-70'

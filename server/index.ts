@@ -1,0 +1,85 @@
+import { createServer } from 'http';
+import { wsServer } from './websocket-server';
+import { transportManager } from './transport-manager';
+import { logger } from './structured-logger';
+import { healthService } from './health-service';
+import { metricsService } from './metrics-service';
+
+const WS_PORT = parseInt(process.env.WS_PORT || '3001', 10);
+const HEALTH_PORT = parseInt(process.env.HEALTH_PORT || '9090', 10);
+
+async function main() {
+  if (!process.env.FIREBASE_CLIENT_EMAIL || !process.env.FIREBASE_PRIVATE_KEY) {
+    logger.warn('Firebase Admin credentials not found; auth will reject all connections', { port: WS_PORT });
+  }
+
+  const server = createServer();
+  wsServer.start(server);
+
+  server.listen(WS_PORT, () => {
+    logger.info('websocket_runtime_started', { port: WS_PORT });
+  });
+
+  const healthServer = createServer((req, res) => {
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+
+    if (req.url === '/health/live') {
+      const status = healthService.liveness();
+      res.writeHead(status.status === 'ok' ? 200 : 503);
+      res.end(JSON.stringify({ status: status.status, uptime: status.uptime }));
+    } else if (req.url === '/health/ready') {
+      const status = healthService.readiness();
+      res.writeHead(status.status === 'ok' ? 200 : 503);
+      res.end(JSON.stringify(status));
+    } else if (req.url === '/health') {
+      res.writeHead(200);
+      res.end(JSON.stringify(healthService.liveness()));
+    } else if (req.url === '/metrics') {
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.writeHead(200);
+      res.end(metricsService.prometheus());
+    } else if (req.url === '/metrics/json') {
+      res.writeHead(200);
+      res.end(JSON.stringify(metricsService.snapshot()));
+    } else {
+      res.writeHead(404);
+      res.end(JSON.stringify({ error: 'not_found' }));
+    }
+  });
+
+  healthServer.listen(HEALTH_PORT, () => {
+    logger.info('health_server_started', { port: HEALTH_PORT });
+  });
+
+  const shutdown = async (signal: string) => {
+    logger.info('shutdown_started', { signal, drainTimeout: 30000 });
+
+    healthService.startShutdown();
+    healthService.startDraining();
+
+    const drainTimer = setTimeout(() => {
+      logger.warn('drain_timeout_reached', { elapsed: healthService.getDrainElapsed() });
+      forceExit();
+    }, 30000);
+
+    wsServer.shutdown(() => {
+      clearTimeout(drainTimer);
+      healthService.stopDraining();
+      transportManager.shutdown().then(() => forceExit());
+    });
+  };
+
+  const forceExit = () => {
+    logger.info('shutdown_complete');
+    process.exit(0);
+  };
+
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
+}
+
+main().catch(err => {
+  logger.error('fatal_error', { error: (err as Error).message, stack: (err as Error).stack });
+  process.exit(1);
+});
