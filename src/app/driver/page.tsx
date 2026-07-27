@@ -1,24 +1,42 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
-import { useAuth } from "@/contexts/auth-context";
-import { useRouter } from "next/navigation";
-import Link from "next/link";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import {
-  Bus, MapPin, Users, Clock, Navigation, QrCode,
-  ArrowRight, PlayCircle, StopCircle, Activity,
-  MapPinned, Zap, CreditCard, Info, TrendingUp,
-  Calendar, Bell, Shield, Fuel, AlertTriangle,
-  CheckCircle, XCircle, Loader2, Sparkles, Star,
-  Crown, Award, Target, BarChart3, Hash, User, Monitor
-} from "lucide-react";
 import { PremiumPageLoader } from "@/components/LoadingSpinner";
-import { supabase } from "@/lib/supabase-client";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card,CardContent,CardHeader } from "@/components/ui/card";
+import { useAuth } from "@/contexts/auth-context";
+import { WebSocketClient } from '@/domains/realtime/ws-client';
 import { authApiFetch } from "@/lib/secure-api-client";
+import { supabase } from "@/lib/supabase-client";
 import { formatIdForDisplay } from "@/lib/utils";
+import {
+	Activity,
+	ArrowRight,
+	Award,
+	Bell,
+	Bus,
+	CheckCircle,
+	Clock,
+	CreditCard,
+	Hash,
+	Info,
+	MapPin,
+	MapPinned,
+	Monitor,
+	Navigation,
+	PlayCircle,
+	QrCode,
+	Shield,
+	Sparkles,
+	Star,
+	StopCircle,
+	TrendingUp,
+	User,
+	Users
+} from "lucide-react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
 
 export default function DriverDashboard() {
   const { userData, currentUser } = useAuth();
@@ -123,25 +141,25 @@ export default function DriverDashboard() {
 
     fetchCurrentStatus();
 
-    // 2. Broadcast Listener only (FREE — no DB reads)
-    // Trip events are pushed from server API routes via broadcast, so no postgres_changes needed.
-    let tripBroadcastChannel: any = null;
-    if (busId) {
-      tripBroadcastChannel = supabase
-        .channel(`trip-status-${busId}`)
-        .on('broadcast', { event: 'trip_started' }, () => {
-          console.log('🚀 Trip started broadcast (dashboard)');
-          setHasActiveTrip(true);
-        })
-        .on('broadcast', { event: 'trip_ended' }, () => {
-          console.log('🏁 Trip ended broadcast (dashboard)');
-          setHasActiveTrip(false);
-        })
-        .subscribe();
-    }
+    // 2. Broadcast Listener via WebSocket
+    // Trip events are pushed from server API routes via emitEvent → WS server.
+    let tripWsClient: WebSocketClient | null = null;
+    const initTripWs = async () => {
+      if (!busId || !currentUser) return;
+      const token = await currentUser.getIdToken();
+      const url = process.env.NEXT_PUBLIC_WS_URL || `ws://${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}:3001`;
+      tripWsClient = new WebSocketClient({ url, token });
+      tripWsClient.connect();
+      tripWsClient.subscribe(`trip-status-${busId}`, (payload: any) => {
+        console.log('🚦 Trip status broadcast received:', payload.event);
+        if (payload.event === 'trip_started') setHasActiveTrip(true);
+        else if (payload.event === 'trip_ended') setHasActiveTrip(false);
+      });
+    };
+    initTripWs();
 
     return () => {
-      if (tripBroadcastChannel) supabase.removeChannel(tripBroadcastChannel);
+      if (tripWsClient) tripWsClient.disconnect();
     };
   }, [currentUser?.uid, busData?.busId, busData?.id]);
 
@@ -313,7 +331,16 @@ export default function DriverDashboard() {
 
                   <div>
                     <h1 className="text-2xl md:text-3xl lg:text-4xl font-black bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 bg-clip-text text-transparent mb-0.5">
-                      Welcome back, {driverData?.fullName?.split(' ')[0] || 'Driver'}!
+                      {(() => {
+                        const rawDriverName = driverData?.fullName || driverData?.name || userData?.name || 'Driver';
+                        const driverFirstName = rawDriverName.trim().split(/\s+/)[0];
+                        return (
+                          <>
+                            <span className="hidden md:inline">Welcome back, {driverFirstName}!</span>
+                            <span className="inline md:hidden">Welcome {driverFirstName}!</span>
+                          </>
+                        );
+                      })()}
                     </h1>
                     <p className="text-[11px] sm:text-xs text-gray-600 dark:text-gray-400 mt-0.5 font-bold uppercase tracking-wider">
                       {new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
@@ -356,7 +383,7 @@ export default function DriverDashboard() {
                   </Button>
                 ) : (
                   <Button
-                    onClick={() => router.push('/driver/live-tracking')}
+                    onClick={() => router.push('/driver/trip/start')}
                     disabled={busData?.status === 'inactive'}
                     className={`group relative overflow-hidden font-bold shadow-xl transform transition-all duration-300 px-3 py-6 sm:px-6 sm:py-3 rounded-2xl border ${busData?.status === 'inactive'
                       ? 'bg-gray-600 text-gray-300 border-gray-500 cursor-not-allowed opacity-70'

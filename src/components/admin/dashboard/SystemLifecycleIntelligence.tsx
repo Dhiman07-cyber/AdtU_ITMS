@@ -1,22 +1,22 @@
 "use client";
 
+import { Button } from '@/components/ui/button';
+import { Card,CardContent } from '@/components/ui/card';
+import { Tooltip,TooltipContent,TooltipProvider,TooltipTrigger } from '@/components/ui/tooltip';
+import { deriveAcademicLifecycle } from '@/lib/utils/deadline-computation';
 import { motion } from 'framer-motion';
 import {
-   Calendar,
-   Mail,
-   Clock,
-   ExternalLink,
-   ShieldAlert,
-   UserPlus,
-   Hourglass
+	Calendar,
+	Clock,
+	ExternalLink,
+	Hourglass,
+	Mail,
+	ShieldAlert,
+	UserPlus
 } from 'lucide-react';
-import { Card, CardContent } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { DashboardStats } from './types';
 import { useRouter } from 'next/navigation';
-import { useMemo, useState, useEffect } from 'react';
-import { deriveAcademicLifecycle } from '@/lib/utils/deadline-computation';
-import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
+import { useEffect,useMemo,useState } from 'react';
+import { DashboardStats } from './types';
 
 interface SystemLifecycleIntelligenceProps {
    stats: DashboardStats;

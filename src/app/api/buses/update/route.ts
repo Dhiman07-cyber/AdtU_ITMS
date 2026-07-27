@@ -1,11 +1,11 @@
-﻿import { NextResponse } from 'next/server';
-import { headers } from 'next/headers';
+﻿import { getBusById,updateBus } from '@/domains/fleet';
+import { assignDriverToBus,getActiveAssignmentByBusId,unassignDriver } from '@/domains/fleet/repositories/driver-assignment.repository';
+import { getUserById } from '@/domains/identity';
+import * as routeService from '@/domains/route';
 import { adminAuth } from '@/lib/firebase-admin';
 import { getSupabaseServer } from '@/lib/supabase-server';
-import { getUserById } from '@/domains/identity';
-import { getBusById, updateBus } from '@/domains/fleet';
-import * as routeService from '@/domains/route';
-import { assignDriverToBus, unassignDriver, getActiveAssignmentByBusId } from '@/domains/fleet/repositories/driver-assignment.repository';
+import { headers } from 'next/headers';
+import { NextResponse } from 'next/server';
 
 export async function PUT(request: Request) {
     try {

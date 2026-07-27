@@ -5,12 +5,12 @@
  * Used by profile pages for modal-based QR display.
  */
 
-import { useRef, useCallback, useState, useEffect } from 'react';
-import { QRCodeCanvas } from 'qrcode.react';
-import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { X, Share2, Download, Copy, CheckCircle, QrCode, ShieldCheck, Fingerprint } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { Dialog,DialogContent,DialogTitle } from '@/components/ui/dialog';
+import { AnimatePresence,motion } from 'framer-motion';
+import { CheckCircle,Copy,Download,Share2,ShieldCheck,X } from 'lucide-react';
+import { QRCodeCanvas } from 'qrcode.react';
+import { useCallback,useEffect,useRef,useState } from 'react';
 import { toast } from 'sonner';
 
 interface StudentQRDisplayProps {

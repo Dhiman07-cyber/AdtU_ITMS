@@ -1,6 +1,6 @@
 "use client";
 
-import React, { Component, ReactNode } from "react";
+import React,{ Component,ReactNode } from "react";
 import MapFallbackUI from "./MapFallbackUI";
 
 interface MapErrorBoundaryProps {

@@ -1,22 +1,20 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { 
-  LineChart, 
-  Line, 
-  XAxis, 
-  YAxis, 
-  CartesianGrid, 
-  Tooltip, 
-  ResponsiveContainer,
-  AreaChart,
-  Area
-} from 'recharts';
-import { Users, MousePointer2, Percent, RefreshCw, BarChart3, TrendingUp } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { Card,CardContent,CardHeader,CardTitle } from '@/components/ui/card';
 import { useAuth } from '@/contexts/auth-context';
 import { authApiFetch } from '@/lib/secure-api-client';
+import { motion } from 'framer-motion';
+import { BarChart3,MousePointer2,Percent,RefreshCw,TrendingUp,Users } from 'lucide-react';
+import { useEffect,useState } from 'react';
+import {
+	CartesianGrid,
+	Line,
+	LineChart,
+	ResponsiveContainer,
+	Tooltip,
+	XAxis,
+	YAxis
+} from 'recharts';
 
 interface AnalyticsData {
   chartData: Array<{

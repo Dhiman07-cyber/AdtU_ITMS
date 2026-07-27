@@ -3,7 +3,7 @@
  * Automatically delete expired notifications at midnight
  */
 
-import { pgFindExpiredNotifications, pgBulkDeleteNotifications } from '@/domains/notification/repositories/notification.repository.pg';
+import { pgBulkDeleteNotifications,pgFindExpiredNotifications } from '@/domains/notification/repositories/notification.repository.pg';
 
 export function calculateNotificationExpiry(startDate: Date, daysToLive: number = 0): string {
   const expiresAt = new Date(startDate);

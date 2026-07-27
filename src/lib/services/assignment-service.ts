@@ -8,12 +8,10 @@
  */
 
 export type {
-    StagedDriverAssignment,
-    StagedRouteAssignment,
+	StagedDriverAssignment,
+	StagedRouteAssignment
 } from './assignment-types';
 
 export {
-    generateStagingId,
-    formatDriverCode,
-    getDriverStatus,
+	formatDriverCode,generateStagingId,getDriverStatus
 } from './assignment-types';

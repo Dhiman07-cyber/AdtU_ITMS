@@ -1,13 +1,13 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { getAllModerators } from '@/domains/identity';
 import { verifyApiAuth } from '@/lib/security/api-auth';
-import { getModeratorsByStatus } from '@/domains/identity';
+import { NextRequest,NextResponse } from 'next/server';
 
 export async function GET(request: NextRequest) {
   try {
     const auth = await verifyApiAuth(request, ['admin']);
     if (!auth.authenticated) return auth.response;
 
-    const moderatorRows = await getModeratorsByStatus('active');
+    const moderatorRows = await getAllModerators();
 
     const moderators = moderatorRows
       .filter((data: any) => {

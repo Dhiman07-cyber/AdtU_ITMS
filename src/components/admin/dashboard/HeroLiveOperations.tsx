@@ -1,24 +1,18 @@
 "use client";
 
-import { motion } from 'framer-motion';
-import {
-  Bus,
-  MapPin,
-  Clock,
-  Users,
-  Navigation,
-  TrendingUp,
-  ArrowRight,
-  ShieldCheck,
-  PlaneTakeoff,
-  Timer,
-  ChevronRight
-} from 'lucide-react';
-import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
-import { ActiveTrip, DashboardStats, BusUtilizationData, RouteOccupancyData } from './types';
+import { Card,CardContent } from '@/components/ui/card';
+import { motion } from 'framer-motion';
+import {
+	Bus,
+	ChevronRight,
+	MapPin,
+	ShieldCheck,
+	Timer,
+	Users
+} from 'lucide-react';
+import { ActiveTrip,DashboardStats } from './types';
 
 interface HeroLiveOperationsProps {
   activeTrips: ActiveTrip[];

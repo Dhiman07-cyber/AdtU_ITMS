@@ -1,12 +1,12 @@
-import { NextResponse } from 'next/server';
-import { getSupabaseServer } from '@/lib/supabase-server';
-import { withSecurity } from '@/lib/security/api-security';
-import { RateLimits } from '@/lib/security/rate-limiter';
-import { getTransportEntitlement } from '@/lib/entitlement/transport-entitlement';
-import { getByUid } from '@/domains/student';
-import * as routeService from '@/domains/route';
 import { getBusById } from '@/domains/fleet';
 import { getDriversByBusId } from '@/domains/identity';
+import * as routeService from '@/domains/route';
+import { getByUid } from '@/domains/student';
+import { getTransportEntitlement } from '@/lib/entitlement/transport-entitlement';
+import { withSecurity } from '@/lib/security/api-security';
+import { RateLimits } from '@/lib/security/rate-limiter';
+import { getSupabaseServer } from '@/lib/supabase-server';
+import { NextResponse } from 'next/server';
 
 /**
  * GET /api/student/dashboard-data
@@ -108,7 +108,7 @@ export const GET = withSecurity(
             busId ? getBusById(busId) : Promise.resolve(null),
             routeId ? routeService.getById(routeId) : Promise.resolve(null),
             busId ? getDriversByBusId(busId) : Promise.resolve([]),
-            busId ? supabase.from('driver_status').select('status, started_at, last_updated_at').eq('bus_id', busId).maybeSingle() : Promise.resolve(null)
+            busId ? supabase.from('active_trips').select('trip_id, status, start_time, last_heartbeat').eq('bus_id', busId).eq('status', 'active').maybeSingle() : Promise.resolve(null)
         ]);
 
         // Process Bus & Route
@@ -129,7 +129,7 @@ export const GET = withSecurity(
         }
 
         // Process Trip Status
-        const isTripActive = tripStatus?.data ? (tripStatus.data.status === 'active' || tripStatus.data.status === 'on_trip' || tripStatus.data.status === 'enroute') : false;
+        const isTripActive = tripStatus?.data ? tripStatus.data.status === 'active' : false;
 
         return NextResponse.json({
             student: studentData,

@@ -1,0 +1,102 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": true,
+  "panels": [
+    {
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "id": 1,
+      "title": "Next.js Server Uptime",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "nodejs_process_uptime_seconds / 3600",
+          "legendFormat": "Uptime (Hours)"
+        }
+      ]
+    },
+    {
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "id": 2,
+      "title": "Cold Starts Total",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(nextjs_cold_starts_total)",
+          "legendFormat": "Cold Starts"
+        }
+      ]
+    },
+    {
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "id": 3,
+      "title": "SSR P95 Duration (ms)",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(nextjs_ssr_duration_seconds_bucket[1m])) by (le)) * 1000",
+          "legendFormat": "P95 SSR (ms)"
+        }
+      ]
+    },
+    {
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "id": 4,
+      "title": "Middleware P95 Duration (ms)",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(nextjs_middleware_duration_seconds_bucket[1m])) by (le)) * 1000",
+          "legendFormat": "P95 Middleware (ms)"
+        }
+      ]
+    },
+    {
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "id": 5,
+      "title": "Next.js Rendering & Middleware Performance",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(nextjs_ssr_duration_seconds_bucket[1m])) by (le)) * 1000",
+          "legendFormat": "SSR P95 (ms)"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(nextjs_middleware_duration_seconds_bucket[1m])) by (le)) * 1000",
+          "legendFormat": "Middleware P95 (ms)"
+        }
+      ]
+    },
+    {
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "id": 6,
+      "title": "Next.js Cache Hits vs Misses & ISR",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "rate(nextjs_cache_hits_total[1m])",
+          "legendFormat": "Cache Hits / s"
+        },
+        {
+          "expr": "rate(nextjs_cache_misses_total[1m])",
+          "legendFormat": "Cache Misses / s"
+        },
+        {
+          "expr": "rate(nextjs_isr_revalidations_total[1m])",
+          "legendFormat": "ISR Revalidations / s"
+        }
+      ]
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["runtime", "nextjs", "ssr", "cache", "itms"],
+  "time": { "from": "now-1h", "to": "now" },
+  "title": "19 - Runtime Dashboard",
+  "uid": "itms-runtime",
+  "version": 1
+}

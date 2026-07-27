@@ -1,6 +1,6 @@
-import { describe, it, expect, beforeEach } from 'vitest';
-import { MigrationRunner, MigrationStore } from '../migration-runner';
-import { MigrationDefinition, MigrationRecord, MigrationStatus } from '../contracts';
+import { beforeEach,describe,expect,it } from 'vitest';
+import { MigrationDefinition,MigrationRecord,MigrationStatus } from '../contracts';
+import { MigrationRunner,MigrationStore } from '../migration-runner';
 
 function createMockStore(): MigrationStore & { records: MigrationRecord[] } {
   return {

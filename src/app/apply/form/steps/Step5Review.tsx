@@ -1,11 +1,11 @@
-import React, { useRef } from 'react';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import { ReviewStepProps } from './types';
-import { CheckCircle, Shield, Loader2, Send, Download, User, BookOpen, Truck, MapPin, Calendar, Phone, Mail, Award, Clock, ArrowLeft, CreditCard } from 'lucide-react';
+import { ArrowLeft,Award,BookOpen,Calendar,CreditCard,Download,Loader2,Mail,MapPin,Send,Shield,User } from 'lucide-react';
 import Image from 'next/image';
-import { Badge } from '@/components/ui/badge';
+import React,{ useRef } from 'react';
 import { toast } from 'sonner';
+import { ReviewStepProps } from './types';
 
 export default function Step5Review({
   formData,

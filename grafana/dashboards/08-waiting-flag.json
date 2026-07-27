@@ -1,0 +1,106 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": true,
+  "panels": [
+    {
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "id": 1,
+      "title": "Waiting Flags Raised Total",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(itms_waiting_flags_raised_total)",
+          "legendFormat": "Flags Raised"
+        }
+      ]
+    },
+    {
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "id": 2,
+      "title": "Flags Acknowledged Total",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(itms_waiting_flags_acknowledged_total)",
+          "legendFormat": "Acknowledged"
+        }
+      ]
+    },
+    {
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "id": 3,
+      "title": "Students Boarded Total",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(itms_waiting_flags_boarded_total)",
+          "legendFormat": "Boarded"
+        }
+      ]
+    },
+    {
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "id": 4,
+      "title": "Flags Expired Total",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(itms_waiting_flags_expired_total)",
+          "legendFormat": "Expired"
+        }
+      ]
+    },
+    {
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "id": 5,
+      "title": "Waiting Flag Lifecycle Trend",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "rate(itms_waiting_flags_raised_total[5m])",
+          "legendFormat": "Raised Rate"
+        },
+        {
+          "expr": "rate(itms_waiting_flags_acknowledged_total[5m])",
+          "legendFormat": "Acknowledged Rate"
+        },
+        {
+          "expr": "rate(itms_waiting_flags_boarded_total[5m])",
+          "legendFormat": "Boarded Rate"
+        },
+        {
+          "expr": "rate(itms_waiting_flags_expired_total[5m])",
+          "legendFormat": "Expired Rate"
+        }
+      ]
+    },
+    {
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "id": 6,
+      "title": "Driver Response & Boarding Time (P95 Seconds)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(itms_waiting_flag_driver_response_duration_seconds_bucket[5m])) by (le))",
+          "legendFormat": "P95 Driver Response Time (s)"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(itms_waiting_flag_boarding_duration_seconds_bucket[5m])) by (le))",
+          "legendFormat": "P95 Boarding Time (s)"
+        }
+      ]
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["waiting-flag", "students", "driver-response", "itms"],
+  "time": { "from": "now-24h", "to": "now" },
+  "title": "08 - Waiting Flag Dashboard",
+  "uid": "itms-waiting-flag",
+  "version": 1
+}

@@ -1,20 +1,20 @@
 "use client";
 
-import { useState } from "react";
-import { useAuth } from "@/contexts/auth-context";
 import { Button } from "@/components/ui/button";
-import { LogOut } from "lucide-react";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
+	DialogTrigger,
 } from "@/components/ui/dialog";
+import { useAuth } from "@/contexts/auth-context";
 import { useToast } from "@/contexts/toast-context";
+import { LogOut } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { useState } from "react";
 
 interface SignOutButtonProps {
   variant?: "default" | "destructive" | "outline" | "secondary" | "ghost" | "link";

@@ -1,5 +1,5 @@
-import { getAuth } from 'firebase/auth';
 import type { Bus } from '@/lib/types';
+import { getAuth } from 'firebase/auth';
 
 export const getAllBuses = async (): Promise<Bus[]> => {
   try {

@@ -1,8 +1,8 @@
 import {
-  MigrationDefinition,
-  MigrationResult,
-  MigrationStatus,
-  MigrationRecord,
+	MigrationDefinition,
+	MigrationRecord,
+	MigrationResult,
+	MigrationStatus,
 } from './contracts';
 
 export interface MigrationStore {

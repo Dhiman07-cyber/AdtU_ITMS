@@ -5,9 +5,5 @@
 // External consumers import these directly from their canonical
 // locations in @/lib/services/.
 export {
-  getCapacity,
-  assignSeat,
-  releaseSeat,
-  findAlternativeBuses,
-  validateAssignment,
+	assignSeat,findAlternativeBuses,getCapacity,releaseSeat,validateAssignment
 } from './services/seat-assignment.service';

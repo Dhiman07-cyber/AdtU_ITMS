@@ -1,20 +1,19 @@
 "use client";
 
-import { useAuth } from "@/contexts/auth-context";
-import { useRouter } from "next/navigation";
-import Link from "next/link";
-import { User, Bus } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { SignOutButton } from "@/components/signout-button";
-import { APP_NAME } from '@/config/runtime';
+import { Button } from "@/components/ui/button";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuLabel,
+	DropdownMenuSeparator,
+	DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu";
+import { APP_NAME } from '@/config/runtime';
+import { useAuth } from "@/contexts/auth-context";
+import { Bus,User } from "lucide-react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 export default function ApplyFormNavbar() {
   const { currentUser, userData } = useAuth();

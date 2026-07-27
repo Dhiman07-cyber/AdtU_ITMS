@@ -1,6 +1,6 @@
 // Firebase Cloud Messaging service (client-side)
-import { getMessaging, getToken, onMessage } from 'firebase/messaging';
 import { app } from '@/lib/firebase';
+import { getMessaging,getToken,onMessage } from 'firebase/messaging';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 const SW_SCOPE = '/';

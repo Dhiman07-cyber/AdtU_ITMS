@@ -1,7 +1,7 @@
+export { FormRoot } from './FormRoot';
 export { OptimizedInput } from './OptimizedInput';
+export { OptimizedOTPInput } from './OptimizedOTPInput';
 export { OptimizedSelect } from './OptimizedSelect';
 export { OptimizedTextarea } from './OptimizedTextarea';
-export { OptimizedOTPInput } from './OptimizedOTPInput';
-export { PersistentInput } from './PersistentInput';
 export { PersistentController } from './PersistentController';
-export { FormRoot } from './FormRoot';
+export { PersistentInput } from './PersistentInput';

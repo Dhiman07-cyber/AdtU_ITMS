@@ -1,11 +1,11 @@
 "use client";
 
-import React, { useCallback, useMemo, useState, useRef, useEffect } from "react";
-import { Bell, Maximize2, Minimize2, ScanLine, Users, X, MapPin, Sun, Moon } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import GuwahatiMap, { type MapPoint } from "./GuwahatiMap";
-import MapFallbackUI from "./MapFallbackUI";
 import { useTheme } from "@/components/theme-provider";
+import { Button } from "@/components/ui/button";
+import { Bell,MapPin,Maximize2,Minimize2,Moon,ScanLine,Sun,Users,X } from "lucide-react";
+import { useCallback,useEffect,useMemo,useRef,useState } from "react";
+import GuwahatiMap,{ type MapPoint } from "./GuwahatiMap";
+import MapFallbackUI from "./MapFallbackUI";
 
 interface WaitingStudent {
   id: string;

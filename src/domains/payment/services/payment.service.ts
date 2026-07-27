@@ -13,26 +13,23 @@
  * plumbing.
  */
 import {
-  createOnlinePayment,
-  processCapturedPayment,
-  createOfflinePaymentAtApproval,
-  approveOfflinePayment,
-  rejectOfflinePayment,
-  getPaymentsByStudent,
-  getAllPayments,
-  getPendingPayments,
-  getPaymentById as getPaymentByIdLegacy,
-  getPaymentDetails,
-  isPaymentProcessed,
+	approveOfflinePayment,
+	createOfflinePaymentAtApproval,
+	createOnlinePayment,
+	getAllPayments,
+	getPaymentById as getPaymentByIdLegacy,
+	getPaymentDetails,
+	getPaymentsByStudent,
+	getPendingPayments,
+	isPaymentProcessed,
+	processCapturedPayment,
+	rejectOfflinePayment,
 } from '@/lib/payment/payment.service';
 import { paymentsSupabaseService } from '@/lib/services/payments-supabase';
 
 export {
-  createOnlinePayment,
-  processCapturedPayment,
-  createOfflinePaymentAtApproval,
-  approveOfflinePayment,
-  rejectOfflinePayment,
+	approveOfflinePayment,createOfflinePaymentAtApproval,createOnlinePayment,
+	processCapturedPayment,rejectOfflinePayment
 };
 
 export async function getByStudent(studentUid: string, studentId?: string) {

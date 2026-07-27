@@ -17,10 +17,10 @@
  *   single source of "seat was released" (see capacity-flags.ts).
  */
 
+import { getAllBuses,updateBus } from '@/domains/fleet';
+import { getAllStudents,getUsersByRole } from '@/domains/identity';
 import { pgInsertNotification } from '@/domains/notification/repositories/notification.repository.pg';
 import { getShiftDeltas } from '@/lib/utils/shift-utils';
-import { getAllBuses, updateBus } from '@/domains/fleet';
-import { getAllStudents, getUsersByRole } from '@/domains/identity';
 
 export interface BusCounterSnapshot {
   currentMembers: number;

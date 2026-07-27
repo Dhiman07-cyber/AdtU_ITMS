@@ -1,0 +1,106 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": true,
+  "panels": [
+    {
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "id": 1,
+      "title": "Total Revenue Collected (INR)",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(itms_payment_revenue_total_inr)",
+          "legendFormat": "Revenue ₹"
+        }
+      ]
+    },
+    {
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "id": 2,
+      "title": "Payments Completed Total",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(itms_payments_completed_total)",
+          "legendFormat": "Completed"
+        }
+      ]
+    },
+    {
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "id": 3,
+      "title": "Payment Success Rate (%)",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "(sum(itms_payments_completed_total) / sum(itms_payments_initiated_total)) * 100",
+          "legendFormat": "Success Rate %"
+        }
+      ]
+    },
+    {
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "id": 4,
+      "title": "Payments Failed Total",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(itms_payments_failed_total)",
+          "legendFormat": "Failed Payments"
+        }
+      ]
+    },
+    {
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "id": 5,
+      "title": "Payment Transactions & Method Split (Online vs Offline)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "rate(itms_payments_completed_total{payment_method=\"online\"}[1h])",
+          "legendFormat": "Online (Razorpay)"
+        },
+        {
+          "expr": "rate(itms_payments_completed_total{payment_method=\"offline\"}[1h])",
+          "legendFormat": "Offline (Receipt Verification)"
+        },
+        {
+          "expr": "rate(itms_payments_failed_total[1h])",
+          "legendFormat": "Failed Transactions"
+        }
+      ]
+    },
+    {
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "id": 6,
+      "title": "Payment Gateway Latency & Webhook Callbacks",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(itms_payment_gateway_duration_seconds_bucket[1h])) by (le)) * 1000",
+          "legendFormat": "P95 Gateway Latency (ms)"
+        },
+        {
+          "expr": "rate(itms_payment_webhooks_total[1h])",
+          "legendFormat": "Webhooks Processed/sec"
+        },
+        {
+          "expr": "rate(itms_payment_receipt_verifications_total[1h])",
+          "legendFormat": "Receipt Verifications/sec"
+        }
+      ]
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["payment", "revenue", "razorpay", "financial", "itms"],
+  "time": { "from": "now-30d", "to": "now" },
+  "title": "09 - Payment Dashboard",
+  "uid": "itms-payment",
+  "version": 1
+}

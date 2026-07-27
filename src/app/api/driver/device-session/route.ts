@@ -1,9 +1,9 @@
-import { NextResponse } from 'next/server';
-import { getSupabaseServer } from '@/lib/supabase-server';
 import { withSecurity } from '@/lib/security/api-security';
-import { DeviceSessionSchema } from '@/lib/security/validation-schemas';
 import { RateLimits } from '@/lib/security/rate-limiter';
 import { safeErrorMessage } from '@/lib/security/safe-error';
+import { DeviceSessionSchema } from '@/lib/security/validation-schemas';
+import { getSupabaseServer } from '@/lib/supabase-server';
+import { NextResponse } from 'next/server';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;

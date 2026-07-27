@@ -1,13 +1,11 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { getStudentById,getUserById } from '@/domains/identity';
+import { getDeadlineConfig } from '@/lib/deadline-config-service';
 import { adminAuth } from '@/lib/firebase-admin';
 import {
-    computeDatesForStudent,
-    generateDatePreview,
-    formatDateWithOrdinal,
-    daysBetween
+	formatDateWithOrdinal,
+	generateDatePreview
 } from '@/lib/utils/deadline-computation';
-import { getDeadlineConfig } from '@/lib/deadline-config-service';
-import { getUserById, getStudentById } from '@/domains/identity';
+import { NextRequest,NextResponse } from 'next/server';
 
 /**
  * POST /api/settings/deadline-preview

@@ -1,15 +1,15 @@
 'use client';
 
-import { useState, useMemo } from 'react';
-import { Search, Users, MapPin, Phone, ChevronRight, Filter, Zap } from 'lucide-react';
-import { Input } from '@/components/ui/input';
+import type { StudentData } from '@/app/admin/smart-allocation/page';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { cn } from '@/lib/utils';
-import type { StudentData } from '@/app/admin/smart-allocation/page';
 import { safeImageSrc } from '@/lib/security/url-sanitizer';
+import { cn } from '@/lib/utils';
+import { ChevronRight,Filter,MapPin,Search,Users,Zap } from 'lucide-react';
+import { useMemo,useState } from 'react';
 
 interface StudentRosterProps {
   students: StudentData[];

@@ -1,7 +1,7 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { getUnauthUserById } from '@/domains/identity';
 import { adminAuth } from '@/lib/firebase-admin';
 import { resolveUserRole } from '@/lib/security/role-cache';
-import { getUnauthUserById } from '@/domains/identity';
+import { NextRequest,NextResponse } from 'next/server';
 
 export async function GET(
   request: NextRequest,

@@ -1,16 +1,16 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { MapPin, AlertCircle, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
 } from "@/components/ui/dialog";
+import { AlertCircle,MapPin,Settings } from "lucide-react";
+import { useEffect,useState } from "react";
 
 interface LocationPermissionModalProps {
   isOpen: boolean;

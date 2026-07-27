@@ -1,8 +1,8 @@
-import { NextResponse } from 'next/server';
-import { verifyApiAuth } from '@/lib/security/api-auth';
-import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
 import * as routeService from '@/domains/route';
 import { clearRouteCache } from '@/lib/profile-service';
+import { verifyApiAuth } from '@/lib/security/api-auth';
+import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
+import { NextResponse } from 'next/server';
 
 export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {

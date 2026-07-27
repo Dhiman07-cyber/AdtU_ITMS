@@ -4,9 +4,9 @@
  * Uses dynamic configuration passed from service layer
  */
 
-import { Timestamp } from 'firebase/firestore';
-import { SimulationConfig } from '@/lib/types/simulation-config';
 import { DeadlineConfig } from '@/lib/types/deadline-config';
+import { SimulationConfig } from '@/lib/types/simulation-config';
+import { Timestamp } from 'firebase/firestore';
 import { deriveAcademicLifecycle } from './deadline-computation';
 
 const MONTH_NAMES = [

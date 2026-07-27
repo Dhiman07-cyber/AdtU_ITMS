@@ -1,0 +1,28 @@
+global:
+  resolve_timeout: 5m
+
+route:
+  group_by: ['alertname', 'category', 'severity']
+  group_wait: 10s
+  group_interval: 1m
+  repeat_interval: 4h
+  receiver: 'default-receiver'
+  routes:
+    - match:
+        severity: P0
+      receiver: 'p0-critical-receiver'
+    - match:
+        severity: P1
+      receiver: 'p1-urgent-receiver'
+
+receivers:
+  - name: 'default-receiver'
+  - name: 'p0-critical-receiver'
+  - name: 'p1-urgent-receiver'
+
+inhibit_rules:
+  - source_match:
+      severity: 'P0'
+    target_match:
+      severity: 'P1'
+    equal: ['category']

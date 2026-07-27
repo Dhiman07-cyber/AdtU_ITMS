@@ -1,62 +1,55 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { useAuth } from '@/contexts/auth-context';
-import { useModeratorPermissions } from '@/hooks/useModeratorPermissions';
-import { useRouter } from 'next/navigation';
-import { safeImageSrc } from '@/lib/security/url-sanitizer';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
-import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
+import { Card,CardContent,CardDescription,CardHeader,CardTitle } from '@/components/ui/card';
+import {
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
+} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { Tabs,TabsContent,TabsList,TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
+import { useAuth } from '@/contexts/auth-context';
+import { useModeratorPermissions } from '@/hooks/useModeratorPermissions';
+import { safeImageSrc } from '@/lib/security/url-sanitizer';
 import {
-  Calendar,
-  Clock,
-  AlertTriangle,
-  CheckCircle,
-  CreditCard,
-  IndianRupee,
-  Info,
-  Loader2,
-  RefreshCw,
-  ArrowLeft,
-  Receipt,
-  History,
-  Eye,
-  FileText,
-  User,
-  XCircle,
-  Download,
-  Filter,
-  TrendingUp,
-  BarChart3,
-  Wallet,
-  ArrowUpRight,
-  ArrowDownRight,
-  Copy
+	AlertTriangle,
+	ArrowUpRight,
+	BarChart3,
+	Calendar,
+	CheckCircle,
+	Clock,
+	Copy,
+	CreditCard,
+	Download,
+	Eye,
+	FileText,
+	Filter,
+	History,
+	IndianRupee,
+	Loader2,
+	Receipt,
+	RefreshCw,
+	TrendingUp,
+	User,
+	Wallet,
+	XCircle
 } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { useEffect,useMemo,useState } from 'react';
 import { toast } from 'sonner';
 
-import { supabase } from '@/lib/supabase-client';
-import Image from 'next/image';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
+import { Select,SelectContent,SelectItem,SelectTrigger,SelectValue } from '@/components/ui/select';
+import { Area,AreaChart,CartesianGrid,ResponsiveContainer,Tooltip,XAxis,YAxis } from 'recharts';
 
-import { parseFirestoreDate, formatDate } from '@/lib/utils/date-utils';
-import { PremiumPageLoader } from '@/components/LoadingSpinner';
 import Avatar from '@/components/Avatar';
+import { PremiumPageLoader } from '@/components/LoadingSpinner';
 import { PaymentDetailModal } from '@/components/payment';
 
 interface StudentData {

@@ -1,34 +1,48 @@
 "use client";
 
-import { useAuth } from "@/contexts/auth-context";
-import { useRouter, useParams } from "next/navigation";
-import { useState, useEffect } from "react";
-import { 
-  User, Mail, Phone, Calendar, MapPin, Bus, Route as RouteIcon,
-  GraduationCap, Building, Heart, Users, IndianRupee, 
-  CheckCircle, QrCode, Clock, Shield, Home, Hash, CreditCard, Briefcase
-} from "lucide-react";
+import {
+	ActionButtons,
+	InfoRow,
+	ProfileHeaderCard,
+	ProfileSectionCard,
+	ProfileShell
+} from "@/components/profile/ProfileComponents";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { useAuth } from "@/contexts/auth-context";
 import {
-  ProfileShell,
-  ProfileHeaderCard,
-  ProfileSectionCard,
-  InfoRow,
-  ActionButtons
-} from "@/components/profile/ProfileComponents";
-import { 
-  getUserProfile, 
-  Profile,
-  StudentProfile,
-  DriverProfile,
-  ModeratorProfile,
-  AdminProfile,
-  formatDate,
-  formatCurrency,
-  isSessionExpired,
-  UserRole
+	DriverProfile,
+	formatCurrency,
+	formatDate,
+	getUserProfile,
+	isSessionExpired,
+	Profile,
+	StudentProfile,
+	UserRole
 } from "@/lib/profile-service";
+import {
+	Briefcase,
+	Building,
+	Bus,
+	Calendar,
+	CheckCircle,
+	Clock,
+	CreditCard,
+	GraduationCap,
+	Hash,
+	Heart,
+	Home,
+	IndianRupee,
+	Mail,
+	MapPin,
+	Phone,
+	Route as RouteIcon,
+	Shield,
+	User,
+	Users
+} from "lucide-react";
+import { useParams,useRouter } from "next/navigation";
+import { useEffect,useState } from "react";
 
 export default function AdminViewUserProfile() {
   const { currentUser, userData } = useAuth();

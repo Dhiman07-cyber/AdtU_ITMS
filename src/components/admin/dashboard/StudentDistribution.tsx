@@ -1,22 +1,22 @@
 "use client";
 
+import { Badge } from '@/components/ui/badge';
+import { Card,CardContent } from '@/components/ui/card';
+import { cn } from '@/lib/utils';
 import { motion } from 'framer-motion';
 import {
-  Users,
-  Sun,
-  Moon
+	Moon,
+	Sun,
+	Users
 } from 'lucide-react';
-import { Card, CardContent } from '@/components/ui/card';
+import { useEffect,useState } from 'react';
 import {
-  PieChart,
-  Pie,
-  Cell,
-  ResponsiveContainer
+	Cell,
+	Pie,
+	PieChart,
+	ResponsiveContainer
 } from 'recharts';
-import { useState, useEffect } from 'react';
-import { cn } from '@/lib/utils';
 import { ShiftDistributionData } from './types';
-import { Badge } from '@/components/ui/badge';
 
 interface StudentDistributionProps {
   distribution: ShiftDistributionData[];

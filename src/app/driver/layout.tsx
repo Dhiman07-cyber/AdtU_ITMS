@@ -1,9 +1,9 @@
 "use client";
 
-import { useAuth } from '@/contexts/auth-context';
-import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
 import DriverLayout from "@/components/DriverLayout";
+import { useAuth } from '@/contexts/auth-context';
+import { useRouter } from 'next/navigation';
+import { useEffect } from 'react';
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const { currentUser, userData, loading } = useAuth();

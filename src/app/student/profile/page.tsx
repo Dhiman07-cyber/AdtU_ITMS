@@ -1,24 +1,33 @@
 ﻿"use client";
 
-import { useAuth } from "@/contexts/auth-context";
-import { useRouter } from "next/navigation";
-import { useState, useEffect, useMemo } from "react";
-import {
-  User, Mail, Phone, Calendar, GraduationCap, Building, Heart,
-  CheckCircle, QrCode, Shield, Home, IndianRupee, Hash,
-  BookOpen, Clock, Users, ShieldCheck, AlertTriangle, Camera
-} from "lucide-react";
+import StudentQRDisplay from "@/components/bus-pass/StudentQRDisplay";
+import ProfileImageUpdateModal from "@/components/ProfileImageUpdateModal";
+import SessionStatusBanner from "@/components/student/SessionStatusBanner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import StudentQRDisplay from "@/components/bus-pass/StudentQRDisplay";
-import SessionStatusBanner from "@/components/student/SessionStatusBanner";
-import { hasTransportEntitlement } from "@/lib/entitlement/transport-entitlement";
-import ProfileImageUpdateModal from "@/components/ProfileImageUpdateModal";
+import { Card,CardContent,CardHeader,CardTitle } from "@/components/ui/card";
+import { useAuth } from "@/contexts/auth-context";
 import { useToast } from "@/contexts/toast-context";
-import Image from "next/image";
+import { hasTransportEntitlement } from "@/lib/entitlement/transport-entitlement";
 import { safeImageSrc } from "@/lib/security/url-sanitizer";
 import { formatDateFlexible } from '@/lib/utils/date-utils';
+import {
+	AlertTriangle,
+	BookOpen,
+	Building,
+	Calendar,
+	Clock,
+	GraduationCap,
+	Hash,
+	Heart,
+	Home,IndianRupee,
+	Mail,Phone,
+	QrCode,Shield,
+	ShieldCheck,
+	User
+} from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useEffect,useState } from "react";
 
 export default function StudentProfilePage() {
   const { currentUser, userData } = useAuth();

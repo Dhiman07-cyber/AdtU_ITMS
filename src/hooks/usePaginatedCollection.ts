@@ -18,28 +18,27 @@
  * @since 2026-01-02
  */
 
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
-    getDocs,
-    getDocsFromServer,
-    query,
-    limit,
-    startAfter,
-    Query,
-    DocumentData,
-    QueryDocumentSnapshot,
-    QueryConstraint,
-    collection,
-    orderBy
-} from 'firebase/firestore';
-import { db } from '@/lib/firebase';
-import { useAuth } from '@/contexts/auth-context';
-import {
-    DEFAULT_PAGE_SIZE,
-    MAX_QUERY_LIMIT,
-    POLLING_INTERVAL_MS
+	DEFAULT_PAGE_SIZE,
+	MAX_QUERY_LIMIT,
+	POLLING_INTERVAL_MS
 } from '@/config/runtime';
+import { useAuth } from '@/contexts/auth-context';
+import { db } from '@/lib/firebase';
 import { useVisibilityAwareListener } from '@/utils/useVisibilityAwareListener';
+import {
+	DocumentData,
+	QueryConstraint,
+	QueryDocumentSnapshot,
+	collection,
+	getDocs,
+	getDocsFromServer,
+	limit,
+	orderBy,
+	query,
+	startAfter
+} from 'firebase/firestore';
+import { useCallback,useEffect,useMemo,useRef,useState } from 'react';
 
 // ============================================================================
 // GLOBAL CACHE - Prevents duplicate fetches during HMR and rapid remounts

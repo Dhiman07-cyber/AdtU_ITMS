@@ -1,9 +1,9 @@
-import { NextResponse } from 'next/server';
+import { update } from '@/domains/student';
 import { db as adminDb } from '@/lib/firebase-admin';
 import { withSecurity } from '@/lib/security/api-security';
-import { CheckPendingStatusSchema } from '@/lib/security/validation-schemas';
 import { RateLimits } from '@/lib/security/rate-limiter';
-import { update } from '@/domains/student';
+import { CheckPendingStatusSchema } from '@/lib/security/validation-schemas';
+import { NextResponse } from 'next/server';
 
 /**
  * POST /api/student/check-pending-status

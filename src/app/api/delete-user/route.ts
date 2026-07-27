@@ -1,8 +1,8 @@
-import { NextResponse } from 'next/server';
-import { withSecurity } from '@/lib/security/api-security';
-import { deleteUserAndData } from '@/lib/cleanup-helpers';
-import { UidOnlySchema } from '@/lib/security/validation-schemas';
 import { getUserById } from '@/domains/identity';
+import { deleteUserAndData } from '@/lib/cleanup-helpers';
+import { withSecurity } from '@/lib/security/api-security';
+import { UidOnlySchema } from '@/lib/security/validation-schemas';
+import { NextResponse } from 'next/server';
 
 export const DELETE = withSecurity(
   async (request, { auth, body, requestId }) => {

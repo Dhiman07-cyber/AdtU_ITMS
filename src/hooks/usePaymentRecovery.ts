@@ -11,13 +11,13 @@
  *  - Caller can trigger a manual attempt at any time via `triggerManualCheck`
  */
 
-import { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  PaymentFrontendStatus,
-  mapRecoverStatusToState,
-  RECOVERY_POLL_INTERVAL_MS,
-  RECOVERY_MAX_ATTEMPTS,
+	mapRecoverStatusToState,
+	PaymentFrontendStatus,
+	RECOVERY_MAX_ATTEMPTS,
+	RECOVERY_POLL_INTERVAL_MS,
 } from '@/lib/payment/payment-state';
+import { useCallback,useEffect,useRef,useState } from 'react';
 
 export interface RecoveryState {
   status: PaymentFrontendStatus | null; // null = not yet run

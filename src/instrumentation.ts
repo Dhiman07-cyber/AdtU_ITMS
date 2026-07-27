@@ -35,17 +35,19 @@ const REQUIRED_PROD_ENV = [
   'CRON_SECRET',
 ] as const;
 
+import { validateEnvironment } from './lib/env-validator';
+
 export function register(): void {
   // Only the Node.js server runtime — skip edge runtime and the browser.
   if (process.env.NEXT_RUNTIME !== 'nodejs') return;
 
-  const missing = REQUIRED_PROD_ENV.filter((key) => !process.env[key]);
-  if (missing.length === 0) return;
-
-  const msg = `❌ Missing required server env vars: ${missing.join(', ')}`;
-  // Fail the boot in production; warn (don't block local dev) otherwise.
-  if (process.env.NODE_ENV === 'production') {
-    throw new Error(msg);
+  const result = validateEnvironment();
+  if (!result.valid) {
+    const msg = `❌ Missing required server env vars: ${result.missing.join(', ')}`;
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error(msg);
+    }
+    console.warn(msg);
   }
-  console.warn(msg);
 }
+

@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect } from "react";
-import { usePathname } from "next/navigation";
-import { readMapPreferences, resolveThemePreference } from "@/lib/maps/map-preferences";
+import { readMapPreferences,resolveThemePreference } from "@/lib/maps/map-preferences";
 import { ensurePmtilesProtocolRegistered } from "@/lib/maps/pmtiles-protocol";
+import { usePathname } from "next/navigation";
+import { useEffect } from "react";
 
 const TRACKING_ROUTES = ["/student/track-bus", "/driver/live-tracking"];
 

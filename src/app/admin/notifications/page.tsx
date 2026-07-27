@@ -1,36 +1,30 @@
 "use client";
 
-import { useState, useEffect, useRef, useMemo, useCallback } from "react";
-import { useRouter } from 'next/navigation';
-import dynamic from 'next/dynamic';
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger
-} from "@/components/ui/tabs";
-import {
-  Bell,
-  Plus,
-  Megaphone,
-  MapPin,
-  MapPinOff,
-  Inbox,
-  Send,
-  Eye,
-  Archive,
-  Loader2,
-  User,
-  Truck
-} from "lucide-react";
-import { useToast } from "@/contexts/toast-context";
 import { PremiumPageLoader } from "@/components/LoadingSpinner";
+import NotificationCardV2 from "@/components/NotificationCardV2";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card,CardContent } from "@/components/ui/card";
+import {
+	Tabs,
+	TabsContent,
+	TabsList,
+	TabsTrigger
+} from "@/components/ui/tabs";
 import { useAuth } from "@/contexts/auth-context";
 import { useNotifications } from '@/contexts/NotificationContext';
-import NotificationCardV2 from "@/components/NotificationCardV2";
+import { useToast } from "@/contexts/toast-context";
+import {
+	Bell,
+	Inbox,
+	Plus,
+	Send,
+	Truck,
+	User
+} from "lucide-react";
+import dynamic from 'next/dynamic';
+import { useRouter } from 'next/navigation';
+import { useCallback,useEffect,useMemo,useRef,useState } from "react";
 
 // Deferred: the create/edit form is a heavy (~700-line) component that's only
 // needed when an admin opens it. Loading it lazily keeps the list view's

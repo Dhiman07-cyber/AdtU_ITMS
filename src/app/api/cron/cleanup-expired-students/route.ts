@@ -1,20 +1,18 @@
-﻿import { NextRequest, NextResponse } from 'next/server';
-import { adminAuth } from '@/lib/firebase-admin';
-import crypto from 'crypto';
-import { shouldBlockAccessFromStoredDates, shouldHardDeleteFromStoredDates } from '@/lib/utils/renewal-utils';
-import { computeBlockDatesFromValidUntil } from '@/lib/utils/deadline-computation';
-import { v2 as cloudinary } from 'cloudinary';
+﻿import { upsertMarker } from '@/domains/admin';
+import { createAuditEvent,SYSTEM_ACTOR,type AuditEventInsert } from '@/domains/audit';
+import { getStudentById,getStudentsByStatuses,updateStudent } from '@/domains/identity';
+import * as Notification from '@/domains/notification';
+import { deleteUserAndData } from '@/lib/cleanup-helpers';
+import { isSeatReleaseAtSoftBlockEnabled,wasSeatReleased } from '@/lib/config/capacity-flags';
 import { getDeadlineConfig } from '@/lib/deadline-config-service';
-import { isSeatReleaseAtSoftBlockEnabled, wasSeatReleased } from '@/lib/config/capacity-flags';
 import { adminReconcileBusLoads } from '@/lib/services/admin-reconcile-bus-loads';
-import { createAuditEvent, SYSTEM_ACTOR, type AuditEventInsert } from '@/domains/audit';
 import { getCurrentSessionStartYear } from '@/lib/services/session-activation.service';
 import { getSupabaseServer } from '@/lib/supabase-server';
-import * as Notification from '@/domains/notification';
-import { upsertMarker } from '@/domains/admin';
-import * as fleetService from '@/domains/fleet/services/fleet.service';
-import { getStudentById, updateStudent, deleteStudent, deleteUser, getStudentsByStatuses } from '@/domains/identity';
-import { deleteUserAndData } from '@/lib/cleanup-helpers';
+import { computeBlockDatesFromValidUntil } from '@/lib/utils/deadline-computation';
+import { shouldBlockAccessFromStoredDates,shouldHardDeleteFromStoredDates } from '@/lib/utils/renewal-utils';
+import { v2 as cloudinary } from 'cloudinary';
+import crypto from 'crypto';
+import { NextRequest,NextResponse } from 'next/server';
 
 // Configure Cloudinary
 if (process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME) {

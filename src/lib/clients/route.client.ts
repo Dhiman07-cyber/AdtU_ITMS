@@ -1,5 +1,5 @@
-import { getAuth } from 'firebase/auth';
 import type { Route } from '@/lib/types';
+import { getAuth } from 'firebase/auth';
 
 export const getAllRoutes = async (): Promise<Route[]> => {
   try {

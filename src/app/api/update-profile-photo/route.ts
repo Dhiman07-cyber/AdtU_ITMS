@@ -11,18 +11,18 @@
  *  - Input validation on targetType and URL format
  */
 
-import { NextResponse } from 'next/server';
-import { withSecurity } from '@/lib/security/api-security';
-import { extractPublicId, deleteAsset } from '@/lib/cloudinary-server';
-import { z } from 'zod';
 import {
-    getStudentById,
-    getDriverById,
-    getModeratorById,
-    updateStudent,
-    updateDriver,
-    updateModerator
+	getDriverById,
+	getModeratorById,
+	getStudentById,
+	updateDriver,
+	updateModerator,
+	updateStudent
 } from '@/domains/identity';
+import { deleteAsset,extractPublicId } from '@/lib/cloudinary-server';
+import { withSecurity } from '@/lib/security/api-security';
+import { NextResponse } from 'next/server';
+import { z } from 'zod';
 
 const UpdateProfilePhotoSchema = z.object({
     targetType: z.enum(['student', 'driver', 'moderator']),

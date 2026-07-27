@@ -1,6 +1,6 @@
-import { NextResponse } from 'next/server';
 import { deleteUserAndData } from '@/lib/cleanup-helpers';
 import { verifyApiAuth } from '@/lib/security/api-auth';
+import { NextResponse } from 'next/server';
 
 export async function DELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {

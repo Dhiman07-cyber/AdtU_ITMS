@@ -1,25 +1,23 @@
-﻿"use client";
+"use client";
 
-import { useState, useEffect, useRef } from 'react';
-import { use } from 'react';
-import { useRouter } from 'next/navigation';
-import { signalCollectionRefresh } from '@/hooks/useEventDrivenRefresh';
-import { useDebouncedStorage } from '@/hooks/useDebouncedStorage';
-import Link from 'next/link';
-import { uploadImage } from '@/lib/upload';
-import { useToast } from '@/contexts/toast-context';
+import { PremiumPageLoader } from "@/components/LoadingSpinner";
+import ProfileImageAddModal from "@/components/ProfileImageAddModal";
+import EnhancedDatePicker from "@/components/enhanced-date-picker";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select,SelectContent,SelectItem,SelectTrigger,SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Info, Camera, AlertTriangle } from "lucide-react";
-import ProfileImageAddModal from "@/components/ProfileImageAddModal";
-import EnhancedDatePicker from "@/components/enhanced-date-picker";
-import { getAllRoutes, getAllBuses, getDriverById, updateDriver, getAllDrivers } from '@/lib/dataService';
+import { useToast } from '@/contexts/toast-context';
+import { useDebouncedStorage } from '@/hooks/useDebouncedStorage';
+import { signalCollectionRefresh } from '@/hooks/useEventDrivenRefresh';
+import { getAllBuses,getAllDrivers,getAllRoutes,getDriverById,updateDriver } from '@/lib/dataService';
 import { Route } from '@/lib/types';
-import RouteSelect from '@/components/RouteSelect';
-import { PremiumPageLoader } from "@/components/LoadingSpinner";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { uploadImage } from '@/lib/upload';
+import { AlertTriangle,Camera,Info } from "lucide-react";
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { use,useEffect,useRef,useState } from 'react';
 
 // Define the form data type
 type DriverFormData = {
@@ -820,33 +818,30 @@ export default function EditDriverPage({ params }: { params: Promise<{ id: strin
                         className="bg-gray-100 dark:bg-gray-700 cursor-not-allowed border-dashed"
                       />
                     </div>
-                    <p className="text-[10px] text-amber-500/80 mt-1 flex items-center gap-1">
+                    <p className="text-[10px] text-blue-500/80 mt-1 flex items-center gap-1">
                       <Info className="h-3 w-3" />
-                      Visit <Link href="/admin/driver-assignment" className="underline hover:text-amber-400">Driver Reassignment</Link> to change route assignment
+                      Routes are assigned dynamically when the driver initiates a trip.
                     </p>
                   </div>
 
-                  {/* Bus Field - LOCKED for editing, must use Driver Reassignment */}
+                  {/* Bus Field - Dynamic QR / Manual trip initiation */}
                   <div>
                     <Label htmlFor="busId" className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
-                      Assigned Bus
+                      Bus Assignment
                     </Label>
-                    <div
-                      onClick={() => addToast('To reassign drivers to a different bus, please visit the Driver Reassignment page.', 'info')}
-                      className="cursor-default"
-                    >
+                    <div>
                       <Input
                         type="text"
                         id="busAssigned"
                         name="busAssigned"
-                        value={formData.busAssigned || (formData.routeId === 'Reserved' ? 'Reserved (No Bus)' : 'No bus assigned')}
+                        value="Dynamic (Selected on Start Trip / QR Scan)"
                         readOnly
                         className="bg-gray-100 dark:bg-gray-700 cursor-not-allowed border-dashed"
                       />
                     </div>
-                    <p className="text-[10px] text-amber-500/80 mt-1 flex items-center gap-1">
+                    <p className="text-[10px] text-blue-500/80 mt-1 flex items-center gap-1">
                       <Info className="h-3 w-3" />
-                      Visit <Link href="/admin/driver-assignment" className="underline hover:text-amber-400">Driver Reassignment</Link> to change bus assignment
+                      Drivers select or scan their bus QR code at trip start time.
                     </p>
                   </div>
 

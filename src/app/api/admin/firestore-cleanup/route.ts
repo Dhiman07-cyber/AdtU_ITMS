@@ -1,9 +1,9 @@
-import { NextResponse } from 'next/server';
 import { adminDb } from '@/lib/firebase-admin';
-import { getSupabaseServer } from '@/lib/supabase-server';
 import { withSecurity } from '@/lib/security/api-security';
-import { FirestoreCleanupSchema, EmptySchema } from '@/lib/security/validation-schemas';
 import { RateLimits } from '@/lib/security/rate-limiter';
+import { EmptySchema,FirestoreCleanupSchema } from '@/lib/security/validation-schemas';
+import { getSupabaseServer } from '@/lib/supabase-server';
+import { NextResponse } from 'next/server';
 
 /**
  * DATABASE CLEANUP ROUTE (SUPABASE + FIRESTORE)

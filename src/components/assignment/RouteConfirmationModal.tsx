@@ -1,43 +1,40 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+	HoverCard,
+	HoverCardContent,
+	HoverCardTrigger,
+} from "@/components/ui/hover-card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
-    Table,
-    TableBody,
-    TableCell,
-    TableHead,
-    TableHeader,
-    TableRow,
+	Table,
+	TableBody,
+	TableCell,
+	TableHead,
+	TableHeader,
+	TableRow,
 } from "@/components/ui/table";
-import {
-    HoverCard,
-    HoverCardContent,
-    HoverCardTrigger,
-} from "@/components/ui/hover-card";
-import {
-    AlertTriangle,
-    CheckCircle2,
-    Clock,
-    RefreshCw,
-    Shield,
-    XCircle,
-    Undo2,
-    X,
-    Info,
-    ArrowRight,
-    Bus,
-    Route,
-    AlertCircle,
-    MapPin,
-    Download,
-    Sparkles
-} from "lucide-react";
-import { cn } from "@/lib/utils";
 import type { RouteConfirmationTableRow } from "@/lib/services/net-route-assignment-service";
+import { cn } from "@/lib/utils";
+import { AnimatePresence,motion } from "framer-motion";
+import {
+	AlertTriangle,
+	Bus,
+	CheckCircle2,
+	Clock,
+	Download,
+	Info,
+	MapPin,
+	RefreshCw,
+	Route,
+	Shield,
+	Sparkles,
+	X,
+	XCircle
+} from "lucide-react";
+import { useEffect } from "react";
 
 // ============================================
 // DESIGN TOKENS

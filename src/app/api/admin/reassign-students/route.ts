@@ -1,16 +1,16 @@
-import { NextResponse } from 'next/server';
+import { createAuditEvent,type AuditActorRole } from '@/domains/audit';
+import { getAllBuses,reassignStudentsAtomically } from '@/domains/fleet';
+import { getStudentById } from '@/domains/identity';
 import { adminDb } from '@/lib/firebase-admin';
-import { getSupabaseServer } from '@/lib/supabase-server';
 import { withSecurity } from '@/lib/security/api-security';
-import { ReassignStudentsSchema } from '@/lib/security/validation-schemas';
+import { requireAdminPermission } from '@/lib/security/moderator-permissions';
 import { RateLimits } from '@/lib/security/rate-limiter';
-import { requireModeratorPermission, requireAdminPermission } from '@/lib/security/moderator-permissions';
-import { createAuditEvent, type AuditActorRole } from '@/domains/audit';
-import { normalizeShift, getShiftDeltas } from '@/lib/utils/shift-utils';
-import { getAllBuses, getBusById, reassignStudentsAtomically } from '@/domains/fleet';
-import crypto from 'crypto';
-import { getStudentById, updateStudent } from '@/domains/identity';
+import { ReassignStudentsSchema } from '@/lib/security/validation-schemas';
+import { getSupabaseServer } from '@/lib/supabase-server';
+import { getShiftDeltas,normalizeShift } from '@/lib/utils/shift-utils';
 import { getUpdaterInfo } from '@/lib/utils/updatedBy';
+import crypto from 'crypto';
+import { NextResponse } from 'next/server';
 
 type ReassignmentAssignment = {
     studentId: string;

@@ -1,0 +1,132 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": true,
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "id": 1,
+      "title": "Platform Status & Overall Health",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(itms_trips_active) + sum(websocket_connections_active)",
+          "legendFormat": "Active Operations"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "id": 2,
+      "title": "Active Users (Students + Drivers)",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "itms_active_students_count + itms_active_drivers_count",
+          "legendFormat": "Active Users"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none"
+      }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "id": 3,
+      "title": "Active Operating Trips",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(itms_trips_active)",
+          "legendFormat": "Active Trips"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area"
+      }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "id": 4,
+      "title": "WebSocket Connections",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(websocket_connections_active)",
+          "legendFormat": "WS Connections"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area"
+      }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "id": 5,
+      "title": "Subsystem Health Overview",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum(rate(itms_api_requests_total[1m]))",
+          "legendFormat": "API Request Rate (req/s)"
+        },
+        {
+          "expr": "sum(rate(database_queries_total[1m]))",
+          "legendFormat": "DB Query Rate (queries/s)"
+        },
+        {
+          "expr": "sum(rate(itms_gps_updates_received_total[1m]))",
+          "legendFormat": "GPS Rate (updates/s)"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "id": 6,
+      "title": "System Error Rates & Failures",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum(rate(itms_api_errors_total[1m]))",
+          "legendFormat": "API Errors"
+        },
+        {
+          "expr": "sum(rate(database_query_errors_total[1m]))",
+          "legendFormat": "DB Errors"
+        },
+        {
+          "expr": "sum(rate(websocket_auth_failure_total[1m]))",
+          "legendFormat": "WS Auth Errors"
+        }
+      ]
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["noc", "global", "itms"],
+  "time": { "from": "now-1h", "to": "now" },
+  "title": "01 - Global Operations Dashboard (NOC)",
+  "uid": "itms-global-ops",
+  "version": 1
+}

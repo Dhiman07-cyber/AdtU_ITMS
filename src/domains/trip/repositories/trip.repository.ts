@@ -9,14 +9,14 @@
  * with distributed locking, idempotency, and heartbeat recovery — wrapped
  * by reference, not reimplemented.
  */
-import { tripLockService } from '@/lib/services/trip-lock-service';
 import type {
-  ActiveTripLock,
-  CanOperateResult,
-  StartTripResult,
-  EndTripResult,
-  HeartbeatResult,
+	ActiveTripLock,
+	CanOperateResult,
+	EndTripResult,
+	HeartbeatResult,
+	StartTripResult,
 } from '@/lib/services/trip-lock-service';
+import { tripLockService } from '@/lib/services/trip-lock-service';
 
 export async function canOperate(driverId: string, busId: string): Promise<CanOperateResult> {
   return tripLockService.canOperate(driverId, busId);
@@ -52,4 +52,4 @@ export async function getActiveTrip(busId: string) {
   return tripLockService.getActiveTrip(busId);
 }
 
-export type { ActiveTripLock, CanOperateResult, StartTripResult, EndTripResult, HeartbeatResult };
+export type { ActiveTripLock,CanOperateResult,EndTripResult,HeartbeatResult,StartTripResult };

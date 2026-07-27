@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe,expect,it,vi } from 'vitest';
 
 vi.mock('@/lib/payment/payment.service', () => ({
   createOnlinePayment: vi.fn(),
@@ -14,7 +14,7 @@ vi.mock('@/lib/payment/payment.service', () => ({
   isPaymentProcessed: vi.fn().mockResolvedValue(true),
 }));
 
-import { getByStudent, isProcessed, processCapturedPayment } from '../services/payment.service';
+import { getByStudent,isProcessed,processCapturedPayment } from '../services/payment.service';
 
 describe('PaymentService', () => {
   it('delegates student payment lookup to existing logic unchanged', async () => {

@@ -1,31 +1,28 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
 } from "@/components/ui/select";
-import {
-    X,
-    ArrowRight,
-    ArrowRightLeft,
-    Shield,
-    User,
-    Bus,
-    Bookmark,
-    ChevronRight,
-    Zap,
-    CheckCircle2,
-    Users,
-} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { normalizeShift } from "@/lib/utils/shift-utils";
+import { AnimatePresence,motion } from "framer-motion";
+import {
+	ArrowRightLeft,
+	Bookmark,
+	Bus,
+	CheckCircle2,
+	User,
+	Users,
+	X,
+	Zap
+} from "lucide-react";
+import { useEffect,useMemo,useState } from "react";
 
 // ============================================
 // DESIGN TOKENS

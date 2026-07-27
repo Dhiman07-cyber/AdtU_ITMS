@@ -1,60 +1,54 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
-import { use } from "react";
-import { useRouter } from "next/navigation";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import {
-  User,
-  Mail,
-  Phone,
-  Calendar,
-  Hash,
-  Users,
-  Building,
-  Edit,
-  Trash2,
-  Loader2,
-  MapPin,
-  Bus,
-  Clock,
-  Shield,
-  CheckCircle2,
-  AlertCircle,
-  ArrowLeft,
-  Heart,
-  Home,
-  School,
-  Download,
-  QrCode,
-  Share2
-} from "lucide-react";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { getAuth } from "firebase/auth";
-import Link from "next/link";
-import { useToast } from '@/contexts/toast-context';
-import { QRCodeCanvas } from 'qrcode.react';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { getStudentById, getBusById, getRouteById, deleteStudent, getPaymentsByStudentUid } from "@/lib/dataService";
 import { PremiumPageLoader } from "@/components/LoadingSpinner";
-import { isDateExpired, formatDateFlexible } from '@/lib/utils/date-utils';
-import { safeImageSrc } from "@/lib/security/url-sanitizer";
+import { Avatar,AvatarFallback } from "@/components/ui/avatar";
+import { Button } from "@/components/ui/button";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
+} from "@/components/ui/dialog";
+import {
+	Table,
+	TableBody,
+	TableCell,
+	TableHead,
+	TableHeader,
+	TableRow,
 } from "@/components/ui/table";
+import { useToast } from '@/contexts/toast-context';
+import { deleteStudent,getPaymentsByStudentUid,getStudentById } from "@/lib/dataService";
+import { safeImageSrc } from "@/lib/security/url-sanitizer";
+import { formatDateFlexible,isDateExpired } from '@/lib/utils/date-utils';
+import { getAuth } from "firebase/auth";
+import {
+	AlertCircle,
+	ArrowLeft,
+	Bus,
+	Calendar,
+	CheckCircle2,
+	Download,
+	Edit,
+	Hash,
+	Heart,
+	Loader2,
+	Mail,
+	Phone,
+	QrCode,
+	School,
+	Share2,
+	Shield,
+	Trash2,
+	User,
+	Users
+} from "lucide-react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { QRCodeCanvas } from 'qrcode.react';
+import { use,useCallback,useEffect,useRef,useState } from "react";
 
 const formatDate = formatDateFlexible;
 
@@ -118,8 +112,8 @@ const InfoCard = ({ icon: Icon, label, value, gradient }: any) => (
   </div>
 );
 
-import { useModeratorPermissions } from "@/hooks/useModeratorPermissions";
 import { PermissionDeniedCard } from "@/components/PermissionDeniedCard";
+import { useModeratorPermissions } from "@/hooks/useModeratorPermissions";
 
 export default function ViewStudentPage({ params }: { params: Promise<{ id: string }> }) {
   const router = useRouter();

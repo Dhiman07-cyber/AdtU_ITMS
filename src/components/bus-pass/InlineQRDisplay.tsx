@@ -5,11 +5,11 @@
  * Shows QR skeleton initially, reveals actual QR on button click.
  */
 
-import { useRef, useCallback, useState } from 'react';
-import { QRCodeCanvas } from 'qrcode.react';
 import { Button } from '@/components/ui/button';
-import { Share2, Download, Copy, CheckCircle, QrCode, ShieldCheck, Fingerprint } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { AnimatePresence,motion } from 'framer-motion';
+import { CheckCircle,Copy,Download,QrCode,Share2,ShieldCheck } from 'lucide-react';
+import { QRCodeCanvas } from 'qrcode.react';
+import { useCallback,useRef,useState } from 'react';
 import { toast } from 'sonner';
 
 interface InlineQRDisplayProps {

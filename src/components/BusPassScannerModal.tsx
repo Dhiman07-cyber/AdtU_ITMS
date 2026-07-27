@@ -1,41 +1,32 @@
 "use client";
 
-import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { useAuth } from '@/contexts/auth-context';
-import { APP_NAME } from '@/config/runtime'; // Import APP_NAME
-import Image from 'next/image';
 import { Button } from '@/components/ui/button';
 import {
-    Dialog,
-    DialogContent,
-    DialogHeader,
-    DialogTitle,
-    DialogDescription
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogHeader,
+	DialogTitle
 } from '@/components/ui/dialog';
-import {
-    Camera,
-    X,
-    Loader2,
-    CheckCircle,
-    XCircle,
-    AlertCircle,
-    Scan,
-    Calendar,
-    Activity,
-    Clock,
-    MapPin,
-    Phone,
-    Bus,
-    ShieldCheck
-} from 'lucide-react';
-import { motion } from 'framer-motion';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import jsQR from 'jsqr';
+import { APP_NAME } from '@/config/runtime'; // Import APP_NAME
+import { useAuth } from '@/contexts/auth-context';
 import { getUserProfile } from '@/lib/profile-service';
-import { BusPassVerificationResult } from '@/lib/types';
-import { badgeVariants } from '@/components/ui/badge';
-import { cn } from '@/lib/utils';
 import { safeImageSrc } from '@/lib/security/url-sanitizer';
+import { BusPassVerificationResult } from '@/lib/types';
+import { motion } from 'framer-motion';
+import jsQR from 'jsqr';
+import {
+	AlertCircle,
+	Bus,
+	Camera,
+	Loader2,
+	Scan,
+	ShieldCheck,
+	X,
+	XCircle
+} from 'lucide-react';
+import Image from 'next/image';
+import { useCallback,useEffect,useRef,useState } from 'react';
 
 interface BusPassScannerModalProps {
     isOpen: boolean;

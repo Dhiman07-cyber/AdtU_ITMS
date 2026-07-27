@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { beforeEach,describe,expect,it,vi } from 'vitest';
 
 const mockInsert = vi.fn().mockResolvedValue('n1');
 const mockFindById = vi.fn();
@@ -18,8 +18,8 @@ vi.mock('../repositories/notification.repository', () => ({
 }));
 
 import {
-  createNotification,
-  markAsRead,
+	createNotification,
+	markAsRead,
 } from '../services/notification.service';
 
 describe('NotificationService', () => {

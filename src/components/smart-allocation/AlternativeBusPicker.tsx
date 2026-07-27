@@ -1,25 +1,25 @@
 "use client";
 
-import React, { useMemo } from "react";
-import { motion } from "framer-motion";
-import {
-  Bus,
-  MapPin,
-  ArrowRight,
-  AlertCircle,
-  Check,
-} from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
+	Dialog,
+	DialogContent,
+	DialogHeader,
+	DialogTitle,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import { normalizeShift,type CanonicalShift } from "@/lib/utils/shift-utils";
+import { motion } from "framer-motion";
+import {
+	AlertCircle,
+	ArrowRight,
+	Bus,
+	Check,
+	MapPin,
+} from "lucide-react";
+import React,{ useMemo } from "react";
 import { toast } from "react-hot-toast";
-import { normalizeShift, type CanonicalShift } from "@/lib/utils/shift-utils";
 
 // ── Types (compatible with ReassignmentPanel) ─────────────────────────────────
 

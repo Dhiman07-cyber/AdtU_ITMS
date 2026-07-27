@@ -1,48 +1,39 @@
 "use client";
 
-import React, { useState, useMemo, useEffect, useCallback } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import {
-  X,
-  Check,
-  Bus,
-  MapPin,
-  AlertTriangle,
-  ArrowRight,
-  Loader2,
-  ListRestart,
-  AlertCircle,
-  GripHorizontal,
-  User,
-  Users,
-} from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
+	Dialog,
+	DialogContent,
+	DialogHeader,
+	DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
 } from "@/components/ui/select";
-import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/auth-context";
+import { cn } from "@/lib/utils";
+import { isStudentBusShiftCompatible,normalizeShift,type CanonicalShift } from "@/lib/utils/shift-utils";
+import { AnimatePresence,motion } from "framer-motion";
+import {
+	AlertCircle,
+	ArrowRight,
+	Bus,
+	Check,
+	ListRestart,
+	Loader2,
+	MapPin,
+	Users,
+	X
+} from "lucide-react";
+import { useCallback,useEffect,useMemo,useState } from "react";
 import { toast } from "react-hot-toast";
-import { normalizeShift, isStudentBusShiftCompatible, type CanonicalShift } from "@/lib/utils/shift-utils";
 
 // =============================================================================
 // TYPES

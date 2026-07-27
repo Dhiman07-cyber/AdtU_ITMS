@@ -9,13 +9,13 @@
  * Migration mapping:
  *   Firestore routes/{id}   → PostgreSQL routes(id)
  */
-import type { MigrationDefinition, MigrationResult, ValidationResult } from '@/infrastructure/migration/contracts';
-import { adminDb } from '@/lib/firebase-admin';
 import {
-  pgUpsert,
-  pgFindById,
-  pgCount,
+	pgCount,
+	pgFindById,
+	pgUpsert,
 } from '@/domains/route/repositories/route.repository.pg';
+import type { MigrationDefinition,MigrationResult,ValidationResult } from '@/infrastructure/migration/contracts';
+import { adminDb } from '@/lib/firebase-admin';
 
 const ROUTES_COLLECTION = 'routes';
 

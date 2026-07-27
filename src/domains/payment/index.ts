@@ -30,17 +30,6 @@
 // and the raw Postgres repository are implementation details, not exposed
 // here — only payment business outcomes are.
 export {
-  createOnlinePayment,
-  processCapturedPayment,
-  createOfflinePaymentAtApproval,
-  approveOfflinePayment,
-  rejectOfflinePayment,
-  upsertApprovalPayment,
-  rejectApplicationPayment,
-  getByStudent,
-  getAll,
-  getPending,
-  getById,
-  getDetails,
-  isProcessed,
+	approveOfflinePayment,createOfflinePaymentAtApproval,createOnlinePayment,getAll,getById,getByStudent,getDetails,getPending,isProcessed,processCapturedPayment,rejectApplicationPayment,rejectOfflinePayment,
+	upsertApprovalPayment
 } from './services/payment.service';

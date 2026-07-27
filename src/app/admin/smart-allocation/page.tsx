@@ -1,70 +1,59 @@
 "use client";
 
-import { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { useRouter } from "next/navigation";
-import { db } from "@/lib/firebase";
-import { useAuth } from "@/contexts/auth-context";
-import { toast } from "react-hot-toast";
-import {
-  Bus,
-  Users,
-  ChevronRight,
-  Download,
-  Sparkles,
-  Activity,
-  Target,
-  ArrowRightLeft,
-  History,
-} from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Label } from "@/components/ui/label";
+import { Button } from "@/components/ui/button";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
+	Card,
+	CardContent,
+	CardDescription,
+	CardHeader,
+	CardTitle,
 } from "@/components/ui/card";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Slider } from "@/components/ui/slider";
+import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Slider } from "@/components/ui/slider";
+import { useAuth } from "@/contexts/auth-context";
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
+import {
+	Activity,
+	ArrowRightLeft,
+	Bus,
+	ChevronRight,
+	Download,
+	History,
+	Sparkles,
+	Target,
+	Users,
+} from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useCallback,useEffect,useMemo,useRef,useState } from "react";
+import { toast } from "react-hot-toast";
 
 // Premium UI Components
-import LiquidGauge from "@/components/smart-allocation/LiquidGauge";
-import HeatStrip from "@/components/smart-allocation/HeatStrip";
-import RouteVisualization from "@/components/smart-allocation/RouteVisualization";
-import StudentRoster from "@/components/smart-allocation/StudentRoster";
-import ReassignmentPanel from "@/components/smart-allocation/ReassignmentPanel";
-import ReassignmentSnackbar, {
-  type RevertBufferData,
-} from "@/components/smart-allocation/ReassignmentSnackbar";
 import { ReassignmentHistoryModal } from "@/components/assignment/ReassignmentHistoryModal";
 import { PremiumPageLoader } from "@/components/LoadingSpinner";
+import ReassignmentPanel from "@/components/smart-allocation/ReassignmentPanel";
+import ReassignmentSnackbar,{
+	type RevertBufferData,
+} from "@/components/smart-allocation/ReassignmentSnackbar";
+import RouteVisualization from "@/components/smart-allocation/RouteVisualization";
+import StudentRoster from "@/components/smart-allocation/StudentRoster";
 
 // Hooks
 // Data fetching via server-side API (PostgreSQL)
 import { useApiCollection } from '@/hooks/useApiCollection';
 
 // Services
-import { StopBusMapper } from "@/lib/services/stop-bus-mapper";
 import { AllocationRanker } from "@/lib/services/allocation-ranker";
+import { StopBusMapper } from "@/lib/services/stop-bus-mapper";
 
 import {
-  detectOverloadedShift,
-  filterStudentsByOverloadedShift,
-  getShiftDisplayName,
-  type OverloadedShift,
+	detectOverloadedShift,
+	getShiftDisplayName,
+	type OverloadedShift
 } from "@/lib/utils/overload-detection";
-import { normalizeShift, getShiftDeltas, type CanonicalShift } from "@/lib/utils/shift-utils";
+import { type CanonicalShift } from "@/lib/utils/shift-utils";
 
 
 // Types

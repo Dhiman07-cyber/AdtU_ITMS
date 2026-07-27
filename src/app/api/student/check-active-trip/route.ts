@@ -1,8 +1,8 @@
-import { NextResponse } from 'next/server';
-import { getSupabaseServer } from '@/lib/supabase-server';
 import { withSecurity } from '@/lib/security/api-security';
-import { BusIdSchema } from '@/lib/security/validation-schemas';
 import { RateLimits } from '@/lib/security/rate-limiter';
+import { BusIdSchema } from '@/lib/security/validation-schemas';
+import { getSupabaseServer } from '@/lib/supabase-server';
+import { NextResponse } from 'next/server';
 
 /**
  * POST /api/student/check-active-trip

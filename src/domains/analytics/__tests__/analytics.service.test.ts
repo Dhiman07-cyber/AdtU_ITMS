@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe,expect,it,vi } from 'vitest';
 
 vi.mock('../repositories/analytics.repository', () => {
   const mockBuses = [
@@ -40,10 +40,10 @@ vi.mock('../repositories/analytics.repository', () => {
 });
 
 import {
-  getPlatformAnalytics,
-  getPaymentAnalytics,
-  getPaymentStats,
-  getDashboardCounts,
+	getDashboardCounts,
+	getPaymentAnalytics,
+	getPaymentStats,
+	getPlatformAnalytics,
 } from '../services/analytics.service';
 
 describe('AnalyticsService', () => {

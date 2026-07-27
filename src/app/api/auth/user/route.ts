@@ -1,6 +1,6 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { getUserById,updateUser } from '@/domains/identity';
 import { withSecurity } from '@/lib/security/api-security';
-import { getUserById, updateUser } from '@/domains/identity';
+import { NextResponse } from 'next/server';
 
 /**
  * GET /api/auth/user

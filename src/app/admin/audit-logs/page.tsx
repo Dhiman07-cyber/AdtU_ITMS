@@ -1,49 +1,45 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
-import { useAuth } from '@/contexts/auth-context';
-import { useRouter } from 'next/navigation';
+import type { AuditLogResponse as AuditLog } from '@/app/api/admin/audit-logs/route';
 import { PremiumPageLoader } from '@/components/LoadingSpinner';
-import { Card, CardContent } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { Button } from '@/components/ui/button';
+import { Card,CardContent } from '@/components/ui/card';
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogHeader,
+	DialogTitle,
 } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Tabs,TabsContent,TabsList,TabsTrigger } from '@/components/ui/tabs';
+import { useAuth } from '@/contexts/auth-context';
 import { useToast } from '@/contexts/toast-context';
 import { authApiFetch } from '@/lib/secure-api-client';
-import type { AuditLogResponse as AuditLog } from '@/app/api/admin/audit-logs/route';
-import {
-  Search,
-  ChevronLeft,
-  ChevronRight,
-  Clock,
-  User,
-  Target,
-  Shield,
-  FileText,
-  Eye,
-  X,
-  Loader2,
-  RefreshCw,
-  ArrowUpDown,
-  Calendar,
-} from 'lucide-react';
 import { cn } from '@/lib/utils';
+import {
+	Calendar,
+	ChevronLeft,
+	ChevronRight,
+	Clock,
+	Eye,
+	FileText,
+	RefreshCw,
+	Search,
+	Target,
+	User
+} from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { useCallback,useEffect,useState } from 'react';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 

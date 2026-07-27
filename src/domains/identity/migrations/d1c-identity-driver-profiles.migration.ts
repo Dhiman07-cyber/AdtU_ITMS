@@ -17,9 +17,9 @@
  *
  * Infrastructure only. No business logic. No service calls.
  */
-import type { MigrationDefinition, MigrationResult, ValidationResult } from '@/infrastructure/migration/contracts';
+import { pgFindDriverById,pgInsertDriver } from '@/domains/identity/repositories/identity.repository.pg';
+import type { MigrationDefinition,MigrationResult,ValidationResult } from '@/infrastructure/migration/contracts';
 import { adminDb } from '@/lib/firebase-admin';
-import { pgInsertDriver, pgFindDriverById } from '@/domains/identity/repositories/identity.repository.pg';
 
 // ─── Firestore collection constants ──────────────────────────────────────────
 const DRIVERS_COLLECTION = 'drivers';

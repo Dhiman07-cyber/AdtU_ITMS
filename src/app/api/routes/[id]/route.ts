@@ -1,7 +1,7 @@
-import { NextResponse } from 'next/server';
+import * as routeService from '@/domains/route';
 import { verifyApiAuth } from '@/lib/security/api-auth';
 import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
-import * as routeService from '@/domains/route';
+import { NextResponse } from 'next/server';
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {

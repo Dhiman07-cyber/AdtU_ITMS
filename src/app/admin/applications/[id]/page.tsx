@@ -1,37 +1,51 @@
 "use client";
 
-import { useEffect, useState, useMemo } from 'react';
-import { useAuth } from '@/contexts/auth-context';
-import { useRouter, useParams } from 'next/navigation';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Textarea } from '@/components/ui/textarea';
+import { Button } from '@/components/ui/button';
+import { Card,CardContent } from '@/components/ui/card';
+import { Dialog,DialogContent,DialogDescription,DialogFooter,DialogHeader,DialogTitle } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Select,SelectContent,SelectItem,SelectTrigger,SelectValue } from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
+import { useAuth } from '@/contexts/auth-context';
+import { useParams,useRouter } from 'next/navigation';
+import { useEffect,useMemo,useState } from 'react';
 
+import { StatusBadge } from '@/components/application/status-badge';
+import { PremiumPageLoader } from '@/components/LoadingSpinner';
+import ReassignmentPanel,{ type BusData as RPBusData,type StudentData as RPStudentData } from '@/components/smart-allocation/ReassignmentPanel';
 import { useToast } from '@/contexts/toast-context';
+import { invalidateCollectionCache } from '@/hooks/usePaginatedCollection';
+import { downloadFile } from '@/lib/download-utils';
+import { safeImageSrc,safeMailtoHref,safeTelHref } from '@/lib/security/url-sanitizer';
+import { Application } from '@/lib/types/application';
+import { cn } from '@/lib/utils';
+import { isUpcomingApplication } from '@/lib/utils/application-eligibility';
+import { deriveAcademicLifecycle } from '@/lib/utils/deadline-computation';
 import {
-  Loader2, CheckCircle, XCircle, ArrowLeft, ArrowRightLeft, User as UserIcon, Phone,
-  Mail, Calendar, CreditCard, FileText, Clock, Bus as BusIcon,
-  Copy, Download, Users, Briefcase, Shield, Zap, Hash, Droplets,
-  MapPin, UserCheck, CalendarDays, ShieldCheck, AlertTriangle, RefreshCw
+	AlertTriangle,
+	ArrowLeft,
+	Briefcase,
+	Bus as BusIcon,
+	Calendar,
+	CalendarDays,
+	CheckCircle,
+	Clock,
+	Copy,
+	CreditCard,
+	Download,
+	FileText,
+	Hash,
+	Loader2,
+	Mail,
+	Phone,
+	RefreshCw,
+	ShieldCheck,
+	User as UserIcon,
+	XCircle
 } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
-import { Application } from '@/lib/types/application';
-import { deriveAcademicLifecycle } from '@/lib/utils/deadline-computation';
-import { isUpcomingApplication } from '@/lib/utils/application-eligibility';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { SectionCard } from '@/components/application/section-card';
-import { StatusBadge } from '@/components/application/status-badge';
-import { cn } from '@/lib/utils';
-import { downloadFile } from '@/lib/download-utils';
-import { PremiumPageLoader } from '@/components/LoadingSpinner';
-import { invalidateCollectionCache } from '@/hooks/usePaginatedCollection';
-import { safeImageSrc, safeMailtoHref, safeTelHref } from '@/lib/security/url-sanitizer';
-import ReassignmentPanel, { type StudentData as RPStudentData, type BusData as RPBusData } from '@/components/smart-allocation/ReassignmentPanel';
 
 
 export default function AdminApplicationDetailPage() {
@@ -1280,7 +1294,7 @@ export default function AdminApplicationDetailPage() {
                 <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">Payment made on</span>
                 <span className="text-[13px] font-bold text-zinc-200">
                   {paymentData?.timestamp || application.formData?.paymentInfo?.paymentTime || application.formData?.paymentInfo?.paidAt
-                    ? new Date(paymentData?.timestamp || application.formData?.paymentInfo?.paymentTime || application.formData?.paymentInfo?.paidAt!).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })
+                    ? new Date(paymentData?.timestamp || application.formData?.paymentInfo?.paymentTime || (application.formData?.paymentInfo?.paidAt as string)).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })
                     : 'N/A'}
                 </span>
               </div>

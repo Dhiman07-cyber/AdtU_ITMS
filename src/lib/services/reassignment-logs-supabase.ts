@@ -7,9 +7,9 @@
  * IMPORTANT: Use only with service role key on server side.
  */
 
-import { SupabaseClient } from '@supabase/supabase-js';
-import { getSupabaseServer } from '@/lib/supabase-server';
 import { generatePrefixedId } from '@/lib/security/random-id';
+import { getSupabaseServer } from '@/lib/supabase-server';
+import { SupabaseClient } from '@supabase/supabase-js';
 
 // ============================================
 // TYPES

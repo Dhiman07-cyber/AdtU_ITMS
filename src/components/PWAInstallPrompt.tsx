@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { usePathname } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { Download, X, Smartphone, Sparkles } from "lucide-react";
+import { Download,Smartphone,Sparkles,X } from "lucide-react";
+import { usePathname } from "next/navigation";
+import { useEffect,useState } from "react";
 
 export default function PWAInstallPrompt() {
   const pathname = usePathname();

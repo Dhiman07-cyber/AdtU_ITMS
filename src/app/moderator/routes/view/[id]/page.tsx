@@ -1,33 +1,30 @@
 ﻿"use client";
 
-import { useState, useEffect } from "react";
-import { use } from "react";
-import { useRouter } from "next/navigation";
-import { Button } from "@/components/ui/button";
-import {
-  MapPin,
-  Hash,
-  Clock,
-  Edit,
-  Trash2,
-  User,
-  Calendar,
-  Activity
-} from "lucide-react";
-import Link from "next/link";
-import { useToast } from '@/contexts/toast-context';
 import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import RouteJourney from "@/components/RouteJourney";
+import { Button } from "@/components/ui/button";
+import {
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
+} from "@/components/ui/dialog";
+import { useToast } from '@/contexts/toast-context';
+import { deleteRoute,getAllBuses,getAllDrivers,getRouteById } from "@/lib/dataService";
 import { formatDateFlexible } from '@/lib/utils/date-utils';
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { getRouteById, deleteRoute, getAllBuses, getAllDrivers } from "@/lib/dataService";
+	Activity,
+	Edit,
+	Hash,
+	MapPin,
+	Trash2,
+	User
+} from "lucide-react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { use,useEffect,useState } from "react";
 
 interface Stop {
   stop_name: string;
@@ -80,8 +77,8 @@ interface Driver {
   createdAt?: string;
 }
 
-import { useModeratorPermissions } from "@/hooks/useModeratorPermissions";
 import { PermissionDeniedCard } from "@/components/PermissionDeniedCard";
+import { useModeratorPermissions } from "@/hooks/useModeratorPermissions";
 
 export default function ViewRoutePage({ params }: { params: Promise<{ id: string }> }) {
   const router = useRouter();

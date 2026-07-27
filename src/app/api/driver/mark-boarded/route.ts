@@ -1,8 +1,9 @@
-import { NextResponse } from 'next/server';
-import { getSupabaseServer } from '@/lib/supabase-server';
+import { emitEvent } from '@/domains/realtime/event-emitter';
 import { withSecurity } from '@/lib/security/api-security';
-import { MarkBoardedSchema } from '@/lib/security/validation-schemas';
 import { RateLimits } from '@/lib/security/rate-limiter';
+import { MarkBoardedSchema } from '@/lib/security/validation-schemas';
+import { getSupabaseServer } from '@/lib/supabase-server';
+import { NextResponse } from 'next/server';
 
 /**
  * POST /api/driver/mark-boarded
@@ -57,28 +58,12 @@ export const POST = withSecurity(
             return NextResponse.json({ success: true, message: 'Student already boarded or processed', data: { flagId, studentUid: flagData.student_uid } });
         }
 
-        // 3. Parallel Broadcasts for instant UI feedback
-        // Note: Using channel().send() without removing channel immediately for speed
-        const broadcastTask = Promise.allSettled([
-            supabase.channel(`waiting_flags_${flagData.bus_id}`).send({
-                type: 'broadcast',
-                event: 'waiting_flag_updated',
-                payload: { flagId, studentUid: flagData.student_uid, status: 'boarded', timestamp: new Date().toISOString() }
-            }),
-            supabase.channel(`student_${flagData.student_uid}`).send({
-                type: 'broadcast',
-                event: 'flag_acknowledged',
-                payload: { flagId, busId: flagData.bus_id, status: 'boarded', ackByDriverUid: driverUid, timestamp: new Date().toISOString(), message: 'Driver has arrived!' }
-            }),
-            supabase.channel(`route_${flagData.route_id}`).send({
-                type: 'broadcast',
-                event: 'waiting_flag_updated',
-                payload: { flagId, studentUid: flagData.student_uid, busId: flagData.bus_id, routeId: flagData.route_id, status: 'boarded', timestamp: new Date().toISOString() }
-            })
+        // 3. Parallel Broadcasts via WebSocket
+        const ts = new Date().toISOString();
+        await Promise.allSettled([
+            emitEvent(`waiting_flags_${flagData.bus_id}`, 'waiting_flag_boarded', { flagId, studentUid: flagData.student_uid, status: 'boarded', timestamp: ts }),
+            emitEvent(`student_${flagData.student_uid}`, 'flag_acknowledged', { flagId, busId: flagData.bus_id, status: 'boarded', ackByDriverUid: driverUid, timestamp: ts, message: 'Driver has arrived!' }),
         ]);
-
-        // Await broadcasts briefly to ensure they are initiated
-        await broadcastTask;
 
         return NextResponse.json({
             success: true,

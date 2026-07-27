@@ -1,8 +1,8 @@
-import { NextResponse } from 'next/server';
 import { deleteRouteAndData } from '@/lib/cleanup-helpers';
+import { clearRouteCache } from '@/lib/profile-service';
 import { verifyApiAuth } from '@/lib/security/api-auth';
 import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
-import { clearRouteCache } from '@/lib/profile-service';
+import { NextResponse } from 'next/server';
 
 export async function DELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {

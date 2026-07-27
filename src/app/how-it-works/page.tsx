@@ -1,12 +1,18 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import Image from "next/image";
 import {
-  MapPin, Bell, Bus, Users, Clock, Shield,
-  Smartphone, Navigation, CheckCircle2, ArrowRight,
-  Grid3x3, Zap, GraduationCap
+	ArrowRight,
+	Bus,
+	CheckCircle2,
+	Grid3x3,
+	MapPin,
+	Navigation,
+	Shield,
+	Users,
+	Zap
 } from "lucide-react";
+import Image from "next/image";
+import { useRouter } from "next/navigation";
 
 export default function HowItWorksPage() {
   const router = useRouter();

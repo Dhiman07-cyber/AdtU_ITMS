@@ -1,6 +1,6 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { adminAuth } from '@/lib/firebase-admin';
 import * as routeService from '@/domains/route';
+import { adminAuth } from '@/lib/firebase-admin';
+import { NextRequest,NextResponse } from 'next/server';
 
 export async function GET(
   request: NextRequest,

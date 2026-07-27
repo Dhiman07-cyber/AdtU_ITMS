@@ -1,7 +1,7 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { getLegalConfig,getSystemConfig,updateLegalConfig } from '@/domains/admin';
 import { verifyApiAuth } from '@/lib/security/api-auth';
-import { getSystemConfig, getLegalConfig, updateLegalConfig } from '@/domains/admin';
 import { sanitizeLegalConfig } from '@/lib/security/object-safety';
+import { NextRequest,NextResponse } from 'next/server';
 const FALLBACK_TITLE = 'Terms & Conditions';
 
 /**

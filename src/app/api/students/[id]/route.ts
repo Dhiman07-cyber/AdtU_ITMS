@@ -1,7 +1,7 @@
-import { NextResponse } from 'next/server';
+import { getByEnrollmentId,getById,getByUid } from '@/domains/student';
 import { verifyApiAuth } from '@/lib/security/api-auth';
 import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
-import { getById, getByUid, getByEnrollmentId } from '@/domains/student';
+import { NextResponse } from 'next/server';
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {

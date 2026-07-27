@@ -1,0 +1,98 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": true,
+  "panels": [
+    {
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "id": 1,
+      "title": "Daily Active Drivers",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "itms_active_drivers_count",
+          "legendFormat": "Active Drivers"
+        }
+      ]
+    },
+    {
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "id": 2,
+      "title": "Driver Assignments Total",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(itms_fleet_driver_assignments_total)",
+          "legendFormat": "Assignments"
+        }
+      ]
+    },
+    {
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "id": 3,
+      "title": "Driver Trips Started",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(itms_trip_started_total)",
+          "legendFormat": "Trips Started"
+        }
+      ]
+    },
+    {
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "id": 4,
+      "title": "Avg Driver Response Time (s)",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(itms_waiting_flag_driver_response_duration_seconds_bucket[5m])) by (le))",
+          "legendFormat": "P95 Response (s)"
+        }
+      ]
+    },
+    {
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "id": 5,
+      "title": "Driver Activity & Trip Performance",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "rate(itms_trip_started_total[1h])",
+          "legendFormat": "Trips Started / hr"
+        },
+        {
+          "expr": "rate(itms_trip_completed_total[1h])",
+          "legendFormat": "Trips Completed / hr"
+        }
+      ]
+    },
+    {
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "id": 6,
+      "title": "Driver GPS Transmission Quality",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "rate(itms_gps_updates_accepted_total[1m])",
+          "legendFormat": "Valid GPS Updates"
+        },
+        {
+          "expr": "rate(itms_gps_updates_rejected_total[1m])",
+          "legendFormat": "Rejected GPS Updates"
+        }
+      ]
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["driver", "fleet", "shifts", "performance", "itms"],
+  "time": { "from": "now-24h", "to": "now" },
+  "title": "12 - Driver Dashboard",
+  "uid": "itms-driver",
+  "version": 1
+}

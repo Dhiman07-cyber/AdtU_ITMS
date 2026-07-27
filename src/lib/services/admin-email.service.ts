@@ -9,8 +9,8 @@
  * - Important system notifications
  */
 
-import { Resend, type Attachment } from 'resend';
 import { getUsersByRole } from '@/domains/identity';
+import { Resend,type Attachment } from 'resend';
 
 // Environment variables
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL;

@@ -1,10 +1,10 @@
-import { NextResponse } from 'next/server';
-import {
-  DEFAULT_MODERATOR_PERMISSIONS,
-  type ModeratorPermissions,
-} from '@/lib/types/moderator-permissions';
-import type { SecurityAuth } from '@/lib/security/api-security';
 import { getModeratorById } from '@/domains/identity';
+import type { SecurityAuth } from '@/lib/security/api-security';
+import {
+	DEFAULT_MODERATOR_PERMISSIONS,
+	type ModeratorPermissions,
+} from '@/lib/types/moderator-permissions';
+import { NextResponse } from 'next/server';
 
 type PermissionCategory = keyof ModeratorPermissions;
 type PermissionKey<C extends PermissionCategory> = keyof ModeratorPermissions[C];

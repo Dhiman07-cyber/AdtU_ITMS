@@ -437,13 +437,8 @@ const DRIVER_FIELD_MAP: Record<string, string> = {
   driverId: 'employee_id',
   address: 'address',
   profilePhotoUrl: 'profile_photo_url',
-  busId: 'bus_id',
-  routeId: 'route_id',
   joiningDate: 'joining_date',
-  shift: 'shift',
   status: 'status',
-  tripActive: 'trip_active',
-  activeTripId: 'active_trip_id',
   isReserved: 'is_reserved',
   approvedBy: 'approved_by',
   dob: 'dob',
@@ -466,15 +461,19 @@ export async function pgFindDriverById(uid: string): Promise<Record<string, any>
   return data ? rowToFirestoreDriver(data) : null;
 }
 
-/** Find drivers by bus ID */
+/** Find drivers currently operating a bus via active_trips */
 export async function pgFindDriversByBusId(busId: string): Promise<Record<string, any>[]> {
   const db = getSupabaseServer();
-  const { data, error } = await db
-    .from('driver_profiles')
-    .select('*')
-    .eq('bus_id', busId);
-  if (error) throw new Error(`IdentityRepository (PG) drivers by bus find failed: ${error.message}`);
-  return (data || []).map(rowToFirestoreDriver);
+  const { data: activeTrip } = await db
+    .from('active_trips')
+    .select('driver_id')
+    .eq('bus_id', busId)
+    .eq('status', 'active')
+    .maybeSingle();
+
+  if (!activeTrip?.driver_id) return [];
+  const driver = await pgFindDriverById(activeTrip.driver_id);
+  return driver ? [driver] : [];
 }
 
 /** Find drivers by status */
@@ -569,6 +568,14 @@ export async function pgFindModeratorById(uid: string): Promise<Record<string, a
 export async function pgFindModeratorsByStatus(status: string): Promise<Record<string, any>[]> {
   const rows = await pgFindByStatus('moderator_profiles', status);
   return rows.map(rowToFirestoreModerator);
+}
+
+/** Find all moderators */
+export async function pgFindAllModerators(): Promise<Record<string, any>[]> {
+  const db = getSupabaseServer();
+  const { data, error } = await db.from('moderator_profiles').select('*');
+  if (error) throw new Error(`IdentityRepository (PG) all moderators query failed: ${error.message}`);
+  return (data || []).map(rowToFirestoreModerator);
 }
 
 /** Find all active moderators */

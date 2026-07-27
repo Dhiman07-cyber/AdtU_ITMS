@@ -14,10 +14,10 @@
  *
  * Infrastructure only. No business logic. No service calls.
  */
-import type { MigrationDefinition, MigrationResult, ValidationResult } from '@/infrastructure/migration/contracts';
-import { adminDb } from '@/lib/firebase-admin';
-import { pgInsertUser, pgFindUserById } from '@/domains/identity/repositories/identity.repository.pg';
 import type { IdentityUser } from '@/domains/identity/repositories/identity.repository.pg';
+import { pgFindUserById,pgInsertUser } from '@/domains/identity/repositories/identity.repository.pg';
+import type { MigrationDefinition,MigrationResult,ValidationResult } from '@/infrastructure/migration/contracts';
+import { adminDb } from '@/lib/firebase-admin';
 
 // ─── Firestore collection constants ──────────────────────────────────────────
 const USERS_COLLECTION = 'users';

@@ -1,41 +1,52 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { Avatar,AvatarFallback,AvatarImage } from "@/components/ui/avatar";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card,CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { useAuth } from "@/contexts/auth-context";
 import { useRouter } from "next/navigation";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Input } from "@/components/ui/input";
+import { useEffect,useMemo,useState } from "react";
 // Migrated: Server-side API → PostgreSQL (no Firestore client reads)
-import { useApiCollection, invalidateCollectionCache } from '@/hooks/useApiCollection';
-import {
-  FileText, Shield, Eye, Check, X, Loader2, Search, Filter,
-  SlidersHorizontal, User, Phone, Calendar, Clock, Bus as BusIcon,
-  ChevronDown, RefreshCw, AlertTriangle, ExternalLink, ArrowRightLeft
-} from "lucide-react";
-import { PageHeader } from "@/components/application/page-header";
 import { StatusBadge } from "@/components/application/status-badge";
-import { isUpcomingApplication, getUpcomingStatus } from "@/lib/utils/application-eligibility";
+import { PremiumPageLoader } from '@/components/LoadingSpinner';
+import type { AlternativeBusData } from '@/components/smart-allocation/AlternativeBusPicker';
+import AlternativeBusPicker from '@/components/smart-allocation/AlternativeBusPicker';
+import { Dialog,DialogContent,DialogDescription,DialogFooter,DialogHeader,DialogTitle } from "@/components/ui/dialog";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-  DropdownMenuCheckboxItem,
+	DropdownMenu,
+	DropdownMenuCheckboxItem,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuLabel,
+	DropdownMenuSeparator,
+	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { cn } from "@/lib/utils";
-import { PremiumPageLoader } from '@/components/LoadingSpinner';
-import { supabase } from '@/lib/supabase-client';
 import { useToast } from '@/contexts/toast-context';
-import AlternativeBusPicker from '@/components/smart-allocation/AlternativeBusPicker';
-import type { AlternativeBusData } from '@/components/smart-allocation/AlternativeBusPicker';
+import { invalidateCollectionCache,useApiCollection } from '@/hooks/useApiCollection';
+import { cn } from "@/lib/utils";
+import { isUpcomingApplication } from "@/lib/utils/application-eligibility";
+import {
+	AlertTriangle,
+	ArrowRightLeft,
+	Bus as BusIcon,
+	Calendar,
+	Check,
+	ChevronDown,
+	Clock,
+	Eye,
+	FileText,
+	Loader2,
+	Phone,
+	RefreshCw,
+	Search,
+	Shield,
+	SlidersHorizontal,User,
+	X
+} from "lucide-react";
 
 export default function AdminApplicationsPage() {
   const { currentUser, userData } = useAuth();

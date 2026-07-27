@@ -1,62 +1,59 @@
 "use client";
 
-import { useAuth } from '@/contexts/auth-context';
-import { useEffect, useState, useMemo, useCallback, memo } from 'react';
-import { useRouter } from 'next/navigation';
-import Link from 'next/link';
-import { exportToExcel } from '@/lib/export-helpers';
 import { ExportButton } from '@/components/ExportButton';
-import { cn } from '@/lib/utils';
-import { supabase } from '@/lib/supabase-client';
-import { useToast } from '@/contexts/toast-context';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { PremiumPageLoader } from '@/components/LoadingSpinner';
 import { Button } from "@/components/ui/button";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
+	Card,
+	CardContent
 } from "@/components/ui/card";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
+} from "@/components/ui/dialog";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuLabel,
+	DropdownMenuSeparator,
+	DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
 } from "@/components/ui/select";
-import { PremiumPageLoader } from '@/components/LoadingSpinner';
-import { MoreHorizontal, Eye, Edit, Trash2, Search, Plus, Filter, RefreshCw, Shield } from "lucide-react";
+import {
+	Table,
+	TableBody,
+	TableCell,
+	TableHead,
+	TableHeader,
+	TableRow,
+} from "@/components/ui/table";
+import { useAuth } from '@/contexts/auth-context';
+import { useToast } from '@/contexts/toast-context';
 import { deleteModerator } from '@/lib/dataService';
+import { exportToExcel } from '@/lib/export-helpers';
+import { supabase } from '@/lib/supabase-client';
+import { cn } from '@/lib/utils';
+import { Edit,Eye,Filter,MoreHorizontal,Plus,RefreshCw,Search,Shield,Trash2 } from "lucide-react";
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { memo,useCallback,useEffect,useMemo,useState } from 'react';
 // Migrated: Server-side API → PostgreSQL (no Firestore client reads)
-import { useApiCollection, invalidateCollectionCache } from '@/hooks/useApiCollection';
-import { safeImageSrc } from "@/lib/security/url-sanitizer";
-import { useEventDrivenRefresh } from '@/hooks/useEventDrivenRefresh';
 import Avatar from '@/components/Avatar';
+import { invalidateCollectionCache,useApiCollection } from '@/hooks/useApiCollection';
+import { useEventDrivenRefresh } from '@/hooks/useEventDrivenRefresh';
+import { safeImageSrc } from "@/lib/security/url-sanitizer";
 import { formatDateDDMMYYYY } from '@/lib/utils/date-utils';
 
 // Memoized table row — skips re-rendering for moderators whose data/handlers

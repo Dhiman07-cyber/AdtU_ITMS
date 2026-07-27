@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe,expect,it,vi } from 'vitest';
 
 vi.mock('@/lib/services/admin-email.service', () => ({
   sendStudentAddedNotification: vi.fn().mockResolvedValue(undefined),
@@ -20,10 +20,10 @@ vi.mock('@/lib/services/session-activation.service', () => ({
 }));
 
 import {
-  sendStudentAddedEmail,
-  reconcileBusLoads,
-  detectIntegrityIssues,
-  activateUpcomingApplications,
+	activateUpcomingApplications,
+	detectIntegrityIssues,
+	reconcileBusLoads,
+	sendStudentAddedEmail,
 } from '../services/admin.service';
 
 describe('AdminService', () => {

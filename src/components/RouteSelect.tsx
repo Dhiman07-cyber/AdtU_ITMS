@@ -1,24 +1,23 @@
 "use client";
 
-import * as React from "react";
-import { Check, ChevronsUpDown, Route, Info, Search, Sparkles, Map } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
-    Command,
-    CommandEmpty,
-    CommandGroup,
-    CommandInput,
-    CommandItem,
-    CommandList,
+	Command,
+	CommandEmpty,
+	CommandGroup,
+	CommandItem,
+	CommandList
 } from "@/components/ui/command";
 import {
-    Popover,
-    PopoverContent,
-    PopoverTrigger,
+	Popover,
+	PopoverContent,
+	PopoverTrigger,
 } from "@/components/ui/popover";
 import { Route as RouteType } from "@/lib/types";
-import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
+import { Check,ChevronsUpDown,Info,Map,Route,Search,Sparkles } from "lucide-react";
+import * as React from "react";
 
 interface RouteSelectProps {
     routes: RouteType[];

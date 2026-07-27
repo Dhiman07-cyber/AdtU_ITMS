@@ -21,18 +21,18 @@
  *   - Renewal: Student.update() → Seat.assignSeat() if seat released → finalize (preserve as approved)
  *   - Renewal applications are PRESERVED in approved state (audit trail).
  */
-import * as repository from '../repositories/application.repository';
-import { getSupabaseServer } from '@/lib/supabase-server';
 import { createAuditEvent } from '@/domains/audit';
-import * as Notification from '@/domains/notification';
-import * as Student from '@/domains/student';
-import * as Seat from '@/domains/seat';
 import { deleteUnauthUser } from '@/domains/identity';
+import * as Notification from '@/domains/notification';
+import * as Seat from '@/domains/seat';
+import * as Student from '@/domains/student';
+import { getDeadlineConfig } from '@/lib/deadline-config-service';
+import { getSupabaseServer } from '@/lib/supabase-server';
+import type { Application,ApplicationState,ApplicationType } from '@/lib/types/application';
+import { isUpcomingApplication } from '@/lib/utils/application-eligibility';
 import { calculateValidUntilDate } from '@/lib/utils/date-utils';
 import { computeBlockDatesFromValidUntil } from '@/lib/utils/deadline-computation';
-import { getDeadlineConfig } from '@/lib/deadline-config-service';
-import { isUpcomingApplication } from '@/lib/utils/application-eligibility';
-import type { Application, ApplicationState, ApplicationType } from '@/lib/types/application';
+import * as repository from '../repositories/application.repository';
 
 // ─── CRUD Methods ────────────────────────────────────────────────────────────
 

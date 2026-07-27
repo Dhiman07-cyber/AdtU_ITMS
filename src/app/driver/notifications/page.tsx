@@ -1,23 +1,16 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
-import { useRouter } from 'next/navigation';
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle
-} from "@/components/ui/dialog";
-import { Bell, Plus, Megaphone, MapPin, MapPinOff, Sparkles, Zap, RefreshCw } from "lucide-react";
-import { useToast } from "@/contexts/toast-context";
-import { useAuth } from "@/contexts/auth-context";
-import NotificationFormV2 from "@/components/NotificationFormV2";
 import NotificationCardV2 from "@/components/NotificationCardV2";
+import NotificationFormV2 from "@/components/NotificationFormV2";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { useAuth } from "@/contexts/auth-context";
 import { useNotifications } from "@/contexts/NotificationContext";
+import { useToast } from "@/contexts/toast-context";
+import { Bell,MapPin,MapPinOff,Megaphone,Plus,RefreshCw,Zap } from "lucide-react";
+import { useRouter } from 'next/navigation';
+import { useEffect,useMemo,useState } from "react";
 
 import { PremiumPageLoader } from "@/components/LoadingSpinner";
 

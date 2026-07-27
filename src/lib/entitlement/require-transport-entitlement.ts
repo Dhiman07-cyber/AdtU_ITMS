@@ -1,6 +1,6 @@
-import { NextResponse } from 'next/server';
 import { getByUid } from '@/domains/student';
-import { getTransportEntitlement, EntitlementResult } from './transport-entitlement';
+import { NextResponse } from 'next/server';
+import { EntitlementResult,getTransportEntitlement } from './transport-entitlement';
 
 /**
  * Server-side guard for student transport API routes (Phase 3).

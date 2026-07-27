@@ -1,16 +1,16 @@
 // @ts-nocheck
 "use client";
 
-import { useState, useEffect, use } from "react";
-import { useRouter } from "next/navigation";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import Link from "next/link";
-import { useToast } from "@/contexts/toast-context";
-import { Badge } from "@/components/ui/badge";
-import { format } from "date-fns";
-import { useAuth } from "@/contexts/auth-context";
 import { PremiumPageLoader } from "@/components/LoadingSpinner";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card,CardContent,CardDescription,CardHeader,CardTitle } from "@/components/ui/card";
+import { useAuth } from "@/contexts/auth-context";
+import { useToast } from "@/contexts/toast-context";
+import { format } from "date-fns";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { use,useEffect,useState } from "react";
 
 export default function ViewNotificationPage({ params }: { params: Promise<{ id: string }> }) {
   const router = useRouter();

@@ -437,11 +437,23 @@ export class LocationValidationService {
       const count = (this.suspiciousPatterns.get(userId) || 0) + 1;
       this.suspiciousPatterns.set(userId, count);
 
+      // Bound suspiciousPatterns to prevent memory growth at scale
+      if (this.suspiciousPatterns.size > 10000) {
+        const firstKey = this.suspiciousPatterns.keys().next().value;
+        if (firstKey !== undefined) this.suspiciousPatterns.delete(firstKey);
+      }
+
       if (count > 10) {
         this.blacklist.add(userId);
+        // Bound blacklist to prevent memory growth at scale
+        if (this.blacklist.size > 10000) {
+          const firstKey = this.blacklist.values().next().value;
+          if (firstKey !== undefined) this.blacklist.delete(firstKey);
+        }
         result.valid = false;
         result.recommendation = 'reject';
-        console.error(`🚫 User ${userId} blacklisted for repeated suspicious activity`);
+        // Note: structured logger not injected here — this class is used both
+        // server-side and in tests. Callers should log the rejection result.
         return;
       }
     }

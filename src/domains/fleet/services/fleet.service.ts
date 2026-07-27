@@ -10,8 +10,8 @@
  * Delegates entirely to fleet.repository → fleet.repository.pg → PostgreSQL.
  * Zero Firestore reads/writes.
  */
+import type { Bus,Driver } from '@/lib/types';
 import * as fleetRepository from '../repositories/fleet.repository';
-import type { Bus, Driver } from '@/lib/types';
 
 export async function createBus(bus: Partial<Bus> & { id: string }): Promise<void> {
   return fleetRepository.upsertBus(bus);
@@ -77,5 +77,5 @@ export async function reassignStudentsAtomically(plans: Array<{
   return fleetRepository.reassignStudentsAtomically(plans);
 }
 
-export type { Bus, Driver };
+export type { Bus,Driver };
 

@@ -1,16 +1,16 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { adminAuth } from '@/lib/firebase-admin';
-import { getSupabaseServer } from '@/lib/supabase-server';
-import { calculateRenewalDate, formatRenewalDate } from '@/lib/utils/renewal-utils';
-import { computeBlockDatesFromValidUntil } from '@/lib/utils/deadline-computation';
-import { getDeadlineConfig } from '@/lib/deadline-config-service';
-import { checkBusCapacity, incrementBusCapacity, decrementBusCapacity } from '@/domains/fleet';
-import { wasSeatReleased } from '@/lib/config/capacity-flags';
-import { paymentsSupabaseService } from '@/lib/services/payments-supabase';
-import crypto from 'crypto';
-import { CapacityFullError } from '@/lib/errors/sentinel-errors';
+import { checkBusCapacity,incrementBusCapacity } from '@/domains/fleet';
 import { getUserById } from '@/domains/identity';
-import { getByUid as getStudentByUid, update as updateStudent } from '@/domains/student';
+import { getByUid as getStudentByUid,update as updateStudent } from '@/domains/student';
+import { wasSeatReleased } from '@/lib/config/capacity-flags';
+import { getDeadlineConfig } from '@/lib/deadline-config-service';
+import { CapacityFullError } from '@/lib/errors/sentinel-errors';
+import { adminAuth } from '@/lib/firebase-admin';
+import { paymentsSupabaseService } from '@/lib/services/payments-supabase';
+import { getSupabaseServer } from '@/lib/supabase-server';
+import { computeBlockDatesFromValidUntil } from '@/lib/utils/deadline-computation';
+import { calculateRenewalDate,formatRenewalDate } from '@/lib/utils/renewal-utils';
+import crypto from 'crypto';
+import { NextRequest,NextResponse } from 'next/server';
 
 /**
  * POST /api/renew-services

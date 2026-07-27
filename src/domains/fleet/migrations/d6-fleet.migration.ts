@@ -23,18 +23,18 @@
  *
  * Infrastructure only. No business logic. No service calls.
  */
-import type { MigrationDefinition, MigrationResult, ValidationResult } from '@/infrastructure/migration/contracts';
-import { adminDb } from '@/lib/firebase-admin';
 import {
-  pgUpsertBus,
-  pgFindBusById,
-  pgCountBuses,
+	pgCountBuses,
+	pgFindBusById,
+	pgUpsertBus,
 } from '@/domains/fleet/repositories/fleet.repository.pg';
 import {
-  pgUpsertDriver,
-  pgFindDriverById,
-  pgCountDrivers,
+	pgCountDrivers,
+	pgFindDriverById,
+	pgUpsertDriver,
 } from '@/domains/identity/repositories/identity.repository.pg';
+import type { MigrationDefinition,MigrationResult,ValidationResult } from '@/infrastructure/migration/contracts';
+import { adminDb } from '@/lib/firebase-admin';
 
 // ─── Collection constants ─────────────────────────────────────────────────────
 const BUSES_COLLECTION   = 'buses';

@@ -5,8 +5,8 @@
 
 "use client";
 
-import { useState, useCallback, useEffect, useRef, memo } from 'react';
 import { cn } from '@/lib/utils';
+import { memo,useCallback,useEffect,useRef,useState } from 'react';
 
 interface OptimizedOTPInputProps {
   length?: number;

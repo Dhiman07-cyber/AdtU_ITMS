@@ -1,52 +1,38 @@
 ﻿"use client";
 
-import { useState, useEffect } from "react";
-import { use } from "react";
-import { useRouter } from "next/navigation";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import {
-  User,
-  Mail,
-  Phone,
-  Calendar,
-  Hash,
-  Users,
-  Building,
-  Edit,
-  Trash2,
-  Loader2,
-  MapPin,
-  Bus,
-  Clock,
-  Shield,
-  CheckCircle2,
-  AlertCircle,
-  ArrowLeft,
-  Heart,
-  Home,
-  School,
-  CreditCard,
-  Briefcase,
-  IdCard,
-  Award,
-  Download,
-} from "lucide-react";
 import { PremiumPageLoader } from "@/components/LoadingSpinner";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import Link from "next/link";
-import { useToast } from '@/contexts/toast-context';
+import { Avatar,AvatarFallback } from "@/components/ui/avatar";
+import { Button } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
 } from "@/components/ui/dialog";
-import { getDriverById, deleteDriver } from '@/lib/dataService';
+import { useToast } from '@/contexts/toast-context';
+import { deleteDriver,getDriverById } from '@/lib/dataService';
 import { safeImageSrc } from "@/lib/security/url-sanitizer";
 import { formatDateFlexible } from '@/lib/utils/date-utils';
+import {
+	AlertCircle,
+	ArrowLeft,
+	Award,
+	Briefcase,
+	Bus,
+	Calendar,
+	CreditCard,
+	Edit,
+	IdCard,
+	Mail,
+	Phone,
+	Trash2,
+	User
+} from "lucide-react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { use,useEffect,useState } from "react";
 
 const formatDate = formatDateFlexible;
 
@@ -122,8 +108,8 @@ const InfoCard = ({ icon: Icon, label, value, gradient }: any) => (
   </div>
 );
 
-import { useModeratorPermissions } from '@/hooks/useModeratorPermissions';
 import { PermissionDeniedCard } from '@/components/PermissionDeniedCard';
+import { useModeratorPermissions } from '@/hooks/useModeratorPermissions';
 
 export default function ViewDriverPage({ params }: { params: Promise<{ id: string }> }) {
   const router = useRouter();

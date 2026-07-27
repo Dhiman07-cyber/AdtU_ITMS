@@ -1,26 +1,26 @@
 "use client";
 
-import React, { useState, useEffect, useRef, useCallback } from "react";
-import { useAuth } from "@/contexts/auth-context";
-import { useRouter } from "next/navigation";
-import dynamic from "next/dynamic";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Bus, MapPin, Clock, Users, Flag, PlayCircle, StopCircle, AlertCircle, Navigation, CheckCircle, Activity, Loader2 } from "lucide-react";
-import { supabase } from "@/lib/supabase-client";
-import { getDriverById, getBusById, getRouteById } from "@/lib/dataService";
-import { useToast } from "@/contexts/toast-context";
-import { PremiumPageLoader } from "@/components/LoadingSpinner";
-import { formatIdForDisplay } from "@/lib/utils";
 import ErrorBoundary from "@/components/ErrorBoundary";
+import { PremiumPageLoader } from "@/components/LoadingSpinner";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card,CardContent,CardHeader,CardTitle } from "@/components/ui/card";
+import { useAuth } from "@/contexts/auth-context";
+import { useToast } from "@/contexts/toast-context";
+import { WebSocketClient } from '@/domains/realtime/ws-client';
+import { getBusById,getDriverById,getRouteById } from "@/lib/dataService";
 import {
-  checkDeviceSession,
-  registerDeviceSession,
-  heartbeatDeviceSession,
-  releaseDeviceSession,
-  getOrCreateDeviceId
+	checkDeviceSession,
+	getOrCreateDeviceId,
+	heartbeatDeviceSession,
+	registerDeviceSession,
+	releaseDeviceSession
 } from "@/lib/session-device-service";
+import { formatIdForDisplay } from "@/lib/utils";
+import { Activity,AlertCircle,Bus,CheckCircle,Clock,Flag,Loader2,MapPin,Navigation,PlayCircle,StopCircle } from "lucide-react";
+import dynamic from "next/dynamic";
+import { useRouter } from "next/navigation";
+import { useCallback,useEffect,useRef,useState } from "react";
 
 // Dynamically import components to avoid SSR issues
 const BrowserCompatibilityBanner = dynamic(() => import('@/components/BrowserCompatibilityBanner'), {
@@ -73,6 +73,7 @@ export default function DriverLiveTrackingPage() {
 
   // Trip state
   const [tripActive, setTripActive] = useState(false);
+  const [wsClientReady, setWsClientReady] = useState(false);
   const [tripId, setTripId] = useState<string | null>(null);
   const [currentLocation, setCurrentLocation] = useState<{ lat: number; lng: number; accuracy: number } | null>(null);
   const [speed, setSpeed] = useState(0);
@@ -83,16 +84,14 @@ export default function DriverLiveTrackingPage() {
 
   // Refs
   const locationIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const locationChannelRef = useRef<any>(null); // Persistent channel for location broadcasting
   const watchIdRef = useRef<number | null>(null);
-  const broadcastCountRef = useRef<number>(0); // For write optimization
-  // Holds the latest broadcast inputs so the 1s broadcast interval can read fresh
+  const wsClientRef = useRef<WebSocketClient | null>(null);
+  // Holds the latest broadcast inputs so the broadcast interval can read fresh
   // values without being torn down / recreated on every GPS tick (prevents interval churn).
   const broadcastInputsRef = useRef<any>(null);
   const lastBroadcastSampleRef = useRef<{ lat: number; lng: number; t: number } | null>(null);
   const manuallyEndedTripRef = useRef<boolean>(false); // Track if trip was manually ended
   const wakeLockRef = useRef<any>(null); // Screen wake lock to prevent screen from turning off
-  const tripBroadcastChannelsRef = useRef<ReturnType<typeof supabase.channel>[]>([]); // Track broadcast channels for cleanup
 
   // Map center
   const [mapCenter, setMapCenter] = useState<[number, number]>([0, 0]); // Default center
@@ -120,7 +119,6 @@ export default function DriverLiveTrackingPage() {
   }>({ hasConflict: false });
   const deviceSessionHeartbeatRef = useRef<NodeJS.Timeout | null>(null);
   const currentDeviceId = useRef<string>('');
-  const [isChannelReady, setIsChannelReady] = useState(false);
 
   // Multi-driver lock state - blocks UI when another driver is operating the bus
   const [busLockedByOther, setBusLockedByOther] = useState(false);
@@ -189,41 +187,32 @@ export default function DriverLiveTrackingPage() {
 
   // Subscribe to wait requests
   useEffect(() => {
-    if (!busData?.busId) return;
+    if (!busData?.busId || !currentUser) return;
 
-    console.log("👂 Subscribing to wait requests for bus:", busData.busId);
+    console.log("👂 Subscribing to wait requests via WS for bus:", busData.busId);
 
-    const channelName = `driver_wait_request_${busData.busId}`;
-    const channel = supabase.channel(channelName);
-
-    channel
-      .on('broadcast', { event: 'wait_request' }, (payload) => {
+    const wsClient = wsClientRef.current;
+    if (wsClient) {
+      wsClient.subscribe(`driver_wait_request_${busData.busId}`, (payload: any) => {
         console.log("📣 Received wait request:", payload);
-        const { studentId, studentName, stop_name, timestamp } = payload.payload;
-
-        // Show request
         setActiveWaitRequest({
-          studentId,
-          studentName,
-          stop_name,
-          timestamp
+          studentId: payload.studentId,
+          studentName: payload.studentName,
+          stop_name: payload.stop_name,
+          timestamp: payload.timestamp,
         });
-        setWaitRequestTimer(10); // Reset timer to 10s
-
-        // Play notification sound if available
+        setWaitRequestTimer(10);
         try {
           const audio = new Audio('/sounds/notification.mp3');
           audio.play().catch(e => console.log('Audio play failed', e));
-        } catch (e) {
-          // Ignore audio errors
-        }
-      })
-      .subscribe();
+        } catch (e) {}
+      });
+    }
 
     return () => {
-      supabase.removeChannel(channel);
+      if (wsClient) wsClient.unsubscribe(`driver_wait_request_${busData.busId}`);
     };
-  }, [busData?.busId]);
+  }, [busData?.busId, currentUser, wsClientReady]);
 
   // Handle countdown
   useEffect(() => {
@@ -423,18 +412,38 @@ export default function DriverLiveTrackingPage() {
   useEffect(() => {
     return () => {
       stopLocationTracking();
-      // Clean up any lingering broadcast channels
-      tripBroadcastChannelsRef.current.forEach((ch) => {
-        supabase.removeChannel(ch);
-      });
-      tripBroadcastChannelsRef.current = [];
     };
   }, [stopLocationTracking]);
 
 
   // NOTE: Cache clearing removed for production - caching is now enabled
 
-
+  // Create shared WebSocket client (single connection owner for all subscriptions)
+  useEffect(() => {
+    if (!currentUser) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const token = await currentUser.getIdToken();
+        if (cancelled) return;
+        const url = process.env.NEXT_PUBLIC_WS_URL || `ws://${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}:3001`;
+        const client = new WebSocketClient({ url, token });
+        wsClientRef.current = client;
+        setWsClientReady(true);
+        client.connect();
+      } catch (err) {
+        console.warn('[Driver] Failed to create WS client:', err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (wsClientRef.current) {
+        wsClientRef.current.disconnect();
+        wsClientRef.current = null;
+      }
+      setWsClientReady(false);
+    };
+  }, [currentUser]);
 
   // Fetch driver, bus, and route data
   useEffect(() => {
@@ -834,142 +843,61 @@ export default function DriverLiveTrackingPage() {
     setMapCenter([26.1445, 91.7362]); // Guwahati campus coordinates
   }, [tripActive, currentLocation]);
 
-  // Store addToast in ref to avoid recreating channel on every render
-  const addToastRef = useRef(addToast);
+  // Subscribe to waiting flags via WebSocket
   useEffect(() => {
-    addToastRef.current = addToast;
-  }, [addToast]);
+    if (!tripActive || !busData?.busId || !currentUser) return;
 
-  // Subscribe to waiting flags channel when trip is active
-  useEffect(() => {
-    if (!tripActive || !busData?.busId) return;
+    console.log("🔄 Subscribing to waiting flags via WS for bus:", busData.busId);
 
-    console.log("🔄 Subscribing to waiting flags for bus:", busData.busId);
-
-    let channelReady = false;
-
-    // Subscribe to real-time updates FIRST
-    const channel = supabase
-      .channel(`waiting_flags_${busData.busId}`, {
-        config: {
-          broadcast: { self: false }
-        }
-      })
-      .on("broadcast", { event: "waiting_flag_created" }, (payload) => {
-        console.log("🚩 New waiting flag received:", payload);
-        const flagData = payload.payload;
-
-        // Add to state if not already present
-        setWaitingFlags((prev) => {
-          const exists = prev.some(f => f.id === flagData.id);
-          if (exists) {
-            console.log("⚠️ Flag already exists, skipping");
-            return prev;
-          }
-          console.log("✅ Adding new flag to state");
-          return [...prev, flagData];
+    // Load initial flags via API
+    const fetchInitialFlags = async () => {
+      try {
+        const idToken = await currentUser.getIdToken();
+        const res = await fetch(`/api/driver/dashboard-data`, {
+          headers: { Authorization: `Bearer ${idToken}` },
         });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.waitingFlags) setWaitingFlags(data.waitingFlags);
+        }
+      } catch (err) {
+        console.warn("Failed to fetch initial waiting flags:", err);
+      }
+    };
+    fetchInitialFlags();
 
-        // Show toast notification using ref
-        addToastRef.current(
-          `${flagData.student_name || 'A student'} is waiting for pickup`,
-          "info"
-        );
-      })
-      .on("broadcast", { event: "waiting_flag_removed" }, (payload) => {
-        console.log("🚩 Waiting flag removed:", payload);
-        setWaitingFlags((prev) =>
-          prev.filter((flag) => flag.id !== payload.payload.flagId)
-        );
-      })
-      // Add postgres_changes as backup for faster flag detection
-      .on("postgres_changes", {
-        event: "INSERT",
-        schema: "public",
-        table: "waiting_flags",
-        filter: `bus_id=eq.${busData.busId}`
-      }, (payload) => {
-        console.log("🚩 New waiting flag (postgres_changes INSERT):", payload);
-        const newFlag = payload.new as any;
+    const wsClient = wsClientRef.current;
+    if (wsClient) {
+      wsClient.subscribe(`waiting_flags_${busData.busId}`, (payload: any) => {
+        console.log("🚩 Waiting flag event:", payload.event, payload);
 
-        // Only add if status is raised or waiting
-        if (newFlag.status === 'raised' || newFlag.status === 'waiting') {
+        if (payload.event === 'waiting_flag_created') {
           setWaitingFlags((prev) => {
-            const exists = prev.some(f => f.id === newFlag.id);
-            if (exists) {
-              console.log("⚠️ Flag already exists (from broadcast), skipping");
-              return prev;
-            }
-            console.log("✅ Adding new flag from postgres_changes");
-            return [...prev, newFlag];
+            if (prev.some(f => f.id === payload.id)) return prev;
+            return [...prev, payload];
           });
-
-          // Show toast notification
-          addToastRef.current(
-            `${newFlag.student_name || 'A student'} is waiting for pickup`,
+          addToast(
+            `${payload.student_name || payload.studentName || 'A student'} is waiting for pickup`,
             "info"
           );
-        }
-      })
-      .on("postgres_changes", {
-        event: "UPDATE",
-        schema: "public",
-        table: "waiting_flags",
-        filter: `bus_id=eq.${busData.busId}`
-      }, (payload) => {
-        console.log("🚩 Waiting flag updated (postgres_changes UPDATE):", payload);
-        const updatedFlag = payload.new as any;
-
-        // If status changed to cancelled or picked_up, remove from list
-        if (updatedFlag.status === 'cancelled' || updatedFlag.status === 'picked_up' || updatedFlag.status === 'boarded') {
-          setWaitingFlags((prev) => prev.filter((flag) => flag.id !== updatedFlag.id));
-        } else {
-          // Update the flag in state
+        } else if (payload.event === 'waiting_flag_removed') {
+          setWaitingFlags((prev) => prev.filter((f) => f.id !== payload.flagId));
+        } else if (payload.event === 'waiting_flag_acknowledged') {
           setWaitingFlags((prev) =>
-            prev.map((flag) =>
-              flag.id === updatedFlag.id ? { ...flag, ...updatedFlag } : flag
+            prev.map((f) =>
+              f.id === payload.flagId ? { ...f, status: 'acknowledged', ackByDriverUid: payload.driverUid } : f
             )
           );
-        }
-      })
-      .subscribe(async (status, error) => {
-        console.log("📡 Waiting flags channel status:", status);
-        if (status === 'SUBSCRIBED') {
-          console.log("✅ Waiting flags channel subscribed successfully");
-          channelReady = true;
-
-          // Load initial flags AFTER subscription is ready
-          try {
-            const { data, error } = await supabase
-              .from("waiting_flags")
-              .select("*")
-              .eq("bus_id", busData.busId)
-              .in("status", ["raised", "waiting", "acknowledged"]);
-
-            if (!error && data) {
-              setWaitingFlags(data);
-              console.log("📍 Loaded initial waiting flags:", data.length, "flags");
-            } else if (error) {
-              console.warn("⚠️ Error loading waiting flags:", error.message);
-              // Graceful degradation - flags just won't show but app continues
-            }
-          } catch (err: any) {
-            console.warn("⚠️ Error loading waiting flags:", err?.message);
-          }
-        } else if (status === 'CHANNEL_ERROR') {
-          console.warn("⚠️ Waiting flags channel error:", error || "Unknown channel error");
-          // Don't crash - just log the error and continue
-          console.warn("⚠️ Waiting flags feature may not work - check Supabase permissions");
-        } else if (status === 'TIMED_OUT') {
-          console.warn("⏱️ Waiting flags channel subscription timed out");
+        } else if (payload.event === 'waiting_flag_boarded' || payload.event === 'waiting_flag_cancelled' || payload.status === 'cancelled' || payload.status === 'picked_up' || payload.status === 'boarded') {
+          setWaitingFlags((prev) => prev.filter((f) => f.id !== payload.id));
         }
       });
+    }
 
     return () => {
-      console.log("🧹 Cleaning up waiting flags channel");
-      supabase.removeChannel(channel);
+      if (wsClient) wsClient.unsubscribe(`waiting_flags_${busData.busId}`);
     };
-  }, [busData?.busId, tripActive]); // Don't include addToast - use ref instead
+  }, [busData?.busId, tripActive, currentUser, wsClientReady]);
 
   // Screen Wake Lock - Keep screen on during active trip
   useEffect(() => {
@@ -1037,43 +965,6 @@ export default function DriverLiveTrackingPage() {
   // Auto pickup logic is handled below in the "Distance-based auto-pickup" effect.
 
 
-  // Manage persistent location channel for better performance
-  useEffect(() => {
-    if (!tripActive || !busData?.busId) return;
-
-    console.log("📡 Setting up persistent location channel for bus:", busData.busId);
-
-    // Reset ready state when setting up new channel
-    setIsChannelReady(false);
-
-    // Create channel with appropriate config
-    const channel = supabase.channel(`bus_location_${busData.busId}`, {
-      config: {
-        broadcast: { self: true, ack: false }
-      }
-    });
-
-    channel.subscribe((status) => {
-      if (status === 'SUBSCRIBED') {
-        console.log("✅ Location channel subscribed");
-        locationChannelRef.current = channel;
-        setIsChannelReady(true);
-      } else if (status === 'CHANNEL_ERROR') {
-        console.warn("⚠️ Location channel error - will retry");
-        addToast("Connection to server failed. Sync may be interrupted.", "warning");
-        locationChannelRef.current = null;
-        setIsChannelReady(false);
-      }
-    });
-
-    return () => {
-      console.log("🧹 Cleaning up location channel");
-      locationChannelRef.current = null;
-      setIsChannelReady(false);
-      supabase.removeChannel(channel);
-    };
-  }, [tripActive, busData?.busId]);
-
   // Keep the latest broadcast inputs in a ref every render. This lets the broadcast
   // interval read fresh GPS values WITHOUT the effect (and its setInterval) being
   // recreated each tick. Runs after every commit; only assigns a ref (cheap).
@@ -1081,25 +972,18 @@ export default function DriverLiveTrackingPage() {
     broadcastInputsRef.current = { currentLocation, accuracy, speed, busData, routeData, tripId, currentUser };
   });
 
-  // Broadcast location to Supabase.
-  // RELIABILITY: This loop is gated ONLY on tripActive — NOT on isChannelReady. The realtime
-  // broadcast channel can drop/reconnect mid-trip; if the loop were gated on channel readiness
-  // it would also stop the periodic DB save, leaving students with NO updates (no broadcast AND
-  // no postgres fallback) during the outage. By running on tripActive, broadcastLocation keeps
-  // writing to the DB every ~15s (the student app's `bus_locations` postgres fallback) regardless
-  // of channel state, and resumes realtime broadcasts automatically the moment the channel ref
-  // is live again (it reads locationChannelRef.current fresh each tick).
-  // Deps are limited to the STABLE tripActive so the 1s interval is created ONCE per trip.
+  // Send location to /api/location/update every 2s.
+  // The API route saves to DB and calls emitEvent → WS server → subscribed students.
   useEffect(() => {
     if (!tripActive) return;
 
     console.log("🚀 Starting location broadcasting for active trip");
 
-    // Broadcast immediately
+    // Send immediately
     broadcastLocation();
 
-    // Throttled interval — minimum 1s
-    locationIntervalRef.current = setInterval(broadcastLocation, 1000);
+    // Throttled interval — 2s
+    locationIntervalRef.current = setInterval(broadcastLocation, 2000);
 
     return () => {
       if (locationIntervalRef.current) {
@@ -1119,77 +1003,29 @@ export default function DriverLiveTrackingPage() {
     if (!currentLocation || !busData || !routeData) return;
 
     try {
-      const now = Date.now();
       const idToken = await currentUser?.getIdToken();
+      const response = await fetch("/api/location/update", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({
+          idToken,
+          busId: busData.busId,
+          routeId: routeData.routeId,
+          lat: currentLocation.lat,
+          lng: currentLocation.lng,
+          accuracy: accuracy,
+          speed: speed,
+          heading: 0,
+          timestamp: Date.now(),
+          tripId: tripId,
+        }),
+      });
 
-      // Increment broadcast counter
-      broadcastCountRef.current += 1;
-
-      // OPTIMIZATION: Save to database only every 15th time (15 seconds when interval=1s)
-      // Save immediately on first start to ensure the DB has an initial point for the student app
-      const shouldSaveToDatabase = broadcastCountRef.current === 1 || broadcastCountRef.current % 15 === 0;
-
-      // Always broadcast to students via Supabase Realtime (real-time updates)
-      try {
-        // Use persistent channel if available
-        if (locationChannelRef.current) {
-          await locationChannelRef.current.send({
-            type: "broadcast",
-            event: "bus_location_update",
-            payload: {
-              busId: busData.busId,
-              driverUid: currentUser?.uid,
-              lat: currentLocation.lat,
-              lng: currentLocation.lng,
-              accuracy: accuracy,
-              speed: speed || 0,
-              heading: 0,
-              timestamp: new Date().toISOString(),
-            },
-          });
-          console.log(`📡 Real-time broadcast sent (${shouldSaveToDatabase ? 'with DB save' : 'broadcast only'})`);
-        } else {
-          // Channel not live yet (initial connect) or temporarily dropped (reconnecting).
-          // Intentionally silent: the periodic DB save below still runs, so students keep
-          // receiving updates via the `bus_locations` postgres fallback until the realtime
-          // channel re-subscribes and broadcasts resume.
-        }
-      } catch (broadcastError) {
-        console.warn("⚠️ Realtime broadcast failed:", broadcastError);
-      }
-
-      // Save to database only every 30 seconds (for history/recovery)
-      if (shouldSaveToDatabase) {
-        try {
-          const response = await fetch("/api/location/update", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${idToken}`,
-            },
-            body: JSON.stringify({
-              idToken,
-              busId: busData.busId,
-              routeId: routeData.routeId,
-              lat: currentLocation.lat,
-              lng: currentLocation.lng,
-              accuracy: accuracy,
-              speed: speed,
-              heading: 0,
-              timestamp: Date.now(),
-              tripId: tripId,
-            }),
-          });
-
-          if (response.ok) {
-            console.log("💾 Location saved to database (every 30s)");
-          } else {
-            console.warn("⚠️ Database save failed:", response.status);
-          }
-        } catch (error) {
-          console.error("❌ Error saving to database:", error);
-          // Non-critical - real-time broadcast still works
-        }
+      if (!response.ok) {
+        console.warn("⚠️ Location update failed:", response.status);
       }
     } catch (error) {
       console.error("❌ Error in broadcastLocation:", error);
@@ -1414,32 +1250,6 @@ export default function DriverLiveTrackingPage() {
         }
       }, 1000); // Wait 1 second for trip to be fully created
 
-      // Broadcast trip started event to all students
-      try {
-        const broadcastChannel = supabase.channel(`trip-status-${busData.busId}`);
-        tripBroadcastChannelsRef.current.push(broadcastChannel);
-        broadcastChannel.subscribe(async (status) => {
-          if (status === 'SUBSCRIBED') {
-            await broadcastChannel.send({
-              type: "broadcast",
-              event: "trip_started",
-              payload: {
-                busId: busData.busId,
-                routeId: routeData.routeId,
-                tripId: result.tripId,
-                routeName: routeData.routeName,
-                timestamp: Date.now(),
-              },
-            });
-            console.log("📢 Trip started broadcast sent to students");
-            supabase.removeChannel(broadcastChannel);
-            tripBroadcastChannelsRef.current = tripBroadcastChannelsRef.current.filter(ch => ch !== broadcastChannel);
-          }
-        });
-      } catch (broadcastError) {
-        console.warn("⚠️ Failed to broadcast trip start:", broadcastError);
-      }
-
       // FCM notifications are sent automatically by start-journey-v2
 
       console.log("✅ Trip started:", result);
@@ -1517,7 +1327,6 @@ export default function DriverLiveTrackingPage() {
         setCurrentLocation(null);
         setWaitingFlags([]);
         setMapCenter([26.1445, 91.7362]);
-        broadcastCountRef.current = 0;
 
         // Auto-exit fullscreen when trip ends
         setIsFullScreenMap(false);
@@ -1527,26 +1336,7 @@ export default function DriverLiveTrackingPage() {
         // Clear the bus marker
         console.log("🗺️ Clearing map markers and resetting view");
 
-        // Broadcast trip ended event
-        try {
-          const channel = supabase.channel(`trip-status-${busData.busId}`);
-          tripBroadcastChannelsRef.current.push(channel);
-          channel.subscribe(async (status) => {
-            if (status === 'SUBSCRIBED') {
-              await channel.send({
-                type: "broadcast",
-                event: "trip_ended",
-                payload: { busId: busData.busId, timestamp: Date.now() },
-              });
-              await supabase.removeChannel(channel);
-              tripBroadcastChannelsRef.current = tripBroadcastChannelsRef.current.filter(ch => ch !== channel);
-            }
-          });
-        } catch (e) {
-          console.warn('Failed to broadcast trip end on client:', e);
-        }
-
-        console.log("✅ Trip ended - map cleared and broadcast sent");
+        console.log("✅ Trip ended - map cleared (broadcast sent server-side)");
 
         // Ensure UI updates by forcing a small delay if needed or just letting React handle it
 

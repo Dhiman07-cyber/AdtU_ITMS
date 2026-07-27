@@ -8,21 +8,9 @@
  */
 
 export type {
-    StagedOperation,
-    DriverSnapshot,
-    BusSnapshot,
-    DbSnapshot,
-    NetBusChange,
-    DriverFinalState,
-    ConfirmationTableRow,
-    ComputeNetAssignmentsResult,
-    ValidationResult,
+	BusSnapshot,ComputeNetAssignmentsResult,ConfirmationTableRow,DbSnapshot,DriverFinalState,DriverSnapshot,NetBusChange,StagedOperation,ValidationResult
 } from './net-assignment-types';
 
 export {
-    createBusLabel,
-    getDriverName,
-    getDriverEmployeeId,
-    computeNetAssignments,
-    validateStagingPreCheck,
+	computeNetAssignments,createBusLabel,getDriverEmployeeId,getDriverName,validateStagingPreCheck
 } from './net-assignment-types';

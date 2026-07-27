@@ -1,17 +1,17 @@
-import './globals.css';
-import '../styles/animations.css';
-import type { Metadata } from 'next';
+import AppShell from '@/components/AppShell';
+import MobileErrorHandler from '@/components/MobileErrorHandler';
+import SimpleErrorBoundary from '@/components/simple-error-boundary';
+import SmoothScrollProvider from '@/components/smooth-scroll-provider';
+import { ThemeProvider } from '@/components/theme-provider';
 import { AuthProvider } from '@/contexts/auth-context';
 import { NotificationProvider } from '@/contexts/NotificationContext';
 import { ToastProvider } from '@/contexts/toast-context';
-import { ThemeProvider } from '@/components/theme-provider';
 import { suppressConsoleWarnings } from '@/lib/console-suppress';
-import SimpleErrorBoundary from '@/components/simple-error-boundary';
-import AppShell from '@/components/AppShell';
-import MobileErrorHandler from '@/components/MobileErrorHandler';
-import SmoothScrollProvider from '@/components/smooth-scroll-provider';
-import { SpeedInsights } from "@vercel/speed-insights/next";
 import { Analytics as VercelAnalytics } from "@vercel/analytics/next";
+import { SpeedInsights } from "@vercel/speed-insights/next";
+import type { Metadata } from 'next';
+import '../styles/animations.css';
+import './globals.css';
 
 declare global {
   interface Window {

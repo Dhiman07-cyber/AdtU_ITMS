@@ -7,15 +7,13 @@
  * SECURITY: Uses withSecurity wrapper. Admin-only access for rollback operations.
  */
 
-import { NextResponse } from 'next/server';
+import { createAuditEvent,type AuditActorRole } from '@/domains/audit';
 import { withSecurity } from '@/lib/security/api-security';
 import { RateLimits } from '@/lib/security/rate-limiter';
-import { createAuditEvent, type AuditActorRole } from '@/domains/audit';
-import { z } from 'zod';
 import { getSupabaseServer } from '@/lib/supabase-server';
-import type { SupabaseClient } from '@supabase/supabase-js';
-import type { ReassignmentLogsDatabase } from '@/lib/types/reassignment-logs';
 import crypto from 'crypto';
+import { NextResponse } from 'next/server';
+import { z } from 'zod';
 
 export const dynamic = 'force-dynamic';
 
@@ -106,7 +104,7 @@ async function getCurrentPostgresState(collection: string, docId: string): Promi
     } else if (collection === 'buses') {
         const { data, error } = await supabase
             .from('buses')
-            .select('morning_load, evening_load, driver_uid, route_id, route_name')
+            .select('morning_load, evening_load, route_id, route_name')
             .eq('id', docId)
             .maybeSingle();
 
@@ -120,20 +118,18 @@ async function getCurrentPostgresState(collection: string, docId: string): Promi
             evening_load: evening,
             currentMembers: morning + evening,
             current_members: morning + evening,
-            driver_uid: data.driver_uid,
             route_id: data.route_id,
             route_name: data.route_name
         };
     } else if (collection === 'drivers') {
         const { data, error } = await supabase
             .from('driver_profiles')
-            .select('bus_id, is_reserved')
+            .select('is_reserved')
             .eq('uid', docId)
             .maybeSingle();
 
         if (error || !data) return null;
         return {
-            bus_id: data.bus_id,
             is_reserved: data.is_reserved
         };
     }

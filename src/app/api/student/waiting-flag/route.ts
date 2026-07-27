@@ -1,14 +1,15 @@
-import { NextResponse } from 'next/server';
-import { getSupabaseServer } from '@/lib/supabase-server';
-import { withSecurity } from '@/lib/security/api-security';
-import { 
-    WaitingFlagPostSchema, 
-    WaitingFlagQuerySchema, 
-    WaitingFlagDeleteSchema 
-} from '@/lib/security/validation-schemas';
-import { RateLimits } from '@/lib/security/rate-limiter';
-import { getTransportEntitlement } from '@/lib/entitlement/transport-entitlement';
+import { emitEvent } from '@/domains/realtime/event-emitter';
 import { getByUid } from '@/domains/student';
+import { getTransportEntitlement } from '@/lib/entitlement/transport-entitlement';
+import { withSecurity } from '@/lib/security/api-security';
+import { RateLimits } from '@/lib/security/rate-limiter';
+import {
+	WaitingFlagDeleteSchema,
+	WaitingFlagPostSchema,
+	WaitingFlagQuerySchema
+} from '@/lib/security/validation-schemas';
+import { getSupabaseServer } from '@/lib/supabase-server';
+import { NextResponse } from 'next/server';
 
 /**
  * POST /api/student/waiting-flag
@@ -49,7 +50,7 @@ export const POST = withSecurity(
             );
         }
 
-        const studentBusId = studentData.busId || studentData.busId;
+        const studentBusId = studentData.bus_id || studentData.busId || studentData.id;
         
         if (!studentBusId || studentBusId !== busId) {
             return NextResponse.json({
@@ -98,25 +99,17 @@ export const POST = withSecurity(
             .single();
 
         if (insertError) {
+            if (insertError.code === '23505') {
+                return NextResponse.json({ error: 'You already have an active waiting flag for this bus' }, { status: 409 });
+            }
             console.error('Supabase insert error:', insertError);
             return NextResponse.json({ error: 'Failed to create waiting flag' }, { status: 500 });
         }
 
-        // 4. Non-blocking Broadcast (Background)
-        (async () => {
-            try {
-                const channel = supabase.channel(`waiting_flags_${busId}`);
-                await channel.subscribe();
-                await channel.send({
-                    type: 'broadcast',
-                    event: 'waiting_flag_created',
-                    payload: insertData
-                });
-                await supabase.removeChannel(channel);
-            } catch (err) {
-                console.warn('Broadcast failed (non-critical):', err);
-            }
-        })();
+        // 4. Non-blocking Broadcast via WebSocket (Background)
+        emitEvent(`waiting_flags_${busId}`, 'waiting_flag_created', insertData).catch(err => {
+            console.warn('Broadcast failed (non-critical):', err);
+        });
 
         return NextResponse.json({
             success: true,
@@ -161,21 +154,10 @@ export const DELETE = withSecurity(
             return NextResponse.json({ error: 'Cannot cancel waiting flag that is already boarded, cancelled, or expired' }, { status: 409 });
         }
 
-        // 2. Non-blocking Broadcast (Background)
-        (async () => {
-            try {
-                const channel = supabase.channel(`waiting_flags_${busId}`);
-                await channel.subscribe();
-                await channel.send({
-                    type: 'broadcast',
-                    event: 'waiting_flag_removed',
-                    payload: { flagId, studentUid }
-                });
-                await supabase.removeChannel(channel);
-            } catch (err) {
-                console.warn('Broadcast failed (non-critical):', err);
-            }
-        })();
+        // 2. Non-blocking Broadcast via WebSocket (Background)
+        emitEvent(`waiting_flags_${busId}`, 'waiting_flag_removed', { flagId, studentUid }).catch(err => {
+            console.warn('Broadcast failed (non-critical):', err);
+        });
 
         return NextResponse.json({ success: true });
     },

@@ -1,10 +1,9 @@
-import React from 'react';
-import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Button } from '@/components/ui/button';
-import { BusStepProps } from './types';
 import RouteSelectionSection from '@/components/RouteSelectionSection';
-import { ArrowLeft, ArrowRight } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
+import { Select,SelectContent,SelectItem,SelectTrigger,SelectValue } from '@/components/ui/select';
+import { ArrowLeft,ArrowRight } from 'lucide-react';
+import { BusStepProps } from './types';
 
 export default function Step3Bus({
   formData,

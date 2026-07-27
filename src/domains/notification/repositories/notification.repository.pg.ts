@@ -49,11 +49,11 @@
  * 4. deleteByUser: WHERE recipient_ids @> '{userId}' OR sender_user_id = userId
  * ──────────────────────────────────────────────────────────────────────────
  */
-import { getSupabaseServer } from '@/lib/supabase-server';
 import type {
-  NotificationSender,
-  NotificationTarget,
+	NotificationSender,
+	NotificationTarget,
 } from '@/lib/notifications/types';
+import { getSupabaseServer } from '@/lib/supabase-server';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -295,7 +295,6 @@ export async function pgInsertNotification(
     .eq('content', input.content)
     .eq('sender_user_id', senderUserId)
     .gte('created_at', fifteenSecondsAgo)
-    .limit(1)
     .maybeSingle();
 
   if (existing?.id) {

@@ -1,7 +1,7 @@
-import { NextResponse } from 'next/server';
+import { getBusById,updateBus } from '@/domains/fleet/services/fleet.service';
 import { verifyApiAuth } from '@/lib/security/api-auth';
 import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
-import { getBusById, updateBus, removeBus } from '@/domains/fleet/services/fleet.service';
+import { NextResponse } from 'next/server';
 
 // D6 Fleet — Bus CRUD API. Runtime owner: PostgreSQL (fleet.repository.pg → buses table).
 // NOTE: /api/buses/create and /api/buses/update handle the complex transactional variants

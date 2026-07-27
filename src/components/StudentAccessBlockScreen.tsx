@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { AlertTriangle, XCircle, Phone, Mail, CreditCard, ArrowRight, Clock } from 'lucide-react';
+import { Card,CardContent,CardDescription,CardHeader,CardTitle } from '@/components/ui/card';
+import { ENTITLEMENT_MESSAGES,EntitlementReason } from '@/lib/entitlement/transport-entitlement';
+import { getBlockingMessage,getContactInfo,getDaysUntilHardDelete,getHardDeleteDate } from '@/lib/utils/renewal-utils';
+import { AlertTriangle,ArrowRight,Clock,CreditCard,Mail,Phone,XCircle } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { getDaysUntilHardDelete, getBlockingMessage, getContactInfo, getHardDeleteDate } from '@/lib/utils/renewal-utils';
-import { EntitlementReason, ENTITLEMENT_MESSAGES } from '@/lib/entitlement/transport-entitlement';
+import { useEffect } from 'react';
 
 interface StudentAccessBlockScreenProps {
   validUntil: string | null;

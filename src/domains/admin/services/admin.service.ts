@@ -10,25 +10,25 @@
  * orchestration delegates to their respective domain modules.
  */
 import {
-  sendStudentAddedNotification,
-  sendApplicationRejectedNotification,
-  sendApplicationApprovedNotification,
+	sendApplicationApprovedNotification,
+	sendApplicationRejectedNotification,
+	sendStudentAddedNotification,
 } from '@/lib/services/admin-email.service';
-import { adminReconcileBusLoads } from '@/lib/services/admin-reconcile-bus-loads';
-import { runIntegrityScan } from '@/lib/services/integrity-detector';
-import {
-  activateUpcomingSessionApplications,
-  activateSingleApplication,
-} from '@/lib/services/session-activation.service';
-import type { SessionActivationSummary } from '@/lib/services/session-activation.service';
 import type {
-  IntegrityReport,
-  IntegrityFinding,
-} from '@/lib/services/integrity-detector';
-import type {
-  ReconcileSummary,
-  ReconcileOptions,
+	ReconcileOptions,
+	ReconcileSummary,
 } from '@/lib/services/admin-reconcile-bus-loads';
+import { adminReconcileBusLoads } from '@/lib/services/admin-reconcile-bus-loads';
+import type {
+	IntegrityFinding,
+	IntegrityReport,
+} from '@/lib/services/integrity-detector';
+import { runIntegrityScan } from '@/lib/services/integrity-detector';
+import type { SessionActivationSummary } from '@/lib/services/session-activation.service';
+import {
+	activateSingleApplication,
+	activateUpcomingSessionApplications,
+} from '@/lib/services/session-activation.service';
 
 export async function sendStudentAddedEmail(
   adminsOrNull: Parameters<typeof sendStudentAddedNotification>[0],
@@ -62,4 +62,4 @@ export async function activateApplication(applicationId: string, trigger: 'admin
   return activateSingleApplication(applicationId, trigger);
 }
 
-export type { SessionActivationSummary, IntegrityReport, IntegrityFinding, ReconcileSummary, ReconcileOptions };
+export type { IntegrityFinding,IntegrityReport,ReconcileOptions,ReconcileSummary,SessionActivationSummary };

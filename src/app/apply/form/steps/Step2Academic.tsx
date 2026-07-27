@@ -1,11 +1,10 @@
-import React from 'react';
-import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Button } from '@/components/ui/button';
-import { OptimizedInput } from '@/components/forms/OptimizedInput';
 import FacultyDepartmentSelector from '@/components/faculty-department-selector';
+import { OptimizedInput } from '@/components/forms/OptimizedInput';
+import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
+import { Select,SelectContent,SelectItem,SelectTrigger,SelectValue } from '@/components/ui/select';
+import { ArrowLeft,ArrowRight } from 'lucide-react';
 import { AcademicStepProps } from './types';
-import { ArrowLeft, ArrowRight } from 'lucide-react';
 
 export default function Step2Academic({
   formData,

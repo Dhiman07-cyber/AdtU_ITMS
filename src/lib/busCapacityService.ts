@@ -13,7 +13,7 @@
 import * as fleetService from '@/domains/fleet/services/fleet.service';
 import * as identityService from '@/domains/identity/services/identity.service';
 import { pgInsertNotification } from '@/domains/notification/repositories/notification.repository.pg';
-import { calculateCapacityDelta, getShiftLoad, normalizeShift, areShiftsCompatible } from '@/lib/utils/shift-utils';
+import { areShiftsCompatible,calculateCapacityDelta,getShiftLoad,normalizeShift } from '@/lib/utils/shift-utils';
 
 export interface BusCapacity {
   busId: string;

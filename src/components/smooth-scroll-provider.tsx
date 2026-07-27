@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useRef } from "react";
-import { usePathname } from "next/navigation";
 import type Lenis from "lenis";
+import { usePathname } from "next/navigation";
+import { useEffect,useRef } from "react";
 
 const ENABLE_LENIS = process.env.NEXT_PUBLIC_ENABLE_LENIS_SMOOTH_SCROLL === "true";
 const PUBLIC_SMOOTH_SCROLL_ROUTES = new Set([

@@ -1,21 +1,21 @@
 "use client";
 
-import { useState, useEffect, useRef, Suspense } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-import { useAuth } from "@/contexts/auth-context";
-import { Button } from "@/components/ui/button";
 import { trackEvent } from "@/components/Analytics";
-import { Bus } from "lucide-react";
-import { motion } from "framer-motion";
+import { Button } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
 } from "@/components/ui/dialog";
+import { useAuth } from "@/contexts/auth-context";
 import { sanitizeRedirectPath } from "@/lib/security/url-sanitizer";
+import { motion } from "framer-motion";
+import { Bus } from "lucide-react";
+import { useRouter,useSearchParams } from "next/navigation";
+import { Suspense,useEffect,useRef,useState } from "react";
 
 function LoginContent() {
   const [error, setError] = useState("");

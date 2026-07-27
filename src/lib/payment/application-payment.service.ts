@@ -3,7 +3,6 @@
  * Manages payments for new applications and renewals
  */
 
-import { PaymentRecord } from './payment-history.service';
 import { calculateValidUntilDate } from '@/lib/utils/date-utils';
 
 export interface PaymentSession {

@@ -1,28 +1,35 @@
 "use client";
 
-import { useAuth } from "@/contexts/auth-context";
-import { useRouter } from "next/navigation";
-import { useState, useEffect } from "react";
 import {
-  User, Mail, Phone, Calendar, MapPin, Bus, Route as RouteIcon,
-  CreditCard, Clock, Shield, Hash, Briefcase, Camera
-} from "lucide-react";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import {
-  ProfileShell,
-  ProfileHeaderCard,
-  ProfileSectionCard,
-  InfoRow
+	InfoRow,
+	ProfileHeaderCard,
+	ProfileShell
 } from "@/components/profile/ProfileComponents";
-import {
-  getUserProfile,
-  DriverProfile,
-  formatDate
-} from "@/lib/profile-service";
 import ProfileImageUpdateModal from "@/components/ProfileImageUpdateModal";
+import { Button } from "@/components/ui/button";
+import { Card,CardContent } from "@/components/ui/card";
+import { useAuth } from "@/contexts/auth-context";
 import { useToast } from "@/contexts/toast-context";
+import {
+	DriverProfile,
+	formatDate,
+	getUserProfile
+} from "@/lib/profile-service";
+import {
+	Briefcase,
+	Bus,
+	Calendar,
+	Camera,
+	Clock,
+	CreditCard,
+	Hash,
+	Mail,Phone,
+	Route as RouteIcon,
+	Shield,
+	User
+} from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useEffect,useState } from "react";
 
 export default function DriverProfilePage() {
   const { currentUser, userData } = useAuth();

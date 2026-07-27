@@ -1,15 +1,15 @@
 "use client";
 
-import { useState, useEffect } from 'react';
-import { useAuth } from '@/contexts/auth-context';
-import { useToast } from '@/contexts/toast-context';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import { Button } from '@/components/ui/button';
+import { Card,CardContent,CardDescription,CardHeader,CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Loader2, Save, IndianRupee } from 'lucide-react';
+import { useAuth } from '@/contexts/auth-context';
+import { useToast } from '@/contexts/toast-context';
+import { IndianRupee,Loader2,Save } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { PremiumPageLoader } from "@/components/LoadingSpinner";
+import { useEffect,useState } from 'react';
 
 export default function AdminSettingsPage() {
   const { currentUser, userData, loading } = useAuth();

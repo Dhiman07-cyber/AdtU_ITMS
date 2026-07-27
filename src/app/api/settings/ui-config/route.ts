@@ -1,7 +1,7 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { adminAuth } from '@/lib/firebase-admin';
-import { getUiConfig, updateUiConfig } from '@/domains/admin';
+import { getUiConfig,updateUiConfig } from '@/domains/admin';
 import { getUserById } from '@/domains/identity';
+import { adminAuth } from '@/lib/firebase-admin';
+import { NextRequest,NextResponse } from 'next/server';
 
 /**
  * GET /api/settings/ui-config

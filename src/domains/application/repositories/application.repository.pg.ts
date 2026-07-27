@@ -56,7 +56,7 @@
  * audit_logs is NOT stored here — Audit domain owns audit trail.
  */
 import { getSupabaseServer } from '@/lib/supabase-server';
-import type { Application, ApplicationState, ApplicationType } from '@/lib/types/application';
+import type { Application,ApplicationState,ApplicationType } from '@/lib/types/application';
 
 // ─── Field Map ───────────────────────────────────────────────────────────────
 

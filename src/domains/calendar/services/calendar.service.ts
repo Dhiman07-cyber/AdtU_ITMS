@@ -8,8 +8,8 @@
  * deriveAcademicLifecycle from src/lib/utils/deadline-computation.ts —
  * relocated by reference, not reimplemented.
  */
-import { deriveAcademicLifecycle, type DerivedLifecycle } from '@/lib/utils/deadline-computation';
 import type { DeadlineConfig } from '@/lib/types/deadline-config';
+import { deriveAcademicLifecycle,type DerivedLifecycle } from '@/lib/utils/deadline-computation';
 import * as calendarRepository from '../repositories/calendar.repository';
 
 export async function getActiveConfig(): Promise<DeadlineConfig> {

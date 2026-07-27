@@ -1,8 +1,8 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from 'react';
 import { Input } from '@/components/ui/input';
-import { searchFaculties, searchDepartments, getFacultyDepartments, Faculty } from '@/lib/facultyService';
+import { Faculty,getFacultyDepartments,searchDepartments,searchFaculties } from '@/lib/facultyService';
+import React,{ useEffect,useRef,useState } from 'react';
 
 interface FacultyDepartmentSelectorProps {
   onFacultySelect: (faculty: string) => void;

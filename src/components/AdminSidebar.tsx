@@ -1,32 +1,30 @@
 "use client";
 
-import { useState, useEffect } from 'react';
-import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { Button } from '@/components/ui/button';
+import { Tooltip,TooltipContent,TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import {
-  LayoutDashboard,
-  GraduationCap,
-  UserCog,
-  ShieldCheck,
-  Bus,
-  MapPin,
-  ClipboardCheck,
-  Bell,
-  MessageCircle,
-  ChevronsLeft,
-  ChevronsRight,
-  Settings,
-  Command,
-  QrCode,
-  UserPlus,
-  RotateCcw,
-  ArrowRightLeft,
-  Users,
-  ScrollText
+	ArrowRightLeft,
+	Bell,
+	Bus,
+	ChevronsLeft,
+	ChevronsRight,
+	ClipboardCheck,
+	Command,
+	LayoutDashboard,
+	MapPin,
+	MessageCircle,
+	QrCode,
+	RotateCcw,
+	ScrollText,
+	Settings,
+	ShieldCheck,
+	UserPlus,
+	Users
 } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import { useEffect } from 'react';
 import { useSidebar } from './AppShell';
 
 import { useTheme } from '@/components/theme-provider';

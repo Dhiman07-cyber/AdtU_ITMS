@@ -7,34 +7,34 @@
  * ADMIN ONLY - requires admin authentication.
  */
 
-import { useState, useEffect } from 'react';
-import { useAuth } from '@/contexts/auth-context';
-import { useRouter } from 'next/navigation';
-import Link from 'next/link';
 import { PremiumPageLoader } from "@/components/LoadingSpinner";
-import {
-    Play,
-    RefreshCw,
-    Shield,
-    Calendar,
-    Trash2,
-    Users,
-    Bell,
-    CheckCircle2,
-    XCircle,
-    Clock,
-    AlertTriangle,
-    ChevronRight,
-    Zap,
-    Database,
-    Mail,
-    FileText,
-    Settings,
-    ArrowLeft,
-} from 'lucide-react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card,CardContent } from '@/components/ui/card';
+import { useAuth } from '@/contexts/auth-context';
+import {
+	AlertTriangle,
+	ArrowLeft,
+	Bell,
+	Calendar,
+	CheckCircle2,
+	ChevronRight,
+	Clock,
+	Database,
+	FileText,
+	Mail,
+	Play,
+	RefreshCw,
+	Settings,
+	Shield,
+	Trash2,
+	Users,
+	XCircle,
+	Zap,
+} from 'lucide-react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { useState } from 'react';
 
 // Define all cron jobs in the system with detailed info
 const CRON_JOBS = [

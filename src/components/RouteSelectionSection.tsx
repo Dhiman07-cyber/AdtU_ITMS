@@ -1,20 +1,20 @@
 "use client";
 
-import { useState, useEffect, useMemo } from 'react';
-import { Label } from '@/components/ui/label';
+import { Alert,AlertDescription } from '@/components/ui/alert';
+import { Dialog,DialogContent,DialogHeader,DialogTitle,DialogTrigger } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
+import { Select,SelectContent,SelectItem,SelectTrigger,SelectValue } from '@/components/ui/select';
 import { useToast } from '@/contexts/toast-context';
-import { Route } from '@/lib/types';
-import { Loader2, AlertCircle, CheckCircle, Info } from 'lucide-react';
 import {
-  checkBusCapacity,
-  checkCapacityForApplication,
-  CapacityCheckResult,
-  BusCapacityInfo
+	BusCapacityInfo,
+	CapacityCheckResult,
+	checkBusCapacity,
+	checkCapacityForApplication
 } from '@/lib/bus-capacity-checker';
-import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Route } from '@/lib/types';
+import { AlertCircle,Info,Loader2 } from 'lucide-react';
+import { useEffect,useState } from 'react';
 
 interface RouteSelectionSectionProps {
   routes: Route[];

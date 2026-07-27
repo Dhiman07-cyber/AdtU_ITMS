@@ -1,9 +1,8 @@
 "use client";
 
-import { useEffect } from 'react';
 import { useAuth } from '@/contexts/auth-context';
 import { useRouter } from 'next/navigation';
-import { PremiumPageLoader } from '@/components/LoadingSpinner';
+import { useEffect } from 'react';
 
 interface StudentAuthWrapperProps {
   children: React.ReactNode;

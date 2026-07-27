@@ -1,5 +1,5 @@
-import { NextResponse } from 'next/server';
 import { getBusById } from '@/domains/fleet/services/fleet.service';
+import { NextResponse } from 'next/server';
 
 // D6 Fleet — Bus view (public/student-accessible). Runtime owner: PostgreSQL.
 

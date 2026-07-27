@@ -1,6 +1,6 @@
+import { Application,ApplicationType,TargetSession } from '@/lib/types/application';
 import { DeadlineConfig } from '@/lib/types/deadline-config';
 import { computeBlockDatesFromValidUntil } from '@/lib/utils/deadline-computation';
-import { Application, ApplicationType, TargetSession } from '@/lib/types/application';
 
 /**
  * Phase 2 — Future-session eligibility.

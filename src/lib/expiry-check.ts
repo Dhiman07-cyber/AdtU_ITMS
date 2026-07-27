@@ -1,8 +1,8 @@
+import { getStudentById,getUsersByRole,updateStudent } from '@/domains/identity';
 import { pgInsertNotification } from '@/domains/notification/repositories/notification.repository.pg';
 import { getDeadlineConfig } from '@/lib/deadline-config-service';
-import { deriveAcademicLifecycle } from './utils/deadline-computation';
 import { getSupabaseServer } from '@/lib/supabase-server';
-import { getStudentById, updateStudent, getUsersByRole } from '@/domains/identity';
+import { deriveAcademicLifecycle } from './utils/deadline-computation';
 
 interface ExpiryCheckResult {
   totalChecked: number;

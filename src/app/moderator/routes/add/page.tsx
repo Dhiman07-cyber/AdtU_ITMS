@@ -1,18 +1,18 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
-import { useAuth } from '@/contexts/auth-context';
-import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import Link from "next/link";
+import { Select,SelectContent,SelectItem,SelectTrigger,SelectValue } from "@/components/ui/select";
+import { useAuth } from '@/contexts/auth-context';
 import { useToast } from "@/contexts/toast-context";
-import { Plus, X, MapPin, Clock, ArrowDown, GripVertical, RotateCcw } from "lucide-react";
 import AllStopsData from "@/data/All_stops.json";
-import { getAllRoutes } from "@/lib/dataService";
 import { signalCollectionRefresh } from "@/hooks/useEventDrivenRefresh";
+import { getAllRoutes } from "@/lib/dataService";
+import { ArrowDown,GripVertical,MapPin,Plus,RotateCcw,X } from "lucide-react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useEffect,useRef,useState } from "react";
 
 // Stop type definition
 type Stop = {
@@ -28,8 +28,8 @@ type RouteFormData = {
   status: string;
 };
 
-import { useModeratorPermissions } from "@/hooks/useModeratorPermissions";
 import { PermissionDeniedCard } from "@/components/PermissionDeniedCard";
+import { useModeratorPermissions } from "@/hooks/useModeratorPermissions";
 
 export default function AddRoutePage() {
   const { currentUser, userData, loading: authLoading } = useAuth();

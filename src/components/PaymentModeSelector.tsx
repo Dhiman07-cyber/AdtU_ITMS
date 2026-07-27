@@ -1,55 +1,51 @@
 "use client";
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Label } from '@/components/ui/label';
-import { Input } from '@/components/ui/input';
-import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Badge } from '@/components/ui/badge';
-import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { OptimizedInput } from '@/components/forms';
-import {
-  CreditCard,
-  Wallet,
-  Building2,
-  CheckCircle,
-  AlertCircle,
-  Info,
-  IndianRupee,
-  Loader2,
-  Upload,
-  X,
-  FileText,
-  Sparkles,
-  Lock,
-  Zap,
-  Calendar,
-  Clock,
-  ShieldCheck,
-  Receipt,
-  ArrowLeft
-} from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
-import Image from 'next/image';
-import { useRazorpay } from '@/hooks/useRazorpay';
-import { useAuth } from '@/contexts/auth-context';
-import { toast } from 'sonner';
-import {
-  PaymentSession,
-  savePaymentSession,
-  getCurrentPaymentSession,
-  getPaymentSession,
-  updatePaymentSessionStatus,
-  storePaymentReceipt,
-  hasCompletedPayment,
-  calculateFee
-} from '@/lib/payment/application-payment.service';
-import { uploadImage } from '@/lib/upload';
-import { isMobileDevice } from '@/lib/mobile-utils';
 import { PaymentStatusPanel } from '@/components/PaymentStatusPanel';
+import { Alert,AlertDescription } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card,CardContent,CardDescription,CardHeader,CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { useAuth } from '@/contexts/auth-context';
 import { usePaymentRecovery } from '@/hooks/usePaymentRecovery';
+import { useRazorpay } from '@/hooks/useRazorpay';
+import { isMobileDevice } from '@/lib/mobile-utils';
+import {
+	getCurrentPaymentSession,
+	getPaymentSession,
+	hasCompletedPayment,
+	PaymentSession,
+	savePaymentSession,
+	storePaymentReceipt,
+	updatePaymentSessionStatus
+} from '@/lib/payment/application-payment.service';
 import type { PaymentFrontendStatus } from '@/lib/payment/payment-state';
+import { uploadImage } from '@/lib/upload';
+import { AnimatePresence,motion } from 'framer-motion';
+import {
+	AlertCircle,
+	ArrowLeft,
+	Building2,
+	Calendar,
+	CheckCircle,
+	Clock,
+	CreditCard,
+	FileText,
+	IndianRupee,
+	Info,
+	Loader2,
+	Lock,
+	Receipt,
+	ShieldCheck,
+	Upload,
+	Wallet,
+	X,
+	Zap
+} from 'lucide-react';
+import React,{ useCallback,useEffect,useRef,useState } from 'react';
+import { toast } from 'sonner';
 
 interface PaymentModeSelectorProps {
   amount: number;

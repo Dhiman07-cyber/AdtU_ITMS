@@ -1,25 +1,24 @@
 "use client";
 
-import React from 'react';
-import {
-    CheckCircle,
-    X,
-    User,
-    CreditCard,
-    Receipt,
-    Calendar,
-    Shield,
-    Clock,
-    Copy,
-    Check,
-    ArrowRight,
-    QrCode
-} from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { toast } from 'sonner';
+import { Dialog,DialogContent,DialogHeader,DialogTitle } from '@/components/ui/dialog';
 import { safeImageSrc } from '@/lib/security/url-sanitizer';
+import { motion } from 'framer-motion';
+import {
+	Calendar,
+	Check,
+	CheckCircle,
+	Clock,
+	Copy,
+	CreditCard,
+	QrCode,
+	Receipt,
+	Shield,
+	User,
+	X
+} from 'lucide-react';
+import React from 'react';
+import { toast } from 'sonner';
 
 interface ReceiptData {
     studentName: string;

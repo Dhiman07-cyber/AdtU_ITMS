@@ -9,7 +9,7 @@
  */
 import * as fleetService from '@/domains/fleet';
 import * as routeService from '@/domains/route';
-import { normalizeShift, areShiftsCompatible, getShiftLoad } from '@/lib/utils/shift-utils';
+import { areShiftsCompatible,getShiftLoad } from '@/lib/utils/shift-utils';
 
 export async function getBusCapacity(busId: string, shift?: string) {
   const result = await fleetService.checkBusCapacity(busId, shift);

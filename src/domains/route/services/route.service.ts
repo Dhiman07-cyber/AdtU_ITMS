@@ -8,8 +8,8 @@
  * ponytail: delegates entirely to existing production logic in
  * src/lib/dataService.ts — zero behavior change.
  */
-import * as routeRepository from '../repositories/route.repository';
 import type { Route } from '../repositories/route.repository';
+import * as routeRepository from '../repositories/route.repository';
 
 export async function getAll(): Promise<Route[]> {
   return routeRepository.findAll();

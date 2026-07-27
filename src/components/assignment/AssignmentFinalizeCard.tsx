@@ -1,17 +1,15 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import {
-    Clock,
-    Undo2,
-    CheckCircle2,
-    AlertCircle,
-    X,
-    RefreshCw
-} from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import { AnimatePresence,motion } from "framer-motion";
+import {
+	AlertCircle,
+	CheckCircle2,
+	Clock,
+	RefreshCw,
+	Undo2
+} from "lucide-react";
+import { useEffect,useState } from "react";
 
 // ============================================
 // DESIGN TOKENS (Matching your system)

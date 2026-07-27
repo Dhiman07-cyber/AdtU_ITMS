@@ -1,7 +1,7 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { getModeratorById,updateModeratorPermissions } from '@/domains/identity';
 import { withSecurity } from '@/lib/security/api-security';
-import { UpdatePermissionsSchema, UIDSchema, validateInput } from '@/lib/security/validation-schemas';
-import { updateModeratorPermissions, getModeratorById } from '@/domains/identity';
+import { UIDSchema,UpdatePermissionsSchema,validateInput } from '@/lib/security/validation-schemas';
+import { NextResponse } from 'next/server';
 
 /**
  * GET /api/moderators/[id]/permissions

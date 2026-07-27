@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useState, useRef } from "react";
-import { getGuwahatiPmtilesUrl, isNonEmptyHttpUrl } from "@/lib/maps/guwahati-pmtiles";
+import { getGuwahatiPmtilesUrl,isNonEmptyHttpUrl } from "@/lib/maps/guwahati-pmtiles";
+import { useRef,useState } from "react";
 
 interface TestResult {
   name: string;

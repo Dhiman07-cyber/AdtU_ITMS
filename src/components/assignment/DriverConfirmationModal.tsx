@@ -1,42 +1,35 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
 import {
-    Table,
-    TableBody,
-    TableCell,
-    TableHead,
-    TableHeader,
-    TableRow,
-} from "@/components/ui/table";
-import {
-    HoverCard,
-    HoverCardContent,
-    HoverCardTrigger,
+	HoverCard,
+	HoverCardContent,
+	HoverCardTrigger,
 } from "@/components/ui/hover-card";
+import { ScrollArea,ScrollBar } from "@/components/ui/scroll-area";
 import {
-    AlertTriangle,
-    CheckCircle2,
-    Clock,
-    RefreshCw,
-    Shield,
-    XCircle,
-    Undo2,
-    X,
-    Info,
-    ArrowRight,
-    Bus,
-    User,
-    AlertCircle,
-    Download,
-    Sparkles
-} from "lucide-react";
-import { cn } from "@/lib/utils";
+	Table,
+	TableBody,
+	TableCell,
+	TableHead,
+	TableHeader,
+	TableRow,
+} from "@/components/ui/table";
 import type { ConfirmationTableRow } from "@/lib/services/net-assignment-service";
+import { cn } from "@/lib/utils";
+import { AnimatePresence,motion } from "framer-motion";
+import {
+	AlertTriangle,
+	Bus,
+	CheckCircle2,
+	Download,
+	Info,
+	RefreshCw,
+	Shield,
+	Sparkles,
+	X
+} from "lucide-react";
+import { useEffect } from "react";
 
 // ============================================
 // DESIGN TOKENS

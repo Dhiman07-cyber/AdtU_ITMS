@@ -1,0 +1,162 @@
+services:
+  redis:
+    container_name: itms-redis
+    image: redis:7.2-alpine
+    command: redis-server --save 60 1 --loglevel notice
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - itms
+
+  ws1:
+    container_name: itms-ws1
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    ports:
+      - "3001"
+    environment:
+      - NODE_ENV=production
+      - WS_PORT=3001
+      - HEALTH_PORT=9090
+      - LOG_LEVEL=info
+      - REDIS_URL=redis://redis:6379
+    env_file:
+      - .env
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:9090/health/live || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - itms
+
+  ws2:
+    container_name: itms-ws2
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    ports:
+      - "3001"
+    environment:
+      - NODE_ENV=production
+      - WS_PORT=3001
+      - HEALTH_PORT=9090
+      - LOG_LEVEL=info
+      - REDIS_URL=redis://redis:6379
+    env_file:
+      - .env
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:9090/health/live || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - itms
+
+  nextjs:
+    container_name: itms-nextjs
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - HOSTNAME=0.0.0.0
+      - REDIS_URL=redis://redis:6379
+    env_file:
+      - .env
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/api/health || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+    networks:
+      - itms
+
+  nginx:
+    container_name: itms-nginx
+    image: nginx:1.27-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - /etc/letsencrypt:/etc/nginx/certs:ro
+    depends_on:
+      ws1:
+        condition: service_healthy
+      ws2:
+        condition: service_healthy
+      nextjs:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - itms
+
+  prometheus:
+    container_name: itms-prometheus
+    image: prom/prometheus:v2.54.0
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alerts:/etc/prometheus/alerts:ro
+    restart: unless-stopped
+    networks:
+      - itms
+
+  alertmanager:
+    container_name: itms-alertmanager
+    image: prom/alertmanager:v0.27.0
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    restart: unless-stopped
+    networks:
+      - itms
+
+  grafana:
+    container_name: itms-grafana
+    image: grafana/grafana:11.1.0
+    ports:
+      - "3002:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards/json:ro
+    depends_on:
+      - prometheus
+      - alertmanager
+    restart: unless-stopped
+    networks:
+      - itms
+
+networks:
+  itms:
+    driver: bridge

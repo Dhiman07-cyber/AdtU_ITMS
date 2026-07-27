@@ -1,10 +1,10 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { getUserById } from '@/domains/identity';
+import { getDeadlineConfig,updateDeadlineConfig } from '@/lib/deadline-config-service';
 import { adminAuth } from '@/lib/firebase-admin';
-import { getDeadlineConfig, updateDeadlineConfig } from '@/lib/deadline-config-service';
-import { DeadlineConfig } from '@/lib/types/deadline-config';
 import { stripUnsafeObjectKeys } from '@/lib/security/object-safety';
 import { getSupabaseServer } from '@/lib/supabase-server';
-import { getUserById } from '@/domains/identity';
+import { DeadlineConfig } from '@/lib/types/deadline-config';
+import { NextRequest,NextResponse } from 'next/server';
 
 /**
  * Check if dependent lifecycle records exist in the system (PostgreSQL)

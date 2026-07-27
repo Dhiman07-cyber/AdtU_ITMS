@@ -1,7 +1,7 @@
-import { BetaAnalyticsDataClient } from '@google-analytics/data';
-import { NextResponse } from 'next/server';
 import { withSecurity } from '@/lib/security/api-security';
 import { RateLimits } from '@/lib/security/rate-limiter';
+import { BetaAnalyticsDataClient } from '@google-analytics/data';
+import { NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;

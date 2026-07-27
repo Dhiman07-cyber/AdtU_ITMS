@@ -1,34 +1,18 @@
-import { NextResponse } from 'next/server';
-import { getSupabaseServer } from '@/lib/supabase-server';
+import { emitEvent } from '@/domains/realtime/event-emitter';
 import { withSecurity } from '@/lib/security/api-security';
-import { RespondWaitSchema } from '@/lib/security/validation-schemas';
 import { RateLimits } from '@/lib/security/rate-limiter';
+import { RespondWaitSchema } from '@/lib/security/validation-schemas';
+import { NextResponse } from 'next/server';
 
-/**
- * POST /api/driver/respond-wait
- * 
- * Sends a wait response from a driver to a student's dashboard.
- */
 export const POST = withSecurity(
     async (request, { body }) => {
         const { studentId, response, busId } = body as any;
 
-        console.log(`📣 Driver responded to wait request for ${studentId}: ${response}`);
-
-        // Initialize Supabase client
-        const supabase = getSupabaseServer();
-
-        // Broadcast to student channel
-        // Channel name: student_wait_response_{studentId}
-        const channel = supabase.channel(`student_wait_response_${studentId}`);
-
-        await channel.send({
-            type: 'broadcast',
-            event: `wait_${response}`, // wait_accepted or wait_rejected
-            payload: {
-                busId,
-                timestamp: Date.now()
-            }
+        // Deliver driver's response through student_{uid} channel (student subscribes to this)
+        await emitEvent(`student_${studentId}`, 'wait_response', {
+            busId,
+            response,
+            timestamp: Date.now()
         });
 
         return NextResponse.json({ success: true });

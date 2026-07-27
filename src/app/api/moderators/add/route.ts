@@ -1,7 +1,7 @@
-import { NextResponse } from 'next/server';
+import { createModerator,createUser } from '@/domains/identity';
 import { withSecurity } from '@/lib/security/api-security';
-import { AddModeratorSchema, validateInput } from '@/lib/security/validation-schemas';
-import { createUser, createModerator } from '@/domains/identity';
+import { AddModeratorSchema } from '@/lib/security/validation-schemas';
+import { NextResponse } from 'next/server';
 
 export const POST = withSecurity(
   async (request, { auth, body, requestId }) => {

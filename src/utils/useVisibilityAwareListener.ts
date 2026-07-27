@@ -13,11 +13,11 @@
  * @since 2026-01-02
  */
 
-import { useState, useEffect, useRef } from 'react';
 import {
-    VISIBILITY_DEBOUNCE_MS,
-    isRealtimeEnabledSync
+	VISIBILITY_DEBOUNCE_MS,
+	isRealtimeEnabledSync
 } from '@/config/runtime';
+import { useEffect,useRef,useState } from 'react';
 
 // ============================================================================
 // TYPES

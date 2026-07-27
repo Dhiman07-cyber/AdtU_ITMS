@@ -1,62 +1,54 @@
 "use client";
 
-import { useState, memo } from 'react';
-import { Card, CardContent } from '@/components/ui/card';
+import {
+	AlertDialog,
+	AlertDialogAction,
+	AlertDialogCancel,
+	AlertDialogContent,
+	AlertDialogDescription,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Textarea } from '@/components/ui/textarea';
+import { Card,CardContent } from '@/components/ui/card';
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-  DropdownMenuSeparator,
-} from '@/components/ui/dropdown-menu';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-  DialogDescription,
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogTitle
 } from '@/components/ui/dialog';
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
-import {
-  MoreVertical,
-  Eye,
-  Edit,
-  Trash2,
-  User,
-  Clock,
-  EyeOff,
-  Bell,
-  Calendar,
-  CheckCheck,
-  MapPin,
-  Globe,
-  Loader2,
-  AlertCircle,
-  ExternalLink,
-  MessageSquare,
-  Bus,
-  Truck,
-  X
-} from 'lucide-react';
-import Link from 'next/link';
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuSeparator,
+	DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { useAuth } from '@/contexts/auth-context';
 import { useToast } from '@/contexts/toast-context';
-import NotificationFormV2 from './NotificationFormV2';
 import { UserNotificationView } from '@/lib/notifications/types';
-import { formatDistanceToNow, format } from 'date-fns';
+import { format,formatDistanceToNow } from 'date-fns';
+import {
+	AlertCircle,
+	Bell,
+	Bus,
+	Calendar,
+	CheckCheck,
+	Clock,
+	Edit,
+	Eye,
+	Globe,
+	MapPin,
+	MessageSquare,
+	MoreVertical,
+	Trash2,
+	User,
+	X
+} from 'lucide-react';
+import { memo,useState } from 'react';
+import NotificationFormV2 from './NotificationFormV2';
 
 interface NotificationCardV2Props {
   notification: UserNotificationView;

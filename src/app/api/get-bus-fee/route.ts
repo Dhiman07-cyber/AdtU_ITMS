@@ -1,5 +1,5 @@
-import { NextRequest, NextResponse } from 'next/server';
 import { getCurrentBusFee } from '@/lib/bus-fee-service';
+import { NextRequest,NextResponse } from 'next/server';
 
 /**
  * GET /api/get-bus-fee

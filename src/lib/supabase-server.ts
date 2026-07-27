@@ -7,7 +7,7 @@
  * SECURITY: Uses SUPABASE_SERVICE_ROLE_KEY — NEVER import this in client code.
  */
 
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { createClient,SupabaseClient } from '@supabase/supabase-js';
 
 let _serverClient: SupabaseClient | null = null;
 

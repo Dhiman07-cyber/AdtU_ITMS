@@ -13,23 +13,26 @@
  * - No dynamic token generation - UID is the single source of truth
  */
 
-import { useAuth } from "@/contexts/auth-context";
-import { useRouter } from "next/navigation";
-import { useState, useEffect } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import InlineQRDisplay from "@/components/bus-pass/InlineQRDisplay";
+import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { Card,CardContent } from "@/components/ui/card";
+import { useAuth } from "@/contexts/auth-context";
+import { getBusById,getRouteById,getStudentByUid } from "@/lib/dataService";
+import { hasTransportEntitlement } from "@/lib/entitlement/transport-entitlement";
 import {
-  Clock, Shield, CheckCircle, XCircle,
-  ArrowLeft, AlertCircle, Bus, MapPin, Info, CreditCard,
-  QrCode
+	AlertCircle,
+	ArrowLeft,
+	Bus,
+	Clock,
+	CreditCard,
+	QrCode,
+	Shield,
+	XCircle
 } from "lucide-react";
 import Link from "next/link";
-import InlineQRDisplay from "@/components/bus-pass/InlineQRDisplay";
-import { getStudentByUid, getBusById, getRouteById } from "@/lib/dataService";
-import { hasTransportEntitlement } from "@/lib/entitlement/transport-entitlement";
-import { PremiumPageLoader } from "@/components/LoadingSpinner";
-import { formatDateFlexible } from '@/lib/utils/date-utils';
+import { useRouter } from "next/navigation";
+import { useEffect,useState } from "react";
 
 export default function StudentBusPassPage() {
   const { currentUser, userData } = useAuth();

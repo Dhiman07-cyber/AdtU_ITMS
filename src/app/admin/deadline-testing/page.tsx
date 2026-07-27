@@ -14,36 +14,34 @@
  * - Manual Mode: Admin selects specific students with checkboxes
  */
 
-import { useState, useEffect } from 'react';
-import { useAuth } from '@/contexts/auth-context';
-import { useRouter } from 'next/navigation';
-import Link from 'next/link';
 import { PremiumPageLoader } from "@/components/LoadingSpinner";
-import {
-    Calendar,
-    Clock,
-    Users,
-    AlertTriangle,
-    Play,
-    Trash2,
-    Lock,
-    CheckCircle2,
-    XCircle,
-    ArrowLeft,
-    RefreshCw,
-    Eye,
-    ChevronDown,
-    ChevronUp,
-    Settings,
-    UserCheck,
-    UserX,
-} from 'lucide-react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card,CardContent,CardDescription,CardHeader,CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { useAuth } from '@/contexts/auth-context';
 import { DeadlineConfig } from '@/lib/types/deadline-config';
+import {
+	AlertTriangle,
+	ArrowLeft,
+	Calendar,
+	CheckCircle2,
+	ChevronDown,
+	ChevronUp,
+	Clock,
+	Eye,
+	Lock,
+	Play,
+	RefreshCw,
+	Settings,
+	Trash2,
+	Users,
+	XCircle
+} from 'lucide-react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { useEffect,useState } from 'react';
 
 interface StudentStatus {
     uid: string;

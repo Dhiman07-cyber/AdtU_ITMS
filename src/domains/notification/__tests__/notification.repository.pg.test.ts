@@ -7,7 +7,7 @@
  * Test philosophy: verify observable behaviour (returned domain objects,
  * thrown errors, field mapping correctness), not mock wiring details.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { beforeEach,describe,expect,it,vi } from 'vitest';
 
 // ─── Mock Supabase client ────────────────────────────────────────────────────
 
@@ -38,14 +38,14 @@ vi.mock('@/lib/supabase-server', () => ({
 
 // ─── Import SUT after mocking ────────────────────────────────────────────────
 import {
-  pgFindNotificationsByUser,
-  pgFindNotificationById,
-  pgFindExpiredNotifications,
-  pgInsertNotification,
-  pgUpdateNotification,
-  pgDeleteNotification,
-  pgBulkDeleteNotifications,
-  pgDeleteNotificationsByUser,
+	pgBulkDeleteNotifications,
+	pgDeleteNotification,
+	pgDeleteNotificationsByUser,
+	pgFindExpiredNotifications,
+	pgFindNotificationById,
+	pgFindNotificationsByUser,
+	pgInsertNotification,
+	pgUpdateNotification,
 } from '../repositories/notification.repository.pg';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────

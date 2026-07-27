@@ -48,10 +48,7 @@
  * createdAt / updatedAt      → created_at / updated_at
  */
 import { getSupabaseServer } from '@/lib/supabase-server';
-import type { Bus, Driver } from '@/lib/types';
-import { getActiveAssignmentByBusId, listActiveAssignments } from '@/domains/fleet/repositories/driver-assignment.repository';
-
-
+import type { Bus } from '@/lib/types';
 // ─── Bus Field Map ────────────────────────────────────────────────────────────
 
 const BUS_FIELD_MAP: Record<string, string> = {
@@ -60,7 +57,6 @@ const BUS_FIELD_MAP: Record<string, string> = {
   model: 'model',
   year: 'year',
   capacity: 'capacity',
-  driverName: 'driver_name',
   routeId: 'route_id',
   routeName: 'route_name',
   status: 'status',
@@ -116,7 +112,7 @@ function pgRowToBus(row: Record<string, any>): Bus {
     year: row.year,
     capacity: row.capacity ?? 0,
     driverUID: null,
-    driverName: row.driver_name,
+    driverName: null,
     routeId: row.route_id,
     routeName: row.route_name,
     status: row.status || 'inactive',
@@ -136,15 +132,29 @@ function pgRowToBus(row: Record<string, any>): Bus {
 // ─── Driver UID Enrichment ────────────────────────────────────────────────────
 
 async function enrichWithDriverUid(bus: Bus): Promise<Bus> {
-  const assignment = await getActiveAssignmentByBusId(bus.id);
-  if (assignment) bus.driverUID = assignment.driverUid;
+  const db = getSupabaseServer();
+  const { data: activeTrip } = await db
+    .from('active_trips')
+    .select('driver_id')
+    .eq('bus_id', bus.id)
+    .eq('status', 'active')
+    .maybeSingle();
+
+  if (activeTrip?.driver_id) {
+    bus.driverUID = activeTrip.driver_id;
+  }
   return bus;
 }
 
 async function enrichBusListWithDriverUid(buses: Bus[]): Promise<Bus[]> {
   if (buses.length === 0) return buses;
-  const all = await listActiveAssignments();
-  const map = new Map(all.map(a => [a.busId, a.driverUid]));
+  const db = getSupabaseServer();
+  const { data: activeTrips } = await db
+    .from('active_trips')
+    .select('bus_id, driver_id')
+    .eq('status', 'active');
+
+  const map = new Map((activeTrips || []).map(t => [t.bus_id, t.driver_id]));
   for (const bus of buses) {
     bus.driverUID = map.get(bus.id) ?? null;
   }

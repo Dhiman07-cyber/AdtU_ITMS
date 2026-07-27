@@ -8,62 +8,26 @@
 //   delete*    — remove entity
 //   check*     — boolean permission/authorization guard
 export {
-  // Users
-  getUserById,
-  getUserByEmail,
-  getUsersByRole,
-  getAllUsers,
-  createUser,
-  updateUser,
-  deleteUser,
-  // Student Profiles
-  getStudentById,
-  getStudentsByStatus,
-  getStudentsByStatuses,
-  getSeatOccupyingStudents,
-  getBusOccupancyStats,
-  getStudentsByShift,
-  getStudentsByBusIds,
-  getStudentsByRouteIds,
-  getAllStudents,
-  createStudent,
-  updateStudent,
-  deleteStudent,
-  // Driver Profiles
-  getDriverById,
-  getDriversByStatus,
-  getAllDrivers,
-  getAllDriversPaginated,
-  getDriversByBusId,
-  createDriver,
-  updateDriver,
-  deleteDriver,
-  // Moderator Profiles
-  getModeratorById,
-  getModeratorsByStatus,
-  createModerator,
-  updateModerator,
-  updateModeratorPermissions,
-  deleteModerator,
-  // Moderator Permissions
-  getModeratorPermissions,
-  requireModeratorPermission,
-  // Admin Profiles
-  getAdminById,
-  createAdmin,
-  updateAdmin,
-  deleteAdmin,
-  // Unauth Users
-  getUnauthUserById,
-  createUnauthUser,
-  updateUnauthUser,
-  deleteUnauthUser,
-  getAllUnauthUsers,
-  // FCM Tokens
-  saveFcmToken,
-  deleteFcmToken,
-  getValidFcmTokensForUsers,
-  cleanupStaleFcmTokens,
-  hashFcmToken,
+	cleanupStaleFcmTokens,createAdmin,createDriver,createModerator,createStudent,createUnauthUser,createUser,deleteAdmin,deleteDriver,deleteFcmToken,deleteModerator,deleteStudent,deleteUnauthUser,deleteUser,
+	// Admin Profiles
+	getAdminById,getAllDrivers,
+	getAllDriversPaginated,getAllModerators,getAllStudents,getAllUnauthUsers,getAllUsers,getBusOccupancyStats,
+	// Driver Profiles
+	getDriverById,getDriversByBusId,getDriversByStatus,
+	// Moderator Profiles
+	getModeratorById,
+	// Moderator Permissions
+	getModeratorPermissions,getModeratorsByStatus,getSeatOccupyingStudents,
+	// Student Profiles
+	getStudentById,getStudentsByBusIds,
+	getStudentsByRouteIds,getStudentsByShift,getStudentsByStatus,
+	getStudentsByStatuses,
+	// Unauth Users
+	getUnauthUserById,getUserByEmail,
+	// Users
+	getUserById,getUsersByRole,getValidFcmTokensForUsers,hashFcmToken,requireModeratorPermission,
+	// FCM Tokens
+	saveFcmToken,updateAdmin,updateDriver,updateModerator,
+	updateModeratorPermissions,updateStudent,updateUnauthUser,updateUser
 } from './services/identity.service';
-export type { User, UserRole, ModeratorPermissions } from './services/identity.service';
+export type { ModeratorPermissions,User,UserRole } from './services/identity.service';

@@ -10,12 +10,12 @@
  * D4 Application flow; this service does not touch them (they're D4's
  * job per the frozen domain boundary, not D3's).
  */
-import * as studentRepository from '../repositories/student.repository';
-import { getTransportEntitlement, hasTransportEntitlement } from '@/lib/entitlement/transport-entitlement';
-import type { Student } from '../repositories/student.repository';
+import { getDeadlineConfig } from '@/lib/deadline-config-service';
+import { getTransportEntitlement,hasTransportEntitlement } from '@/lib/entitlement/transport-entitlement';
 import { paymentsSupabaseService } from '@/lib/services/payments-supabase';
 import { computeBlockDatesFromValidUntil } from '@/lib/utils/deadline-computation';
-import { getDeadlineConfig } from '@/lib/deadline-config-service';
+import type { Student } from '../repositories/student.repository';
+import * as studentRepository from '../repositories/student.repository';
 
 export async function getByUid(uid: string): Promise<Student | null> {
   return studentRepository.findByUid(uid);
@@ -114,6 +114,6 @@ export async function getProfile(uid: string): Promise<Student | null> {
 
 // Canonical entitlement decision — re-exported as-is (see
 // src/lib/entitlement/transport-entitlement.ts for the locked business rule).
-export { getTransportEntitlement, hasTransportEntitlement };
+export { getTransportEntitlement,hasTransportEntitlement };
 
-export type { Student };
+	export type { Student };

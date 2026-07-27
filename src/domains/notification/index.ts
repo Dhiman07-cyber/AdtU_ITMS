@@ -6,11 +6,7 @@
 // D10.4 ACTIVE: All reads and writes go through PostgreSQL.
 // Firestore notification collection is now read-only (frozen pending removal).
 export {
-  createNotification,
-  editNotification,
-  deleteNotificationGlobally,
-  markAsRead,
-  findById,
-  findByUser,
-  isNotificationVisibleToUser,
+	createNotification,deleteNotificationGlobally,editNotification,findById,
+	findByUser,
+	isNotificationVisibleToUser,markAsRead
 } from './services/notification.service';

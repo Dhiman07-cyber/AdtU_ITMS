@@ -1,9 +1,10 @@
-﻿import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseServer } from '@/lib/supabase-server';
-import { withSecurity } from '@/lib/security/api-security';
-import { WaitingFlagPostSchema } from '@/lib/security/validation-schemas';
-import { RateLimits } from '@/lib/security/rate-limiter';
+﻿import { emitEvent } from '@/domains/realtime/event-emitter';
 import { getByUid } from '@/domains/student';
+import { withSecurity } from '@/lib/security/api-security';
+import { RateLimits } from '@/lib/security/rate-limiter';
+import { WaitingFlagPostSchema } from '@/lib/security/validation-schemas';
+import { getSupabaseServer } from '@/lib/supabase-server';
+import { NextResponse } from 'next/server';
 
 // Initialize Supabase client
 const supabase = getSupabaseServer();
@@ -107,25 +108,16 @@ export const POST = withSecurity(
         return NextResponse.json({ success: false, error: 'Failed to record waiting flag', requestId }, { status: 500 });
       }
 
-      // 7. Real-time Broadcast to Driver
-      try {
-        const channel = supabase.channel(`waiting_flags_${busId}`);
-        await channel.send({
-          type: 'broadcast',
-          event: 'waiting_flag_created',
-          payload: {
-            flagId: flag.id,
-            studentUid,
-            studentName,
-            stop_name: flagData.stop_name,
-            accuracy,
-            message: flagData.message,
-            timestamp: flagData.created_at
-          }
-        });
-      } catch (broadcastError) {
-        console.warn(`[${requestId}] Real-time broadcast failed (non-critical):`, broadcastError);
-      }
+      // 7. Real-time Broadcast via WebSocket
+      emitEvent(`waiting_flags_${busId}`, 'waiting_flag_created', {
+        flagId: flag.id,
+        studentUid,
+        studentName,
+        stop_name: flagData.stop_name,
+        accuracy,
+        message: flagData.message,
+        timestamp: flagData.created_at
+      }).catch(err => console.warn(`[${requestId}] Real-time broadcast failed (non-critical):`, err));
 
       const elapsed = Date.now() - startTime;
       console.log(`✅ [${requestId}] Waiting flag ${flag.id} created in ${elapsed}ms`);

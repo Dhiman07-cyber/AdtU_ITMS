@@ -1,4 +1,4 @@
-import type { MapConfig, MapProvider, MapTheme } from "./map-config";
+import type { MapConfig,MapProvider,MapTheme } from "./map-config";
 import { sanitizeMapConfigInput } from "./map-config";
 import type { MapProviderId } from "./map-provider-types";
 

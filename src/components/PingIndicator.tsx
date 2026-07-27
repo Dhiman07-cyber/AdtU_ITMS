@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from 'react';
+import { useEffect,useRef,useState } from 'react';
 
 /**
  * Premium Ping Indicator - Refined Design

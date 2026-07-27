@@ -1,21 +1,8 @@
 // D11 Config — system configuration and operational markers
 export {
-  getSystemConfig,
-  updateSystemConfig,
-  getLandingConfig,
-  updateLandingConfig,
-  getUiConfig,
-  updateUiConfig,
-  getLegalConfig,
-  updateLegalConfig,
-  findMarker,
-  upsertMarker,
+	findMarker,getLandingConfig,getLegalConfig,getSystemConfig,getUiConfig,updateLandingConfig,updateLegalConfig,updateSystemConfig,updateUiConfig,upsertMarker
 } from './services/config.service';
 export type {
-  ConfigResult,
-  SystemConfig,
-  LandingConfig,
-  UiConfig,
-  LegalConfig,
-  LegalConfigSection,
+	ConfigResult,LandingConfig,LegalConfig,
+	LegalConfigSection,SystemConfig,UiConfig
 } from './services/config.service';

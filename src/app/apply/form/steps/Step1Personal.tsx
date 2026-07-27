@@ -1,15 +1,14 @@
-import React from 'react';
-import { Camera, X, ArrowRight, ArrowLeft } from 'lucide-react';
-import Image from 'next/image';
-import { Label } from '@/components/ui/label';
-import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Button } from '@/components/ui/button';
+import EnhancedDatePicker from '@/components/enhanced-date-picker';
 import { OptimizedInput } from '@/components/forms/OptimizedInput';
 import { OptimizedSelect } from '@/components/forms/OptimizedSelect';
-import EnhancedDatePicker from '@/components/enhanced-date-picker';
-import ProfileImageAddModal from '@/components/ProfileImageAddModal';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select,SelectContent,SelectItem,SelectTrigger,SelectValue } from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
+import { ArrowRight,Camera,X } from 'lucide-react';
+import Image from 'next/image';
+import React from 'react';
 import { PersonalStepProps } from './types';
 
 export default function Step1Personal({

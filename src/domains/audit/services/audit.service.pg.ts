@@ -7,26 +7,23 @@
  * No Firestore fallback. No outbox. No recovery.
  * PG is the single source of truth.
  */
-import {
-  pgInsertAuditEvent,
-  pgQueryAuditEvents,
-} from '../repositories/audit.repository.pg';
 import type {
-  AuditEventInsert,
-  AuditEventRow,
-  AuditEventFilters,
-  AuditEventPagination,
-  AuditEventQueryResult,
+	AuditEventFilters,
+	AuditEventInsert,
+	AuditEventPagination,
+	AuditEventQueryResult,
+	AuditEventRow,
+} from '../repositories/audit.repository.pg';
+import {
+	pgInsertAuditEvent,
+	pgQueryAuditEvents,
 } from '../repositories/audit.repository.pg';
 
 // ─── Re-exports ──────────────────────────────────────────────────────────────
 
 export type {
-  AuditEventInsert,
-  AuditEventRow,
-  AuditEventFilters,
-  AuditEventPagination,
-  AuditEventQueryResult,
+	AuditEventFilters,AuditEventInsert,AuditEventPagination,
+	AuditEventQueryResult,AuditEventRow
 };
 
 // ─── Types ───────────────────────────────────────────────────────────────────

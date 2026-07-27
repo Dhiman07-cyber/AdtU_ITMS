@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useState } from "react";
-import { Navigation, Clock, Users, Play, Target, MapPin, ChevronRight } from "lucide-react";
+import { Clock,MapPin,Navigation,Play,Target,Users } from "lucide-react";
+import { useState } from "react";
 
 interface RouteStop {
   stop_name: string;
@@ -88,7 +88,7 @@ export default function RouteJourney({
 
               return (
                 <div
-                  key={stop.stop_name}
+                  key={(stop as any).id || stop.stop_name || stop.name || `stop-${stop.sequence || index}`}
                   className="flex items-start"
                 >
                   {/* Stop Point Station */}

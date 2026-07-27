@@ -1,10 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { describe,expect,it } from 'vitest';
 import {
-  generateSecureQRData,
-  parseSecureQRData,
-  signDocumentPayload,
-  verifyReceiptIntegrity,
-  type DocumentPayload,
+	generateSecureQRData,
+	parseSecureQRData,
+	signDocumentPayload,
+	verifyReceiptIntegrity,
+	type DocumentPayload,
 } from '../document-crypto.service';
 
 const payload: DocumentPayload = {

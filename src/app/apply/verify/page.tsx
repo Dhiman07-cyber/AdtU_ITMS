@@ -1,10 +1,10 @@
 "use client";
 
+import { Card,CardContent,CardDescription,CardHeader,CardTitle } from "@/components/ui/card";
 import { useAuth } from '@/contexts/auth-context';
-import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Loader2 } from "lucide-react";
+import { useRouter } from 'next/navigation';
+import { useEffect } from 'react';
 
 export default function VerifyApplicationPage() {
   const { currentUser, loading } = useAuth();

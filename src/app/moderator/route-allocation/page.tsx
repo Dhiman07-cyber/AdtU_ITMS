@@ -1,69 +1,58 @@
 "use client";
 
-import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
+import { useCallback,useEffect,useMemo,useRef,useState } from "react";
 
 
 
-import { useAuth } from "@/contexts/auth-context";
-import { useModeratorPermissions } from "@/hooks/useModeratorPermissions";
-import { PermissionDeniedCard } from "@/components/PermissionDeniedCard";
-import { toast } from "react-hot-toast";
-import {
-    Bus,
-    Route as RouteIcon,
-    Search,
-    Filter,
-    ArrowRightLeft,
-    MapPin,
-    CheckCircle2,
-    Navigation,
-    Clock,
-    X,
-    Plus,
-    Check,
-    UserCog,
-    Sparkles,
-    History,
-} from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
 import { PremiumPageLoader } from "@/components/LoadingSpinner";
-import { Checkbox } from "@/components/ui/checkbox";
+import { PermissionDeniedCard } from "@/components/PermissionDeniedCard";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
 } from "@/components/ui/select";
 import {
-    Tooltip,
-    TooltipContent,
-    TooltipProvider,
-    TooltipTrigger,
+	TooltipProvider
 } from "@/components/ui/tooltip";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { useAuth } from "@/contexts/auth-context";
+import { useModeratorPermissions } from "@/hooks/useModeratorPermissions";
 import { cn } from "@/lib/utils";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
+import {
+	ArrowRightLeft,
+	Bus,
+	CheckCircle2,
+	Filter,
+	History,
+	MapPin,
+	Navigation,
+	Route as RouteIcon,
+	Search
+} from "lucide-react";
+import { toast } from "react-hot-toast";
 
 // Assignment components and services
-import { RouteStagingArea } from "@/components/assignment/StagingArea";
-import { RouteConfirmationModal } from "@/components/assignment/RouteConfirmationModal";
 import { AssignmentFinalizeCard } from "@/components/assignment/AssignmentFinalizeCard";
 import { ReassignmentHistoryModal } from "@/components/assignment/ReassignmentHistoryModal";
+import { RouteConfirmationModal } from "@/components/assignment/RouteConfirmationModal";
+import { RouteStagingArea } from "@/components/assignment/StagingArea";
 import {
-    generateStagingId,
-    type StagedRouteAssignment,
+	generateStagingId,
+	type StagedRouteAssignment,
 } from "@/lib/services/assignment-service";
 import {
-    computeNetRouteAssignments,
-    validateRouteStagingPreCheck,
-    type StagedRouteOperation,
-    type DbRouteSnapshot,
-    type RouteConfirmationTableRow,
-    type ComputeNetRouteAssignmentsResult,
+	computeNetRouteAssignments,
+	validateRouteStagingPreCheck,
+	type ComputeNetRouteAssignmentsResult,
+	type DbRouteSnapshot,
+	type StagedRouteOperation
 } from "@/lib/services/net-route-assignment-service";
 
 // ============================================

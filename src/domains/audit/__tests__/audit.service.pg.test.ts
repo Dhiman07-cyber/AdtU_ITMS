@@ -4,7 +4,7 @@
  * Tests service functions using mocked repository.
  * Verifies validation, result types, and error handling.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { beforeEach,describe,expect,it,vi } from 'vitest';
 
 // ─── Mock repository ─────────────────────────────────────────────────────────
 
@@ -24,9 +24,9 @@ vi.mock('../repositories/audit.repository.pg', () => ({
 // ─── Import SUT after mocking ────────────────────────────────────────────────
 
 import {
-  createAuditEvent,
-  queryAuditEvents,
-  SYSTEM_ACTOR,
+	createAuditEvent,
+	queryAuditEvents,
+	SYSTEM_ACTOR,
 } from '../services/audit.service.pg';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────

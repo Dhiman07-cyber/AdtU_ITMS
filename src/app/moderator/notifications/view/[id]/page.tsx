@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Loader2, ArrowLeft } from "lucide-react";
 import { PremiumPageLoader } from "@/components/LoadingSpinner";
+import { Button } from "@/components/ui/button";
+import { Card,CardContent,CardHeader,CardTitle } from "@/components/ui/card";
+import { ArrowLeft } from "lucide-react";
 import Link from 'next/link';
+import { useParams,useRouter } from 'next/navigation';
+import { useEffect,useState } from 'react';
 
 export default function ModeratorViewNotification() {
   const params = useParams();

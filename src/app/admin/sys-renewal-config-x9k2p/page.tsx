@@ -1,53 +1,40 @@
 "use client";
 
-import { useState, useEffect, useCallback } from 'react';
-import { useAuth } from '@/contexts/auth-context';
-import { useToast } from '@/contexts/toast-context';
+import { useSidebar } from '@/components/AppShell';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { PremiumPageLoader } from '@/components/LoadingSpinner';
+import MonthDayPicker,{ MonthDayValue,fromConfigFormat,toConfigFormat } from '@/components/month-day-picker';
+import TimePicker,{ TimeValue,fromConfigTime } from '@/components/time-picker';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { ConfirmDialog } from '@/components/ConfirmDialog';
-import MonthDayPicker, { MonthDayValue, fromConfigFormat, toConfigFormat } from '@/components/month-day-picker';
-import TimePicker, { TimeValue, fromConfigTime } from '@/components/time-picker';
-import {
-    Loader2,
-    Save,
-    RotateCcw,
-    Calendar,
-    Bell,
-    Lock,
-    Phone,
-    Mail,
-    Building,
-    IndianRupee,
-    XCircle,
-    Settings2,
-    Trash2,
-    AlertTriangle,
-    Sparkles,
-    AlertCircle,
-    Clock,
-    Info,
-    FileText,
-    CreditCard,
-    Shield,
-    CheckCircle,
-    Users,
-    MapPin,
-    Award,
-    Zap,
-    Home,
-    Layers,
-    Plus,
-    UserCheck,
-    ScrollText
-} from 'lucide-react';
-import { useRouter } from 'next/navigation';
-import { PremiumPageLoader } from '@/components/LoadingSpinner';
+import { useAuth } from '@/contexts/auth-context';
+import { useToast } from '@/contexts/toast-context';
 import { DeadlineConfig } from '@/lib/types/deadline-config';
 import { deriveAcademicLifecycle } from '@/lib/utils/deadline-computation';
-import { useSidebar } from '@/components/AppShell';
+import {
+	AlertTriangle,
+	Bell,
+	Calendar,
+	FileText,
+	IndianRupee,
+	Info,
+	Layers,
+	Loader2,
+	Lock,
+	Plus,
+	RotateCcw,
+	Save,
+	ScrollText,
+	Settings2,
+	Shield,
+	Sparkles,
+	Trash2,
+	XCircle
+} from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { useCallback,useEffect,useState } from 'react';
 
 // ============================================================================
 // TYPES

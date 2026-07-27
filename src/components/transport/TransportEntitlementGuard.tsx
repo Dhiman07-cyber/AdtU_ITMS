@@ -1,10 +1,10 @@
 "use client";
 
-import { ReactNode, useEffect, useState } from 'react';
+import { PremiumPageLoader } from '@/components/LoadingSpinner';
+import StudentAccessBlockScreen from '@/components/StudentAccessBlockScreen';
 import { useAuth } from '@/contexts/auth-context';
 import { useTransportEntitlement } from '@/hooks/useTransportEntitlement';
-import StudentAccessBlockScreen from '@/components/StudentAccessBlockScreen';
-import { PremiumPageLoader } from '@/components/LoadingSpinner';
+import { ReactNode,useEffect,useState } from 'react';
 
 interface TransportEntitlementGuardProps {
   children: ReactNode;

@@ -93,7 +93,11 @@ export async function getSystemConfig(): Promise<ConfigResult<SystemConfig>> {
 
   const doc = await adminDb.collection('settings').doc('config').get();
   if (!doc.exists) {
-    throw new Error('Configuration missing in settings database. Please configure settings and try again later.');
+    return {
+      data: { appName: 'AdtU Bus Services', busFee: { amount: 5000, version: 1 } } as any,
+      updatedAt: null,
+      updatedByUid: null,
+    };
   }
 
   const data = doc.data() as SystemConfig;
@@ -133,7 +137,17 @@ export async function getLandingConfig(): Promise<ConfigResult<LandingConfig>> {
 
   const doc = await adminDb.collection('settings').doc('landing').get();
   if (!doc.exists) {
-    throw new Error('Landing configuration missing in settings database. Please configure settings and try again later.');
+    const defaultConfig: LandingConfig = {
+      heroTitle: 'AdtU Bus Services',
+      heroSubtitle: 'Smart Campus Transit Portal',
+      features: [],
+      updatedAt: new Date().toISOString(),
+    } as any;
+    return {
+      data: defaultConfig,
+      updatedAt: null,
+      updatedByUid: null,
+    };
   }
 
   const data = doc.data() as LandingConfig;
@@ -199,7 +213,11 @@ export async function getLegalConfig(type: 'privacy' | 'terms'): Promise<ConfigR
 
   const doc = await adminDb.collection('settings').doc(type).get();
   if (!doc.exists) {
-    throw new Error(`Configuration missing in settings database for ${type}. Please configure settings and try again later.`);
+    return {
+      data: { title: type === 'privacy' ? 'Privacy Policy' : 'Terms of Service', sections: [] },
+      updatedAt: null,
+      updatedByUid: null,
+    };
   }
 
   const data = doc.data() as LegalConfig;

@@ -1,23 +1,28 @@
 "use client";
 
-import { useAuth } from "@/contexts/auth-context";
-import { useRouter } from "next/navigation";
-import { useState, useEffect } from "react";
-import { 
-  User, Mail, Phone, Calendar, Clock, Shield, Hash, Briefcase, Building
-} from "lucide-react";
-import { Button } from "@/components/ui/button";
 import {
-  ProfileShell,
-  ProfileHeaderCard,
-  ProfileSectionCard,
-  InfoRow
+	InfoRow,
+	ProfileHeaderCard,
+	ProfileSectionCard,
+	ProfileShell
 } from "@/components/profile/ProfileComponents";
-import { 
-  getUserProfile, 
-  AdminProfile,
-  formatDate
+import { Button } from "@/components/ui/button";
+import { useAuth } from "@/contexts/auth-context";
+import {
+	AdminProfile,
+	formatDate,
+	getUserProfile
 } from "@/lib/profile-service";
+import {
+	Briefcase,Building,
+	Calendar,Clock,
+	Hash,
+	Mail,Phone,
+	Shield,
+	User
+} from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useEffect,useState } from "react";
 
 export default function AdminProfilePage() {
   const { currentUser, userData } = useAuth();

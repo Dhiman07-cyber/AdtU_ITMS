@@ -8,8 +8,8 @@
  *  - Mobile compression for large images.
  */
 
-import { isMobileDevice, compressImageForMobile } from './mobile-utils';
 import { getAuth } from 'firebase/auth';
+import { compressImageForMobile,isMobileDevice } from './mobile-utils';
 
 /** Allowed MIME types (must match server allowlist) */
 const ALLOWED_TYPES = new Set([
