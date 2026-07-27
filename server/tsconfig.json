@@ -2,7 +2,7 @@
   "extends": "../tsconfig.json",
   "compilerOptions": {
     "noEmit": false,
-    "module": "commonjs",
+    "module": "esnext",
     "moduleResolution": "bundler",
     "rootDir": "..",
     "outDir": "./dist",
