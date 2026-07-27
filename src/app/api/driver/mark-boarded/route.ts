@@ -1,9 +1,9 @@
-import { NextResponse } from 'next/server';
-import { getSupabaseServer } from '@/lib/supabase-server';
-import { withSecurity } from '@/lib/security/api-security';
-import { MarkBoardedSchema } from '@/lib/security/validation-schemas';
-import { RateLimits } from '@/lib/security/rate-limiter';
 import { emitEvent } from '@/domains/realtime/event-emitter';
+import { withSecurity } from '@/lib/security/api-security';
+import { RateLimits } from '@/lib/security/rate-limiter';
+import { MarkBoardedSchema } from '@/lib/security/validation-schemas';
+import { getSupabaseServer } from '@/lib/supabase-server';
+import { NextResponse } from 'next/server';
 
 /**
  * POST /api/driver/mark-boarded

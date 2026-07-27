@@ -1,4 +1,3 @@
-import { normalizeShift } from '@/lib/utils/shift-utils';
 import { auth } from '@/lib/firebase';
 
 async function getAuthHeaders(): Promise<Record<string, string>> {

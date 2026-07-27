@@ -1,6 +1,6 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { checkAndNotifyExpiringStudents, sendMidJuneReminder } from '@/lib/expiry-check';
+import { checkAndNotifyExpiringStudents,sendMidJuneReminder } from '@/lib/expiry-check';
 import crypto from 'crypto';
+import { NextRequest,NextResponse } from 'next/server';
 
 /**
  * Cron endpoint for expiry checks

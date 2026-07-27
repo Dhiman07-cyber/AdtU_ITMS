@@ -12,17 +12,15 @@
  * @version 1.0.0
  */
 
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { useAuth } from '@/contexts/auth-context';
 import {
-    DEFAULT_PAGE_SIZE,
-    POLLING_INTERVAL_MS
+	POLLING_INTERVAL_MS
 } from '@/config/runtime';
+import { useAuth } from '@/contexts/auth-context';
 import { useVisibilityAwareListener } from '@/utils/useVisibilityAwareListener';
+import { useCallback,useEffect,useRef,useState } from 'react';
 import {
-    dataCache,
-    invalidateCollectionCache,
-    type CacheEntry,
+	dataCache,
+	type CacheEntry
 } from './usePaginatedCollection';
 
 // ============================================================================

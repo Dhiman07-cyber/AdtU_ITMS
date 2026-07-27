@@ -8,21 +8,10 @@
  */
 
 export type {
-    StagedRouteOperation,
-    BusSnapshot,
-    RouteSnapshot,
-    DbRouteSnapshot,
-    NetRouteChange,
-    RouteImpact,
-    RouteConfirmationTableRow,
-    ComputeNetRouteAssignmentsResult,
-    RouteValidationResult,
+	BusSnapshot,ComputeNetRouteAssignmentsResult,DbRouteSnapshot,
+	NetRouteChange,RouteConfirmationTableRow,RouteImpact,RouteSnapshot,RouteValidationResult,StagedRouteOperation
 } from './net-route-assignment-types';
 
 export {
-    getRouteName,
-    getRoute,
-    formatBusLabel,
-    computeNetRouteAssignments,
-    validateRouteStagingPreCheck,
+	computeNetRouteAssignments,formatBusLabel,getRoute,getRouteName,validateRouteStagingPreCheck
 } from './net-route-assignment-types';

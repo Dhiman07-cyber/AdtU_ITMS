@@ -1,9 +1,8 @@
 "use client";
 
 import { useAuth } from '@/contexts/auth-context';
-import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { PremiumPageLoader } from '@/components/LoadingSpinner';
+import { useEffect,useState } from 'react';
 
 export default function ModeratorLayout({
   children,

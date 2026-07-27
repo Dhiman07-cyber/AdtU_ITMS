@@ -11,7 +11,6 @@
 
 import { messaging } from '@/lib/firebase-admin';
 import { getSupabaseServer } from '@/lib/supabase-server';
-import { getDriverUidByBusId } from '@/domains/fleet/repositories/driver-assignment.repository';
 
 export type TripEventType = 'TRIP_STARTED' | 'TRIP_ENDED';
 export type RouteTopicEventType = TripEventType | 'BUS_CHANGED';
@@ -57,7 +56,7 @@ export async function verifyDriverRouteBinding(
   try {
     const supabase = getSupabaseServer();
 
-    // 1. Check active_trips for active assignment
+    // Check active_trips for active assignment
     const { data: activeTrip } = await supabase
       .from('active_trips')
       .select('bus_id, driver_id')
@@ -67,29 +66,7 @@ export async function verifyDriverRouteBinding(
 
     if (activeTrip?.bus_id === busId) return { authorized: true };
 
-    // 2. Check canonical driver_assignments table
-    const assignedDriverUid = await getDriverUidByBusId(busId);
-    if (assignedDriverUid === driverId) return { authorized: true };
-
-    // 3. Check buses table (driver_uid)
-    const { data: bus } = await supabase
-      .from('buses')
-      .select('driver_uid')
-      .eq('id', busId)
-      .maybeSingle();
-
-    if (bus?.driver_uid === driverId) return { authorized: true };
-
-    // 4. Check driver_profiles table (bus_id)
-    const { data: driverProfile } = await supabase
-      .from('driver_profiles')
-      .select('bus_id')
-      .eq('uid', driverId)
-      .maybeSingle();
-
-    if (driverProfile?.bus_id === busId) return { authorized: true };
-
-    return { authorized: false, reason: 'Driver is not assigned to this bus' };
+    return { authorized: false, reason: 'No active trip found for this driver and bus' };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Driver authorization failed';
     console.error('Error verifying driver-route binding:', message);

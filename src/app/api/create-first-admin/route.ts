@@ -1,5 +1,5 @@
+import { createUser,getUserById } from '@/domains/identity';
 import crypto from 'crypto';
-import { createUser, getUserById } from '@/domains/identity';
 
 export async function POST(request: Request) {
   try {

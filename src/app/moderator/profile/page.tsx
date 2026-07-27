@@ -1,25 +1,32 @@
 "use client";
 
-import { useAuth } from "@/contexts/auth-context";
-import { useRouter } from "next/navigation";
-import { useState, useEffect } from "react";
 import {
-  User, Mail, Phone, Calendar, Clock, Shield, Hash, Briefcase, Building, Camera
-} from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import {
-  ProfileShell,
-  ProfileHeaderCard,
-  InfoRow
+	InfoRow,
+	ProfileHeaderCard,
+	ProfileShell
 } from "@/components/profile/ProfileComponents";
-import {
-  getUserProfile,
-  ModeratorProfile,
-  formatDate
-} from "@/lib/profile-service";
 import ProfileImageUpdateModal from "@/components/ProfileImageUpdateModal";
+import { Button } from "@/components/ui/button";
+import { Card,CardContent } from "@/components/ui/card";
+import { useAuth } from "@/contexts/auth-context";
 import { useToast } from "@/contexts/toast-context";
+import {
+	formatDate,
+	getUserProfile,
+	ModeratorProfile
+} from "@/lib/profile-service";
+import {
+	Briefcase,Building,
+	Calendar,
+	Camera,
+	Clock,
+	Hash,
+	Mail,Phone,
+	Shield,
+	User
+} from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useEffect,useState } from "react";
 
 export default function ModeratorProfilePage() {
   const { currentUser, userData } = useAuth();

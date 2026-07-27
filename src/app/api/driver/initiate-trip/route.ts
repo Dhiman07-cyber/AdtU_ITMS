@@ -1,8 +1,8 @@
-import { NextResponse } from 'next/server';
+import * as tripService from '@/domains/trip';
 import { withSecurity } from '@/lib/security/api-security';
 import { RateLimits } from '@/lib/security/rate-limiter';
+import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import * as tripService from '@/domains/trip';
 
 const InitiateTripSchema = z.object({
   busId: z.string().min(1).max(100),

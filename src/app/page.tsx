@@ -1,10 +1,10 @@
 'use client';
 
+import LandingPage from '@/app/(landing)/page';
+import { PremiumPageLoader } from '@/components/LoadingSpinner';
 import { useAuth } from '@/contexts/auth-context';
 import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
-import { PremiumPageLoader } from '@/components/LoadingSpinner';
-import LandingPage from '@/app/(landing)/page';
+import { useEffect,useState } from 'react';
 
 export default function Home() {
   const { currentUser, userData, loading, needsApplication } = useAuth();

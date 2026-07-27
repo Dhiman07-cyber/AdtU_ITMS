@@ -1,55 +1,48 @@
 ﻿"use client";
 
-import React, { useState, useEffect } from 'react';
-import { useAuth } from '@/contexts/auth-context';
-import { useRouter } from 'next/navigation';
-import Image from 'next/image';
 import { PremiumPageLoader } from '@/components/LoadingSpinner';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Label } from '@/components/ui/label';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Badge } from '@/components/ui/badge';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import {
-  Calendar,
-  Clock,
-  AlertTriangle,
-  CheckCircle,
-  CreditCard,
-  IndianRupee,
-  Info,
-  Loader2,
-  RefreshCw,
-  ArrowLeft,
-  Receipt,
-  History,
-  Sparkles,
-  Zap,
-  User,
-  IdCard,
-  CalendarCheck,
-  TrendingUp,
-  ShieldCheck,
-  ChevronRight,
-  Bus,
-  Copy,
-  Download
-} from 'lucide-react';
-import { toast } from 'sonner';
 import PaymentModeSelector from '@/components/PaymentModeSelector';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card,CardContent } from '@/components/ui/card';
+import { Label } from '@/components/ui/label';
+import { Select,SelectContent,SelectItem,SelectTrigger,SelectValue } from '@/components/ui/select';
+import { useAuth } from '@/contexts/auth-context';
 import {
-  calculateFee,
-  calculateSessionDates,
-  clearPaymentSession,
-  hasCompletedPayment
+	calculateSessionDates,
+	clearPaymentSession,
+	hasCompletedPayment
 } from '@/lib/payment/application-payment.service';
-import Link from 'next/link';
-import { parseFirestoreDate, formatDate, daysUntil, isDateExpired } from '@/lib/utils/date-utils';
+import { daysUntil,isDateExpired,parseFirestoreDate } from '@/lib/utils/date-utils';
+import {
+	AlertTriangle,
+	ArrowLeft,
+	Bus,
+	Calendar,
+	CheckCircle,
+	Clock,
+	Copy,
+	Download,
+	History,
+	IndianRupee,
+	Info,
+	Loader2,
+	Receipt,
+	RefreshCw,
+	ShieldCheck,
+	Sparkles,
+	TrendingUp,
+	User,
+	Zap
+} from 'lucide-react';
+import Image from 'next/image';
+import { useRouter } from 'next/navigation';
+import React,{ useEffect,useState } from 'react';
+import { toast } from 'sonner';
 // Migrated: Server-side API → PostgreSQL (no Firestore client reads)
+import ErrorBoundary from '@/components/ErrorBoundary';
 import { useApiCollection } from '@/hooks/useApiCollection';
 import { safeImageSrc } from '@/lib/security/url-sanitizer';
-import ErrorBoundary from '@/components/ErrorBoundary';
 
 interface Transaction {
   studentId: string;

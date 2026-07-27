@@ -53,6 +53,10 @@ export class WebSocketServer {
         const url = new URL(request.url || '/', 'http://localhost');
         const reconnectToken = url.searchParams.get('reconnect_token');
         if (reconnectToken) {
+          const oldSession = sessionManager.findByReconnectToken(reconnectToken);
+          if (oldSession) {
+            subscriptionManager.unsubscribeAll(oldSession.socketId, oldSession);
+          }
           const restored = sessionManager.restoreSession(reconnectToken, socketId);
           if (restored) {
             session = restored;
@@ -116,16 +120,22 @@ export class WebSocketServer {
         routeMessage(ws, session, raw);
       });
 
+      ws.on('pong', () => {
+        sessionManager.updateHeartbeat(socketId);
+      });
+
       ws.on('close', () => {
         connectionCleanupService.cleanup(socketId);
         clearRateLimitsFor(socketId);
         logger.info('audit', { action: 'disconnected', uid: auth.uid!, role: auth.role || 'unknown', socketId, ip });
       });
 
-      ws.on('error', () => {
-        connectionCleanupService.cleanup(socketId);
-        clearRateLimitsFor(socketId);
+      ws.on('error', (err) => {
+        // Do NOT call cleanup here — the 'close' event always fires after 'error'
+        // and is the canonical cleanup owner. Calling cleanup twice would produce
+        // a duplicate 'disconnected' audit log and redundant index mutations.
         metricsService.inc('errors');
+        logger.error('ws_socket_error', { uid: auth.uid!, socketId, error: (err as Error).message, errorClass: 'WEBSOCKET_SEND_FAILED' });
       });
 
       metricsService.inc('connectionsAccepted');

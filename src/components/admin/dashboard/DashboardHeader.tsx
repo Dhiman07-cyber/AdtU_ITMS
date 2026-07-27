@@ -1,10 +1,10 @@
 "use client";
 
-import { Clock, Activity, RefreshCw, Zap, Bus, Users, MapPin } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { DashboardStats } from './types';
 import { useTheme } from '@/components/theme-provider';
+import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { Clock,RefreshCw } from 'lucide-react';
+import { DashboardStats } from './types';
 
 interface DashboardHeaderProps {
   firstName: string;
@@ -34,12 +34,18 @@ export default function DashboardHeader({
       <div className="space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center gap-4">
           <div className="relative">
-            <h1 className={cn(
-              "text-2xl md:text-3xl font-extrabold tracking-tight leading-tight",
-              theme === 'dark' ? "bg-gradient-to-r from-white via-blue-100 to-indigo-100 bg-clip-text text-transparent" : "bg-gradient-to-r from-[#1E3A8A] via-[#1E40AF] to-[#1E3A8A] bg-clip-text text-transparent"
-            )}>
-              Welcome back, {firstName}!
-            </h1>
+            {(() => {
+              const cleanFirstName = (firstName || (role === 'moderator' ? 'Moderator' : 'Admin')).trim().split(/\s+/)[0];
+              return (
+                <h1 className={cn(
+                  "text-2xl md:text-3xl font-extrabold tracking-tight leading-tight",
+                  theme === 'dark' ? "bg-gradient-to-r from-white via-blue-100 to-indigo-100 bg-clip-text text-transparent" : "bg-gradient-to-r from-[#1E3A8A] via-[#1E40AF] to-[#1E3A8A] bg-clip-text text-transparent"
+                )}>
+                  <span className="hidden md:inline">Welcome back, {cleanFirstName}!</span>
+                  <span className="inline md:hidden">Welcome {cleanFirstName}!</span>
+                </h1>
+              );
+            })()}
             <div className="absolute -bottom-1 left-0 w-24 h-1 bg-gradient-to-r from-blue-600 to-transparent rounded-full shadow-[0_0_10px_rgba(37,99,235,0.5)]" />
           </div>
 

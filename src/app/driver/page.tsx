@@ -1,25 +1,42 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
-import { useAuth } from "@/contexts/auth-context";
-import { useRouter } from "next/navigation";
-import Link from "next/link";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import {
-  Bus, MapPin, Users, Clock, Navigation, QrCode,
-  ArrowRight, PlayCircle, StopCircle, Activity,
-  MapPinned, Zap, CreditCard, Info, TrendingUp,
-  Calendar, Bell, Shield, Fuel, AlertTriangle,
-  CheckCircle, XCircle, Loader2, Sparkles, Star,
-  Crown, Award, Target, BarChart3, Hash, User, Monitor
-} from "lucide-react";
 import { PremiumPageLoader } from "@/components/LoadingSpinner";
-import { supabase } from "@/lib/supabase-client";
-import { authApiFetch } from "@/lib/secure-api-client";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card,CardContent,CardHeader } from "@/components/ui/card";
+import { useAuth } from "@/contexts/auth-context";
 import { WebSocketClient } from '@/domains/realtime/ws-client';
+import { authApiFetch } from "@/lib/secure-api-client";
+import { supabase } from "@/lib/supabase-client";
 import { formatIdForDisplay } from "@/lib/utils";
+import {
+	Activity,
+	ArrowRight,
+	Award,
+	Bell,
+	Bus,
+	CheckCircle,
+	Clock,
+	CreditCard,
+	Hash,
+	Info,
+	MapPin,
+	MapPinned,
+	Monitor,
+	Navigation,
+	PlayCircle,
+	QrCode,
+	Shield,
+	Sparkles,
+	Star,
+	StopCircle,
+	TrendingUp,
+	User,
+	Users
+} from "lucide-react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
 
 export default function DriverDashboard() {
   const { userData, currentUser } = useAuth();
@@ -314,7 +331,16 @@ export default function DriverDashboard() {
 
                   <div>
                     <h1 className="text-2xl md:text-3xl lg:text-4xl font-black bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 bg-clip-text text-transparent mb-0.5">
-                      Welcome back, {driverData?.fullName?.split(' ')[0] || 'Driver'}!
+                      {(() => {
+                        const rawDriverName = driverData?.fullName || driverData?.name || userData?.name || 'Driver';
+                        const driverFirstName = rawDriverName.trim().split(/\s+/)[0];
+                        return (
+                          <>
+                            <span className="hidden md:inline">Welcome back, {driverFirstName}!</span>
+                            <span className="inline md:hidden">Welcome {driverFirstName}!</span>
+                          </>
+                        );
+                      })()}
                     </h1>
                     <p className="text-[11px] sm:text-xs text-gray-600 dark:text-gray-400 mt-0.5 font-bold uppercase tracking-wider">
                       {new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}

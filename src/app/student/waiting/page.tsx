@@ -1,24 +1,24 @@
 ﻿"use client";
 
-import { useState, useEffect } from "react";
-import { useAuth } from "@/contexts/auth-context";
-import { useRouter } from "next/navigation";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card,CardContent,CardDescription,CardHeader,CardTitle } from "@/components/ui/card";
+import { useAuth } from "@/contexts/auth-context";
+import { getBusById,getBusesByRouteId,getRouteById,getStudentByUid } from "@/lib/dataService";
 import {
-  Flag,
-  Clock,
-  MapPin,
-  CheckCircle,
-  AlertCircle
+	AlertCircle,
+	CheckCircle,
+	Clock,
+	Flag,
+	MapPin
 } from "lucide-react";
-import { getStudentByUid, getBusById, getRouteById, getBusesByRouteId } from "@/lib/dataService";
 import dynamic from "next/dynamic";
+import { useRouter } from "next/navigation";
+import { useEffect,useState } from "react";
 
 // Dynamic import for live-location map (student)
 const BusMap = dynamic(() => import("@/components/maps/LiveTrackingBusMap"), { ssr: false });
-import { PremiumPageLoader } from "@/components/LoadingSpinner";
 
 export default function StudentWaitingPage() {
   const { currentUser, userData } = useAuth();

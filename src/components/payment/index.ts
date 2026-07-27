@@ -5,7 +5,7 @@
  */
 
 export { TransactionCard } from './TransactionCard';
-export type { TransactionCardData, TransactionCardProps } from './TransactionCard';
+export type { TransactionCardData,TransactionCardProps } from './TransactionCard';
 
 export { PaymentDetailModal } from './PaymentDetailModal';
 export type { PaymentDetailModalProps } from './PaymentDetailModal';

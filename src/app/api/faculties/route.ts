@@ -1,5 +1,5 @@
-import { NextResponse } from 'next/server';
 import facultiesData from '@/data/faculties_departments.json';
+import { NextResponse } from 'next/server';
 
 export async function GET() {
   try {

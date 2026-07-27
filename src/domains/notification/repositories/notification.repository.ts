@@ -15,36 +15,36 @@
  * VISIBILITY: Pure function, no persistence.
  */
 import {
-  getUsersByRole,
-  getAllUsers,
-  getStudentsByShift,
-  getStudentsByBusIds,
-  getStudentsByRouteIds,
-  getAllStudents,
+	getAllStudents,
+	getAllUsers,
+	getStudentsByBusIds,
+	getStudentsByRouteIds,
+	getStudentsByShift,
+	getUsersByRole,
 } from '@/domains/identity';
-import { normalizeShift } from '@/lib/utils/shift-utils';
-import {
-  pgFindNotificationById,
-  pgInsertNotification,
-  pgUpdateNotification,
-  pgBulkDeleteNotifications,
-  pgDeleteNotificationsByUser,
-  pgFindNotificationsByUser,
-  pgFindExpiredNotifications,
-  pgDeleteNotification,
-} from './notification.repository.pg';
 import type {
-  NotificationRecord,
-  CreateNotificationInput,
-} from './notification.repository.pg';
-import type {
-  UserRole,
-  TargetType,
-  NotificationTarget,
-  NotificationSender,
-  PermissionCheckResult,
-  VisibilityCheckResult,
+	NotificationSender,
+	NotificationTarget,
+	PermissionCheckResult,
+	TargetType,
+	UserRole,
+	VisibilityCheckResult,
 } from '@/lib/notifications/types';
+import { normalizeShift } from '@/lib/utils/shift-utils';
+import type {
+	CreateNotificationInput,
+	NotificationRecord,
+} from './notification.repository.pg';
+import {
+	pgBulkDeleteNotifications,
+	pgDeleteNotification,
+	pgDeleteNotificationsByUser,
+	pgFindExpiredNotifications,
+	pgFindNotificationById,
+	pgFindNotificationsByUser,
+	pgInsertNotification,
+	pgUpdateNotification,
+} from './notification.repository.pg';
 
 // ─── Permission Checkers (pure functions, no persistence) ────────────────────
 
@@ -355,15 +355,9 @@ export function isNotificationVisibleToUser(
 // ─── Re-exports ─────────────────────────────────────────────────────────────
 
 export type {
-  NotificationRecord,
-  CreateNotificationInput,
+	CreateNotificationInput,NotificationRecord
 };
 
-export type {
-  UserRole,
-  TargetType,
-  NotificationTarget,
-  NotificationSender,
-  PermissionCheckResult,
-  VisibilityCheckResult,
-};
+	export type {
+		NotificationSender,NotificationTarget,PermissionCheckResult,TargetType,UserRole,VisibilityCheckResult
+	};

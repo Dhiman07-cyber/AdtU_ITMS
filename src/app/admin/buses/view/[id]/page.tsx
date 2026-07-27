@@ -1,38 +1,35 @@
 ﻿"use client";
 
-import { useState, useEffect } from "react";
-import { use } from "react";
-import { useRouter } from "next/navigation";
-import { Button } from "@/components/ui/button";
-import {
-  Bus,
-  Hash,
-  Users,
-  MapPin,
-  Calendar,
-  Edit,
-  Trash2,
-  User,
-  Phone,
-  Mail,
-  CreditCard,
-  CalendarDays,
-  Activity,
-  Palette
-} from "lucide-react";
-import Link from "next/link";
-import { useToast } from '@/contexts/toast-context';
 import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import RouteJourney from "@/components/RouteJourney";
+import { Button } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
 } from "@/components/ui/dialog";
-import { getBusById, getRouteById, getDriverById, deleteBus, getAllDrivers } from "@/lib/dataService";
+import { useToast } from '@/contexts/toast-context';
+import { deleteBus,getAllDrivers,getBusById,getRouteById } from "@/lib/dataService";
+import {
+	Activity,
+	Bus,
+	CalendarDays,
+	CreditCard,
+	Edit,
+	Hash,
+	Mail,
+	MapPin,
+	Phone,
+	Trash2,
+	User,
+	Users
+} from "lucide-react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { use,useEffect,useState } from "react";
 
 // Define the interfaces
 interface Stop {

@@ -28,8 +28,8 @@
  *   The exported function signatures are frozen.
  *   No caller may be required to change its import.
  */
+import { getActiveConfig,updateConfig } from '@/domains/calendar';
 import type { DeadlineConfig } from './types/deadline-config';
-import { getActiveConfig, updateConfig } from '@/domains/calendar';
 
 /**
  * Returns the fully-populated DeadlineConfig from PostgreSQL.

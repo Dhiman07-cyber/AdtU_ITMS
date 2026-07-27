@@ -1,32 +1,44 @@
 "use client";
 
-import { useAuth } from "@/contexts/auth-context";
-import { useTransportEntitlement } from "@/hooks/useTransportEntitlement";
-import { useRouter, usePathname } from "next/navigation";
-import Link from "next/link";
-import React, { useState, useCallback, useEffect } from "react";
-import {
-  User, Bus, Bell, Menu, X, LayoutDashboard,
-  GraduationCap, UserCog, ShieldCheck, MapPin,
-  ClipboardCheck, MessageCircle, Settings2, LogOut,
-  ChevronRight, QrCode, RefreshCcw
-} from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { SignOutButton } from "@/components/signout-button";
 import { CompactPingIndicator } from '@/components/PingIndicator';
-import { APP_NAME } from '@/config/runtime';
-import { useNotifications } from '@/contexts/NotificationContext';
-import { cn } from "@/lib/utils";
-import { safeImageSrc } from "@/lib/security/url-sanitizer";
-import { motion, AnimatePresence } from "framer-motion";
+import { SignOutButton } from "@/components/signout-button";
+import { Button } from "@/components/ui/button";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuLabel,
+	DropdownMenuSeparator,
+	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { APP_NAME } from '@/config/runtime';
+import { useAuth } from "@/contexts/auth-context";
+import { useNotifications } from '@/contexts/NotificationContext';
+import { useTransportEntitlement } from "@/hooks/useTransportEntitlement";
+import { safeImageSrc } from "@/lib/security/url-sanitizer";
+import { cn } from "@/lib/utils";
+import { AnimatePresence,motion } from "framer-motion";
+import {
+	Bell,
+	Bus,
+	ChevronRight,
+	ClipboardCheck,
+	GraduationCap,
+	LayoutDashboard,
+	LogOut,
+	MapPin,
+	Menu,
+	MessageCircle,
+	QrCode,RefreshCcw,
+	Settings2,
+	ShieldCheck,
+	User,
+	UserCog,
+	X
+} from "lucide-react";
+import Link from "next/link";
+import { usePathname,useRouter } from "next/navigation";
+import React,{ useCallback,useEffect,useState } from "react";
 
 interface NavbarProps {
   onMenuToggle?: () => void;

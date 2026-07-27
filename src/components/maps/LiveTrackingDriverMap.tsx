@@ -1,6 +1,5 @@
 "use client";
 
-import type { ComponentProps } from "react";
 import dynamic from "next/dynamic";
 import MapErrorBoundary from "./MapErrorBoundary";
 

@@ -1,11 +1,11 @@
-﻿import { NextResponse } from 'next/server';
-import { wasSeatReleased } from '@/lib/config/capacity-flags';
-import { withSecurity } from '@/lib/security/api-security';
-import { DeleteStudentSchema } from '@/lib/security/validation-schemas';
-import { RateLimits } from '@/lib/security/rate-limiter';
-import { createAuditEvent, resolveAuditActor } from '@/domains/audit';
+﻿import { createAuditEvent,resolveAuditActor } from '@/domains/audit';
 import { getStudentById } from '@/domains/identity';
 import { deleteUserAndData } from '@/lib/cleanup-helpers';
+import { wasSeatReleased } from '@/lib/config/capacity-flags';
+import { withSecurity } from '@/lib/security/api-security';
+import { RateLimits } from '@/lib/security/rate-limiter';
+import { DeleteStudentSchema } from '@/lib/security/validation-schemas';
+import { NextResponse } from 'next/server';
 
 export const POST = withSecurity(
     async (request, { auth, body }) => {

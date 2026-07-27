@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import { X, Globe } from "lucide-react";
+import { Alert,AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Globe,X } from "lucide-react";
+import { useEffect,useState } from "react";
 
 export default function BrowserCompatibilityBanner() {
   const [showBanner, setShowBanner] = useState(false);

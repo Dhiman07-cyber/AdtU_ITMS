@@ -1,12 +1,12 @@
 "use client";
 
-import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/auth-context';
-import {
-    ModeratorPermissions,
-    DEFAULT_MODERATOR_PERMISSIONS
-} from '@/lib/types/moderator-permissions';
 import { getSigningOutState } from '@/lib/firestore-error-handler';
+import {
+	DEFAULT_MODERATOR_PERMISSIONS,
+	ModeratorPermissions
+} from '@/lib/types/moderator-permissions';
+import { useEffect,useState } from 'react';
 
 interface UseModeratorPermissionsReturn {
     permissions: ModeratorPermissions;

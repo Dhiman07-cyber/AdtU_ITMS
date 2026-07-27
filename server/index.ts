@@ -1,9 +1,13 @@
+import 'dotenv/config';
 import { createServer } from 'http';
 import { wsServer } from './websocket-server';
 import { transportManager } from './transport-manager';
 import { logger } from './structured-logger';
 import { healthService } from './health-service';
 import { metricsService } from './metrics-service';
+import { stopOfflineQueue } from './offline-queue';
+import { stopRateLimiter } from './rate-limiter';
+import { stopMessageValidator } from './message-validator';
 
 const WS_PORT = parseInt(process.env.WS_PORT || '3001', 10);
 const HEALTH_PORT = parseInt(process.env.HEALTH_PORT || '9090', 10);
@@ -66,6 +70,9 @@ async function main() {
     wsServer.shutdown(() => {
       clearTimeout(drainTimer);
       healthService.stopDraining();
+      stopOfflineQueue();
+      stopRateLimiter();
+      stopMessageValidator();
       transportManager.shutdown().then(() => forceExit());
     });
   };

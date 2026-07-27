@@ -1,12 +1,12 @@
 "use client";
 
-import { ReactNode } from "react";
+import { useTransportEntitlement } from "@/hooks/useTransportEntitlement";
+import { cn } from "@/lib/utils";
+import { Home,MapPin,QrCode,RefreshCcw,User } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Home, MapPin, QrCode, RefreshCcw, User } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { ReactNode } from "react";
 import StudentAuthWrapper from "./StudentAuthWrapper";
-import { useTransportEntitlement } from "@/hooks/useTransportEntitlement";
 
 interface StudentLayoutProps {
   children: ReactNode;

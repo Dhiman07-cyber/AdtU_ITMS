@@ -41,6 +41,7 @@ export interface LocationUpdate {
   timestamp: string;
   provider?: 'gps' | 'network' | 'unknown';
   battery?: number;
+  correlationId?: string;
 }
 
 export interface LocationUpdateNormalized {

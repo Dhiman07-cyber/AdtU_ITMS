@@ -10,10 +10,10 @@
  *   // Use auth.uid, auth.role, auth.email
  */
 
-import { NextRequest, NextResponse } from 'next/server';
 import { adminAuth } from '@/lib/firebase-admin';
 import { resolveUserRole } from '@/lib/security/role-cache';
 import crypto from 'crypto';
+import { NextRequest,NextResponse } from 'next/server';
 
 // ============================================================================
 // TYPES

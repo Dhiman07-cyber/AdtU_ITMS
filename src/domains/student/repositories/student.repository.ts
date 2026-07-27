@@ -14,20 +14,20 @@
  * ponytail: thin delegation wrapper. Public function signatures are
  * unchanged so StudentService requires zero modification.
  */
-import {
-  pgFindByUid,
-  pgFindById,
-  pgFindAll,
-  pgFindByBusId,
-  pgFindByEnrollmentId,
-  pgFindByStatus,
-  pgInsert,
-  pgUpdate,
-  pgRemove,
-  pgUpsert,
-  pgUnassignRoute,
-} from './student.repository.pg';
 import type { Student } from '@/lib/types';
+import {
+	pgFindAll,
+	pgFindByBusId,
+	pgFindByEnrollmentId,
+	pgFindById,
+	pgFindByStatus,
+	pgFindByUid,
+	pgInsert,
+	pgRemove,
+	pgUnassignRoute,
+	pgUpdate,
+	pgUpsert,
+} from './student.repository.pg';
 
 export async function findByUid(uid: string): Promise<Student | null> {
   return pgFindByUid(uid);

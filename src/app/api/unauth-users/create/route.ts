@@ -1,6 +1,6 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { createUnauthUser,getUnauthUserById,getUserById,updateUnauthUser } from '@/domains/identity';
 import { withSecurity } from '@/lib/security/api-security';
-import { createUnauthUser, getUnauthUserById, getUserById, updateUnauthUser } from '@/domains/identity';
+import { NextResponse } from 'next/server';
 
 /**
  * Create or update an unauthenticated user entry

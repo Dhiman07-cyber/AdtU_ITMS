@@ -1,10 +1,10 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { verifyApiAuth } from '@/lib/security/api-auth';
-import { checkRateLimit, RateLimits, createRateLimitId } from '@/lib/security/rate-limiter';
-import { calculateRenewalDate } from '@/lib/utils/renewal-utils';
-import { computeBlockDatesFromValidUntil } from '@/lib/utils/deadline-computation';
+import { createStudent,createUser } from '@/domains/identity';
 import { getDeadlineConfig } from '@/lib/deadline-config-service';
-import { createUser, createStudent } from '@/domains/identity';
+import { verifyApiAuth } from '@/lib/security/api-auth';
+import { checkRateLimit,createRateLimitId,RateLimits } from '@/lib/security/rate-limiter';
+import { computeBlockDatesFromValidUntil } from '@/lib/utils/deadline-computation';
+import { calculateRenewalDate } from '@/lib/utils/renewal-utils';
+import { NextRequest,NextResponse } from 'next/server';
 
 export async function POST(request: NextRequest) {
   try {

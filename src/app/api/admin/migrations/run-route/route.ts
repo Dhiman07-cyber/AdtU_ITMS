@@ -10,13 +10,13 @@
  *   ?action=rollback  — delete the PG row (rollback)
  *   ?action=status    — return current migration record from migration_log
  */
-import { NextRequest, NextResponse } from 'next/server';
+import { routeMigration } from '@/domains/route/migrations/d7-route.migration';
+import { MigrationRunner } from '@/infrastructure/migration/migration-runner';
+import { RollbackManager } from '@/infrastructure/migration/rollback-manager';
+import { SupabaseMigrationStore } from '@/infrastructure/migration/supabase-migration-store';
 import { adminAuth } from '@/lib/firebase-admin';
 import { resolveUserRole } from '@/lib/security/role-cache';
-import { MigrationRunner } from '@/infrastructure/migration/migration-runner';
-import { SupabaseMigrationStore } from '@/infrastructure/migration/supabase-migration-store';
-import { RollbackManager } from '@/infrastructure/migration/rollback-manager';
-import { routeMigration } from '@/domains/route/migrations/d7-route.migration';
+import { NextRequest,NextResponse } from 'next/server';
 
 async function requireAdmin(req: NextRequest): Promise<string | null> {
   const authHeader = req.headers.get('Authorization');

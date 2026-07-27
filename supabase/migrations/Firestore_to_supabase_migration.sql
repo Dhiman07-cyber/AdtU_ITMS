@@ -50,7 +50,22 @@ BEGIN
         ALTER TABLE public.student_profiles DROP COLUMN assigned_route_id;
     END IF;
 
-    -- driver_profiles: remove old alias columns and deprecated fields
+    -- driver_profiles: remove static assignment fields
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='driver_profiles' AND column_name='bus_id') THEN
+        ALTER TABLE public.driver_profiles DROP COLUMN bus_id;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='driver_profiles' AND column_name='route_id') THEN
+        ALTER TABLE public.driver_profiles DROP COLUMN route_id;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='driver_profiles' AND column_name='shift') THEN
+        ALTER TABLE public.driver_profiles DROP COLUMN shift;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='driver_profiles' AND column_name='trip_active') THEN
+        ALTER TABLE public.driver_profiles DROP COLUMN trip_active;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='driver_profiles' AND column_name='active_trip_id') THEN
+        ALTER TABLE public.driver_profiles DROP COLUMN active_trip_id;
+    END IF;
     IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='driver_profiles' AND column_name='assigned_bus_id') THEN
         ALTER TABLE public.driver_profiles DROP COLUMN assigned_bus_id;
     END IF;
@@ -62,6 +77,14 @@ BEGIN
     END IF;
     IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='driver_profiles' AND column_name='driver_id') THEN
         ALTER TABLE public.driver_profiles DROP COLUMN driver_id;
+    END IF;
+
+    -- buses: remove static driver ownership fields
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='buses' AND column_name='driver_uid') THEN
+        ALTER TABLE public.buses DROP COLUMN driver_uid;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='buses' AND column_name='driver_name') THEN
+        ALTER TABLE public.buses DROP COLUMN driver_name;
     END IF;
 
     -- moderator_profiles: remove old legacy fields
@@ -173,13 +196,8 @@ CREATE TABLE IF NOT EXISTS driver_profiles (
     employee_id        TEXT,
     address            TEXT,
     profile_photo_url  TEXT,
-    bus_id             TEXT,
-    route_id           TEXT,
     joining_date       TEXT,
-    shift              TEXT CHECK (shift IN ('Morning', 'Evening', 'Both')),
     status             TEXT CHECK (status IN ('active', 'inactive', 'suspended', 'reserved')),
-    trip_active        BOOLEAN DEFAULT FALSE,
-    active_trip_id     TEXT,
     is_reserved        BOOLEAN DEFAULT FALSE,
     created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -336,13 +354,10 @@ CREATE TABLE IF NOT EXISTS buses (
     model            TEXT,
     year             TEXT,
     capacity         INTEGER NOT NULL DEFAULT 0,
-    driver_uid       TEXT,
-    driver_name      TEXT,
     route_id         TEXT,
     route_name       TEXT,
     status           TEXT NOT NULL DEFAULT 'inactive'
                          CHECK (status IN ('active', 'inactive', 'maintenance', 'enroute', 'idle')),
-    -- current_passenger_count removed: was always identical to current_members (written simultaneously in every RPC)
     morning_load     INTEGER NOT NULL DEFAULT 0,
     evening_load     INTEGER NOT NULL DEFAULT 0,
     current_members  INTEGER NOT NULL DEFAULT 0,
@@ -1552,16 +1567,9 @@ CREATE POLICY "active_trips_service_role" ON public.active_trips
 
 GRANT SELECT ON public.active_trips TO anon, authenticated;
 
--- Enable realtime for active_trips (required for multi-driver lock UI updates)
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_publication_tables
-        WHERE pubname = 'supabase_realtime' AND tablename = 'active_trips'
-    ) THEN
-        ALTER PUBLICATION supabase_realtime ADD TABLE active_trips;
-    END IF;
-END $$;
+-- Real-time transport for active trips & bus tracking is served by the dedicated
+-- Node.js WebSocket server runtime (server/index.ts). PostgreSQL is strictly used
+-- for lock persistence and data storage.
 
 
 -- ─────────────────────────────────────────────────────────────────────────────

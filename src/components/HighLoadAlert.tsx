@@ -1,15 +1,15 @@
 "use client";
 
-import { useEffect, useState, useMemo } from 'react';
-import { useRouter } from 'next/navigation';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
-import { AlertTriangle, Settings, Bus, TrendingUp, Users, ChevronRight, Zap } from 'lucide-react';
+import { Card,CardContent } from '@/components/ui/card';
+import { AlertTriangle,Bus,ChevronRight,Settings,TrendingUp,Users,Zap } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { useMemo,useState } from 'react';
 // Migrated: Server-side API → PostgreSQL (no Firestore client reads)
 import { useApiCollection } from '@/hooks/useApiCollection';
-import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
+import { AnimatePresence,motion } from 'framer-motion';
 
 interface OverloadInfo {
   busId: string;

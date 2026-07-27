@@ -10,16 +10,16 @@
  * Persistence: delegates to notification.repository.ts → PG repository.
  * FCM push dispatch stays internal to API routes, not a domain capability.
  */
-import * as notificationRepository from '../repositories/notification.repository';
 import type {
-  UserRole,
-  TargetType,
-  NotificationTarget,
-  NotificationSender,
-  PermissionCheckResult,
-  VisibilityCheckResult,
-  NotificationRecord,
+	NotificationRecord,
+	NotificationSender,
+	NotificationTarget,
+	PermissionCheckResult,
+	TargetType,
+	UserRole,
+	VisibilityCheckResult,
 } from '../repositories/notification.repository';
+import * as notificationRepository from '../repositories/notification.repository';
 
 // ─── Permission Checkers (pure functions, delegated) ─────────────────────────
 
@@ -264,11 +264,5 @@ export async function findById(
 // ─── Re-exports ─────────────────────────────────────────────────────────────
 
 export type {
-  UserRole,
-  TargetType,
-  NotificationTarget,
-  NotificationSender,
-  PermissionCheckResult,
-  VisibilityCheckResult,
-  NotificationRecord,
+	NotificationRecord,NotificationSender,NotificationTarget,PermissionCheckResult,TargetType,UserRole,VisibilityCheckResult
 };

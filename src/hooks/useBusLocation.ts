@@ -1,8 +1,7 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { supabase } from '@/lib/supabase-client';
-import { isValidLatLng } from '@/lib/maps/location-display-guards';
 import { WebSocketClient } from '@/domains/realtime/ws-client';
-import { useWebSocket } from './useWebSocket';
+import { isValidLatLng } from '@/lib/maps/location-display-guards';
+import { supabase } from '@/lib/supabase-client';
+import { useCallback,useEffect,useRef,useState } from 'react';
 
 interface BusLocation {
   busId: string;
@@ -15,7 +14,7 @@ interface BusLocation {
   timestamp: string;
 }
 
-export const useBusLocation = (busId: string, token?: string | null) => {
+export const useBusLocation = (busId: string, token?: string | null, externalClient?: WebSocketClient | null) => {
   const [currentLocation, setCurrentLocation] = useState<BusLocation | null>(null);
   const [history, setHistory] = useState<BusLocation[]>([]);
   const [loading, setLoading] = useState(true);
@@ -87,8 +86,17 @@ export const useBusLocation = (busId: string, token?: string | null) => {
   }, [busId, applyIncomingLocation]);
 
   useEffect(() => {
-    if (!token || !busId) return;
-    const url = process.env.NEXT_PUBLIC_WS_URL || `ws://${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}:3001`;
+    if (!busId) return;
+
+    if (externalClient) {
+      const unsub = externalClient.subscribe(`bus_location_${busId}`, (payload: any) => {
+        handleBusLocationUpdate(payload.payload || payload);
+      });
+      return () => { unsub(); };
+    }
+
+    if (!token) return;
+    const url = process.env.NEXT_PUBLIC_WS_URL || `ws://${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}:3001/ws`;
     const client = new WebSocketClient({ url, token });
     clientRef.current = client;
     client.connect();
@@ -102,7 +110,7 @@ export const useBusLocation = (busId: string, token?: string | null) => {
       client.disconnect();
       clientRef.current = null;
     };
-  }, [busId, token, handleBusLocationUpdate]);
+  }, [busId, token, externalClient, handleBusLocationUpdate]);
 
   return { currentLocation, history, loading, error };
 };

@@ -1,21 +1,19 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useAuth } from "@/contexts/auth-context";
-import { useRouter } from "next/navigation";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import {
-  Bus,
-  MapPin,
-  User,
-  Users,
-  Bell,
-  AlertCircle
-} from "lucide-react";
-import { supabase } from '@/lib/supabase-client';
 import { PremiumPageLoader } from "@/components/LoadingSpinner";
+import { Badge } from "@/components/ui/badge";
+import { Card,CardContent,CardDescription,CardHeader,CardTitle } from "@/components/ui/card";
+import { useAuth } from "@/contexts/auth-context";
+import { supabase } from '@/lib/supabase-client';
+import {
+	AlertCircle,
+	Bell,
+	Bus,
+	MapPin,
+	User
+} from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useEffect,useState } from "react";
 
 interface DriverStatus {
   driver_uid: string;
@@ -58,14 +56,20 @@ export default function ModeratorDashboard() {
 
     const fetchData = async () => {
       try {
-        const { data: statusData, error: statusError } = await supabase
-          .from('driver_status')
-          .select('*');
+        const { data: activeTripsData, error: statusError } = await supabase
+          .from('active_trips')
+          .select('*')
+          .eq('status', 'active');
 
         if (statusError) {
-          console.error('Error fetching driver statuses:', statusError);
+          console.error('Error fetching active trips:', statusError);
         } else {
-          setDriverStatuses(statusData || []);
+          setDriverStatuses((activeTripsData || []).map(t => ({
+            driver_uid: t.driver_id,
+            bus_id: t.bus_id,
+            status: 'on_trip',
+            last_updated: t.last_heartbeat || t.start_time || new Date().toISOString(),
+          })));
         }
 
         // Notifications are managed via Firestore (not Supabase).

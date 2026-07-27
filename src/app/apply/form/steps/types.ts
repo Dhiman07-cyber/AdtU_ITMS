@@ -1,4 +1,4 @@
-import { ApplicationFormData, ApplicationState } from '@/lib/types/application';
+import { ApplicationFormData,ApplicationState } from '@/lib/types/application';
 
 // This file defines the shared props for all step components
 export interface StepProps {

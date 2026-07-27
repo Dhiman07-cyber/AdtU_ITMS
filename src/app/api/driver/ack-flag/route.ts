@@ -1,10 +1,10 @@
-﻿import { NextResponse } from 'next/server';
-import { getSupabaseServer } from '@/lib/supabase-server';
-import { withSecurity } from '@/lib/security/api-security';
-import { MarkBoardedSchema } from '@/lib/security/validation-schemas';
-import { RateLimits } from '@/lib/security/rate-limiter';
 import { getDriverById } from '@/domains/identity';
 import { emitEvent } from '@/domains/realtime/event-emitter';
+import { withSecurity } from '@/lib/security/api-security';
+import { RateLimits } from '@/lib/security/rate-limiter';
+import { MarkBoardedSchema } from '@/lib/security/validation-schemas';
+import { getSupabaseServer } from '@/lib/supabase-server';
+import { NextResponse } from 'next/server';
 
 /**
  * POST /api/driver/ack-flag
@@ -41,15 +41,18 @@ export const POST = withSecurity(
       );
     }
 
-    // Verify driver is assigned to this bus/route
-    const driverData = await getDriverById(driverUid);
-    if (!driverData) {
-      return NextResponse.json({ error: 'Driver profile not found' }, { status: 404 });
-    }
+    // Verify driver is assigned to this bus or holds active trip lock
+    const { data: activeTrip } = await supabase
+      .from('active_trips')
+      .select('trip_id')
+      .eq('driver_id', driverUid)
+      .eq('bus_id', flagData.bus_id)
+      .eq('status', 'active')
+      .maybeSingle();
 
-    const driverClaimsBus =
-      driverData.busId === flagData.bus_id ||
-      driverData.busId === flagData.bus_id;
+    const driverData = await getDriverById(driverUid);
+    const driverBusId = driverData?.bus_id || driverData?.busId;
+    const driverClaimsBus = activeTrip !== null || driverBusId === flagData.bus_id;
 
     if (!driverClaimsBus) {
       console.error('Driver assignment validation failed:', {

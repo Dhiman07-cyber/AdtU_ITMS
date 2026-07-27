@@ -1,26 +1,26 @@
 "use client";
 
-import React, { useState, useEffect, useRef, useCallback } from "react";
-import { useAuth } from "@/contexts/auth-context";
-import { useRouter } from "next/navigation";
-import dynamic from "next/dynamic";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Bus, MapPin, Clock, Users, Flag, PlayCircle, StopCircle, AlertCircle, Navigation, CheckCircle, Activity, Loader2 } from "lucide-react";
-import { WebSocketClient } from '@/domains/realtime/ws-client';
-import { getDriverById, getBusById, getRouteById } from "@/lib/dataService";
-import { useToast } from "@/contexts/toast-context";
-import { PremiumPageLoader } from "@/components/LoadingSpinner";
-import { formatIdForDisplay } from "@/lib/utils";
 import ErrorBoundary from "@/components/ErrorBoundary";
+import { PremiumPageLoader } from "@/components/LoadingSpinner";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card,CardContent,CardHeader,CardTitle } from "@/components/ui/card";
+import { useAuth } from "@/contexts/auth-context";
+import { useToast } from "@/contexts/toast-context";
+import { WebSocketClient } from '@/domains/realtime/ws-client';
+import { getBusById,getDriverById,getRouteById } from "@/lib/dataService";
 import {
-  checkDeviceSession,
-  registerDeviceSession,
-  heartbeatDeviceSession,
-  releaseDeviceSession,
-  getOrCreateDeviceId
+	checkDeviceSession,
+	getOrCreateDeviceId,
+	heartbeatDeviceSession,
+	registerDeviceSession,
+	releaseDeviceSession
 } from "@/lib/session-device-service";
+import { formatIdForDisplay } from "@/lib/utils";
+import { Activity,AlertCircle,Bus,CheckCircle,Clock,Flag,Loader2,MapPin,Navigation,PlayCircle,StopCircle } from "lucide-react";
+import dynamic from "next/dynamic";
+import { useRouter } from "next/navigation";
+import { useCallback,useEffect,useRef,useState } from "react";
 
 // Dynamically import components to avoid SSR issues
 const BrowserCompatibilityBanner = dynamic(() => import('@/components/BrowserCompatibilityBanner'), {
@@ -73,6 +73,7 @@ export default function DriverLiveTrackingPage() {
 
   // Trip state
   const [tripActive, setTripActive] = useState(false);
+  const [wsClientReady, setWsClientReady] = useState(false);
   const [tripId, setTripId] = useState<string | null>(null);
   const [currentLocation, setCurrentLocation] = useState<{ lat: number; lng: number; accuracy: number } | null>(null);
   const [speed, setSpeed] = useState(0);
@@ -84,6 +85,7 @@ export default function DriverLiveTrackingPage() {
   // Refs
   const locationIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const watchIdRef = useRef<number | null>(null);
+  const wsClientRef = useRef<WebSocketClient | null>(null);
   // Holds the latest broadcast inputs so the broadcast interval can read fresh
   // values without being torn down / recreated on every GPS tick (prevents interval churn).
   const broadcastInputsRef = useRef<any>(null);
@@ -189,12 +191,8 @@ export default function DriverLiveTrackingPage() {
 
     console.log("👂 Subscribing to wait requests via WS for bus:", busData.busId);
 
-    let wsClient: WebSocketClient | null = null;
-    const initWs = async () => {
-      const token = await currentUser.getIdToken();
-      const url = process.env.NEXT_PUBLIC_WS_URL || `ws://${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}:3001`;
-      wsClient = new WebSocketClient({ url, token });
-      wsClient.connect();
+    const wsClient = wsClientRef.current;
+    if (wsClient) {
       wsClient.subscribe(`driver_wait_request_${busData.busId}`, (payload: any) => {
         console.log("📣 Received wait request:", payload);
         setActiveWaitRequest({
@@ -209,13 +207,12 @@ export default function DriverLiveTrackingPage() {
           audio.play().catch(e => console.log('Audio play failed', e));
         } catch (e) {}
       });
-    };
-    initWs();
+    }
 
     return () => {
-      if (wsClient) wsClient.disconnect();
+      if (wsClient) wsClient.unsubscribe(`driver_wait_request_${busData.busId}`);
     };
-  }, [busData?.busId, currentUser]);
+  }, [busData?.busId, currentUser, wsClientReady]);
 
   // Handle countdown
   useEffect(() => {
@@ -421,7 +418,32 @@ export default function DriverLiveTrackingPage() {
 
   // NOTE: Cache clearing removed for production - caching is now enabled
 
-
+  // Create shared WebSocket client (single connection owner for all subscriptions)
+  useEffect(() => {
+    if (!currentUser) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const token = await currentUser.getIdToken();
+        if (cancelled) return;
+        const url = process.env.NEXT_PUBLIC_WS_URL || `ws://${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}:3001`;
+        const client = new WebSocketClient({ url, token });
+        wsClientRef.current = client;
+        setWsClientReady(true);
+        client.connect();
+      } catch (err) {
+        console.warn('[Driver] Failed to create WS client:', err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (wsClientRef.current) {
+        wsClientRef.current.disconnect();
+        wsClientRef.current = null;
+      }
+      setWsClientReady(false);
+    };
+  }, [currentUser]);
 
   // Fetch driver, bus, and route data
   useEffect(() => {
@@ -844,12 +866,8 @@ export default function DriverLiveTrackingPage() {
     };
     fetchInitialFlags();
 
-    let wsClient: WebSocketClient | null = null;
-    const initWs = async () => {
-      const token = await currentUser.getIdToken();
-      const url = process.env.NEXT_PUBLIC_WS_URL || `ws://${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}:3001`;
-      wsClient = new WebSocketClient({ url, token });
-      wsClient.connect();
+    const wsClient = wsClientRef.current;
+    if (wsClient) {
       wsClient.subscribe(`waiting_flags_${busData.busId}`, (payload: any) => {
         console.log("🚩 Waiting flag event:", payload.event, payload);
 
@@ -874,13 +892,12 @@ export default function DriverLiveTrackingPage() {
           setWaitingFlags((prev) => prev.filter((f) => f.id !== payload.id));
         }
       });
-    };
-    initWs();
+    }
 
     return () => {
-      if (wsClient) wsClient.disconnect();
+      if (wsClient) wsClient.unsubscribe(`waiting_flags_${busData.busId}`);
     };
-  }, [busData?.busId, tripActive, currentUser]);
+  }, [busData?.busId, tripActive, currentUser, wsClientReady]);
 
   // Screen Wake Lock - Keep screen on during active trip
   useEffect(() => {

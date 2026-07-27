@@ -4,9 +4,9 @@
  * Returns the current user's notifications from PostgreSQL.
  * Replaces the Firestore onSnapshot / getDocs read in NotificationContext.
  */
-import { NextRequest, NextResponse } from 'next/server';
-import { withSecurity } from '@/lib/security/api-security';
 import * as Notification from '@/domains/notification';
+import { withSecurity } from '@/lib/security/api-security';
+import { NextResponse } from 'next/server';
 
 const NOTIFICATION_LIMIT = 50;
 

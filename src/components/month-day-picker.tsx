@@ -8,14 +8,13 @@
  * The year is applied per-student using their sessionEndYear at runtime.
  */
 
-import React, { useState, useEffect } from 'react';
-import { Calendar, ChevronLeft, ChevronRight, ChevronDown, Info } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { addMonths, subMonths, startOfMonth, endOfMonth, isSameMonth, isSameDay, setMonth } from 'date-fns';
-import { eachDayOfInterval } from 'date-fns/eachDayOfInterval';
-import { subDays, addDays } from 'date-fns';
 import * as Popover from '@radix-ui/react-popover';
+import { addDays,addMonths,endOfMonth,isSameDay,isSameMonth,setMonth,startOfMonth,subDays,subMonths } from 'date-fns';
+import { eachDayOfInterval } from 'date-fns/eachDayOfInterval';
+import { Calendar,ChevronDown,ChevronLeft,ChevronRight,Info } from 'lucide-react';
+import { useEffect,useState } from 'react';
 
 /**
  * Month/Day value object - the return type of this picker

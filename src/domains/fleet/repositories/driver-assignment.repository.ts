@@ -98,46 +98,30 @@ export async function getActiveAssignmentByDriverUid(driverUid: string): Promise
   return null;
 }
 
-/** Get the driver UID assigned to a bus. Convenience wrapper. */
+/** Get the driver UID assigned to a bus during an active trip. */
 export async function getDriverUidByBusId(busId: string): Promise<string | null> {
   const supabase = getSupabaseServer();
-  const { data: assignment } = await supabase
-    .from('driver_assignments')
-    .select('driver_uid')
+  const { data: activeTrip } = await supabase
+    .from('active_trips')
+    .select('driver_id')
     .eq('bus_id', busId)
-    .eq('is_active', true)
+    .eq('status', 'active')
     .maybeSingle();
 
-  if (assignment?.driver_uid) return assignment.driver_uid;
-
-  const { data: bus } = await supabase
-    .from('buses')
-    .select('driver_uid')
-    .eq('id', busId)
-    .maybeSingle();
-
-  return bus?.driver_uid ?? null;
+  return activeTrip?.driver_id ?? null;
 }
 
-/** Get the bus ID assigned to a driver. Convenience wrapper. */
+/** Get the bus ID assigned to a driver during an active trip. */
 export async function getBusIdByDriverUid(driverUid: string): Promise<string | null> {
   const supabase = getSupabaseServer();
-  const { data: assignment } = await supabase
-    .from('driver_assignments')
+  const { data: activeTrip } = await supabase
+    .from('active_trips')
     .select('bus_id')
-    .eq('driver_uid', driverUid)
-    .eq('is_active', true)
+    .eq('driver_id', driverUid)
+    .eq('status', 'active')
     .maybeSingle();
 
-  if (assignment?.bus_id) return assignment.bus_id;
-
-  const { data: driver } = await supabase
-    .from('driver_profiles')
-    .select('bus_id')
-    .eq('uid', driverUid)
-    .maybeSingle();
-
-  return driver?.bus_id ?? null;
+  return activeTrip?.bus_id ?? null;
 }
 
 /** List all active assignments (for fleet dashboard, admin views). */
@@ -184,8 +168,7 @@ export async function getAssignmentHistoryByDriverUid(driverUid: string, limit =
 // ─── Mutations ──────────────────────────────────────────────────────────────────
 
 /**
- * Create a new active assignment and deactivate any previous active assignment
- * for the same driver or bus. This is the canonical way to assign a driver to a bus.
+ * Create a new active assignment log entry without touching legacy bus/profile columns.
  */
 export async function assignDriverToBus(
   driverUid: string,
@@ -209,24 +192,7 @@ export async function assignDriverToBus(
     .eq('is_active', true)
     .or(`driver_uid.eq.${driverUid},bus_id.eq.${busId}`);
 
-  // Sync buses table: clear old assignment for this driver and set on new bus
-  await supabase
-    .from('buses')
-    .update({ driver_uid: '' })
-    .eq('driver_uid', driverUid);
-
-  await supabase
-    .from('buses')
-    .update({ driver_uid: driverUid })
-    .eq('id', busId);
-
-  // Sync driver_profiles table
-  await supabase
-    .from('driver_profiles')
-    .update({ bus_id: busId, route_id: options?.routeId || null })
-    .eq('uid', driverUid);
-
-  // Insert the new assignment
+  // Insert the new assignment log
   const { data, error } = await supabase
     .from('driver_assignments')
     .insert({
@@ -246,7 +212,7 @@ export async function assignDriverToBus(
   return rowToDomain(data);
 }
 
-/** Deactivate an active assignment (unassign a driver from a bus). */
+/** Deactivate an active assignment. */
 export async function unassignDriver(driverUid: string, reason = 'admin_reassign'): Promise<boolean> {
   const supabase = getSupabaseServer();
   const { error } = await supabase
@@ -258,16 +224,6 @@ export async function unassignDriver(driverUid: string, reason = 'admin_reassign
     })
     .eq('driver_uid', driverUid)
     .eq('is_active', true);
-
-  await supabase
-    .from('buses')
-    .update({ driver_uid: '' })
-    .eq('driver_uid', driverUid);
-
-  await supabase
-    .from('driver_profiles')
-    .update({ bus_id: null })
-    .eq('uid', driverUid);
 
   return !error;
 }

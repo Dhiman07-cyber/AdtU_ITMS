@@ -69,10 +69,9 @@ CREATE TABLE IF NOT EXISTS waiting_flags (
   bus_id TEXT NOT NULL,
   route_id TEXT NOT NULL,
   stop_name TEXT,
-  stop_name TEXT,
   stop_lat DOUBLE PRECISION,
   stop_lng DOUBLE PRECISION,
-  status TEXT NOT NULL DEFAULT 'raised' CHECK (status IN ('raised', 'acknowledged', 'boarded', 'expired', 'cancelled', 'removed')),
+  status TEXT NOT NULL DEFAULT 'raised' CHECK (status IN ('raised', 'acknowledged', 'waiting', 'boarded', 'expired', 'cancelled', 'removed')),
   message TEXT,
   trip_id TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -89,6 +88,7 @@ CREATE INDEX IF NOT EXISTS idx_waiting_flags_active ON waiting_flags(bus_id, sta
 CREATE INDEX IF NOT EXISTS idx_waiting_flags_student_active ON waiting_flags(student_uid, status);
 CREATE INDEX IF NOT EXISTS idx_waiting_flags_bus_student ON waiting_flags(bus_id, student_uid);
 CREATE INDEX IF NOT EXISTS idx_waiting_flags_active_raised ON waiting_flags(bus_id, student_uid) WHERE status = 'raised';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_waiting_flags_one_active ON waiting_flags(student_uid, bus_id) WHERE status IN ('raised', 'acknowledged', 'waiting');
 
 -- driver_location_updates table (historical breadcrumbs)
 CREATE TABLE IF NOT EXISTS driver_location_updates (
@@ -123,8 +123,8 @@ CREATE TABLE IF NOT EXISTS public.driver_assignments (
   metadata JSONB DEFAULT '{}'::jsonb
 );
 
-CREATE INDEX IF NOT EXISTS idx_da_active_bus ON public.driver_assignments(bus_id) WHERE is_active = TRUE;
-CREATE INDEX IF NOT EXISTS idx_da_active_driver ON public.driver_assignments(driver_uid) WHERE is_active = TRUE;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_da_one_active_bus ON public.driver_assignments(bus_id) WHERE is_active = TRUE;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_da_one_active_driver ON public.driver_assignments(driver_uid) WHERE is_active = TRUE;
 CREATE INDEX IF NOT EXISTS idx_da_history_bus ON public.driver_assignments(bus_id, assigned_at DESC);
 
 -- =====================================================
@@ -249,6 +249,31 @@ BEGIN
     -- active_trips table
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'active_trips' AND column_name = 'end_time') THEN
         ALTER TABLE public.active_trips ADD COLUMN end_time TIMESTAMPTZ;
+    END IF;
+
+    -- driver_profiles table
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'driver_profiles' AND column_name = 'bus_id') THEN
+        ALTER TABLE public.driver_profiles DROP COLUMN bus_id;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'driver_profiles' AND column_name = 'route_id') THEN
+        ALTER TABLE public.driver_profiles DROP COLUMN route_id;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'driver_profiles' AND column_name = 'shift') THEN
+        ALTER TABLE public.driver_profiles DROP COLUMN shift;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'driver_profiles' AND column_name = 'trip_active') THEN
+        ALTER TABLE public.driver_profiles DROP COLUMN trip_active;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'driver_profiles' AND column_name = 'active_trip_id') THEN
+        ALTER TABLE public.driver_profiles DROP COLUMN active_trip_id;
+    END IF;
+
+    -- buses table
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'buses' AND column_name = 'driver_uid') THEN
+        ALTER TABLE public.buses DROP COLUMN driver_uid;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'buses' AND column_name = 'driver_name') THEN
+        ALTER TABLE public.buses DROP COLUMN driver_name;
     END IF;
 
     -- bus_locations table
@@ -660,42 +685,16 @@ REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO service_role;
 
-GRANT EXECUTE ON FUNCTION public.check_bus_lock(TEXT) TO anon, authenticated;
 GRANT SELECT ON public.payments TO authenticated;
 
 -- =====================================================
--- SECTION 8: ENABLE REALTIME
+-- SECTION 8: REALTIME ARCHITECTURE NOTE
 -- =====================================================
-
-DO $$ 
-BEGIN 
-  IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'bus_locations') THEN
-    ALTER PUBLICATION supabase_realtime ADD TABLE bus_locations;
-  END IF;
-  
-  IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'driver_status') THEN
-    ALTER PUBLICATION supabase_realtime ADD TABLE driver_status;
-  END IF;
-  
-  IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'waiting_flags') THEN
-    ALTER PUBLICATION supabase_realtime ADD TABLE waiting_flags;
-  END IF;
-  
-  IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'reassignment_logs') THEN
-    ALTER PUBLICATION supabase_realtime ADD TABLE reassignment_logs;
-  END IF;
-  
-  IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'payments') THEN
-    ALTER PUBLICATION supabase_realtime ADD TABLE payments;
-  END IF;
-  
-
-  
-  -- Active Trips: Enable realtime for multi-driver lock system
-  IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND tablename = 'active_trips') THEN
-    ALTER PUBLICATION supabase_realtime ADD TABLE active_trips;
-  END IF;
-END $$;
+-- Real-time transport for trips, bus locations, driver status, and waiting flags
+-- is decoupled from PostgreSQL WAL streaming and served by the dedicated Node.js
+-- WebSocket server runtime (server/index.ts) on port 3001.
+-- This eliminates database WAL streaming overhead and provides sub-10ms delivery.
+-- PostgreSQL is strictly used for persistent data storage and atomic RPC locks.
 
 -- =====================================================
 -- SECTION 9: MULTI-DRIVER LOCK SYSTEM
@@ -714,6 +713,9 @@ CREATE TABLE IF NOT EXISTS public.active_trips (
   end_time TIMESTAMPTZ,
   last_heartbeat TIMESTAMPTZ DEFAULT NOW(),
   metadata JSONB DEFAULT '{}'::jsonb,
+  expires_at TIMESTAMPTZ,
+  fcm_start_sent BOOLEAN NOT NULL DEFAULT FALSE,
+  fcm_end_sent BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW(),
   
@@ -787,6 +789,8 @@ BEGIN
   END IF;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+
+GRANT EXECUTE ON FUNCTION public.check_bus_lock(TEXT) TO anon, authenticated;
 
 -- Function to get stale locks
 CREATE OR REPLACE FUNCTION get_stale_locks(p_heartbeat_timeout_seconds INTEGER DEFAULT 60)

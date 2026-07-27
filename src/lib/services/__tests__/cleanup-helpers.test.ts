@@ -1,8 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import * as fleetService from '@/domains/fleet';
+import { getSupabaseServer } from '@/lib/supabase-server';
+import { beforeEach,describe,expect,it,vi } from 'vitest';
 import { deleteUserAndData } from '../../cleanup-helpers';
 import { adminAuth } from '../../firebase-admin';
-import { getSupabaseServer } from '@/lib/supabase-server';
-import * as fleetService from '@/domains/fleet';
 
 // Mock dependencies
 vi.mock('@/lib/supabase-server', () => {

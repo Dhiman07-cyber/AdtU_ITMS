@@ -1,33 +1,32 @@
 import { getSupabaseServer } from '@/lib/supabase-server';
-import { getDriverUidByBusId, getBusIdByDriverUid } from '@/domains/assignment';
 
-type BusRow = { id: string; driver_uid?: string | null; bus_number?: string | null; route_id?: string | null; route_name?: string | null; status?: string | null };
+type BusRow = { id: string; bus_number?: string | null; route_id?: string | null; route_name?: string | null; status?: string | null };
 
 export async function verifyDriverBusAssignment(driverId: string, busId: string): Promise<{ authorized: boolean; reason?: string; busData?: BusRow }> {
   const supabase = getSupabaseServer();
-  const [busResult, assignedDriverUid, driverAssignedBusId] = await Promise.all([
-    supabase.from('buses').select('id, driver_uid, bus_number, route_id, route_name, status').eq('id', busId).maybeSingle(),
-    getDriverUidByBusId(busId),
-    getBusIdByDriverUid(driverId),
-  ]);
+  const busResult = await supabase
+    .from('buses')
+    .select('id, bus_number, route_id, route_name, status')
+    .eq('id', busId)
+    .maybeSingle();
 
   const busData = busResult.data;
   if (!busData) return { authorized: false, reason: 'Bus not found' };
   if (busData.status === 'inactive') return { authorized: false, reason: 'Bus is inactive' };
 
+  // Check if bus is locked by another driver
   const { data: activeTrip } = await supabase
     .from('active_trips')
-    .select('bus_id, driver_id')
-    .eq('driver_id', driverId)
+    .select('bus_id, driver_id, expires_at')
+    .eq('bus_id', busId)
     .eq('status', 'active')
     .maybeSingle();
 
-  const driverClaimsBus = activeTrip?.bus_id === busId;
-  const busClaimsDriver = assignedDriverUid === driverId || busData.driver_uid === driverId;
-  const profileClaimsBus = driverAssignedBusId === busId;
-
-  if (!driverClaimsBus && !busClaimsDriver && !profileClaimsBus) {
-    return { authorized: false, reason: 'Driver is not assigned to this bus' };
+  if (activeTrip && activeTrip.driver_id !== driverId) {
+    const isExpired = activeTrip.expires_at ? Date.now() > new Date(activeTrip.expires_at).getTime() : false;
+    if (!isExpired) {
+      return { authorized: false, reason: 'This bus is currently being operated by another driver' };
+    }
   }
 
   return { authorized: true, busData };

@@ -1,35 +1,35 @@
 "use client";
 
-import { motion, AnimatePresence } from "framer-motion";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
+import { Button } from "@/components/ui/button";
+import { ScrollArea,ScrollBar } from "@/components/ui/scroll-area";
 import {
-    Table,
-    TableBody,
-    TableCell,
-    TableHead,
-    TableHeader,
-    TableRow,
+	Table,
+	TableBody,
+	TableCell,
+	TableHead,
+	TableHeader,
+	TableRow,
 } from "@/components/ui/table";
 import {
-    Tooltip,
-    TooltipContent,
-    TooltipProvider,
-    TooltipTrigger,
+	Tooltip,
+	TooltipContent,
+	TooltipProvider,
+	TooltipTrigger,
 } from "@/components/ui/tooltip";
-import {
-    Trash2,
-    ArrowRightLeft,
-    CheckCircle2,
-    XCircle,
-    Bus,
-    Info,
-    Bookmark,
-    Zap,
-    Shield,
-} from "lucide-react";
 import { cn } from "@/lib/utils";
+import { AnimatePresence,motion } from "framer-motion";
+import {
+	ArrowRightLeft,
+	Bookmark,
+	Bus,
+	CheckCircle2,
+	Info,
+	Shield,
+	Trash2,
+	XCircle,
+	Zap,
+} from "lucide-react";
 
 // ============================================
 // DESIGN TOKENS

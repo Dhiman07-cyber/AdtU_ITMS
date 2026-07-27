@@ -10,7 +10,13 @@ export type MetricKey =
   | 'errors'
   | 'rateLimitBlocks' | 'invalidMessages' | 'payloadTooLarge' | 'replayDetected'
   | 'slowHandlers' | 'queueDropped'
-  | 'heartbeatTimeouts' | 'reconnectsHandled';
+  | 'heartbeatTimeouts' | 'reconnectsHandled'
+  // GPS pipeline
+  | 'gpsAccepted' | 'gpsRejected'
+  // Trip lifecycle
+  | 'tripsStarted' | 'tripsEnded' | 'heartbeatsSent'
+  // Notifications
+  | 'notificationsSent' | 'notificationsFailed' | 'notificationsDeduplicated';
 
 export class MetricsService {
   private startTime = Date.now();
@@ -22,6 +28,9 @@ export class MetricsService {
     rateLimitBlocks: 0, invalidMessages: 0, payloadTooLarge: 0, replayDetected: 0,
     slowHandlers: 0, queueDropped: 0,
     heartbeatTimeouts: 0, reconnectsHandled: 0,
+    gpsAccepted: 0, gpsRejected: 0,
+    tripsStarted: 0, tripsEnded: 0, heartbeatsSent: 0,
+    notificationsSent: 0, notificationsFailed: 0, notificationsDeduplicated: 0,
   };
 
   inc(k: MetricKey, n = 1): void { this.state[k] += n; }
@@ -52,6 +61,9 @@ export class MetricsService {
       errors: s.errors,
       heartbeatTimeouts: s.heartbeatTimeouts,
       reconnectsHandled: s.reconnectsHandled,
+      gps: { accepted: s.gpsAccepted, rejected: s.gpsRejected },
+      trips: { started: s.tripsStarted, ended: s.tripsEnded, heartbeatsSent: s.heartbeatsSent },
+      notifications: { sent: s.notificationsSent, failed: s.notificationsFailed, deduplicated: s.notificationsDeduplicated },
     };
   }
 
@@ -91,6 +103,30 @@ export class MetricsService {
       '# HELP itms_ws_uptime_seconds Server uptime in seconds',
       '# TYPE itms_ws_uptime_seconds gauge',
       `itms_ws_uptime_seconds ${Math.floor(s.uptime / 1000)}`,
+      '# HELP itms_ws_heartbeat_timeouts Total heartbeat timeouts',
+      '# TYPE itms_ws_heartbeat_timeouts counter',
+      `itms_ws_heartbeat_timeouts ${s.heartbeatTimeouts}`,
+      '# HELP itms_ws_reconnects Total session reconnects handled',
+      '# TYPE itms_ws_reconnects counter',
+      `itms_ws_reconnects ${s.reconnectsHandled}`,
+      '# HELP itms_gps_accepted Total GPS updates accepted',
+      '# TYPE itms_gps_accepted counter',
+      `itms_gps_accepted ${s.gps.accepted}`,
+      '# HELP itms_gps_rejected Total GPS updates rejected',
+      '# TYPE itms_gps_rejected counter',
+      `itms_gps_rejected ${s.gps.rejected}`,
+      '# HELP itms_trips_started Total trips started',
+      '# TYPE itms_trips_started counter',
+      `itms_trips_started ${s.trips.started}`,
+      '# HELP itms_trips_ended Total trips ended',
+      '# TYPE itms_trips_ended counter',
+      `itms_trips_ended ${s.trips.ended}`,
+      '# HELP itms_notifications_sent Total FCM notifications sent',
+      '# TYPE itms_notifications_sent counter',
+      `itms_notifications_sent ${s.notifications.sent}`,
+      '# HELP itms_notifications_failed Total FCM notifications failed',
+      '# TYPE itms_notifications_failed counter',
+      `itms_notifications_failed ${s.notifications.failed}`,
     ].join('\n');
   }
 }

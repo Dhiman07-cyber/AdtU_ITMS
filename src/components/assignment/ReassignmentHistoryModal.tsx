@@ -1,40 +1,36 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+	Dialog,
+	DialogContent,
+	DialogHeader,
+	DialogTitle
+} from "@/components/ui/dialog";
+import {
+	Tooltip,
+	TooltipContent,
+	TooltipProvider,
+	TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useAuth } from "@/contexts/auth-context";
-import { toast } from "react-hot-toast";
 import { cn } from "@/lib/utils";
 import {
-    Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogHeader,
-    DialogTitle,
-} from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import {
-    Tooltip,
-    TooltipContent,
-    TooltipProvider,
-    TooltipTrigger,
-} from "@/components/ui/tooltip";
-import {
-    History,
-    RotateCcw,
-    User,
-    Bus,
-    Route,
-    Users,
-    Clock,
-    CheckCircle2,
-    XCircle,
-    Loader2,
-    Info,
-    Calendar,
-    Shield,
-    FileText
+	Calendar,
+	CheckCircle2,
+	Clock,
+	History,
+	Loader2,
+	RotateCcw,
+	Route,
+	Shield,
+	User,
+	Users,
+	XCircle
 } from "lucide-react";
+import { useCallback,useEffect,useState } from "react";
+import { toast } from "react-hot-toast";
 
 // ============================================
 // TYPES

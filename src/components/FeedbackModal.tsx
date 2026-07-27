@@ -1,19 +1,19 @@
 "use client";
 
-import { useState } from 'react';
-import { useAuth } from '@/contexts/auth-context';
-import { useToast } from '@/contexts/toast-context';
+import { Button } from '@/components/ui/button';
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogHeader,
+	DialogTitle,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { Button } from '@/components/ui/button';
-import { Loader2, Send, MessageSquare, User, Mail, Sparkles } from 'lucide-react';
+import { useAuth } from '@/contexts/auth-context';
+import { useToast } from '@/contexts/toast-context';
+import { Loader2,Mail,MessageSquare,Send,Sparkles,User } from 'lucide-react';
+import { useState } from 'react';
 
 interface FeedbackModalProps {
   isOpen: boolean;

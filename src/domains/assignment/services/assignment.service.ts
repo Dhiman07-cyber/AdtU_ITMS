@@ -1,13 +1,13 @@
 import {
-  assignDriverToBus as repoAssignDriverToBus,
-  unassignDriver as repoUnassignDriver,
-  getActiveAssignmentByBusId,
-  getActiveAssignmentByDriverUid,
-  getDriverUidByBusId,
-  getBusIdByDriverUid,
-  listActiveAssignments,
-  getAssignmentHistoryByBusId,
-  getAssignmentHistoryByDriverUid,
+	getActiveAssignmentByBusId,
+	getActiveAssignmentByDriverUid,
+	getAssignmentHistoryByBusId,
+	getAssignmentHistoryByDriverUid,
+	getBusIdByDriverUid,
+	getDriverUidByBusId,
+	listActiveAssignments,
+	assignDriverToBus as repoAssignDriverToBus,
+	unassignDriver as repoUnassignDriver,
 } from '@/domains/fleet/repositories/driver-assignment.repository';
 import type { DriverAssignment } from '@/lib/types';
 
@@ -28,5 +28,5 @@ export async function unassignDriver(driverUid: string, reason?: string): Promis
   return repoUnassignDriver(driverUid, reason);
 }
 
-export { getActiveAssignmentByBusId, getActiveAssignmentByDriverUid, getDriverUidByBusId, getBusIdByDriverUid, listActiveAssignments, getAssignmentHistoryByBusId, getAssignmentHistoryByDriverUid };
+export { getActiveAssignmentByBusId,getActiveAssignmentByDriverUid,getAssignmentHistoryByBusId,getAssignmentHistoryByDriverUid,getBusIdByDriverUid,getDriverUidByBusId,listActiveAssignments };
 export type { DriverAssignment };

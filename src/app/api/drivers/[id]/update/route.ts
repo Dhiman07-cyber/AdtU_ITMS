@@ -1,7 +1,7 @@
-﻿import { NextResponse } from 'next/server';
+﻿import { getDriverById,updateDriver } from '@/domains/identity';
 import { verifyApiAuth } from '@/lib/security/api-auth';
 import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
-import { getDriverById, updateDriver } from '@/domains/identity';
+import { NextResponse } from 'next/server';
 
 export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {

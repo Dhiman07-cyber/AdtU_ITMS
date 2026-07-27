@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe,expect,it,vi } from 'vitest';
 
 vi.mock('../repositories/application.repository', () => ({
   findAll: vi.fn().mockResolvedValue([{ applicationId: 'a1' }]),
@@ -13,7 +13,7 @@ vi.mock('../repositories/application.repository', () => ({
   count: vi.fn().mockResolvedValue(0),
 }));
 
-import { getById, approve, reject } from '../services/application.service';
+import { getById } from '../services/application.service';
 
 describe('ApplicationService', () => {
   it('delegates lookup to the repository unchanged', async () => {

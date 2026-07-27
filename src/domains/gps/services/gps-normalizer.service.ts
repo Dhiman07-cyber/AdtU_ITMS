@@ -1,4 +1,4 @@
-import type { LocationUpdate, LocationUpdateNormalized } from './types';
+import type { LocationUpdate,LocationUpdateNormalized } from './types';
 
 const MAX_CLOCK_SKEW_MS = 2 * 60 * 1000;
 

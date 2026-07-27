@@ -1,19 +1,25 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
-import { useAuth } from "@/contexts/auth-context";
-import { useRouter } from "next/navigation";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import {
-  Bus, QrCode, Sun, Moon, ArrowLeft, ArrowRight, CheckCircle,
-  Loader2, AlertCircle, Scan, Shield,
-} from "lucide-react";
-import { authApiFetch } from "@/lib/secure-api-client";
 import { PremiumPageLoader } from "@/components/LoadingSpinner";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card,CardContent } from "@/components/ui/card";
+import { useAuth } from "@/contexts/auth-context";
+import { authApiFetch } from "@/lib/secure-api-client";
 import { formatIdForDisplay } from "@/lib/utils";
 import jsQR from "jsqr";
+import {
+	AlertCircle,
+	ArrowLeft,
+	Bus,
+	CheckCircle,
+	Moon,
+	QrCode,
+	Scan,
+	Sun
+} from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useCallback,useEffect,useRef,useState } from "react";
 
 type TripMode = "dev" | "production";
 type Step = "select-mode" | "select-bus" | "scan-qr" | "select-shift" | "confirming" | "done" | "error";
@@ -30,12 +36,16 @@ export default function StartTripPage() {
   const { currentUser, userData } = useAuth();
   const router = useRouter();
 
-  const [mode, setMode] = useState<TripMode>("dev");
-  const [step, setStep] = useState<Step>("select-mode");
+  const configMode = (process.env.NEXT_PUBLIC_TRIP_INITIATION_MODE as TripMode) ||
+    (process.env.NEXT_PUBLIC_ENABLE_QR_START === "true" ? "production" : "dev");
+
+  const [mode, setMode] = useState<TripMode>(configMode);
+  const [step, setStep] = useState<Step>(configMode === "production" ? "scan-qr" : "select-bus");
   const [buses, setBuses] = useState<BusInfo[]>([]);
   const [selectedBus, setSelectedBus] = useState<BusInfo | null>(null);
   const [selectedShift, setSelectedShift] = useState<"Morning" | "Evening" | null>(null);
   const [loading, setLoading] = useState(true);
+  const [resolvingQR, setResolvingQR] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<{ tripId: string } | null>(null);
 
@@ -69,30 +79,52 @@ export default function StartTripPage() {
     setStep("select-shift");
   };
 
-  const handleQRResult = (busId: string) => {
-    const bus = buses.find((b) => b.id === busId);
-    if (bus) {
-      setSelectedBus(bus);
-      setStep("select-shift");
-    } else {
-      setError("QR code scanned, but bus not found in your assignments");
+  const handleQRResult = async (rawQRData: string) => {
+    if (!currentUser) return;
+    setResolvingQR(true);
+    setError(null);
+
+    try {
+      const res = await authApiFetch(currentUser, "/api/driver/resolve-bus-qr", {
+        method: "POST",
+        body: JSON.stringify({ qrData: rawQRData }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setSelectedBus({
+          id: data.busId,
+          bus_number: data.busNumber,
+          status: data.status,
+          route_id: data.routeId,
+          route_name: data.routeName,
+        });
+        setStep("select-shift");
+      } else {
+        const err = await res.json();
+        setError(err.error || "Bus not found for scanned QR code");
+      }
+    } catch (e) {
+      setError("Failed to resolve bus QR code. Please try again.");
+    } finally {
+      setResolvingQR(false);
     }
   };
 
   const selectShift = (shift: "Morning" | "Evening") => {
     setSelectedShift(shift);
     setStep("confirming");
-    startTrip(shift);
   };
 
-  const startTrip = async (shift: "Morning" | "Evening") => {
-    if (!currentUser || !selectedBus) return;
+  const confirmAndStartTrip = async () => {
+    if (!currentUser || !selectedBus || !selectedShift) return;
     setError(null);
+    setLoading(true);
 
     try {
       const res = await authApiFetch(currentUser, "/api/driver/initiate-trip", {
         method: "POST",
-        body: JSON.stringify({ busId: selectedBus.id, shift }),
+        body: JSON.stringify({ busId: selectedBus.id, shift: selectedShift }),
       });
 
       if (res.ok) {
@@ -108,6 +140,8 @@ export default function StartTripPage() {
     } catch (e) {
       setError("Network error. Please try again.");
       setStep("error");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -120,6 +154,8 @@ export default function StartTripPage() {
     } else if (step === "select-shift") {
       if (mode === "dev") setStep("select-bus");
       else setStep("scan-qr");
+    } else if (step === "confirming") {
+      setStep("select-shift");
     } else {
       setStep("select-mode");
       setSelectedBus(null);
@@ -128,7 +164,7 @@ export default function StartTripPage() {
   };
 
   const reset = () => {
-    setStep("select-mode");
+    setStep(configMode === "production" ? "scan-qr" : "select-bus");
     setSelectedBus(null);
     setSelectedShift(null);
     setError(null);
@@ -315,11 +351,55 @@ export default function StartTripPage() {
           </div>
         )}
 
-        {/* Step: Confirming */}
-        {step === "confirming" && (
-          <div className="p-8 text-center">
-            <Loader2 className="h-8 w-8 animate-spin mx-auto mb-3 text-blue-600" />
-            <p className="text-sm text-gray-500">Starting your trip...</p>
+        {/* Step: Confirmation Dialog */}
+        {step === "confirming" && selectedBus && selectedShift && (
+          <div className="space-y-6">
+            <Card className="border-0 shadow-lg bg-white dark:bg-gray-900 rounded-2xl overflow-hidden">
+              <CardContent className="p-6 space-y-4">
+                <h2 className="text-lg font-bold text-gray-900 dark:text-white border-b pb-3 border-gray-100 dark:border-gray-800">
+                  Confirm Trip Details
+                </h2>
+
+                <div className="space-y-3">
+                  <div className="flex justify-between items-center py-2 border-b border-gray-50 dark:border-gray-800/50">
+                    <span className="text-sm text-gray-500 font-medium">Bus Number</span>
+                    <span className="text-sm font-bold text-gray-900 dark:text-white">
+                      {formatIdForDisplay(selectedBus.bus_number || selectedBus.id)}
+                    </span>
+                  </div>
+
+                  {selectedBus.id && (
+                    <div className="flex justify-between items-center py-2 border-b border-gray-50 dark:border-gray-800/50">
+                      <span className="text-sm text-gray-500 font-medium">Bus Primary Key</span>
+                      <span className="text-xs font-mono text-gray-600 dark:text-gray-400">
+                        {selectedBus.id}
+                      </span>
+                    </div>
+                  )}
+
+                  <div className="flex justify-between items-center py-2 border-b border-gray-50 dark:border-gray-800/50">
+                    <span className="text-sm text-gray-500 font-medium">Assigned Route</span>
+                    <span className="text-sm font-semibold text-blue-600 dark:text-blue-400">
+                      {selectedBus.route_name || selectedBus.route_id || "Unassigned Route"}
+                    </span>
+                  </div>
+
+                  <div className="flex justify-between items-center py-2">
+                    <span className="text-sm text-gray-500 font-medium">Selected Shift</span>
+                    <Badge className={selectedShift === "Morning" ? "bg-amber-100 text-amber-800 font-bold" : "bg-indigo-100 text-indigo-800 font-bold"}>
+                      {selectedShift} Shift
+                    </Badge>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Button
+              onClick={confirmAndStartTrip}
+              className="w-full py-6 text-base font-bold bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white rounded-2xl shadow-xl shadow-green-500/20"
+            >
+              Confirm & Start Trip
+            </Button>
           </div>
         )}
 

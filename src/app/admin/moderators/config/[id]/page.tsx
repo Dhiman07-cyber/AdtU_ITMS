@@ -1,51 +1,47 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import { useParams, useRouter } from "next/navigation";
-import { auth } from "@/lib/firebase";
 import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import { useAuth } from "@/contexts/auth-context";
 import { useToast } from "@/contexts/toast-context";
+import { auth } from "@/lib/firebase";
 import {
-    ModeratorPermissions,
-    DEFAULT_MODERATOR_PERMISSIONS,
-    FULL_MODERATOR_PERMISSIONS,
-    PERMISSION_CATEGORIES,
+	DEFAULT_MODERATOR_PERMISSIONS,
+	FULL_MODERATOR_PERMISSIONS,
+	ModeratorPermissions,
+	PERMISSION_CATEGORIES,
 } from "@/lib/types/moderator-permissions";
 import {
-    ArrowLeft,
-    Shield,
-    ShieldCheck,
-    ShieldOff,
-    Save,
-    RotateCcw,
-    Users,
-    UserCog,
-    Bus,
-    MapPin,
-    ClipboardCheck,
-    CreditCard,
-    Loader2,
-    Check,
-    X,
-    AlertTriangle,
-    ChevronDown,
-    ChevronUp,
-    Info,
-    Sparkles,
-    Lock,
-    Unlock,
-    Eye,
-    Plus,
-    Pencil,
-    Trash2,
-    ArrowRightLeft,
-    CheckCircle2,
-    XCircle,
-    QrCode,
-    UserCheck,
-    Wallet,
+	AlertTriangle,
+	ArrowLeft,
+	ArrowRightLeft,
+	Bus,
+	Check,
+	CheckCircle2,
+	ChevronDown,
+	ChevronUp,
+	ClipboardCheck,
+	CreditCard,
+	Eye,
+	Info,
+	Loader2,
+	MapPin,
+	Pencil,
+	Plus,
+	QrCode,
+	RotateCcw,
+	Save,
+	Shield,
+	ShieldCheck,
+	ShieldOff,
+	Trash2,
+	UserCheck,
+	UserCog,
+	Users,
+	Wallet,
+	XCircle
 } from "lucide-react";
+import { useParams,useRouter } from "next/navigation";
+import { useCallback,useEffect,useState } from "react";
 
 // ═══════════════════════════════════════════════
 // ICON MAP

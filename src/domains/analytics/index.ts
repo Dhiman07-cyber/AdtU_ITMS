@@ -1,7 +1,5 @@
 // D13 Analytics — public surface. Only this file may be imported by other domains.
 export {
-  getPlatformAnalytics,
-  getPaymentAnalytics,
-  getPaymentStats,
-  getDashboardCounts,
+	getDashboardCounts,getPaymentAnalytics,
+	getPaymentStats,getPlatformAnalytics
 } from './services/analytics.service';

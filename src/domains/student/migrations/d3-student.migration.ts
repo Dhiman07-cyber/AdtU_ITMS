@@ -19,9 +19,9 @@
  *
  * Infrastructure only. No business logic. No service calls.
  */
-import type { MigrationDefinition, MigrationResult, ValidationResult } from '@/infrastructure/migration/contracts';
+import { pgCount,pgFindByUid,pgUpsert } from '@/domains/student/repositories/student.repository.pg';
+import type { MigrationDefinition,MigrationResult,ValidationResult } from '@/infrastructure/migration/contracts';
 import { adminDb } from '@/lib/firebase-admin';
-import { pgUpsert, pgFindByUid, pgCount } from '@/domains/student/repositories/student.repository.pg';
 
 // ─── Firestore collection constants ──────────────────────────────────────────
 const STUDENTS_COLLECTION = 'students';

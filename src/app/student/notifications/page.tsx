@@ -1,28 +1,16 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
-import { useAuth } from "@/contexts/auth-context";
-import { useRouter } from "next/navigation";
-import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+import { PremiumPageLoader } from "@/components/LoadingSpinner";
+import NotificationCardV2 from "@/components/NotificationCardV2";
 import { Button } from "@/components/ui/button";
-import { Bell, Bus, Info, MapPin, Clock, RefreshCw } from "lucide-react";
+import { Card,CardContent } from "@/components/ui/card";
+import { Tabs,TabsContent,TabsList,TabsTrigger } from "@/components/ui/tabs";
+import { useAuth } from "@/contexts/auth-context";
 import { useNotifications } from "@/contexts/NotificationContext";
 import { useToast } from "@/contexts/toast-context";
-import NotificationCardV2 from "@/components/NotificationCardV2";
-import { PremiumPageLoader } from "@/components/LoadingSpinner";
+import { Bell,Bus,Clock,Info,MapPin,RefreshCw } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useEffect,useMemo,useState } from "react";
 
 type TabType = 'all' | 'trip' | 'notice' | 'pickup' | 'dropoff' | 'announcement';
 

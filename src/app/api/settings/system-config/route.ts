@@ -1,8 +1,8 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { adminAuth } from '@/lib/firebase-admin';
+import { getSystemConfig,updateSystemConfig } from '@/domains/admin';
+import { getAdminById,getUserById } from '@/domains/identity';
 import { pgInsertNotification } from '@/domains/notification/repositories/notification.repository.pg';
-import { getSystemConfig, updateSystemConfig } from '@/domains/admin';
-import { getUserById, getAdminById } from '@/domains/identity';
+import { adminAuth } from '@/lib/firebase-admin';
+import { NextRequest,NextResponse } from 'next/server';
 
 // GET: Retrieve system config from PostgreSQL (public — no sensitive data)
 export async function GET(req: NextRequest) {

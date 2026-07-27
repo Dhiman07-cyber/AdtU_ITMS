@@ -1,25 +1,24 @@
 "use client";
 
-import { useAuth } from '@/contexts/auth-context';
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import Link from 'next/link';
-import { uploadImage } from '@/lib/upload';
-import { useToast } from '@/contexts/toast-context';
+import EnhancedDatePicker from "@/components/enhanced-date-picker";
+import { OptimizedInput,OptimizedSelect,OptimizedTextarea } from '@/components/forms';
+import { PremiumPageLoader } from "@/components/LoadingSpinner";
+import ProfileImageAddModal from '@/components/ProfileImageAddModal';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Info, Camera, Trash2, RotateCcw } from "lucide-react";
-import ProfileImageAddModal from '@/components/ProfileImageAddModal';
-import Image from 'next/image';
-import EnhancedDatePicker from "@/components/enhanced-date-picker";
-import { signalCollectionRefresh } from '@/hooks/useEventDrivenRefresh';
-import { PremiumPageLoader } from "@/components/LoadingSpinner";
-import { getAllModerators } from "@/lib/dataService";
+import { SelectItem } from "@/components/ui/select";
+import { useAuth } from '@/contexts/auth-context';
+import { useToast } from '@/contexts/toast-context';
 import { useDebouncedStorage } from '@/hooks/useDebouncedStorage';
-import { OptimizedInput, OptimizedSelect, OptimizedTextarea } from '@/components/forms';
+import { signalCollectionRefresh } from '@/hooks/useEventDrivenRefresh';
+import { getAllModerators } from "@/lib/dataService";
+import { uploadImage } from '@/lib/upload';
+import { Camera,RotateCcw,Trash2 } from "lucide-react";
+import Image from 'next/image';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { useEffect,useState } from 'react';
 
 export default function AddModeratorPage() {
   const { currentUser, userData, loading } = useAuth();

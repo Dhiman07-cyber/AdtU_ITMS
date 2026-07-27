@@ -3,17 +3,17 @@
  * POST /api/bus-pass/verify-secure-qr
  */
 
-import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseServer } from '@/lib/supabase-server';
-import { decryptQRCodeData, quickValidateQRToken } from '@/lib/security/encryption.service';
-import { checkRateLimit, RateLimits, createRateLimitId } from '@/lib/security/rate-limiter';
-import { verifyApiAuth } from '@/lib/security/api-auth';
-import {
-    scannerBusMatchesStudent,
-    validateStudentScannerContext,
-} from '@/lib/security/scanner-auth';
-import { getTransportEntitlement } from '@/lib/entitlement/transport-entitlement';
 import { getByUid } from '@/domains/student';
+import { getTransportEntitlement } from '@/lib/entitlement/transport-entitlement';
+import { verifyApiAuth } from '@/lib/security/api-auth';
+import { decryptQRCodeData,quickValidateQRToken } from '@/lib/security/encryption.service';
+import { checkRateLimit,createRateLimitId,RateLimits } from '@/lib/security/rate-limiter';
+import {
+	scannerBusMatchesStudent,
+	validateStudentScannerContext,
+} from '@/lib/security/scanner-auth';
+import { getSupabaseServer } from '@/lib/supabase-server';
+import { NextRequest,NextResponse } from 'next/server';
 
 function getValidUntilDate(validUntil: unknown): Date | null {
     if (!validUntil) return null;

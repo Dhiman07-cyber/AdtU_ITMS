@@ -1,10 +1,6 @@
 export { MigrationStatus } from './contracts';
 export type {
-  MigrationDefinition,
-  MigrationResult,
-  ValidationResult,
-  MigrationRecord,
-  RollbackCapability,
+	MigrationDefinition,MigrationRecord,MigrationResult,RollbackCapability,ValidationResult
 } from './contracts';
 
 export { MigrationRunner } from './migration-runner';

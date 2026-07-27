@@ -9,10 +9,10 @@
  * Auth: Bearer <Firebase ID Token>
  */
 
-import { NextRequest, NextResponse } from 'next/server';
 import { adminAuth } from '@/lib/firebase-admin';
-import { saveToken, isValidTokenFormat } from '@/lib/services/fcm-token-service';
 import { resolveUserRole } from '@/lib/security/role-cache';
+import { isValidTokenFormat,saveToken } from '@/lib/services/fcm-token-service';
+import { NextRequest,NextResponse } from 'next/server';
 
 export async function POST(request: NextRequest) {
   try {

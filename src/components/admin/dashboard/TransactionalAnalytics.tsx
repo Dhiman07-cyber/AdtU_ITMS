@@ -1,38 +1,33 @@
 "use client";
 
-import { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import {
-  TrendingUp,
-  Calendar,
-  Wallet,
-  CreditCard,
-  ArrowUp,
-  Download,
-  Filter,
-  BarChart3
-} from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import {
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  Legend,
-  BarChart,
-  Bar,
-  PieChart,
-  Pie,
-  Cell
-} from 'recharts';
-import { PaymentTrend, MethodTrend } from './types';
-import { cn } from '@/lib/utils';
-import { exportToExcel } from '@/lib/export-helpers';
+import { Card,CardContent,CardHeader,CardTitle } from '@/components/ui/card';
 import { useAuth } from '@/contexts/auth-context';
+import { exportToExcel } from '@/lib/export-helpers';
+import { cn } from '@/lib/utils';
+import { AnimatePresence,motion } from 'framer-motion';
+import {
+	BarChart3,
+	Calendar,
+	CreditCard,
+	Download,
+	TrendingUp,
+	Wallet
+} from 'lucide-react';
+import { useEffect,useState } from 'react';
+import {
+	Area,
+	AreaChart,
+	CartesianGrid,
+	Cell,
+	Pie,
+	PieChart,
+	ResponsiveContainer,
+	Tooltip,
+	XAxis,
+	YAxis
+} from 'recharts';
+import { MethodTrend,PaymentTrend } from './types';
 
 interface TransactionalAnalyticsProps {
   paymentTrends: {

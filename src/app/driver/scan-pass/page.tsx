@@ -1,38 +1,31 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from 'react';
-import { useAuth } from '@/contexts/auth-context';
-import { useRouter } from 'next/navigation';
-import Image from 'next/image';
 import { Button } from '@/components/ui/button';
-import {
-  Camera,
-  CheckCircle,
-  XCircle,
-  AlertCircle,
-  Loader2,
-  Phone,
-  Calendar,
-  Clock,
-  Scan,
-  Activity,
-  ArrowLeft,
-  X,
-  ShieldCheck,
-  Bus,
-  Copy,
-  RotateCcw,
-  Layout,
-  LayoutGrid,
-  User,
-  Check
-} from 'lucide-react';
-import jsQR from 'jsqr';
-import { motion, AnimatePresence } from 'framer-motion';
-import { toast } from 'sonner';
 import { APP_NAME } from '@/config/runtime';
+import { useAuth } from '@/contexts/auth-context';
 import { auth } from '@/lib/firebase';
 import { safeImageSrc } from '@/lib/security/url-sanitizer';
+import { AnimatePresence,motion } from 'framer-motion';
+import jsQR from 'jsqr';
+import {
+	AlertCircle,
+	Bus,
+	Camera,
+	Check,
+	CheckCircle,
+	Copy,
+	Layout,
+	LayoutGrid,
+	Loader2,
+	RotateCcw,
+	Scan,
+	User,
+	XCircle
+} from 'lucide-react';
+import Image from 'next/image';
+import { useRouter } from 'next/navigation';
+import { useCallback,useEffect,useRef,useState } from 'react';
+import { toast } from 'sonner';
 
 // Verified student data interface
 interface VerifiedStudentData {

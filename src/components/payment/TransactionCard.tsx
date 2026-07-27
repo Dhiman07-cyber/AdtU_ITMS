@@ -14,26 +14,25 @@
  * - Micro-animations for enhanced UX
  */
 
-import React from 'react';
 import { Badge } from '@/components/ui/badge';
 import {
-    Receipt,
-    Clock,
-    Calendar,
-    IndianRupee,
-    CheckCircle,
-    AlertCircle,
-    Loader2,
-    CreditCard,
-    User,
-    ExternalLink
-} from 'lucide-react';
-import {
-    PaymentMethod,
-    PaymentStatus,
-    getStatusBadgeClass,
-    getMethodBadgeClass
+	PaymentMethod,
+	PaymentStatus,
+	getMethodBadgeClass,
+	getStatusBadgeClass
 } from '@/lib/types/payment';
+import {
+	Calendar,
+	CheckCircle,
+	Clock,
+	CreditCard,
+	ExternalLink,
+	IndianRupee,
+	Loader2,
+	Receipt,
+	User
+} from 'lucide-react';
+import React from 'react';
 
 // ============================================================================
 // TYPES

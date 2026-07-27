@@ -1,11 +1,11 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { createAuditEvent } from '@/domains/audit';
 import { adminAuth } from '@/lib/firebase-admin';
 import { resolveUserRole } from '@/lib/security/role-cache';
 import {
-  activateUpcomingSessionApplications,
-  activateSingleApplication,
+	activateSingleApplication,
+	activateUpcomingSessionApplications,
 } from '@/lib/services/session-activation.service';
-import { createAuditEvent } from '@/domains/audit';
+import { NextRequest,NextResponse } from 'next/server';
 
 /**
  * Admin manual trigger for the canonical session-activation service.

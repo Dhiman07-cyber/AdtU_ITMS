@@ -1,4 +1,4 @@
-import { RollbackCapability, MigrationResult } from './contracts';
+import { MigrationResult,RollbackCapability } from './contracts';
 
 export class RollbackManager {
   private capabilities: Map<string, RollbackCapability> = new Map();

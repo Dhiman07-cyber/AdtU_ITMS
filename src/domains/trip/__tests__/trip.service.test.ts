@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe,expect,it,vi } from 'vitest';
 
 vi.mock('@/lib/services/trip-lock-service', () => ({
   tripLockService: {
@@ -70,8 +70,8 @@ vi.mock('@/lib/utils/shift-utils', () => ({
   }),
 }));
 
-import { startTrip, endTrip, getActiveTrip, canOperate, heartbeat } from '../services/trip.service';
 import { tripLockService } from '@/lib/services/trip-lock-service';
+import { canOperate,endTrip,getActiveTrip,heartbeat,startTrip } from '../services/trip.service';
 
 describe('TripService', () => {
   it('startTrip accepts options object and returns tripId', async () => {

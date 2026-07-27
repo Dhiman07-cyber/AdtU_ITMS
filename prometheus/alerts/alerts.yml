@@ -1,0 +1,98 @@
+groups:
+  - name: itms_infrastructure_alerts
+    rules:
+      - alert: WebSocketServerDown
+        expr: sum(websocket_connections_active) == 0
+        for: 2m
+        labels:
+          severity: P0
+          category: INFRASTRUCTURE
+        annotations:
+          summary: "WebSocket server runtime appears offline"
+          description: "Active WebSocket connections dropped to 0 across all instances."
+
+      - alert: HighMemoryUsage
+        expr: (nodejs_process_resident_memory_bytes / 1024 / 1024) > 800
+        for: 5m
+        labels:
+          severity: P1
+          category: CAPACITY
+        annotations:
+          summary: "High Node.js process RSS memory consumption"
+          description: "Process memory consumption exceeded 800 MB threshold."
+
+      - alert: HighEventLoopLag
+        expr: (nodejs_event_loop_delay_p95_seconds * 1000) > 100
+        for: 2m
+        labels:
+          severity: P1
+          category: PERFORMANCE
+        annotations:
+          summary: "High event loop delay detected"
+          description: "P95 event loop delay exceeds 100ms threshold."
+
+  - name: itms_application_alerts
+    rules:
+      - alert: APIHighErrorRate
+        expr: (sum(rate(itms_api_errors_total[5m])) / sum(rate(itms_api_requests_total[5m]))) * 100 > 5
+        for: 3m
+        labels:
+          severity: P0
+          category: APPLICATION
+        annotations:
+          summary: "API Error rate exceeds 5%"
+          description: "HTTP 5xx server error rate is currently high."
+
+      - alert: HighAPILatencyP95
+        expr: histogram_quantile(0.95, sum(rate(itms_api_request_duration_seconds_bucket[5m])) by (le)) * 1000 > 2000
+        for: 5m
+        labels:
+          severity: P1
+          category: PERFORMANCE
+        annotations:
+          summary: "High API response latency (P95 > 2000ms)"
+          description: "API response latency P95 exceeds 2 seconds."
+
+  - name: itms_business_alerts
+    rules:
+      - alert: LowPaymentSuccessRate
+        expr: (sum(rate(itms_payments_completed_total[1h])) / sum(rate(itms_payments_initiated_total[1h]))) * 100 < 90
+        for: 15m
+        labels:
+          severity: P1
+          category: PAYMENT
+        annotations:
+          summary: "Payment success rate dropped below 90%"
+          description: "Ratio of completed payments to initiated orders has degraded significantly."
+
+      - alert: GPSPipelineHighRejectionRate
+        expr: (sum(rate(itms_gps_updates_rejected_total[5m])) / sum(rate(itms_gps_updates_received_total[5m]))) * 100 > 15
+        for: 5m
+        labels:
+          severity: P1
+          category: GPS
+        annotations:
+          summary: "GPS coordinate rejection rate exceeds 15%"
+          description: "GPS pipeline is rejecting an excessive ratio of driver location updates."
+
+  - name: itms_security_alerts
+    rules:
+      - alert: MassAuthFailures
+        expr: sum(rate(itms_auth_failures_total[5m])) > 10
+        for: 2m
+        labels:
+          severity: P0
+          category: SECURITY
+        annotations:
+          summary: "Mass authentication failures detected"
+          description: "Potential credential stuffing or brute-force authentication attack in progress."
+
+      - alert: RateLimitExceededSpike
+        expr: sum(rate(websocket_rate_limit_blocks_total[5m])) > 50
+        for: 2m
+        labels:
+          severity: P1
+          category: SECURITY
+        annotations:
+          summary: "High rate limit enforcement rate"
+          description: "Excessive client requests triggering rate limit blocks."

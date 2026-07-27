@@ -1,43 +1,36 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { use } from "react";
-import { useRouter } from "next/navigation";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import {
-  User,
-  Mail,
-  Phone,
-  Calendar,
-  Hash,
-  Building,
-  Edit,
-  Trash2,
-  Loader2,
-  ArrowLeft,
-  Home,
-  Briefcase,
-  IdCard,
-  Shield,
-  CheckCircle2,
-  AlertCircle
-} from "lucide-react";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import Link from "next/link";
 import { PremiumPageLoader } from "@/components/LoadingSpinner";
-import { useToast } from '@/contexts/toast-context';
+import { Avatar,AvatarFallback } from "@/components/ui/avatar";
+import { Button } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
 } from "@/components/ui/dialog";
-import { getModeratorById, deleteModerator } from '@/lib/dataService';
+import { useToast } from '@/contexts/toast-context';
+import { deleteModerator,getModeratorById } from '@/lib/dataService';
 import { safeImageSrc } from "@/lib/security/url-sanitizer";
 import { formatDateFlexible } from '@/lib/utils/date-utils';
+import {
+	ArrowLeft,
+	Briefcase,
+	Calendar,
+	Edit,
+	IdCard,
+	Loader2,
+	Mail,
+	Phone,
+	Shield,
+	Trash2,
+	User
+} from "lucide-react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { use,useEffect,useState } from "react";
 
 const formatDate = formatDateFlexible;
 

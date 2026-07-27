@@ -1,6 +1,6 @@
-import type { MigrationDefinition, MigrationResult, ValidationResult } from '@/infrastructure/migration/contracts';
+import { pgCount,pgFindByApplicationId,pgUpsert } from '@/domains/application/repositories/application.repository.pg';
+import type { MigrationDefinition,MigrationResult,ValidationResult } from '@/infrastructure/migration/contracts';
 import { adminDb } from '@/lib/firebase-admin';
-import { pgUpsert, pgFindByApplicationId, pgCount } from '@/domains/application/repositories/application.repository.pg';
 
 const APPLICATIONS_COLLECTION = 'applications';
 

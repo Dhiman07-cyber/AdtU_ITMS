@@ -1,32 +1,32 @@
 ﻿"use client";
 
-import { useState, useEffect, useRef } from 'react';
-import { useAuth } from '@/contexts/auth-context';
-import { useRouter } from 'next/navigation';
-import Link from 'next/link';
-import { uploadImage } from '@/lib/upload';
-import { useToast } from '@/contexts/toast-context';
+import EnhancedDatePicker from "@/components/enhanced-date-picker";
+import { PremiumPageLoader } from "@/components/LoadingSpinner";
+import ProfileImageAddModal from '@/components/ProfileImageAddModal';
+import RouteSelect from '@/components/RouteSelect';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { RefreshCw, Info, Camera, Trash2 } from "lucide-react";
-import EnhancedDatePicker from "@/components/enhanced-date-picker";
-import ProfileImageAddModal from '@/components/ProfileImageAddModal';
-import Image from 'next/image';
-import { getAllRoutes, getAllBuses, getAllDrivers, getModeratorById, updateDriver } from '@/lib/dataService';
-import { Route, Driver } from '@/lib/types';
-import { signalCollectionRefresh } from "@/hooks/useEventDrivenRefresh";
-import RouteSelect from '@/components/RouteSelect';
-import { PremiumPageLoader } from "@/components/LoadingSpinner";
-import { useDebouncedStorage } from '@/hooks/useDebouncedStorage';
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
 } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+import { useAuth } from '@/contexts/auth-context';
+import { useToast } from '@/contexts/toast-context';
+import { useDebouncedStorage } from '@/hooks/useDebouncedStorage';
+import { signalCollectionRefresh } from "@/hooks/useEventDrivenRefresh";
+import { getAllBuses,getAllDrivers,getAllRoutes,getModeratorById,updateDriver } from '@/lib/dataService';
+import { Route } from '@/lib/types';
+import { uploadImage } from '@/lib/upload';
+import { Camera,RefreshCw,Trash2 } from "lucide-react";
+import Image from 'next/image';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { useEffect,useRef,useState } from 'react';
 
 // Define the form data type
 type DriverFormData = {
@@ -48,8 +48,8 @@ type DriverFormData = {
   shift: string;
 };
 
-import { useModeratorPermissions } from '@/hooks/useModeratorPermissions';
 import { PermissionDeniedCard } from '@/components/PermissionDeniedCard';
+import { useModeratorPermissions } from '@/hooks/useModeratorPermissions';
 
 export default function AddDriver() {
   const { currentUser, userData, loading } = useAuth();

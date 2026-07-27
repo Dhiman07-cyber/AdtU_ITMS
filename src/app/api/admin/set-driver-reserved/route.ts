@@ -1,8 +1,8 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { getActiveAssignmentByDriverUid,unassignDriver } from '@/domains/fleet/repositories/driver-assignment.repository';
+import { getDriverById } from '@/domains/identity';
 import { verifyApiAuth } from '@/lib/security/api-auth';
 import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
-import { getDriverById } from '@/domains/identity';
-import { unassignDriver, getActiveAssignmentByDriverUid } from '@/domains/fleet/repositories/driver-assignment.repository';
+import { NextRequest,NextResponse } from 'next/server';
 
 /**
  * Set a driver as "Reserved" (not assigned to any bus)

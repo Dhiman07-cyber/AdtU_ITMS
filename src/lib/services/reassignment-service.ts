@@ -1,7 +1,6 @@
+import type { ReassignmentPlan } from '@/app/admin/smart-allocation/page';
 import * as fleetService from '@/domains/fleet/services/fleet.service';
 import { pgInsertNotification } from '@/domains/notification/repositories/notification.repository.pg';
-import { normalizeShift } from '@/lib/utils/shift-utils';
-import type { ReassignmentPlan } from '@/app/admin/smart-allocation/page';
 
 interface UndoAction {
   id: string;

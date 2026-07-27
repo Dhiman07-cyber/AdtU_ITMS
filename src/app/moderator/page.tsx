@@ -1,19 +1,19 @@
 "use client";
 
-import { useEffect, useState, useMemo, useCallback } from 'react';
-import dynamic from 'next/dynamic';
-import { useAuth } from '@/contexts/auth-context';
-import { useRouter } from 'next/navigation';
 import { PremiumPageLoader } from '@/components/LoadingSpinner';
+import { useAuth } from '@/contexts/auth-context';
+import dynamic from 'next/dynamic';
+import { useRouter } from 'next/navigation';
+import { useCallback,useEffect,useMemo,useState } from 'react';
 
 // Lightweight, framer-motion-free header/strip/hero stay in the critical bundle.
 import {
-  DashboardHeader,
-  SystemHealthStrip,
-  HeroLiveOperations,
-  SystemLifecycleIntelligence,
-  QuickActions,
-  DashboardStats
+	DashboardHeader,
+	DashboardStats,
+	HeroLiveOperations,
+	QuickActions,
+	SystemHealthStrip,
+	SystemLifecycleIntelligence
 } from '@/components/admin/dashboard';
 
 // Recharts-heavy widgets are code-split so the ~chart bundle never blocks first paint.
@@ -38,9 +38,9 @@ const StudentDistribution = dynamic(() => import('@/components/admin/dashboard/S
   loading: () => <ChartSkeleton className="h-80 w-full" />,
 });
 
-import { authApiFetch } from '@/lib/secure-api-client';
 import HighLoadAlert from '@/components/HighLoadAlert';
 import { createDashboardCache } from '@/lib/dashboard-cache';
+import { authApiFetch } from '@/lib/secure-api-client';
 
 const dashboardCache = createDashboardCache<any>('moderator');
 

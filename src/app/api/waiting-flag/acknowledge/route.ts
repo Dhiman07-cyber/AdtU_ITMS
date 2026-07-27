@@ -1,4 +1,4 @@
-﻿/**
+/**
  * POST /api/waiting-flag/acknowledge
  * 
  * Driver acknowledges a waiting flag with:
@@ -8,11 +8,11 @@
  * - Audit logging
  */
 
-import { NextResponse } from 'next/server';
-import { auth } from '@/lib/firebase-admin';
-import { getSupabaseServer } from '@/lib/supabase-server';
-import { checkRateLimit, createRateLimitId } from '@/lib/security/rate-limiter';
 import { emitEvent } from '@/domains/realtime/event-emitter';
+import { auth } from '@/lib/firebase-admin';
+import { checkRateLimit,createRateLimitId } from '@/lib/security/rate-limiter';
+import { getSupabaseServer } from '@/lib/supabase-server';
+import { NextResponse } from 'next/server';
 
 export async function POST(request: Request) {
   const startTime = Date.now();
@@ -63,7 +63,7 @@ export async function POST(request: Request) {
     const supabase = getSupabaseServer();
     const { data: driverProfile } = await supabase
       .from('driver_profiles')
-      .select('uid, bus_id, bus_id, full_name')
+      .select('uid, full_name')
       .eq('uid', driverUid)
       .maybeSingle();
 
@@ -88,9 +88,18 @@ export async function POST(request: Request) {
       );
     }
 
-    // Verify driver is assigned to this bus
-    if (driverProfile.bus_id !== flag.bus_id &&
-      driverProfile.bus_id !== flag.bus_id) {
+    // Verify driver is assigned to this bus or holds active trip lock
+    const { data: activeTrip } = await supabase
+      .from('active_trips')
+      .select('trip_id')
+      .eq('driver_id', driverUid)
+      .eq('bus_id', flag.bus_id)
+      .eq('status', 'active')
+      .maybeSingle();
+
+    const driverIsAuthorized = activeTrip !== null;
+
+    if (!driverIsAuthorized) {
       return NextResponse.json(
         { error: 'Driver is not assigned to this bus' },
         { status: 403 }

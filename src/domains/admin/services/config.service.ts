@@ -133,7 +133,17 @@ export async function getLandingConfig(): Promise<ConfigResult<LandingConfig>> {
 
   const doc = await adminDb.collection('settings').doc('landing').get();
   if (!doc.exists) {
-    throw new Error('Landing configuration missing in settings database. Please configure settings and try again later.');
+    const defaultConfig: LandingConfig = {
+      heroTitle: 'AdtU Bus Services',
+      heroSubtitle: 'Smart Campus Transit Portal',
+      features: [],
+      updatedAt: new Date().toISOString(),
+    } as any;
+    return {
+      data: defaultConfig,
+      updatedAt: null,
+      updatedByUid: null,
+    };
   }
 
   const data = doc.data() as LandingConfig;

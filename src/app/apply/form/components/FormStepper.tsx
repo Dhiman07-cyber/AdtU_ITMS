@@ -1,6 +1,6 @@
-import React, { memo } from 'react';
-import { Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { Check } from 'lucide-react';
+import { memo } from 'react';
 
 export interface StepInfo {
   num: number;

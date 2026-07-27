@@ -1,36 +1,28 @@
 "use client";
 
-import { useState, useEffect, use } from "react";
-import { useAuth } from "@/contexts/auth-context";
-import { useRouter } from "next/navigation";
-import Image from "next/image";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { PremiumPageLoader } from "@/components/LoadingSpinner";
+import { Avatar,AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import {
-  User,
-  Phone,
-  Mail,
-  MapPin,
-  Calendar,
-  Users,
-  Bus,
-  AlertCircle,
-  ArrowLeft,
-  GraduationCap,
-  Home,
-  Hash,
-  Heart,
-  School,
-  Loader2,
-  CheckCircle2,
-  Clock
-} from "lucide-react";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { useAuth } from "@/contexts/auth-context";
 import { getStudentById as getStudentByUid } from "@/lib/dataService";
 import { safeImageSrc } from "@/lib/security/url-sanitizer";
-import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import { formatDateFlexible } from '@/lib/utils/date-utils';
+import {
+	AlertCircle,
+	ArrowLeft,
+	Bus,
+	Calendar,
+	Hash,
+	Heart,
+	Mail,
+	MapPin,
+	Phone,
+	School,
+	User,
+	Users
+} from "lucide-react";
+import { useRouter } from "next/navigation";
+import { use,useEffect,useState } from "react";
 
 const StatusBadge = ({ status }: { status: string }) => {
   const statusConfig: Record<string, { bg: string; text: string; dot: string }> = {

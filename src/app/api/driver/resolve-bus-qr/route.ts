@@ -1,7 +1,8 @@
-import { NextResponse } from 'next/server';
-import { getSupabaseServer } from '@/lib/supabase-server';
+import { parseQRPayload } from '@/domains/trip';
 import { withSecurity } from '@/lib/security/api-security';
 import { RateLimits } from '@/lib/security/rate-limiter';
+import { getSupabaseServer } from '@/lib/supabase-server';
+import { NextResponse } from 'next/server';
 import { z } from 'zod';
 
 const ResolveBusQRSchema = z.object({
@@ -15,19 +16,20 @@ export const POST = withSecurity(
 
     let busId: string | null = null;
 
-    const qr = qrData.trim();
-
-    if (qr.startsWith('bus:')) {
-      busId = qr.slice(4).trim();
-    } else if (/^[a-zA-Z0-9_-]{1,64}$/.test(qr)) {
-      busId = qr;
+    try {
+      const contract = parseQRPayload(qrData);
+      if (contract.busId) {
+        busId = contract.busId;
+      }
+    } catch {
+      busId = null;
     }
 
     if (!busId) {
       const busByNumber = await supabase
         .from('buses')
         .select('id')
-        .eq('bus_number', qr)
+        .eq('bus_number', qrData.trim())
         .maybeSingle();
 
       if (busByNumber.data) {

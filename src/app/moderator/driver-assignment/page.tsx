@@ -1,72 +1,53 @@
 ﻿"use client";
 
-import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
+import { useCallback,useEffect,useMemo,useRef,useState } from "react";
 
 
+import Avatar from "@/components/Avatar";
+import { PremiumPageLoader } from "@/components/LoadingSpinner";
+import { PermissionDeniedCard } from "@/components/PermissionDeniedCard";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+	TooltipProvider
+} from "@/components/ui/tooltip";
 import { useAuth } from "@/contexts/auth-context";
 import { useModeratorPermissions } from "@/hooks/useModeratorPermissions";
-import { PermissionDeniedCard } from "@/components/PermissionDeniedCard";
-import { toast } from "react-hot-toast";
-import {
-    Bus,
-    Users,
-    Search,
-    Filter,
-    ArrowRightLeft,
-    User,
-    CheckCircle2,
-    Plus,
-    Check,
-    X,
-    MapPin,
-    UserCog,
-    ChevronDown,
-    Sparkles,
-    History,
-} from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
-import { PremiumPageLoader } from "@/components/LoadingSpinner";
-import { Checkbox } from "@/components/ui/checkbox";
-import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from "@/components/ui/select";
-import {
-    Tooltip,
-    TooltipContent,
-    TooltipProvider,
-    TooltipTrigger,
-} from "@/components/ui/tooltip";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { cn } from "@/lib/utils";
 import { safeImageSrc } from "@/lib/security/url-sanitizer";
-import { motion, AnimatePresence } from "framer-motion";
-import Avatar from "@/components/Avatar";
+import { cn } from "@/lib/utils";
+import { AnimatePresence,motion } from "framer-motion";
+import {
+	ArrowRightLeft,
+	Bus,
+	History,
+	MapPin,
+	Search,
+	User,
+	UserCog,
+	Users
+} from "lucide-react";
+import { toast } from "react-hot-toast";
 
 // Assignment components and services
-import { DriverStagingArea } from "@/components/assignment/StagingArea";
-import { DriverConfirmationModal } from "@/components/assignment/DriverConfirmationModal";
 import { AssignmentFinalizeCard } from "@/components/assignment/AssignmentFinalizeCard";
+import { DriverConfirmationModal } from "@/components/assignment/DriverConfirmationModal";
 import { ReassignmentHistoryModal } from "@/components/assignment/ReassignmentHistoryModal";
+import { DriverStagingArea } from "@/components/assignment/StagingArea";
 import {
-    generateStagingId,
-    formatDriverCode,
-    getDriverStatus,
-    type StagedDriverAssignment,
+	formatDriverCode,
+	generateStagingId,
+	getDriverStatus,
+	type StagedDriverAssignment,
 } from "@/lib/services/assignment-service";
 import {
-    computeNetAssignments,
-    validateStagingPreCheck,
-    type StagedOperation,
-    type DbSnapshot,
-    type ConfirmationTableRow,
-    type ComputeNetAssignmentsResult,
+	computeNetAssignments,
+	validateStagingPreCheck,
+	type ComputeNetAssignmentsResult,
+	type DbSnapshot,
+	type StagedOperation
 } from "@/lib/services/net-assignment-service";
 
 // ============================================

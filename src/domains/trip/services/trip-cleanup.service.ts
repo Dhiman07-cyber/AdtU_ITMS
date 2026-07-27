@@ -1,5 +1,5 @@
-import { getSupabaseServer } from '@/lib/supabase-server';
 import { clearHistory } from '@/domains/gps';
+import { getSupabaseServer } from '@/lib/supabase-server';
 
 export async function cleanupTrip(params: {
   driverId: string;

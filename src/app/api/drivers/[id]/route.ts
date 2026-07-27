@@ -1,7 +1,7 @@
-import { NextResponse } from 'next/server';
+import { getDriverById,deleteDriver as removeDriver,updateDriver } from '@/domains/identity';
 import { verifyApiAuth } from '@/lib/security/api-auth';
 import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
-import { getDriverById, updateDriver, deleteDriver as removeDriver } from '@/domains/identity';
+import { NextResponse } from 'next/server';
 
 // D6 Fleet — Driver CRUD API. Runtime owner: PostgreSQL (driver_profiles table).
 

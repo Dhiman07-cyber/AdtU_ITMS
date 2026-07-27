@@ -1,11 +1,8 @@
 import { getAuth } from 'firebase/auth';
 
 import type {
-  Student,
-  Driver,
-  Moderator,
-  Bus,
-  Route,
+	Moderator,
+	Student
 } from '@/lib/types';
 
 // Re-export domain-specific client functions

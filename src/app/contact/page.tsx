@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useState } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Mail, Phone, Clock, MapPin, Headphones, MessageCircle, Sparkles, Loader2 } from 'lucide-react';
 import ApplyFormNavbar from '@/components/ApplyFormNavbar';
-import { safeMailtoHref, safeTelHref } from '@/lib/security/url-sanitizer';
 import Footer from '@/components/Footer';
+import { Card } from '@/components/ui/card';
+import { safeMailtoHref,safeTelHref } from '@/lib/security/url-sanitizer';
+import { Clock,Headphones,Loader2,Mail,MapPin,MessageCircle,Phone,Sparkles } from 'lucide-react';
+import { useEffect,useState } from 'react';
 
 export default function ContactPage() {
   const [config, setConfig] = useState<any>(null);

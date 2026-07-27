@@ -1,7 +1,7 @@
 "use client";
 
-import React, { Component, ErrorInfo, ReactNode } from 'react';
-import { RefreshCw, WifiOff, AlertTriangle } from 'lucide-react';
+import { AlertTriangle,RefreshCw,WifiOff } from 'lucide-react';
+import { Component,ErrorInfo,ReactNode } from 'react';
 
 interface ErrorBoundaryProps {
   children: ReactNode;

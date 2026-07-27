@@ -5,10 +5,14 @@ const MAX_EVENT_LENGTH = 64;
 const seenNonces = new Map<string, number>();
 const NONCE_EXPIRY = 30000;
 
-setInterval(() => {
+const nonceCleanupTimer = setInterval(() => {
   const now = Date.now();
   for (const [k, t] of seenNonces) { if (now - t > NONCE_EXPIRY) seenNonces.delete(k); }
 }, 60000);
+
+export function stopMessageValidator(): void {
+  clearInterval(nonceCleanupTimer);
+}
 
 export interface ValidationResult {
   valid: boolean;

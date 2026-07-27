@@ -1,16 +1,16 @@
-import { NextResponse } from 'next/server';
+import * as tripService from '@/domains/trip';
 import { withSecurity } from '@/lib/security/api-security';
 import { RateLimits } from '@/lib/security/rate-limiter';
 import { StartTripSchema } from '@/lib/security/validation-schemas';
-import * as tripService from '@/domains/trip';
+import { NextResponse } from 'next/server';
 
 export const POST = withSecurity(
   async (request, { auth, body }) => {
     const startTime = Date.now();
-    const { busId, routeId } = body as any;
+    const { busId, routeId, shift } = body as any;
     const driverUid = auth.uid;
 
-    const result = await tripService.startTrip({ driverId: driverUid, busId, routeId });
+    const result = await tripService.startTrip({ driverId: driverUid, busId, routeId, shift });
 
     if (!result.success) {
       return NextResponse.json(

@@ -1,6 +1,6 @@
-﻿import { NextResponse } from 'next/server';
+﻿import { getDriverById,getUserById } from '@/domains/identity';
 import { getModeratorPermissions } from '@/lib/security/moderator-permissions';
-import { getDriverById, getUserById } from '@/domains/identity';
+import { NextResponse } from 'next/server';
 
 type ScannerAuth = {
   uid: string;

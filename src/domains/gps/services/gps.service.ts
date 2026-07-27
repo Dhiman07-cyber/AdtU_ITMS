@@ -1,6 +1,6 @@
 import { LocationValidationService } from '@/lib/security/location-validation-service';
-import type { GPSLocation, GPSFilterResult, LocationUpdate, PipelineResult } from './types';
-import { processLocationUpdate, processLocationUpdateSimple } from './gps-pipeline.service';
+import { processLocationUpdate,processLocationUpdateSimple } from './gps-pipeline.service';
+import type { GPSFilterResult,GPSLocation,LocationUpdate,PipelineResult } from './types';
 
 const validator = new LocationValidationService();
 
@@ -45,4 +45,4 @@ export async function validateUpdate(raw: LocationUpdate): Promise<PipelineResul
   return processLocationUpdateSimple(raw);
 }
 
-export type { GPSLocation, GPSFilterResult, LocationUpdate, PipelineResult };
+export type { GPSFilterResult,GPSLocation,LocationUpdate,PipelineResult };

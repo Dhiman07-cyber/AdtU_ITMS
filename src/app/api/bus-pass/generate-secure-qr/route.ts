@@ -12,13 +12,13 @@
  * - Authentication required
  */
 
-import { NextRequest, NextResponse } from 'next/server';
-import { encryptQRCodeData } from '@/lib/security/encryption.service';
-import { checkRateLimit, RateLimits, createRateLimitId } from '@/lib/security/rate-limiter';
-import { verifyApiAuth } from '@/lib/security/api-auth';
-import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
-import { getTransportEntitlement } from '@/lib/entitlement/transport-entitlement';
 import { getByUid } from '@/domains/student';
+import { getTransportEntitlement } from '@/lib/entitlement/transport-entitlement';
+import { verifyApiAuth } from '@/lib/security/api-auth';
+import { encryptQRCodeData } from '@/lib/security/encryption.service';
+import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
+import { checkRateLimit,createRateLimitId,RateLimits } from '@/lib/security/rate-limiter';
+import { NextRequest,NextResponse } from 'next/server';
 
 export async function POST(request: NextRequest) {
     try {

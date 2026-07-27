@@ -1,13 +1,13 @@
-import QRCode from 'qrcode';
 import {
-  DocumentCryptoService,
-  generateSecureQRData,
-  buildDocumentPayloadFromPayment,
+	buildDocumentPayloadFromPayment,
+	DocumentCryptoService,
+	generateSecureQRData,
 } from '@/lib/security/document-crypto.service';
-import { paymentsSupabaseService, type PaymentRecord } from '@/lib/services/payments-supabase';
-import puppeteer, { Browser } from 'puppeteer';
+import { paymentsSupabaseService,type PaymentRecord } from '@/lib/services/payments-supabase';
 import fs from 'fs';
 import path from 'path';
+import puppeteer,{ Browser } from 'puppeteer';
+import QRCode from 'qrcode';
 
 export type ReceiptSignatureResult = {
   ok: boolean;

@@ -1,7 +1,7 @@
 "use client"
 
-import * as React from "react"
 import { cn } from "@/lib/utils"
+import * as React from "react"
 
 interface TabsContextType {
   activeTab: string
@@ -120,4 +120,4 @@ const TabsContent = React.forwardRef<HTMLDivElement, TabsContentProps>(
 )
 TabsContent.displayName = "TabsContent"
 
-export { Tabs, TabsList, TabsTrigger, TabsContent }
+export { Tabs,TabsContent,TabsList,TabsTrigger }

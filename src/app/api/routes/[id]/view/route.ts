@@ -1,5 +1,5 @@
-import { NextResponse } from 'next/server';
 import { getById as getRouteById } from '@/domains/route';
+import { NextResponse } from 'next/server';
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {

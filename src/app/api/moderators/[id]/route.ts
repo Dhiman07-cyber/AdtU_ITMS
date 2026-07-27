@@ -1,6 +1,6 @@
-import { NextResponse } from 'next/server';
-import { verifyApiAuth } from '@/lib/security/api-auth';
 import { getModeratorById } from '@/domains/identity';
+import { verifyApiAuth } from '@/lib/security/api-auth';
+import { NextResponse } from 'next/server';
 
 // Define types for our data
 interface Moderator {

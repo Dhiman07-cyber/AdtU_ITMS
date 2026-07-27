@@ -1,28 +1,39 @@
-﻿"use client";
+"use client";
 
-import { useState, useEffect, useMemo } from 'react';
-import { useAuth } from "@/contexts/auth-context";
-import { useRouter } from "next/navigation";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import StudentQRDisplay from "@/components/bus-pass/StudentQRDisplay";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card,CardContent,CardHeader } from "@/components/ui/card";
+import { useAuth } from "@/contexts/auth-context";
+import { WebSocketClient } from '@/domains/realtime/ws-client';
+import { getTransportEntitlement } from '@/lib/entitlement/transport-entitlement';
+import { authApiFetch } from '@/lib/secure-api-client';
+import { motion } from "framer-motion";
 import {
-  MapPin,
-  Navigation,
-  Bus,
-  RefreshCcw, QrCode, ArrowRight,
-  GraduationCap, BookOpen, Clock, Info,
-  CheckCircle, CreditCard, Zap, User, Activity,
-  Calendar, TrendingUp, Award, Bell, Shield, Star,
-  Timer, Route, Target, CheckCircle2, AlertCircle, Users, Monitor
+	Activity,
+	AlertCircle,
+	ArrowRight,
+	Bell,
+	BookOpen,
+	Bus,
+	Calendar,
+	Clock,
+	CreditCard,
+	GraduationCap,
+	Info,
+	MapPin,
+	Monitor,
+	Navigation,
+	QrCode,
+	RefreshCcw,
+	Star,
+	Timer,
+	User,
+	Users
 } from "lucide-react";
 import Link from 'next/link';
-import { motion } from "framer-motion";
-import StudentQRDisplay from "@/components/bus-pass/StudentQRDisplay";
-import { getTransportEntitlement } from '@/lib/entitlement/transport-entitlement';
-import { supabase } from '@/lib/supabase-client';
-import { WebSocketClient } from '@/domains/realtime/ws-client';
-import { authApiFetch } from '@/lib/secure-api-client';
+import { useRouter } from "next/navigation";
+import { useEffect,useState } from 'react';
 // SPARK PLAN SAFETY: Migrated to usePaginatedCollection
 
 
@@ -107,31 +118,67 @@ export default function StudentDashboard() {
     }
   }, [currentUser, studentData]);
 
-  // REALTIME SUBSCRIPTIONS — WebSocket primary
+  // REALTIME SUBSCRIPTIONS — WebSocket primary + 5s active trip check fallback
   useEffect(() => {
-    const busId = studentData?.busId;
+    const busId = studentData?.bus_id || studentData?.busId || busData?.id || busData?.busId || busData?.bus_id;
     if (!busId || !currentUser) return;
 
     let wsClient: WebSocketClient | null = null;
+    let isCancelled = false;
+
+    const checkActiveTrip = async () => {
+      try {
+        const token = await currentUser.getIdToken();
+        const response = await fetch(`/api/student/trip-status?busId=${encodeURIComponent(busId)}`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {}
+        });
+        if (response.ok) {
+          const result = await response.json();
+          if (!isCancelled) {
+            setTripActive(result.tripActive);
+          }
+        }
+      } catch (err) {
+        console.error('Error checking active trip on dashboard:', err);
+      }
+    };
+
+    // Run active trip check immediately
+    checkActiveTrip();
+
+    // Fast 5s interval check as fallback
+    const interval = setInterval(checkActiveTrip, 5000);
 
     const init = async () => {
-      const token = await currentUser.getIdToken();
-      const url = process.env.NEXT_PUBLIC_WS_URL || `ws://${window.location.hostname}:3001`;
-      wsClient = new WebSocketClient({ url, token });
-      wsClient.connect();
+      try {
+        const token = await currentUser.getIdToken();
+        if (isCancelled) return;
+        const url = process.env.NEXT_PUBLIC_WS_URL || `ws://${window.location.hostname}:3001/ws`;
+        wsClient = new WebSocketClient({ url, token });
+        wsClient.connect();
 
-      wsClient.subscribe(`trip-status-${busId}`, (payload: any) => {
-        if (payload.event === 'trip_started') setTripActive(true);
-        else if (payload.event === 'trip_ended') setTripActive(false);
-      });
+        wsClient.subscribe(`trip-status-${busId}`, (payload: any) => {
+          const data = payload.payload || payload;
+          const eventType = data.event || payload.event;
+          if (eventType === 'trip_started' || data.status === 'active') {
+            setTripActive(true);
+          } else if (eventType === 'trip_ended' || data.status === 'ended') {
+            setTripActive(false);
+          }
+        });
+      } catch (err) {
+        console.warn('Dashboard WS init failed:', err);
+      }
     };
 
     init();
 
     return () => {
+      isCancelled = true;
+      clearInterval(interval);
       wsClient?.disconnect();
     };
-  }, [studentData?.busId, currentUser]);
+  }, [studentData?.bus_id, studentData?.busId, busData?.id, busData?.busId, busData?.bus_id, currentUser]);
 
 
   useEffect(() => {
@@ -159,7 +206,9 @@ export default function StudentDashboard() {
   // CANONICAL entitlement (Phase 3) — the single answer the dashboard uses to gate
   // every transport feature (QR generation, Track Bus / View Pass actions).
   const transportEntitled = getTransportEntitlement(studentData ?? userData).entitled;
-  const studentName = studentData?.fullName || studentData?.name || userData?.name || 'Student';
+  const rawStudentName = studentData?.fullName || studentData?.name || userData?.name || 'Student';
+  const studentName = rawStudentName;
+  const studentFirstName = rawStudentName.trim().split(/\s+/)[0];
   const studentShift = studentData?.shift || 'Not Set';
 
   // Get session years properly
@@ -191,7 +240,8 @@ export default function StudentDashboard() {
                     </div>
                     <div className="min-w-0 flex-1">
                       <h1 className="text-xl md:text-3xl lg:text-4xl font-bold bg-gradient-to-r from-gray-900 to-gray-600 dark:from-white dark:to-gray-300 bg-clip-text text-transparent leading-tight break-words">
-                        Welcome back, <span className="block sm:inline">{studentData?.fullName || studentData?.name || 'Student'}!</span>
+                        <span className="hidden md:inline">Welcome back, {studentFirstName}!</span>
+                        <span className="inline md:hidden">Welcome {studentFirstName}!</span>
                       </h1>
                       <p className="text-xs md:text-sm text-gray-600 dark:text-gray-400 mt-1 font-medium">
                         {new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}

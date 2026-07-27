@@ -1,7 +1,7 @@
 import { sessionManager } from './session-manager';
 import { connectionRegistry } from './connection-registry';
 import { subscriptionManager } from './subscription-manager';
-import type WebSocket from 'ws';
+import { clearQueue } from './offline-queue';
 
 export class ConnectionCleanupService {
   cleanup(socketId: string): void {
@@ -11,17 +11,14 @@ export class ConnectionCleanupService {
     }
     sessionManager.delete(socketId);
     connectionRegistry.unregister(socketId);
+    // Immediately free offline queue memory — don't wait for 5-min TTL
+    clearQueue(socketId);
   }
 
   cleanupAll(): void {
     for (const [socketId] of connectionRegistry.getAll()) {
       this.cleanup(socketId);
     }
-  }
-
-  setupCloseHandler(ws: WebSocket, socketId: string): void {
-    ws.on('close', () => this.cleanup(socketId));
-    ws.on('error', () => this.cleanup(socketId));
   }
 }
 

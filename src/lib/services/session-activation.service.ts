@@ -36,24 +36,23 @@
  *   6. Failure-isolated. One application's failure never stops the rest.
  */
 
-import { Application } from '@/lib/types/application';
-import type { Bus } from '@/lib/types';
-import { getDeadlineConfig } from '@/lib/deadline-config-service';
-import { DeadlineConfig } from '@/lib/types/deadline-config';
-import { createAuditEvent, SYSTEM_ACTOR } from '@/domains/audit';
-import { CapacityFullError } from '@/lib/errors/sentinel-errors';
-import { normalizeShift, areShiftsCompatible, getShiftLoad } from '@/lib/utils/shift-utils';
-import { createUser, createStudent } from '@/domains/identity';
+import { findMarker,upsertMarker } from '@/domains/admin';
 import { getAllByState } from '@/domains/application';
 import * as applicationRepo from '@/domains/application/repositories/application.repository';
-import { getSupabaseServer } from '@/lib/supabase-server';
-import { findMarker, upsertMarker } from '@/domains/admin';
-import * as Notification from '@/domains/notification';
+import { createAuditEvent,SYSTEM_ACTOR } from '@/domains/audit';
 import * as fleetService from '@/domains/fleet/services/fleet.service';
+import { createStudent,createUser } from '@/domains/identity';
+import * as Notification from '@/domains/notification';
 import * as routeService from '@/domains/route';
 import { findAlternatives } from '@/domains/seat/repositories/seat.repository';
 import { sendBusFullAlert } from '@/lib/busCapacityService';
+import { getDeadlineConfig } from '@/lib/deadline-config-service';
+import { CapacityFullError } from '@/lib/errors/sentinel-errors';
+import type { Bus } from '@/lib/types';
+import { Application } from '@/lib/types/application';
+import { DeadlineConfig } from '@/lib/types/deadline-config';
 import { computeBlockDatesFromValidUntil } from '@/lib/utils/deadline-computation';
+import { normalizeShift } from '@/lib/utils/shift-utils';
 
 class StateChangedError extends Error {}
 

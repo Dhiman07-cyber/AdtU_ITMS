@@ -1,64 +1,59 @@
 "use client";
 
-import { useAuth } from '@/contexts/auth-context';
-import { useEffect, useState, useMemo } from 'react';
-import { useRouter } from 'next/navigation';
-import Link from 'next/link';
-import { exportToExcel } from '@/lib/export-helpers';
+import Avatar from '@/components/Avatar';
 import { ExportButton } from '@/components/ExportButton';
-import { cn } from '@/lib/utils';
-import { supabase } from '@/lib/supabase-client';
-import {
-    Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogFooter,
-    DialogHeader,
-    DialogTitle,
-} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import {
-    DropdownMenu,
-    DropdownMenuContent,
-    DropdownMenuItem,
-    DropdownMenuLabel,
-    DropdownMenuSeparator,
-    DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import {
-    Card,
-    CardContent,
-    CardDescription,
-    CardHeader,
-    CardTitle,
+	Card,
+	CardContent
 } from "@/components/ui/card";
 import {
-    Table,
-    TableBody,
-    TableCell,
-    TableHead,
-    TableHeader,
-    TableRow,
-} from "@/components/ui/table";
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
+} from "@/components/ui/dialog";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuLabel,
+	DropdownMenuSeparator,
+	DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
 } from "@/components/ui/select";
-import { PremiumPageLoader } from '@/components/LoadingSpinner';
-import { MoreHorizontal, Eye, Edit, Trash2, Search, Loader2, Plus, RefreshCw, Filter, X, Users, ArrowRightLeft, QrCode } from "lucide-react";
-import { deleteStudent } from '@/lib/dataService';
+import {
+	Table,
+	TableBody,
+	TableCell,
+	TableHead,
+	TableHeader,
+	TableRow,
+} from "@/components/ui/table";
+import { useAuth } from '@/contexts/auth-context';
 import { useToast } from '@/contexts/toast-context';
+import { deleteStudent } from '@/lib/dataService';
+import { exportToExcel } from '@/lib/export-helpers';
 import { safeImageSrc } from "@/lib/security/url-sanitizer";
-import Avatar from '@/components/Avatar';
+import { supabase } from '@/lib/supabase-client';
+import { cn } from '@/lib/utils';
+import { Edit,Eye,Filter,Loader2,MoreHorizontal,Plus,QrCode,RefreshCw,Search,Trash2 } from "lucide-react";
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { useEffect,useMemo,useState } from 'react';
 // Migrated: Server-side API → PostgreSQL (no Firestore client reads)
-import { useApiCollection, invalidateCollectionCache } from '@/hooks/useApiCollection';
+import { invalidateCollectionCache,useApiCollection } from '@/hooks/useApiCollection';
 import { useEventDrivenRefresh } from '@/hooks/useEventDrivenRefresh';
 import { useModeratorPermissions } from '@/hooks/useModeratorPermissions';
-import { PermissionDeniedCard } from '@/components/PermissionDeniedCard';
 
 export default function AdminStudents() {
     const { currentUser, userData, loading: authLoading } = useAuth();

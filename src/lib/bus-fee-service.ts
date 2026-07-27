@@ -3,7 +3,7 @@
  * Handles bus fee storage in Firestore settings/config collection
  */
 
-import { getSystemConfig, updateSystemConfig } from '@/domains/admin';
+import { getSystemConfig,updateSystemConfig } from '@/domains/admin';
 
 export interface BusFeeData {
   amount: number;

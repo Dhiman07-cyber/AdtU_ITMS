@@ -1,62 +1,59 @@
 "use client";
 
-import { useAuth } from '@/contexts/auth-context';
-import { useEffect, useState, useMemo, useCallback, memo } from 'react';
-import { useRouter } from 'next/navigation';
-import Link from 'next/link';
-import { exportToExcel } from '@/lib/export-helpers';
+import Avatar from '@/components/Avatar';
 import { ExportButton } from '@/components/ExportButton';
-import { supabase } from '@/lib/supabase-client';
-import { useToast } from '@/contexts/toast-context';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { PremiumPageLoader } from '@/components/LoadingSpinner';
 import { Button } from "@/components/ui/button";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
+	Card,
+	CardContent
 } from "@/components/ui/card";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
+} from "@/components/ui/dialog";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuLabel,
+	DropdownMenuSeparator,
+	DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
 } from "@/components/ui/select";
-import { PremiumPageLoader } from '@/components/LoadingSpinner';
-import { MoreHorizontal, Eye, Edit, Trash2, Search, Loader2, Plus, Filter, ArrowRightLeft, Users, RefreshCw } from "lucide-react";
+import {
+	Table,
+	TableBody,
+	TableCell,
+	TableHead,
+	TableHeader,
+	TableRow,
+} from "@/components/ui/table";
+import { useAuth } from '@/contexts/auth-context';
+import { useToast } from '@/contexts/toast-context';
 import { deleteDriver } from '@/lib/dataService';
-import Avatar from '@/components/Avatar';
+import { exportToExcel } from '@/lib/export-helpers';
 import { safeImageSrc } from "@/lib/security/url-sanitizer";
+import { supabase } from '@/lib/supabase-client';
+import { ArrowRightLeft,Edit,Eye,Filter,MoreHorizontal,Plus,RefreshCw,Search,Trash2 } from "lucide-react";
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { memo,useCallback,useEffect,useMemo,useState } from 'react';
 // Migrated: Server-side API → PostgreSQL (no Firestore client reads)
-import { useApiCollection, invalidateCollectionCache } from '@/hooks/useApiCollection';
-import { useEventDrivenRefresh } from '@/hooks/useEventDrivenRefresh';
 import { useTheme } from '@/components/theme-provider';
+import { invalidateCollectionCache,useApiCollection } from '@/hooks/useApiCollection';
+import { useEventDrivenRefresh } from '@/hooks/useEventDrivenRefresh';
 import { cn } from '@/lib/utils';
 import { formatDateDDMMYYYY } from '@/lib/utils/date-utils';
 
@@ -348,8 +345,8 @@ export default function AdminDrivers() {
       const busMap = new Map((rawBuses || []).map((b: any) => [b.id, b.bus_number || b.registration_number]));
 
       const driversData = (rawDrivers || []).map((driver: any, index: number) => {
-        const busAssigned = busMap.get(driver.bus_id) || (driver.bus_id ? `Bus-${driver.bus_id}` : 'Reserved');
-        const status = driver.status || (driver.bus_id ? 'Active' : 'Reserved');
+        const busAssigned = 'Dynamic (Trip Init)';
+        const status = driver.status || 'Active';
 
         return [
           (index + 1).toString(),
@@ -365,7 +362,7 @@ export default function AdminDrivers() {
 
       // Add headers
       driversData.unshift([
-        'Sl No', 'Name', 'Email', 'Phone', 'Driver ID', 'Bus Assigned', 'Joining Date', 'Status'
+        'Sl No', 'Name', 'Email', 'Phone', 'Driver ID', 'Assignment Mode', 'Joining Date', 'Status'
       ]);
 
       // Add section header
@@ -501,7 +498,7 @@ export default function AdminDrivers() {
                     <TableHead>Driver Information</TableHead>
                     <TableHead className="text-center">Phone</TableHead>
                     <TableHead className="text-center">Employee ID</TableHead>
-                    <TableHead className="text-center whitespace-nowrap">Bus Assigned</TableHead>
+                    <TableHead className="text-center whitespace-nowrap">Assignment Mode</TableHead>
                     <TableHead className="text-center">Years of Service</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
@@ -513,7 +510,7 @@ export default function AdminDrivers() {
                         key={driver.uid || driver.id || `driver-${index}`}
                         driver={driver}
                         theme={theme}
-                        busDisplay={getBusDisplay(driver.busId || driver.bus_id)}
+                        busDisplay="Dynamic (Trip Init)"
                         onDelete={handleDeleteClick}
                       />
                     ))}

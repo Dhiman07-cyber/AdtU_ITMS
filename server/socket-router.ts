@@ -62,6 +62,7 @@ handle('subscribe', (ws, session, payload) => {
   const channel = payload.channel as string | undefined;
   if (!channel) { send(ws, { type: 'error', message: 'subscribe requires "channel"' }); return; }
   subscriptionManager.subscribe(session.socketId, channel, ws, session);
+  logger.debug('subscribe', { uid: session.uid, socketId: session.socketId, channel });
   send(ws, { type: 'subscribed', channel });
 });
 
@@ -69,6 +70,7 @@ handle('unsubscribe', (ws, session, payload) => {
   const channel = payload.channel as string | undefined;
   if (!channel) { send(ws, { type: 'error', message: 'unsubscribe requires "channel"' }); return; }
   subscriptionManager.unsubscribe(session.socketId, channel, session);
+  logger.debug('unsubscribe', { uid: session.uid, socketId: session.socketId, channel });
   send(ws, { type: 'unsubscribed', channel });
 });
 
@@ -77,9 +79,10 @@ handle('pong', (ws, session) => {
 });
 
 handle('presence', (ws, session, payload) => {
-  if (payload.busId) sessionManager.setBusId(session.socketId, payload.busId);
-  if (payload.tripId) sessionManager.setTripId(session.socketId, payload.tripId);
-  if (payload.routeId) sessionManager.setRouteId(session.socketId, payload.routeId);
+  if (payload.busId && typeof payload.busId === 'string' && payload.busId.trim()) sessionManager.setBusId(session.socketId, payload.busId.trim());
+  if (payload.tripId && typeof payload.tripId === 'string' && payload.tripId.trim()) sessionManager.setTripId(session.socketId, payload.tripId.trim());
+  if (payload.routeId && typeof payload.routeId === 'string' && payload.routeId.trim()) sessionManager.setRouteId(session.socketId, payload.routeId.trim());
+  logger.debug('presence', { uid: session.uid, socketId: session.socketId, busId: payload.busId, tripId: payload.tripId, routeId: payload.routeId });
   send(ws, { type: 'presence_ok' });
 });
 

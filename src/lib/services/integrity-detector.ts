@@ -1,6 +1,6 @@
-﻿import { getAllStudents } from '@/domains/identity';
+﻿import * as applicationService from '@/domains/application';
 import { getAllBuses } from '@/domains/fleet';
-import * as applicationService from '@/domains/application';
+import { getAllStudents } from '@/domains/identity';
 import { wasSeatReleased } from '@/lib/config/capacity-flags';
 
 /**

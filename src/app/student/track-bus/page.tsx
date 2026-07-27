@@ -1,39 +1,32 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
-import { useAuth } from "@/contexts/auth-context";
-import { useRouter } from "next/navigation";
-import Image from "next/image";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import {
-  MapPin,
-  Bus,
-  Navigation,
-  Play,
-  Square,
-  Flag,
-  XCircle,
-  AlertCircle,
-  Clock,
-  X,
-  AlertTriangle,
-  CheckCircle
-} from "lucide-react";
-import {
-  getStudentByUid,
-  getBusById,
-  getRouteById,
-} from "@/lib/dataService";
-import { WebSocketClient } from '@/domains/realtime/ws-client';
-import { useToast } from "@/contexts/toast-context";
-import dynamic from "next/dynamic";
-import { useBusLocation } from '@/hooks/useBusLocation';
-import TransportEntitlementGuard from "@/components/transport/TransportEntitlementGuard";
-import { formatIdForDisplay } from "@/lib/utils";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import { PremiumPageLoader } from "@/components/LoadingSpinner";
+import TransportEntitlementGuard from "@/components/transport/TransportEntitlementGuard";
+import { Button } from "@/components/ui/button";
+import { Card,CardContent,CardHeader,CardTitle } from "@/components/ui/card";
+import { useAuth } from "@/contexts/auth-context";
+import { useToast } from "@/contexts/toast-context";
+import { WebSocketClient } from '@/domains/realtime/ws-client';
+import { useBusLocation } from '@/hooks/useBusLocation';
+import {
+	getBusById,
+	getRouteById
+} from "@/lib/dataService";
+import { formatIdForDisplay } from "@/lib/utils";
+import {
+	AlertCircle,
+	Bus,
+	Clock,
+	Flag,
+	Navigation,
+	X,
+	XCircle
+} from "lucide-react";
+import dynamic from "next/dynamic";
+import Image from "next/image";
+import { useRouter } from "next/navigation";
+import { useEffect,useRef,useState } from "react";
 
 const LiveTrackingBusMap = dynamic(() => import("@/components/maps/LiveTrackingBusMap"), {
   ssr: false,
@@ -70,6 +63,7 @@ function TrackBusLive() {
   const [eta, setEta] = useState<string | null>(null);
   const [distanceToBus, setDistanceToBus] = useState<number | null>(null);
   const [tripActive, setTripActive] = useState(false);
+  const [wsClientReady, setWsClientReady] = useState(false);
 
   const [showManualLocation, setShowManualLocation] = useState(false);
   const [isFullScreenMap, setIsFullScreenMap] = useState(false);
@@ -113,6 +107,7 @@ function TrackBusLive() {
   const hasShownLocationErrorRef = useRef(false);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const hasShownArrivalToastRef = useRef(false); // Track if 100m arrival toast shown
+  const wsClientRef = useRef<WebSocketClient | null>(null);
 
 
   // Calculate distance between two points (Haversine formula)
@@ -204,7 +199,7 @@ function TrackBusLive() {
     };
   }, []); // Run once on mount
 
-  // Fallback to assigned bus stop location if device GPS is unavailable
+  // Fallback to assigned bus stop location or AdtU Campus if device GPS is unavailable
   useEffect(() => {
     if (studentLocation) return;
 
@@ -217,18 +212,31 @@ function TrackBusLive() {
       return;
     }
 
-    if (routeData?.stops && Array.isArray(routeData.stops) && (studentData?.stop_name || studentData?.assignedStop)) {
-      const stopName = (studentData.stop_name || studentData.assignedStop || '').toLowerCase();
+    const stopName = (studentData?.stop_name || studentData?.assignedStop || studentData?.stopName || studentData?.pickupPoint || studentData?.pickup_stop || '').toLowerCase();
+
+    if (routeData?.stops && Array.isArray(routeData.stops) && stopName) {
       const matchedStop = routeData.stops.find((s: any) =>
-        s.name && s.name.toLowerCase().includes(stopName)
+        (s.name && s.name.toLowerCase().includes(stopName)) ||
+        (s.stop_name && s.stop_name.toLowerCase().includes(stopName)) ||
+        (s.id && s.id.toLowerCase().includes(stopName))
       );
-      if (matchedStop && matchedStop.lat && matchedStop.lng) {
+      if (matchedStop && (matchedStop.lat || matchedStop.stop_lat) && (matchedStop.lng || matchedStop.stop_lng)) {
         setStudentLocation({
-          lat: Number(matchedStop.lat),
-          lng: Number(matchedStop.lng),
+          lat: Number(matchedStop.lat || matchedStop.stop_lat),
+          lng: Number(matchedStop.lng || matchedStop.stop_lng),
           accuracy: 100,
         });
+        return;
       }
+    }
+
+    // Default Fallback: AdtU Campus coordinates (26.2019, 91.8615) if no stop coordinates found
+    if (!studentLocation && studentData) {
+      setStudentLocation({
+        lat: 26.2019,
+        lng: 91.8615,
+        accuracy: 100,
+      });
     }
   }, [studentLocation, studentData, routeData]);
 
@@ -350,42 +358,72 @@ function TrackBusLive() {
     return () => window.removeEventListener('focus', handleFocus);
   }, [loading, currentUser, userData, router, addToast]);
 
+  // Create shared WebSocket client (single connection owner for all subscriptions)
+  useEffect(() => {
+    if (!currentUser) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const token = await currentUser.getIdToken();
+        if (cancelled) return;
+        const url = process.env.NEXT_PUBLIC_WS_URL || `ws://${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}:3001/ws`;
+        const client = new WebSocketClient({ url, token });
+        wsClientRef.current = client;
+        setWsClientReady(true);
+        client.connect();
+      } catch (err) {
+        console.warn('[TrackBus] Failed to create WS client:', err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (wsClientRef.current) {
+        wsClientRef.current.disconnect();
+        wsClientRef.current = null;
+      }
+      setWsClientReady(false);
+    };
+  }, [currentUser]);
+
   // Subscribe to acknowledgment events via WebSocket
   useEffect(() => {
     if (!currentUser?.uid || !isWaiting) return;
+    const client = wsClientRef.current;
+    if (!client) return;
 
-    console.log("🔔 Subscribing to student acknowledgment channel via WS");
-
-    let wsClient: WebSocketClient | null = null;
-    const initWs = async () => {
-      const token = await currentUser.getIdToken();
-      const url = process.env.NEXT_PUBLIC_WS_URL || `ws://${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}:3001`;
-      wsClient = new WebSocketClient({ url, token });
-      wsClient.connect();
-      wsClient.subscribe(`student_${currentUser.uid}`, (payload: any) => {
-        if (payload.event === 'wait_response') {
-          const msg = payload.response === 'accepted' ? 'Driver will wait for you!' : 'Driver could not wait. Please proceed to the stop.';
-          addToast(msg, payload.response === 'accepted' ? 'success' : 'info');
-          return;
-        }
-        setIsWaiting(false);
-        setCurrentFlagId(null);
-        addToast("Driver has acknowledged your flag! They're on the way!", "success");
-      });
-    };
-    initWs();
+    const unsub = client.subscribe(`student_${currentUser.uid}`, (payload: any) => {
+      if (payload.event === 'wait_response') {
+        const msg = payload.response === 'accepted' ? 'Driver will wait for you!' : 'Driver could not wait. Please proceed to the stop.';
+        addToast(msg, payload.response === 'accepted' ? 'success' : 'info');
+        return;
+      }
+      setIsWaiting(false);
+      setCurrentFlagId(null);
+      addToast("Driver has acknowledged your flag! They're on the way!", "success");
+    });
 
     return () => {
-      if (wsClient) wsClient.disconnect();
+      unsub();
     };
-  }, [currentUser?.uid, isWaiting, addToast]);
+  }, [currentUser?.uid, isWaiting, wsClientReady, addToast]);
 
-  // Use the optimized bus location hook
+  const [authToken, setAuthToken] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (currentUser) {
+      currentUser.getIdToken().then(t => setAuthToken(t)).catch(() => {});
+    } else {
+      setAuthToken(null);
+    }
+  }, [currentUser?.uid]);
+
+  const targetBusId = busData?.id || busData?.busId || busData?.bus_id || studentData?.bus_id || studentData?.busId || '';
+
+  // Use the optimized bus location hook with token & WS client
   const {
     currentLocation: hookBusLocation,
     loading: busLocationLoading
-  } = useBusLocation(busData?.busId || studentData?.busId || studentData?.busId || '');
-
+  } = useBusLocation(targetBusId, authToken, wsClientRef.current);
 
   // Update local busLocation state whenever hook location changes
   useEffect(() => {
@@ -394,19 +432,44 @@ function TrackBusLive() {
     }
   }, [hookBusLocation]);
 
-  // NO-OP: Removed redundant tripEndChannel hook (consolidated below)
-
-  // Check for active trip with realtime subscription
+  // Subscribe to live bus location updates via shared WebSocket client
   useEffect(() => {
-    if (!busData?.busId) return;
+    if (!targetBusId) return;
+    const client = wsClientRef.current;
+    if (!client) return;
+
+    console.log(`📍 Subscribing to live location for bus: bus_location_${targetBusId}`);
+    const unsub = client.subscribe(`bus_location_${targetBusId}`, (payload: any) => {
+      const data = payload.payload || payload;
+      if (data && data.lat && data.lng) {
+        setBusLocation({
+          busId: data.busId || targetBusId,
+          driverUid: data.driverUid || '',
+          lat: Number(data.lat),
+          lng: Number(data.lng),
+          speed: data.speed !== undefined ? Number(data.speed) : 0,
+          heading: data.heading !== undefined ? Number(data.heading) : 0,
+          accuracy: data.accuracy,
+          timestamp: data.timestamp || new Date().toISOString(),
+        });
+      }
+    });
+
+    return () => {
+      unsub();
+    };
+  }, [targetBusId, wsClientReady]);
+
+  // Check for active trip with realtime subscription & 5s fast check fallback
+  useEffect(() => {
+    if (!targetBusId) return;
 
     const checkActiveTrip = async () => {
       try {
-        console.log('🔍 Checking trip status via API for bus:', busData.busId);
+        console.log('🔍 Checking trip status via API for bus:', targetBusId);
 
-        // Use API endpoint with auth token
-        const token = await currentUser?.getIdToken();
-        const response = await fetch(`/api/student/trip-status?busId=${encodeURIComponent(busData.busId)}`, {
+        const token = authToken || await currentUser?.getIdToken();
+        const response = await fetch(`/api/student/trip-status?busId=${encodeURIComponent(targetBusId)}`, {
           headers: token ? { Authorization: `Bearer ${token}` } : {}
         });
 
@@ -423,7 +486,7 @@ function TrackBusLive() {
         } else {
           console.log('ℹ️ No active trip found via API');
           setTripActive(false);
-          setBusLocation(null); // Clear stale location if trip not active
+          setBusLocation(null);
         }
       } catch (error) {
         console.error("❌ Error checking active trip:", error);
@@ -433,39 +496,36 @@ function TrackBusLive() {
     // Run the check immediately
     checkActiveTrip();
 
+    // Fast 5-second interval fallback so student UI activates automatically even if WS packet drops
+    const interval = setInterval(checkActiveTrip, 5000);
+
     // Subscribe to trip status broadcasts via WebSocket
-    let tripWsClient: WebSocketClient | null = null;
-    const initTripWs = async () => {
-      if (!currentUser) return;
-      const token = await currentUser.getIdToken();
-      const url = process.env.NEXT_PUBLIC_WS_URL || `ws://${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}:3001`;
-      tripWsClient = new WebSocketClient({ url, token });
-      tripWsClient.connect();
-      tripWsClient.subscribe(`trip-status-${busData.busId}`, (payload: any) => {
-        console.log("🚦 Trip status broadcast:", payload.event);
-        if (payload.event === "trip_started") {
+    const client = wsClientRef.current;
+    let unsub: (() => void) | null = null;
+    if (client) {
+      unsub = client.subscribe(`trip-status-${targetBusId}`, (payload: any) => {
+        console.log("🚦 Trip status broadcast:", payload);
+        const data = payload.payload || payload;
+        const eventType = data.event || payload.event;
+        if (eventType === "trip_started" || data.status === "active") {
           setTripActive(true);
-          addToast(`🚌 Trip started for ${formatIdForDisplay(payload.routeId || payload.busId)}!`, "success");
-        } else if (payload.event === "trip_ended") {
+          addToast(`🚌 Trip started for ${formatIdForDisplay(data.routeId || data.busId || targetBusId)}!`, "success");
+        } else if (eventType === "trip_ended" || data.status === "ended") {
           setTripActive(false);
           setBusLocation(null);
           setIsFullScreenMap(false);
           setIsWaiting(false);
           setCurrentFlagId(null);
-          addToast(`🏁 Trip for ${formatIdForDisplay(payload.busNumber || payload.busId)} has ended`, "success");
+          addToast(`🏁 Trip for ${formatIdForDisplay(data.busNumber || data.busId || targetBusId)} has ended`, "success");
         }
       });
-    };
-    initTripWs();
-
-    // Also set up periodic checks every 30 seconds as fallback
-    const interval = setInterval(checkActiveTrip, 30000);
+    }
 
     return () => {
       clearInterval(interval);
-      if (tripWsClient) tripWsClient.disconnect();
+      if (unsub) unsub();
     };
-  }, [busData?.busId, addToast]);
+  }, [targetBusId, wsClientReady, authToken, currentUser?.uid, addToast]);
 
   // Calculate distance and ETA between bus and student
   useEffect(() => {
@@ -529,39 +589,33 @@ function TrackBusLive() {
 
   // Subscribe to waiting flag changes via WebSocket
   useEffect(() => {
-    if (!currentUser?.uid || !busData?.busId) return;
+    if (!currentUser?.uid || !targetBusId) return;
+    const client = wsClientRef.current;
+    if (!client) return;
 
-    let wsClient: WebSocketClient | null = null;
-    const initWs = async () => {
-      const token = await currentUser.getIdToken();
-      const url = process.env.NEXT_PUBLIC_WS_URL || `ws://${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}:3001`;
-      wsClient = new WebSocketClient({ url, token });
-      wsClient.connect();
-      wsClient.subscribe(`waiting_flags_${busData.busId}`, (payload: any) => {
-        const flagStudentUid = payload.student_uid || payload.studentUid;
-        if (flagStudentUid !== currentUser.uid) return;
-        console.log("📡 Waiting flag change received:", payload);
+    const unsub = client.subscribe(`waiting_flags_${targetBusId}`, (payload: any) => {
+      const flagStudentUid = payload.student_uid || payload.studentUid;
+      if (flagStudentUid !== currentUser.uid) return;
+      console.log("📡 Waiting flag change received:", payload);
 
-        if (payload.event === 'waiting_flag_removed' ||
-            payload.status === 'boarded' ||
-            payload.status === 'cancelled' ||
-            payload.status === 'picked_up') {
-          setIsWaiting(false);
-          setCurrentFlagId(null);
-          if (payload.event === 'waiting_flag_removed') {
-            addToast("🎉 You've been picked up! Have a safe journey.", "success");
-          }
-        } else if (payload.status === "acknowledged") {
-          addToast("👋 Driver has acknowledged your waiting flag!", "success");
+      if (payload.event === 'waiting_flag_removed' ||
+          payload.status === 'boarded' ||
+          payload.status === 'cancelled' ||
+          payload.status === 'picked_up') {
+        setIsWaiting(false);
+        setCurrentFlagId(null);
+        if (payload.event === 'waiting_flag_removed') {
+          addToast("🎉 You've been picked up! Have a safe journey.", "success");
         }
-      });
-    };
-    initWs();
+      } else if (payload.status === "acknowledged") {
+        addToast("👋 Driver has acknowledged your waiting flag!", "success");
+      }
+    });
 
     return () => {
-      if (wsClient) wsClient.disconnect();
+      unsub();
     };
-  }, [currentUser?.uid, busData?.busId, addToast]);
+  }, [currentUser?.uid, targetBusId, wsClientReady, addToast]);
 
   // Screen Wake Lock API
   useEffect(() => {
@@ -954,8 +1008,8 @@ function TrackBusLive() {
               : "h-[420px] md:h-[550px] lg:h-full rounded-3xl md:rounded-[2rem]"
               }`}>
               <LiveTrackingBusMap
-                busId={busData?.busId || studentData?.busId || ''}
-                busNumber={busData?.busNumber}
+                busId={targetBusId}
+                busNumber={busData?.busNumber || busData?.bus_number || targetBusId}
                 journeyActive={tripActive}
                 isFullScreen={isFullScreenMap}
                 onToggleFullScreen={() => setIsFullScreenMap(!isFullScreenMap)}

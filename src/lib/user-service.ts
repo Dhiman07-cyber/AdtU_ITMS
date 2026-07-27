@@ -1,14 +1,12 @@
 import { auth } from '@/lib/firebase';
 import {
-  signOut,
-  User as FirebaseUser,
-  GoogleAuthProvider,
-  signInWithPopup
+	GoogleAuthProvider,
+	signInWithPopup,
+	signOut
 } from 'firebase/auth';
-import { User, Student, Driver, Moderator } from '@/lib/types';
 
 // Export types from the new types file
-export type { User, Student, Driver, Moderator } from '@/lib/types';
+export type { Driver,Moderator,Student,User } from '@/lib/types';
 export type UserRole = 'admin' | 'moderator' | 'driver' | 'student';
 
 // Function to sign in a user with Google (client-safe)

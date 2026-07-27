@@ -15,14 +15,8 @@
 //   - Assignment reads Bus (bus validation) via Fleet domain API
 //   - Assignment reads Driver (driver validation) via Identity domain API
 export {
-  assignDriverToBus,
-  unassignDriver,
-  getActiveAssignmentByBusId,
-  getActiveAssignmentByDriverUid,
-  getDriverUidByBusId,
-  getBusIdByDriverUid,
-  listActiveAssignments,
-  getAssignmentHistoryByBusId,
-  getAssignmentHistoryByDriverUid,
+	assignDriverToBus,getActiveAssignmentByBusId,
+	getActiveAssignmentByDriverUid,getAssignmentHistoryByBusId,
+	getAssignmentHistoryByDriverUid,getBusIdByDriverUid,getDriverUidByBusId,listActiveAssignments,unassignDriver
 } from './services/assignment.service';
 export type { DriverAssignment } from './services/assignment.service';

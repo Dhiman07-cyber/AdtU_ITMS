@@ -4,7 +4,7 @@
  * FleetService delegates entirely to fleet.repository (→ fleet.repository.pg → PostgreSQL).
  * Tests mock fleet.repository so no database connection is required.
  */
-import { describe, it, expect, vi } from 'vitest';
+import { describe,expect,it,vi } from 'vitest';
 
 vi.mock('../repositories/fleet.repository', () => ({
   findAllBuses: vi.fn().mockResolvedValue([{ id: 'b1', busId: 'b1', busNumber: 'BUS-01', capacity: 40, status: 'active' }]),
@@ -15,11 +15,11 @@ vi.mock('../repositories/fleet.repository', () => ({
 }));
 
 import {
-  getAllBuses,
-  getBusesByRouteId,
-  getBusById,
-  updateBus,
-  removeBus,
+	getAllBuses,
+	getBusById,
+	getBusesByRouteId,
+	removeBus,
+	updateBus,
 } from '../services/fleet.service';
 
 describe('FleetService — PostgreSQL delegation', () => {

@@ -1,25 +1,20 @@
 "use client";
 
-import { useEffect, useState, useRef } from 'react';
-import { useAuth } from '@/contexts/auth-context';
-import { useRouter } from 'next/navigation';
+import ApplyFormNavbar from '@/components/ApplyFormNavbar';
+import Footer from '@/components/Footer';
+import { PremiumPageLoader } from '@/components/LoadingSpinner';
 import { Button } from '@/components/ui/button';
+import { useAuth } from '@/contexts/auth-context';
 import {
-  Shield,
-  CreditCard,
-  Clock,
-  ArrowRight,
-  Info,
-  FileText,
-  MapPin,
-  GraduationCap,
-  CheckCircle,
-  Bus
+	CheckCircle,
+	Clock,
+	CreditCard,
+	FileText,
+	Shield
 } from 'lucide-react';
 import Link from 'next/link';
-import ApplyFormNavbar from '@/components/ApplyFormNavbar';
-import { PremiumPageLoader } from '@/components/LoadingSpinner';
-import Footer from '@/components/Footer';
+import { useRouter } from 'next/navigation';
+import { useEffect,useRef,useState } from 'react';
 
 export default function ApplyLandingPage() {
   const { currentUser, userData, loading } = useAuth();

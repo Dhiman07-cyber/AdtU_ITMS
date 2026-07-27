@@ -11,54 +11,55 @@
  * All persistence delegated to identity.repository.
  * Permission checks delegated to lib/security/moderator-permissions.
  */
-import {
-  findUserById as repoFindUserById,
-  findUserByEmail as repoFindUserByEmail,
-  findUsersByRole as repoFindUsersByRole,
-  findAllUsers as repoFindAllUsers,
-  insertUser as repoInsertUser,
-  updateUser as repoUpdateUser,
-  removeUser as repoRemoveUser,
-  findStudentById as repoFindStudentById,
-  findStudentsByStatus as repoFindStudentsByStatus,
-  findStudentsByStatuses as repoFindStudentsByStatuses,
-  findSeatOccupyingStudents as repoFindSeatOccupyingStudents,
-  getBusOccupancyStats as repoGetBusOccupancyStats,
-  findStudentsByShift as repoFindStudentsByShift,
-  findStudentsByBusIds as repoFindStudentsByBusIds,
-  findStudentsByRouteIds as repoFindStudentsByRouteIds,
-  findAllStudents as repoFindAllStudents,
-  insertStudent as repoInsertStudent,
-  updateStudent as repoUpdateStudent,
-  removeStudent as repoRemoveStudent,
-  findDriverById as repoFindDriverById,
-  findDriversByStatus as repoFindDriversByStatus,
-  findAllDrivers as repoFindAllDrivers,
-  findAllDriversPaginated as repoFindAllDriversPaginated,
-  insertDriver as repoInsertDriver,
-  updateDriver as repoUpdateDriver,
-  removeDriver as repoRemoveDriver,
-  findDriversByBusId as repoFindDriversByBusId,
-  findModeratorById as repoFindModeratorById,
-  findModeratorsByStatus as repoFindModeratorsByStatus,
-  insertModerator as repoInsertModerator,
-  updateModerator as repoUpdateModerator,
-  updateModeratorPermissions as repoUpdateModeratorPermissions,
-  removeModerator as repoRemoveModerator,
-  findAdminById as repoFindAdminById,
-  insertAdmin as repoInsertAdmin,
-  updateAdmin as repoUpdateAdmin,
-  removeAdmin as repoRemoveAdmin,
-  findUnauthUserById as repoFindUnauthUserById,
-  insertUnauthUser as repoInsertUnauthUser,
-  updateUnauthUser as repoUpdateUnauthUser,
-  removeUnauthUser as repoRemoveUnauthUser,
-  findAllUnauthUsers as repoFindAllUnauthUsers,
-  type User,
-} from '../repositories/identity.repository';
-import { getModeratorPermissions as getModPerms, requireModeratorPermission } from '@/lib/security/moderator-permissions';
+import { getModeratorPermissions as getModPerms,requireModeratorPermission } from '@/lib/security/moderator-permissions';
 import type { ModeratorPermissions } from '@/lib/types/moderator-permissions';
 import type { UserRole } from '@/lib/user-service';
+import {
+	findAdminById as repoFindAdminById,
+	findAllDrivers as repoFindAllDrivers,
+	findAllDriversPaginated as repoFindAllDriversPaginated,
+	findAllModerators as repoFindAllModerators,
+	findAllStudents as repoFindAllStudents,
+	findAllUnauthUsers as repoFindAllUnauthUsers,
+	findAllUsers as repoFindAllUsers,
+	findDriverById as repoFindDriverById,
+	findDriversByBusId as repoFindDriversByBusId,
+	findDriversByStatus as repoFindDriversByStatus,
+	findModeratorById as repoFindModeratorById,
+	findModeratorsByStatus as repoFindModeratorsByStatus,
+	findSeatOccupyingStudents as repoFindSeatOccupyingStudents,
+	findStudentById as repoFindStudentById,
+	findStudentsByBusIds as repoFindStudentsByBusIds,
+	findStudentsByRouteIds as repoFindStudentsByRouteIds,
+	findStudentsByShift as repoFindStudentsByShift,
+	findStudentsByStatus as repoFindStudentsByStatus,
+	findStudentsByStatuses as repoFindStudentsByStatuses,
+	findUnauthUserById as repoFindUnauthUserById,
+	findUserByEmail as repoFindUserByEmail,
+	findUserById as repoFindUserById,
+	findUsersByRole as repoFindUsersByRole,
+	getBusOccupancyStats as repoGetBusOccupancyStats,
+	insertAdmin as repoInsertAdmin,
+	insertDriver as repoInsertDriver,
+	insertModerator as repoInsertModerator,
+	insertStudent as repoInsertStudent,
+	insertUnauthUser as repoInsertUnauthUser,
+	insertUser as repoInsertUser,
+	removeAdmin as repoRemoveAdmin,
+	removeDriver as repoRemoveDriver,
+	removeModerator as repoRemoveModerator,
+	removeStudent as repoRemoveStudent,
+	removeUnauthUser as repoRemoveUnauthUser,
+	removeUser as repoRemoveUser,
+	updateAdmin as repoUpdateAdmin,
+	updateDriver as repoUpdateDriver,
+	updateModerator as repoUpdateModerator,
+	updateModeratorPermissions as repoUpdateModeratorPermissions,
+	updateStudent as repoUpdateStudent,
+	updateUnauthUser as repoUpdateUnauthUser,
+	updateUser as repoUpdateUser,
+	type User,
+} from '../repositories/identity.repository';
 
 // ─── Users ──────────────────────────────────────────────────────────────────
 
@@ -209,6 +210,10 @@ export async function getModeratorsByStatus(status: string): Promise<Record<stri
   return repoFindModeratorsByStatus(status);
 }
 
+export async function getAllModerators(): Promise<Record<string, any>[]> {
+  return repoFindAllModerators();
+}
+
 export async function createModerator(moderator: Record<string, any>): Promise<void> {
   return repoInsertModerator(moderator);
 }
@@ -278,11 +283,11 @@ export async function getAllUnauthUsers(): Promise<Record<string, any>[]> {
 // ─── FCM Tokens ──────────────────────────────────────────────────────────────
 
 import {
-  upsertToken as repoUpsertToken,
-  deleteToken as repoDeleteToken,
-  getValidTokensForUsers as repoGetValidTokensForUsers,
-  cleanupStaleTokens as repoCleanupStaleTokens,
-  hashToken as repoHashToken,
+	cleanupStaleTokens as repoCleanupStaleTokens,
+	deleteToken as repoDeleteToken,
+	getValidTokensForUsers as repoGetValidTokensForUsers,
+	hashToken as repoHashToken,
+	upsertToken as repoUpsertToken,
 } from '../repositories/fcm-token.repository.pg';
 
 export async function saveFcmToken(
@@ -312,4 +317,4 @@ export function hashFcmToken(token: string): string {
 // ─── Re-exports ─────────────────────────────────────────────────────────────
 
 export { requireModeratorPermission };
-export type { User, UserRole, ModeratorPermissions };
+export type { ModeratorPermissions,User,UserRole };

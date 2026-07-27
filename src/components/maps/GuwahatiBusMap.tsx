@@ -1,11 +1,11 @@
 "use client";
 
-import React, { useCallback, useMemo, useState, useRef, useEffect } from "react";
-import { Maximize2, Minimize2, QrCode, MapPin, Sun, Moon } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import GuwahatiMap, { type MapPoint } from "./GuwahatiMap";
-import MapFallbackUI from "./MapFallbackUI";
 import { useTheme } from "@/components/theme-provider";
+import { Button } from "@/components/ui/button";
+import { MapPin,Maximize2,Minimize2,Moon,QrCode,Sun } from "lucide-react";
+import { useCallback,useEffect,useMemo,useRef,useState } from "react";
+import GuwahatiMap,{ type MapPoint } from "./GuwahatiMap";
+import MapFallbackUI from "./MapFallbackUI";
 
 interface GuwahatiBusMapProps {
   busId: string;
@@ -92,8 +92,10 @@ export default function GuwahatiBusMap({
 
   const points: MapPoint[] = useMemo(() => {
     const list: MapPoint[] = [];
-    if (studentLocation?.lat && studentLocation?.lng) {
-      list.push({ id: "student", lat: studentLocation.lat, lng: studentLocation.lng, kind: "student", label: "Me" });
+    const lat = Number(studentLocation?.lat);
+    const lng = Number(studentLocation?.lng);
+    if (Number.isFinite(lat) && Number.isFinite(lng) && (lat !== 0 || lng !== 0)) {
+      list.push({ id: "student", lat, lng, kind: "student", label: "Me" });
     }
     return list;
   }, [studentLocation?.lat, studentLocation?.lng]);

@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, useEffect } from 'react';
-import { Loader2, ArrowLeft, Bookmark, Zap, LayoutDashboard } from 'lucide-react';
-import Link from 'next/link';
 import { Button } from "@/components/ui/button";
-import { useAuth } from '@/contexts/auth-context';
 import { APP_NAME } from '@/config/runtime';
+import { useAuth } from '@/contexts/auth-context';
+import { ArrowLeft,Bookmark,LayoutDashboard,Loader2,Zap } from 'lucide-react';
+import Link from 'next/link';
+import { useEffect,useState } from 'react';
 
 interface TermsSection {
   id: string;

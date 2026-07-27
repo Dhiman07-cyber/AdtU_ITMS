@@ -1,36 +1,34 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import { useAuth } from "@/contexts/auth-context";
-import { useRouter } from "next/navigation";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import {
-  Bus,
-  MapPin,
-  Navigation,
-  Clock,
-  User,
-  Users,
-  CheckCircle,
-  XCircle,
-  AlertCircle,
-  Flag,
-  Bell
-} from "lucide-react";
-import { getBusById, getRouteById, getStudentByUid, getBusesByRouteId } from "@/lib/dataService";
-import { supabase } from "@/lib/supabase-client";
-import { WebSocketClient } from '@/domains/realtime/ws-client';
 import DynamicStudentMap from "@/components/DynamicStudentMap";
-import { useGeolocation } from "@/hooks/useGeolocation";
+import ErrorBoundary from "@/components/ErrorBoundary";
+import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import LocationPermissionModal from "@/components/LocationPermissionModal";
+import TransportEntitlementGuard from "@/components/transport/TransportEntitlementGuard";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card,CardContent,CardDescription,CardHeader,CardTitle } from "@/components/ui/card";
 import WaitingFlagModal from "@/components/WaitingFlagModal";
+import { useAuth } from "@/contexts/auth-context";
 import { useToast } from "@/contexts/toast-context";
 import { useFCMToken } from "@/hooks/useFCMToken";
-import TransportEntitlementGuard from "@/components/transport/TransportEntitlementGuard";
-import { PremiumPageLoader } from "@/components/LoadingSpinner";
-import ErrorBoundary from "@/components/ErrorBoundary";
+import { useGeolocation } from "@/hooks/useGeolocation";
+import { getBusById,getBusesByRouteId,getRouteById,getStudentByUid } from "@/lib/dataService";
+import { supabase } from "@/lib/supabase-client";
+import {
+	AlertCircle,
+	Bell,
+	Bus,
+	CheckCircle,
+	Flag,
+	MapPin,
+	Navigation,
+	User,
+	Users,
+	XCircle
+} from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useCallback,useEffect,useState } from "react";
 
 function StudentBusLive() {
   const { currentUser, userData } = useAuth();
@@ -132,19 +130,17 @@ function StudentBusLive() {
             setWaitingFlagId(flags[0].id);
           }
 
-          // Check if there's an active trip for this bus by querying Firestore
+          // Check if there's an active trip for this bus by querying active_trips
           try {
-            // Note: We can't directly access Firestore from client, so we check driver_status in Supabase
-            // which is updated when trips start/end
-            const { data: driverStatus } = await supabase
-              .from('driver_status')
+            const { data: activeTrip } = await supabase
+              .from('active_trips')
               .select('*')
               .eq('bus_id', student.busId)
-              .in('status', ['on_trip', 'enroute'])
+              .eq('status', 'active')
               .maybeSingle();
 
-            setTripActive(!!driverStatus);
-            console.log('🚌 Active trip check:', { active: !!driverStatus, status: driverStatus?.status });
+            setTripActive(!!activeTrip);
+            console.log('🚌 Active trip check:', { active: !!activeTrip, tripId: activeTrip?.trip_id });
           } catch (error) {
             console.error('Error checking active trip:', error);
             setTripActive(false);
@@ -167,31 +163,9 @@ function StudentBusLive() {
     }
   }, [userData, router]);
 
-  // Subscribe to trip status broadcasts via WebSocket
-  useEffect(() => {
-    if (!studentData?.busId) return;
-
-    console.log('📡 Subscribing to trip status for bus:', studentData.busId);
-
-    let wsClient: WebSocketClient | null = null;
-    const initWs = async () => {
-      if (!currentUser) return;
-      const token = await currentUser.getIdToken();
-      const url = process.env.NEXT_PUBLIC_WS_URL || `ws://${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}:3001`;
-      wsClient = new WebSocketClient({ url, token });
-      wsClient.connect();
-      wsClient.subscribe(`trip-status-${studentData.busId}`, (payload: any) => {
-        console.log('🚦 Trip status broadcast:', payload.event);
-        if (payload.event === 'trip_started') setTripActive(true);
-        else if (payload.event === 'trip_ended') setTripActive(false);
-      });
-    };
-    initWs();
-
-    return () => {
-      if (wsClient) wsClient.disconnect();
-    };
-  }, [studentData?.busId, currentUser]);
+  // ponytail: trip-status-{busId} subscription owned by DynamicStudentMap
+  // to avoid duplicate WS connections. The page receives trip state via the
+  // onWaitingFlagCreate/onWaitingFlagRemove callbacks.
 
   // Show location modal if permission denied
   useEffect(() => {
@@ -511,7 +485,7 @@ function StudentBusLive() {
           </CardHeader>
           <CardContent>
             <DynamicStudentMap
-              busId={studentData.busId || studentData.busId}
+              busId={studentData.busId || studentData.bus_id}
               routeId={studentData.routeId}
               journeyActive={tripActive}
               studentLocation={position ? { lat: position.lat, lng: position.lng, accuracy: position.accuracy } : undefined}
@@ -525,6 +499,7 @@ function StudentBusLive() {
                 setWaiting(false);
                 addToast('Waiting flag removed', 'info');
               }}
+              onTripStateChange={(active) => setTripActive(active)}
             />
           </CardContent>
         </Card>

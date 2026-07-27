@@ -1,11 +1,11 @@
 "use client";
 
-import { useMemo } from 'react';
 import { useAuth } from '@/contexts/auth-context';
 import {
-  getTransportEntitlement,
-  EntitlementReason,
+	EntitlementReason,
+	getTransportEntitlement,
 } from '@/lib/entitlement/transport-entitlement';
+import { useMemo } from 'react';
 
 export interface UseTransportEntitlement {
   /** True only while auth/user data is still loading (decision not yet known). */

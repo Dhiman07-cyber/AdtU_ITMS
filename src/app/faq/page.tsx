@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from 'react';
-import { Card, CardContent } from '@/components/ui/card';
-import { ChevronDown } from 'lucide-react';
+import { Card,CardContent } from '@/components/ui/card';
 import faqData from '@/data/footer/faq.json';
+import { ChevronDown } from 'lucide-react';
+import { useState } from 'react';
 
 export default function FAQPage() {
   const [openIndex, setOpenIndex] = useState<number | null>(null);

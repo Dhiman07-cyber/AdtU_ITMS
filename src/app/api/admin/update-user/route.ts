@@ -1,13 +1,13 @@
-﻿import { NextResponse } from 'next/server';
-import { withSecurity } from '@/lib/security/api-security';
-import { UpdateStudentSchema } from '@/lib/security/validation-schemas';
-import { RateLimits } from '@/lib/security/rate-limiter';
+﻿import { decrementBusCapacity,incrementBusCapacity } from '@/domains/fleet';
+import { getStudentById,updateStudent } from '@/domains/identity';
 import { wasSeatReleased } from '@/lib/config/capacity-flags';
-import { safeErrorMessage } from '@/lib/security/safe-error';
-import { computeBlockDatesFromValidUntil } from '@/lib/utils/deadline-computation';
 import { getDeadlineConfig } from '@/lib/deadline-config-service';
-import { decrementBusCapacity, incrementBusCapacity } from '@/domains/fleet';
-import { getStudentById, updateStudent } from '@/domains/identity';
+import { withSecurity } from '@/lib/security/api-security';
+import { RateLimits } from '@/lib/security/rate-limiter';
+import { safeErrorMessage } from '@/lib/security/safe-error';
+import { UpdateStudentSchema } from '@/lib/security/validation-schemas';
+import { computeBlockDatesFromValidUntil } from '@/lib/utils/deadline-computation';
+import { NextResponse } from 'next/server';
 
 /**
  * POST /api/admin/update-user

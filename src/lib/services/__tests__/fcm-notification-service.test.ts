@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach,describe,expect,it,vi } from 'vitest';
 
 const {
   mockRunTransaction,
@@ -55,7 +55,7 @@ vi.mock('@/lib/supabase-server', () => ({
   getSupabaseServer: () => mockSupabaseClient,
 }));
 
-import { notifyRoute, verifyDriverRouteBinding } from '../fcm-notification-service';
+import { notifyRoute,verifyDriverRouteBinding } from '../fcm-notification-service';
 
 describe('FCM Notification Service', () => {
   beforeEach(() => {
@@ -111,7 +111,7 @@ describe('FCM Notification Service', () => {
 
       const result = await notifyRoute({ routeId: 'r1', tripId: 't2', routeName: 'Morning', busId: 'b1' });
 
-      expect(result.error).toBe('already_sent');
+      expect(result.error).toContain('ALREADY_SENT');
       expect(result.successCount).toBe(0);
       expect(mockSendTopic).not.toHaveBeenCalled();
     });
@@ -154,9 +154,9 @@ describe('FCM Notification Service', () => {
   });
 
   describe('verifyDriverRouteBinding', () => {
-    it('authorizes a driver assigned to the bus via driver_status', async () => {
+    it('authorizes a driver assigned to the bus via active_trips', async () => {
       const mockMaybeSingle = vi.fn().mockResolvedValue({
-        data: { bus_id: 'b1', driver_uid: 'd1' },
+        data: { bus_id: 'b1', driver_id: 'd1' },
         error: null,
       });
       mockSupabaseClient.from.mockImplementation((table: string) => {
@@ -174,7 +174,6 @@ describe('FCM Notification Service', () => {
     });
 
     it('authorizes a driver referenced by the buses table', async () => {
-      let callCount = 0;
       mockSupabaseClient.from.mockImplementation((table: string) => {
         const chain: Record<string, any> = {
           select: vi.fn(() => chain),
@@ -183,10 +182,12 @@ describe('FCM Notification Service', () => {
           limit: vi.fn(() => chain),
           maybeSingle: vi.fn(),
         };
-        if (table === 'driver_status') {
-          chain.maybeSingle.mockResolvedValue({ data: { bus_id: 'other', driver_uid: 'd1' }, error: null });
+        if (table === 'active_trips') {
+          chain.maybeSingle.mockResolvedValue({ data: null, error: null });
         } else if (table === 'buses') {
           chain.maybeSingle.mockResolvedValue({ data: { driver_uid: 'd1' }, error: null });
+        } else {
+          chain.maybeSingle.mockResolvedValue({ data: null, error: null });
         }
         return chain;
       });

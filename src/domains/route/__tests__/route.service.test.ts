@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe,expect,it,vi } from 'vitest';
 
 vi.mock('../repositories/route.repository', () => ({
   findAll: vi.fn().mockResolvedValue([{ id: 'r1', routeId: 'r1', routeName: 'North' }]),
@@ -9,7 +9,7 @@ vi.mock('../repositories/route.repository', () => ({
   findAllNames: vi.fn().mockResolvedValue(['North', 'South']),
 }));
 
-import { getAll, getById, create } from '../services/route.service';
+import { create,getAll,getById } from '../services/route.service';
 
 describe('RouteService', () => {
   it('delegates route lookup to the repository unchanged', async () => {

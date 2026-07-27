@@ -1,8 +1,8 @@
-import { NextResponse } from 'next/server';
-import { withSecurity } from '@/lib/security/api-security';
-import { EndTripSchema } from '@/lib/security/validation-schemas';
-import { RateLimits } from '@/lib/security/rate-limiter';
 import * as tripService from '@/domains/trip';
+import { withSecurity } from '@/lib/security/api-security';
+import { RateLimits } from '@/lib/security/rate-limiter';
+import { EndTripSchema } from '@/lib/security/validation-schemas';
+import { NextResponse } from 'next/server';
 
 export const POST = withSecurity<{ busId: string; tripId?: string }>(
   async (request, { auth, body }) => {

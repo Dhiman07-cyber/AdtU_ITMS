@@ -1,5 +1,5 @@
-import { getAuth } from 'firebase/auth';
 import type { Driver } from '@/lib/types';
+import { getAuth } from 'firebase/auth';
 
 export const getAllDrivers = async (): Promise<Driver[]> => {
   try {

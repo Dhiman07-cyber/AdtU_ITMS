@@ -1,23 +1,21 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
-import { use } from "react";
-import { useRouter } from "next/navigation";
+import { PremiumPageLoader } from "@/components/LoadingSpinner";
+import ProfileImageAddModal from "@/components/ProfileImageAddModal";
+import EnhancedDatePicker from "@/components/enhanced-date-picker";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select,SelectContent,SelectItem,SelectTrigger,SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import Link from "next/link";
 import { useToast } from '@/contexts/toast-context';
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import ProfileImageAddModal from "@/components/ProfileImageAddModal";
-import EnhancedDatePicker from "@/components/enhanced-date-picker";
-import { getModeratorById, updateModerator } from '@/lib/dataService';
-import { Camera, User } from "lucide-react";
-import { signalCollectionRefresh } from '@/hooks/useEventDrivenRefresh';
-import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import { useDebouncedStorage } from '@/hooks/useDebouncedStorage';
+import { signalCollectionRefresh } from '@/hooks/useEventDrivenRefresh';
+import { getModeratorById,updateModerator } from '@/lib/dataService';
+import { Camera,User } from "lucide-react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { use,useEffect,useState } from "react";
 
 
 export default function EditModeratorPage({ params }: { params: Promise<{ id: string }> }) {

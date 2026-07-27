@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useRef, useCallback } from 'react';
 import { WebSocketClient } from '@/domains/realtime/ws-client';
+import { useEffect,useRef } from 'react';
 
 type EventHandler = (payload: any) => void;
 

@@ -1,33 +1,28 @@
 "use client";
 
-import { useState, useEffect, useRef } from 'react';
-import { useAuth } from '@/contexts/auth-context';
+import AddStudentPaymentSection from '@/components/AddStudentPaymentSection';
+import EnhancedDatePicker from "@/components/enhanced-date-picker";
 import FacultyDepartmentSelector from '@/components/faculty-department-selector';
+import ProfileImageAddModal from '@/components/ProfileImageAddModal';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select,SelectContent,SelectItem,SelectTrigger,SelectValue } from '@/components/ui/select';
+import { useAuth } from '@/contexts/auth-context';
+import { useToast } from '@/contexts/toast-context';
+import { checkBusCapacity,type BusCapacityInfo,type CapacityCheckResult } from '@/lib/bus-capacity-checker';
+import { getAllBuses,getAllRoutes,getModeratorById } from '@/lib/dataService';
+import { Route } from '@/lib/types';
+import { uploadImage } from '@/lib/upload';
+import { calculateValidUntilDate } from '@/lib/utils/date-utils';
+import { Camera,Loader2,Trash2 } from "lucide-react";
+import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Textarea } from '@/components/ui/textarea';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { useToast } from '@/contexts/toast-context';
-import { Info, Camera, PenSquare, Trash2, Loader2 } from "lucide-react";
-import { getAllRoutes, getAllBuses, getModeratorById } from '@/lib/dataService';
-import { Route } from '@/lib/types';
-import EnhancedDatePicker from "@/components/enhanced-date-picker";
-import enhancedDatePicker from "@/components/enhanced-date-picker";
-import ProfileImageAddModal from '@/components/ProfileImageAddModal';
-import Image from 'next/image';
-import { calculateValidUntilDate } from '@/lib/utils/date-utils';
-import { checkBusCapacity, type BusCapacityInfo, type CapacityCheckResult } from '@/lib/bus-capacity-checker';
-import { AlertCircle, ExternalLink } from 'lucide-react';
-import { Alert, AlertDescription } from '@/components/ui/alert';
-import { uploadImage } from '@/lib/upload';
-import AddStudentPaymentSection from '@/components/AddStudentPaymentSection';
+import { useEffect,useRef,useState } from 'react';
 
+import { OptimizedInput,OptimizedSelect,OptimizedTextarea } from '@/components/forms';
 import { useDebouncedStorage } from '@/hooks/useDebouncedStorage';
-import { OptimizedInput, OptimizedSelect, OptimizedTextarea } from '@/components/forms';
 
 // Define the form data type
 type StudentFormData = {
@@ -59,8 +54,8 @@ type StudentFormData = {
   pickupPoint: string; // Stop ID from route
 };
 
-import { useModeratorPermissions } from '@/hooks/useModeratorPermissions';
 import { PermissionDeniedCard } from '@/components/PermissionDeniedCard';
+import { useModeratorPermissions } from '@/hooks/useModeratorPermissions';
 
 export default function AddStudentForm() {
   const { currentUser, userData, loading } = useAuth();

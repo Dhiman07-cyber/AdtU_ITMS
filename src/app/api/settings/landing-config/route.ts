@@ -1,7 +1,7 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { adminAuth } from '@/lib/firebase-admin';
-import { getLandingConfig, updateLandingConfig } from '@/domains/admin';
+import { getLandingConfig,updateLandingConfig } from '@/domains/admin';
 import { getUserById } from '@/domains/identity';
+import { adminAuth } from '@/lib/firebase-admin';
+import { NextRequest,NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
 

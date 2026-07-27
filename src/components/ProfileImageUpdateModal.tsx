@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, useRef, useCallback, useEffect } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Dialog,DialogContent,DialogDescription,DialogHeader,DialogTitle } from "@/components/ui/dialog";
 import { Slider } from "@/components/ui/slider";
-import { Camera, Upload, X, ZoomIn, ZoomOut, RotateCcw, Check, AlertCircle, Loader2 } from "lucide-react";
 import { uploadImage } from "@/lib/upload";
+import { AlertCircle,Camera,Check,Loader2,RotateCcw,Upload,X,ZoomIn,ZoomOut } from "lucide-react";
+import { useCallback,useEffect,useRef,useState } from "react";
 
 interface ProfileImageUpdateModalProps {
     isOpen: boolean;

@@ -1,54 +1,53 @@
 ﻿"use client";
 
-import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
+import { useCallback,useEffect,useMemo,useRef,useState } from "react";
 
 
-import { useAuth } from "@/contexts/auth-context";
-import { toast } from "react-hot-toast";
 import { trackEvent } from "@/components/Analytics";
-import {
-    Bus,
-    Users,
-    Search,
-    ArrowRightLeft,
-    User,
-    MapPin,
-    UserCog,
-    History,
-    Clock,
-    Bookmark,
-} from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
+import Avatar from "@/components/Avatar";
 import { PremiumPageLoader } from "@/components/LoadingSpinner";
-import {
-    TooltipProvider,
-} from "@/components/ui/tooltip";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+	TooltipProvider,
+} from "@/components/ui/tooltip";
+import { useAuth } from "@/contexts/auth-context";
 import { cn } from "@/lib/utils";
 import { normalizeShift } from "@/lib/utils/shift-utils";
-import { motion, AnimatePresence } from "framer-motion";
-import Avatar from "@/components/Avatar";
+import { motion } from "framer-motion";
+import {
+	ArrowRightLeft,
+	Bus,
+	Clock,
+	History,
+	MapPin,
+	Search,
+	User,
+	UserCog,
+	Users
+} from "lucide-react";
+import { toast } from "react-hot-toast";
 
 // Assignment components and services
-import { DriverConfirmationModal } from "@/components/assignment/DriverConfirmationModal";
 import { AssignmentFinalizeCard } from "@/components/assignment/AssignmentFinalizeCard";
+import { DriverConfirmationModal } from "@/components/assignment/DriverConfirmationModal";
+import { DriverStagingAreaV2,type StagedDriverChange } from "@/components/assignment/DriverStagingAreaV2";
 import { ReassignmentHistoryModal } from "@/components/assignment/ReassignmentHistoryModal";
-import { ShiftSlotPrompt, type ShiftSlotPayload, type DriverSlotInfo } from "@/components/assignment/ShiftSlotPrompt";
-import { DriverStagingAreaV2, type StagedDriverChange } from "@/components/assignment/DriverStagingAreaV2";
+import { ShiftSlotPrompt,type DriverSlotInfo,type ShiftSlotPayload } from "@/components/assignment/ShiftSlotPrompt";
 import {
-    formatDriverCode,
-    getDriverStatus,
-    type StagedDriverAssignment,
+	formatDriverCode,
+	getDriverStatus,
+	type StagedDriverAssignment,
 } from "@/lib/services/assignment-service";
 import {
-    computeNetAssignments,
-    validateStagingPreCheck,
-    type StagedOperation,
-    type DbSnapshot,
-    type ComputeNetAssignmentsResult,
+	computeNetAssignments,
+	validateStagingPreCheck,
+	type ComputeNetAssignmentsResult,
+	type DbSnapshot,
+	type StagedOperation,
 } from "@/lib/services/net-assignment-service";
 
 // ============================================

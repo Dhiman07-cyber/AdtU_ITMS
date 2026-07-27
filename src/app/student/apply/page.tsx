@@ -1,9 +1,9 @@
 "use client";
 
 import { useAuth } from '@/contexts/auth-context';
-import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
 import { Loader2 } from "lucide-react";
+import { useRouter } from 'next/navigation';
+import { useEffect } from 'react';
 
 export default function StudentApplyPage() {
   const { currentUser, userData, loading } = useAuth();

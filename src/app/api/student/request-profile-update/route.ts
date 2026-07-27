@@ -1,9 +1,9 @@
-﻿import { NextResponse } from 'next/server';
+﻿import { getById,update } from '@/domains/student';
 import { db as adminDb } from '@/lib/firebase-admin';
 import { withSecurity } from '@/lib/security/api-security';
-import { RequestProfileUpdateSchema } from '@/lib/security/validation-schemas';
 import { RateLimits } from '@/lib/security/rate-limiter';
-import { getById, update } from '@/domains/student';
+import { RequestProfileUpdateSchema } from '@/lib/security/validation-schemas';
+import { NextResponse } from 'next/server';
 
 /**
  * POST /api/student/request-profile-update

@@ -1,16 +1,16 @@
 "use client";
 
-import { usePathname } from 'next/navigation';
-import { useAuth } from '@/contexts/auth-context';
-import Navbar from '@/components/Navbar';
-import Footer from '@/components/Footer';
 import AdminSidebar from '@/components/AdminSidebar';
+import Footer from '@/components/Footer';
 import ModeratorSidebar from '@/components/ModeratorSidebar';
+import Navbar from '@/components/Navbar';
 import PWAInstallPrompt from '@/components/PWAInstallPrompt';
-import { TooltipProvider } from "@/components/ui/tooltip";
-import { useEffect, useState, createContext, useContext, useCallback } from 'react';
 import { useTheme } from '@/components/theme-provider';
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { useAuth } from '@/contexts/auth-context';
 import { cn } from '@/lib/utils';
+import { usePathname } from 'next/navigation';
+import { createContext,useCallback,useContext,useEffect,useState } from 'react';
 
 
 import { FCMTokenManager } from '@/components/FCMTokenManager';

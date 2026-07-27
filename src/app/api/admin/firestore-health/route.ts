@@ -1,10 +1,9 @@
-import { NextResponse } from 'next/server';
-import { getApps, initializeApp } from 'firebase-admin/app';
-import { getFirestore } from 'firebase-admin/firestore';
-import { cert } from 'firebase-admin/app';
 import { withSecurity } from '@/lib/security/api-security';
-import { EmptySchema } from '@/lib/security/validation-schemas';
 import { RateLimits } from '@/lib/security/rate-limiter';
+import { EmptySchema } from '@/lib/security/validation-schemas';
+import { cert,getApps,initializeApp } from 'firebase-admin/app';
+import { getFirestore } from 'firebase-admin/firestore';
+import { NextResponse } from 'next/server';
 
 let adminApp: any;
 let adminDb: any;

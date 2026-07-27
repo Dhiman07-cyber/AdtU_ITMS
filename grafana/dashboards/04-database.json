@@ -1,0 +1,106 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": true,
+  "panels": [
+    {
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "id": 1,
+      "title": "Database Query Throughput (qps)",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(rate(database_queries_total[1m]))",
+          "legendFormat": "Queries/sec"
+        }
+      ]
+    },
+    {
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "id": 2,
+      "title": "P95 Query Latency (ms)",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(database_query_duration_seconds_bucket[1m])) by (le)) * 1000",
+          "legendFormat": "P95 Latency"
+        }
+      ]
+    },
+    {
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "id": 3,
+      "title": "Slow Queries (>200ms)",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(database_slow_queries_total)",
+          "legendFormat": "Slow Queries"
+        }
+      ]
+    },
+    {
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "id": 4,
+      "title": "Database Connection Errors",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(database_connection_errors_total)",
+          "legendFormat": "Conn Errors"
+        }
+      ]
+    },
+    {
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "id": 5,
+      "title": "Query Latency Percentiles (P50, P95, P99)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(database_query_duration_seconds_bucket[1m])) by (le)) * 1000",
+          "legendFormat": "P50 Latency (ms)"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(database_query_duration_seconds_bucket[1m])) by (le)) * 1000",
+          "legendFormat": "P95 Latency (ms)"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(database_query_duration_seconds_bucket[1m])) by (le)) * 1000",
+          "legendFormat": "P99 Latency (ms)"
+        }
+      ]
+    },
+    {
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "id": 6,
+      "title": "RPC Calls & Query Failures",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum(rate(database_rpc_calls_total[1m]))",
+          "legendFormat": "RPC Calls (ops/s)"
+        },
+        {
+          "expr": "sum(rate(database_query_errors_total[1m]))",
+          "legendFormat": "Query Errors"
+        },
+        {
+          "expr": "sum(rate(database_pool_exhaustions_total[1m]))",
+          "legendFormat": "Pool Exhaustions"
+        }
+      ]
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["database", "postgres", "supabase", "itms"],
+  "time": { "from": "now-1h", "to": "now" },
+  "title": "04 - Database Dashboard",
+  "uid": "itms-database",
+  "version": 1
+}

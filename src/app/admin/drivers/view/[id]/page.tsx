@@ -1,51 +1,38 @@
 ﻿"use client";
 
-import { useState, useEffect } from "react";
-import { use } from "react";
-import { useRouter } from "next/navigation";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import {
-  User,
-  Mail,
-  Phone,
-  Calendar,
-  Hash,
-  Users,
-  Building,
-  Edit,
-  Trash2,
-  Loader2,
-  MapPin,
-  Bus,
-  Clock,
-  Shield,
-  CheckCircle2,
-  AlertCircle,
-  ArrowLeft,
-  Heart,
-  Home,
-  School,
-  CreditCard,
-  Briefcase,
-  IdCard,
-  Award
-} from "lucide-react";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { PremiumPageLoader } from "@/components/LoadingSpinner";
-import Link from "next/link";
-import { useToast } from '@/contexts/toast-context';
+import { Avatar,AvatarFallback } from "@/components/ui/avatar";
+import { Button } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
 } from "@/components/ui/dialog";
-import { getDriverById, deleteDriver } from '@/lib/dataService';
+import { useToast } from '@/contexts/toast-context';
+import { deleteDriver,getDriverById } from '@/lib/dataService';
 import { safeImageSrc } from "@/lib/security/url-sanitizer";
 import { formatDateFlexible } from '@/lib/utils/date-utils';
+import {
+	AlertCircle,
+	ArrowLeft,
+	Award,
+	Briefcase,
+	Bus,
+	Calendar,
+	CreditCard,
+	Edit,
+	IdCard,
+	Mail,
+	Phone,
+	Trash2,
+	User
+} from "lucide-react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { use,useEffect,useState } from "react";
 
 const formatDate = formatDateFlexible;
 

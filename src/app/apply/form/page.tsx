@@ -7,44 +7,37 @@ import Step3Bus from './steps/Step3Bus';
 import Step4ServicePayment from './steps/Step4ServicePayment';
 import Step5Review from './steps/Step5Review';
 
-import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
-import { useAuth } from '@/contexts/auth-context';
-import { useRouter, usePathname } from 'next/navigation';
-import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import {
-  Loader2,
-  CheckCircle,
-  Info,
-  RotateCcw,
-  Camera,
-  Building2,
-  Calendar,
-  MapPin,
-  CreditCard
-} from 'lucide-react';
 import { trackEvent } from '@/components/Analytics';
-import ProfileImageAddModal from '@/components/ProfileImageAddModal';
-import { ApplicationFormData, ApplicationState } from '@/lib/types/application';
-import Image from 'next/image';
-import { getAllRoutes, getAllBuses } from '@/lib/dataService';
-import { Route } from '@/lib/types';
 import ApplyFormNavbar from '@/components/ApplyFormNavbar';
 import ErrorBoundary from '@/components/ErrorBoundary';
-import {
-  hasCompletedPayment,
-  getCurrentPaymentSession,
-  clearPaymentSession,
-  calculateSessionDates
-} from '@/lib/payment/application-payment.service';
-import {
-  type CapacityCheckResult
-} from '@/lib/bus-capacity-checker';
-import { useToast } from '@/contexts/toast-context';
-import { uploadImage } from '@/lib/upload';
 import { PremiumPageLoader } from '@/components/LoadingSpinner';
-import { isMobileDevice, compressImageForMobile } from '@/lib/mobile-utils';
+import ProfileImageAddModal from '@/components/ProfileImageAddModal';
+import { Button } from '@/components/ui/button';
+import { Dialog,DialogContent,DialogDescription,DialogFooter,DialogHeader,DialogTitle } from '@/components/ui/dialog';
+import { useAuth } from '@/contexts/auth-context';
+import { useToast } from '@/contexts/toast-context';
 import { useDebouncedStorage } from '@/hooks/useDebouncedStorage';
+import {
+	type CapacityCheckResult
+} from '@/lib/bus-capacity-checker';
+import { getAllBuses,getAllRoutes } from '@/lib/dataService';
+import { compressImageForMobile,isMobileDevice } from '@/lib/mobile-utils';
+import {
+	calculateSessionDates,
+	clearPaymentSession,
+	getCurrentPaymentSession,
+	hasCompletedPayment
+} from '@/lib/payment/application-payment.service';
+import { Route } from '@/lib/types';
+import { ApplicationFormData,ApplicationState } from '@/lib/types/application';
+import { uploadImage } from '@/lib/upload';
+import {
+	CheckCircle,
+	Info,
+	RotateCcw
+} from 'lucide-react';
+import { usePathname,useRouter } from 'next/navigation';
+import { useCallback,useEffect,useMemo,useRef,useState } from 'react';
 
 const STEP_LABELS = [
   { num: 1, title: "Personal Information" },

@@ -15,8 +15,8 @@
  * @since 2026-01-05
  */
 
-import { useEffect, useCallback, useRef } from 'react';
-import { useSearchParams, useRouter, usePathname } from 'next/navigation';
+import { usePathname,useRouter,useSearchParams } from 'next/navigation';
+import { useEffect,useRef } from 'react';
 import { invalidateCollectionCache } from './usePaginatedCollection';
 
 export interface UseEventDrivenRefreshOptions {

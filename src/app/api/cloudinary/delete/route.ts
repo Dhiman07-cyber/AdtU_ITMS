@@ -1,5 +1,5 @@
-import { NextResponse } from 'next/server';
 import { verifyApiAuth } from '@/lib/security/api-auth';
+import { NextResponse } from 'next/server';
 
 export async function DELETE(request: Request) {
   const auth = await verifyApiAuth(request as any);

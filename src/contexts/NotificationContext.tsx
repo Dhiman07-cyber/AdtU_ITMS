@@ -1,12 +1,12 @@
 "use client";
 
-import React, { createContext, useContext, useEffect, useState, useCallback, useRef, useMemo, ReactNode } from 'react';
+import {
+	NOTIFICATION_POLLING_INTERVAL_MS
+} from '@/config/runtime';
 import { useAuth } from '@/contexts/auth-context';
 import { UserNotificationView } from '@/lib/notifications/types';
 import { authApiFetch } from '@/lib/secure-api-client';
-import {
-    NOTIFICATION_POLLING_INTERVAL_MS
-} from '@/config/runtime';
+import { createContext,ReactNode,useCallback,useContext,useEffect,useMemo,useRef,useState } from 'react';
 
 // ============================================================================
 // CONSTANTS

@@ -1,10 +1,10 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState, useImperativeHandle, forwardRef } from "react";
-import maplibregl, { type Map as MapLibreMap, Marker as MapLibreMarker, LngLatLike } from "maplibre-gl";
-import "maplibre-gl/dist/maplibre-gl.css";
+import { getGuwahatiPmtilesUrl } from "@/lib/maps/guwahati-pmtiles";
 import { ensurePmtilesProtocolRegistered } from "@/lib/maps/pmtiles-protocol";
-import { getGuwahatiPmtilesUrl, isNonEmptyHttpUrl } from "@/lib/maps/guwahati-pmtiles";
+import maplibregl,{ type Map as MapLibreMap,Marker as MapLibreMarker } from "maplibre-gl";
+import "maplibre-gl/dist/maplibre-gl.css";
+import React,{ forwardRef,useEffect,useImperativeHandle,useMemo,useRef,useState } from "react";
 
 export type MapTheme = "light" | "dark";
 
@@ -59,7 +59,6 @@ function buildVectorStyle(pmtilesUrl: string, theme: MapTheme) {
   return {
     version: 8,
     name: "Guwahati Premium Vector",
-    glyphs: "https://fonts.openmaptiles.org/{fontstack}/{range}.pbf",
     sources: {
       guwahati: {
         type: "vector",
@@ -276,6 +275,7 @@ const GuwahatiMap = forwardRef<GuwahatiMapHandles, Props>(({
           minZoom: 10,
           maxZoom: 18,
           attributionControl: false,
+          localIdeographFontFamily: 'sans-serif',
         });
 
         mapRef.current = map;

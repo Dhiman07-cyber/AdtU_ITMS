@@ -10,17 +10,17 @@
  * per the frozen architecture, this repository only covers route/stop
  * master data.
  */
-import {
-  pgFindAll,
-  pgFindById,
-  pgUpdate,
-  pgRemove,
-  pgInsert,
-  pgUpsert,
-  pgFindAllNames,
-  pgCount,
-} from './route.repository.pg';
 import type { Route } from '@/lib/types';
+import {
+	pgCount,
+	pgFindAll,
+	pgFindAllNames,
+	pgFindById,
+	pgInsert,
+	pgRemove,
+	pgUpdate,
+	pgUpsert,
+} from './route.repository.pg';
 
 export async function findAll(): Promise<Route[]> {
   return pgFindAll();

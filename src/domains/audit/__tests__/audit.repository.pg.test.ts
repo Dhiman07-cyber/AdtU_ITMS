@@ -4,7 +4,7 @@
  * Tests repository functions using a mocked Supabase client.
  * Verifies observable behaviour: returned values, errors, nulls.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { beforeEach,describe,expect,it,vi } from 'vitest';
 
 // ─── Mock Supabase client ────────────────────────────────────────────────────
 
@@ -33,8 +33,8 @@ vi.mock('@/lib/supabase-server', () => ({
 // ─── Import SUT after mocking ────────────────────────────────────────────────
 
 import {
-  pgInsertAuditEvent,
-  pgQueryAuditEvents,
+	pgInsertAuditEvent,
+	pgQueryAuditEvents,
 } from '../repositories/audit.repository.pg';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────

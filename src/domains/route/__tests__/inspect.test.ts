@@ -1,6 +1,6 @@
-import 'dotenv/config';
-import { describe, it } from 'vitest';
 import { adminDb } from '@/lib/firebase-admin';
+import 'dotenv/config';
+import { describe,it } from 'vitest';
 
 describe('Inspect Firestore Routes', () => {
   it('prints the routes', async () => {

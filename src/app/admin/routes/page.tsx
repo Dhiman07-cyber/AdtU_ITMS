@@ -1,70 +1,69 @@
 "use client";
 
-import { useState, useMemo } from "react";
-import { useRouter } from 'next/navigation';
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { exportToExcel } from '@/lib/export-helpers';
 import { ExportButton } from '@/components/ExportButton';
-import { cn } from '@/lib/utils';
-import { supabase } from '@/lib/supabase-client';
-import { useToast } from '@/contexts/toast-context';
-import { normalizeRouteStatus } from '@/lib/formatters';
+import { PremiumPageLoader } from '@/components/LoadingSpinner';
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
-  Card,
-  CardContent,
+	Card,
+	CardContent,
 } from "@/components/ui/card";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { Badge } from "@/components/ui/badge";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { PremiumPageLoader } from '@/components/LoadingSpinner';
-import {
-  Search,
-  Plus,
-  MoreHorizontal,
-  Edit,
-  Trash2,
-  Eye,
-  MapPin,
-  Filter,
-  Bus as BusIcon,
-  Activity,
-  RefreshCw
-} from "lucide-react";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
 } from "@/components/ui/dialog";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuLabel,
+	DropdownMenuSeparator,
+	DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "@/components/ui/select";
+import {
+	Table,
+	TableBody,
+	TableCell,
+	TableHead,
+	TableHeader,
+	TableRow,
+} from "@/components/ui/table";
+import { useToast } from '@/contexts/toast-context';
 import { deleteRoute } from "@/lib/dataService";
+import { exportToExcel } from '@/lib/export-helpers';
+import { normalizeRouteStatus } from '@/lib/formatters';
+import { supabase } from '@/lib/supabase-client';
+import { cn } from '@/lib/utils';
+import {
+	Bus as BusIcon,
+	Edit,
+	Eye,
+	Filter,
+	MapPin,
+	MoreHorizontal,
+	Plus,
+	RefreshCw,
+	Search,
+	Trash2
+} from "lucide-react";
+import { useRouter } from 'next/navigation';
+import { useMemo,useState } from "react";
 // Migrated: Server-side API → PostgreSQL (no Firestore client reads)
-import { useApiCollection, invalidateCollectionCache } from '@/hooks/useApiCollection';
-import { useEventDrivenRefresh } from '@/hooks/useEventDrivenRefresh';
 import { useTheme } from '@/components/theme-provider';
+import { invalidateCollectionCache,useApiCollection } from '@/hooks/useApiCollection';
+import { useEventDrivenRefresh } from '@/hooks/useEventDrivenRefresh';
 
 // Use local interfaces to avoid type conflicts
 interface RouteItem {

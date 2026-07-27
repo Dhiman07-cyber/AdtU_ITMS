@@ -14,20 +14,20 @@
  * Thin delegation wrapper. Public function signatures are unchanged so
  * FleetService requires zero modification.
  */
+import type { Bus,Driver } from '@/lib/types';
 import {
-  pgFindAllBuses,
-  pgFindBusById,
-  pgFindBusesByRouteId,
-  pgUpdateBus,
-  pgRemoveBus,
-  pgUpsertBus,
-  pgUnassignRoute,
-  pgCheckBusCapacity,
-  pgIncrementBusCapacity,
-  pgDecrementBusCapacity,
-  pgReassignStudentsAtomically,
+	pgCheckBusCapacity,
+	pgDecrementBusCapacity,
+	pgFindAllBuses,
+	pgFindBusById,
+	pgFindBusesByRouteId,
+	pgIncrementBusCapacity,
+	pgReassignStudentsAtomically,
+	pgRemoveBus,
+	pgUnassignRoute,
+	pgUpdateBus,
+	pgUpsertBus,
 } from './fleet.repository.pg';
-import type { Bus, Driver } from '@/lib/types';
 
 export async function findAllBuses(): Promise<Bus[]> {
   return pgFindAllBuses();
@@ -77,7 +77,7 @@ export async function upsertBus(bus: Partial<Bus> & { id: string }): Promise<voi
 
 // ─── Capacity Operations ────────────────────────────────────────────────────
 
-export type { CapacityCheckResult, CapacityMutationResult } from './fleet.repository.pg';
+export type { CapacityCheckResult,CapacityMutationResult } from './fleet.repository.pg';
 
 export async function checkBusCapacity(busId: string, shift?: string) {
   return pgCheckBusCapacity(busId, shift);
@@ -101,4 +101,4 @@ export async function reassignStudentsAtomically(plans: Array<{
   return pgReassignStudentsAtomically(plans);
 }
 
-export type { Bus, Driver };
+export type { Bus,Driver };

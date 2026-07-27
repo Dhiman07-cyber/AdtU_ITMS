@@ -1,9 +1,9 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { getSupabaseServer } from '@/lib/supabase-server';
+import { createAuditEvent,type AuditActorRole } from '@/domains/audit';
 import { verifyApiAuth } from '@/lib/security/api-auth';
 import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
-import { createAuditEvent, type AuditActorRole } from '@/domains/audit';
+import { getSupabaseServer } from '@/lib/supabase-server';
 import crypto from 'crypto';
+import { NextRequest,NextResponse } from 'next/server';
 
 /**
  * POST /api/fleet/assign-routes

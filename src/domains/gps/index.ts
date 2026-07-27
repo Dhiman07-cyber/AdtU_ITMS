@@ -1,19 +1,12 @@
-export {
-  validateLocation,
-  filterUpdate,
-  clearHistory,
-  processUpdate,
-  validateUpdate,
-} from './services/gps.service';
-export type {
-  GPSLocation,
-  GPSFilterResult,
-  GPSCoordinate,
-  GPSUpdate,
-  LocationUpdate,
-  LocationUpdateNormalized,
-  PipelineResult,
-} from './services/types';
+export { checkActiveTrip,getLastLocation,persistLocation } from './services/gps-persistence.service';
 export { validateLocationUpdate } from './services/gps-validation.service';
 export type { ValidationResult } from './services/gps-validation.service';
-export { persistLocation, checkActiveTrip, getLastLocation } from './services/gps-persistence.service';
+export {
+	clearHistory,filterUpdate,processUpdate,validateLocation,validateUpdate
+} from './services/gps.service';
+export type {
+	GPSCoordinate,GPSFilterResult,GPSLocation,GPSUpdate,
+	LocationUpdate,
+	LocationUpdateNormalized,
+	PipelineResult
+} from './services/types';

@@ -1,10 +1,10 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState, ReactNode, useRef, useMemo, useCallback } from 'react';
-import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
-import { setSigningOut, getSigningOutState } from '@/lib/firestore-error-handler';
-import { User, signInWithGoogle } from '@/lib/user-service';
+import { setSigningOut } from '@/lib/firestore-error-handler';
+import { User,signInWithGoogle } from '@/lib/user-service';
+import { User as FirebaseUser,onAuthStateChanged } from 'firebase/auth';
+import { ReactNode,createContext,useCallback,useContext,useEffect,useMemo,useRef,useState } from 'react';
 
 interface AuthContextType {
   currentUser: FirebaseUser | null;

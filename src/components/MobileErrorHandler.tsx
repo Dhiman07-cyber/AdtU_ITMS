@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect } from 'react';
 import { initMobileErrorHandler } from '@/lib/utils/mobile-error-handler';
+import { useEffect } from 'react';
 
 /**
  * Mobile Error Handler Component

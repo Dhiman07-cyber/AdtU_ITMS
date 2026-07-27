@@ -1,20 +1,20 @@
 "use client";
 
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card,CardContent,CardHeader,CardTitle } from '@/components/ui/card';
 import { useAuth } from '@/contexts/auth-context';
-import dynamic from 'next/dynamic';
-import { supabase } from '@/lib/supabase-client';
 import { WebSocketClient } from '@/domains/realtime/ws-client';
+import { supabase } from '@/lib/supabase-client';
+import { AlertCircle,Bus,Clock,MapPin,Navigation } from 'lucide-react';
+import dynamic from 'next/dynamic';
+import React,{ useEffect,useMemo,useRef,useState } from 'react';
 
 // Dynamic import for vector PMTiles map
 const GuwahatiMap = dynamic(() => import('@/components/maps/GuwahatiMap'), {
   ssr: false,
   loading: () => <div className="w-full h-[500px] bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-800 dark:to-gray-900 rounded-3xl animate-pulse flex items-center justify-center text-slate-500 font-bold">Loading Guwahati Vector Map...</div>,
 });
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { MapPin, Bus, Clock, Navigation, AlertCircle } from 'lucide-react';
 
 // Using shared Supabase client from @/lib/supabase-client
 
@@ -52,6 +52,7 @@ interface DynamicStudentMapProps {
   studentLocation?: { lat: number; lng: number; accuracy: number };
   onWaitingFlagCreate?: (flagId: string) => void;
   onWaitingFlagRemove?: (flagId: string) => void;
+  onTripStateChange?: (active: boolean) => void;
 }
 
 function DynamicStudentMap({ 
@@ -60,7 +61,8 @@ function DynamicStudentMap({
   journeyActive = false,
   studentLocation,
   onWaitingFlagCreate,
-  onWaitingFlagRemove 
+  onWaitingFlagRemove,
+  onTripStateChange
 }: DynamicStudentMapProps) {
   const { currentUser } = useAuth();
   const wsRef = useRef<WebSocketClient | null>(null);
@@ -128,8 +130,13 @@ function DynamicStudentMap({
       });
 
       client.subscribe(`trip-status-${busId}`, (payload: any) => {
-        if (payload.event === 'trip_ended' || payload.payload?.event === 'trip_ended') {
+        const isStarted = payload.event === 'trip_started' || payload.payload?.event === 'trip_started';
+        const isEnded = payload.event === 'trip_ended' || payload.payload?.event === 'trip_ended';
+        if (isEnded) {
           setBusLocation(null);
+          onTripStateChange?.(false);
+        } else if (isStarted) {
+          onTripStateChange?.(true);
         }
       });
     };

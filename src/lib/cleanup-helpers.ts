@@ -3,16 +3,14 @@
  * Utilities for deleting data from Firestore and associated resources
  */
 
-import { adminAuth, adminDb } from './firebase-admin';
-import { pgDeleteNotificationsByUser } from '@/domains/notification/repositories/notification.repository.pg';
-import { extractPublicId, deleteAsset } from './cloudinary-server';
-import { wasSeatReleased } from './config/capacity-flags';
-import { deleteUser, deleteStudent, deleteDriver, deleteModerator, updateStudent, updateDriver, getAllDrivers, getStudentsByBusIds, getStudentById, getDriverById, getModeratorById } from '@/domains/identity';
 import * as fleetService from '@/domains/fleet';
+import { deleteDriver,deleteModerator,deleteUser,getAllDrivers,getDriverById,getModeratorById,getStudentById,getStudentsByBusIds,updateDriver,updateStudent } from '@/domains/identity';
+import { pgDeleteNotificationsByUser } from '@/domains/notification/repositories/notification.repository.pg';
 import { deleteUserTokens } from '@/lib/services/fcm-token-service';
-import * as studentService from '@/domains/student';
-import * as routeService from '@/domains/route';
 import { getSupabaseServer } from '@/lib/supabase-server';
+import { deleteAsset,extractPublicId } from './cloudinary-server';
+import { wasSeatReleased } from './config/capacity-flags';
+import { adminAuth,adminDb } from './firebase-admin';
 
 /**
  * Delete profile image from Cloudinary

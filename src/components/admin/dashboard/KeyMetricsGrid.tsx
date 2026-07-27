@@ -1,25 +1,19 @@
 "use client";
 
+import { useTheme } from '@/components/theme-provider';
+import { Button } from '@/components/ui/button';
+import { Card,CardContent } from '@/components/ui/card';
+import { cn } from '@/lib/utils';
 import {
-  Users,
-  Bus,
-  Route as RouteIcon,
-  FileCheck,
-  DollarSign,
-  TrendingUp,
-  Activity,
-  ArrowUpRight,
-  ShieldCheck,
-  UserCheck,
-  IndianRupee
+	ArrowUpRight,
+	Bus,
+	FileCheck,
+	IndianRupee,
+	UserCheck,
+	Users
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { Card, CardContent } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
 import { DashboardStats } from './types';
-import { cn } from '@/lib/utils';
-import { ResponsiveContainer, AreaChart, Area } from 'recharts';
-import { useTheme } from '@/components/theme-provider';
 
 // Mini sparkline data simulation
 const generateSparklineData = (base: number) => {

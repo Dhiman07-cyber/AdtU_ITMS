@@ -1,10 +1,10 @@
 "use client";
 
-import React, { useMemo } from "react";
-import { MapPin, Bus } from "lucide-react";
+import type { BusData,StudentData } from "@/app/admin/smart-allocation/page";
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
-import type { BusData, StudentData } from "@/app/admin/smart-allocation/page";
+import { Bus,MapPin } from "lucide-react";
+import React,{ useMemo } from "react";
 
 interface RouteVisualizationProps {
   bus: BusData;

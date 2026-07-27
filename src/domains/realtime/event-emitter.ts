@@ -1,4 +1,4 @@
-import { getActiveTransport, initializeTransport } from './transport-manager';
+import { getActiveTransport,initializeTransport } from './transport-manager';
 
 let initialized = false;
 

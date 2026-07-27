@@ -1,13 +1,13 @@
 "use client";
 
-import { ReactNode } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Avatar,AvatarFallback,AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Card,CardContent,CardDescription,CardHeader,CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
-import { LucideIcon } from 'lucide-react';
 import { safeImageSrc } from '@/lib/security/url-sanitizer';
+import { LucideIcon } from 'lucide-react';
+import { ReactNode } from 'react';
 
 /**
  * InfoRow - Display label and value in a consistent format

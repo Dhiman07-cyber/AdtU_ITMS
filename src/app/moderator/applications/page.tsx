@@ -1,44 +1,52 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
-import { useAuth } from "@/contexts/auth-context";
-import { useRouter } from "next/navigation";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { Avatar,AvatarFallback,AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Button } from "@/components/ui/button";
+import { Card,CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { useAuth } from "@/contexts/auth-context";
+import { useRouter } from "next/navigation";
+import { useEffect,useMemo,useState } from "react";
 // Migrated: Server-side API → PostgreSQL (no Firestore client reads)
-import { useApiCollection, invalidateCollectionCache } from '@/hooks/useApiCollection';
-import {
-  FileText, Shield, Eye, Check, X, Loader2, Search,
-  SlidersHorizontal, User, Phone, Calendar, Clock, Bus as BusIcon,
-  ChevronDown, RefreshCw, AlertTriangle, ArrowRightLeft, Bus
-} from "lucide-react";
 import { StatusBadge } from "@/components/application/status-badge";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-  DropdownMenuCheckboxItem,
-} from "@/components/ui/dropdown-menu";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { cn } from "@/lib/utils";
 import { PremiumPageLoader } from '@/components/LoadingSpinner';
-import { useModeratorPermissions } from '@/hooks/useModeratorPermissions';
-import ReassignmentPanel from '@/components/smart-allocation/ReassignmentPanel';
-import type { StudentData as RPStudentData, BusData as RPBusData } from '@/components/smart-allocation/ReassignmentPanel';
-import AlternativeBusPicker from '@/components/smart-allocation/AlternativeBusPicker';
 import type { AlternativeBusData } from '@/components/smart-allocation/AlternativeBusPicker';
+import AlternativeBusPicker from '@/components/smart-allocation/AlternativeBusPicker';
+import type { BusData as RPBusData,StudentData as RPStudentData } from '@/components/smart-allocation/ReassignmentPanel';
+import ReassignmentPanel from '@/components/smart-allocation/ReassignmentPanel';
+import { Dialog,DialogContent,DialogDescription,DialogFooter,DialogHeader,DialogTitle } from "@/components/ui/dialog";
+import {
+	DropdownMenu,
+	DropdownMenuCheckboxItem,
+	DropdownMenuContent,
+	DropdownMenuTrigger
+} from "@/components/ui/dropdown-menu";
+import { invalidateCollectionCache,useApiCollection } from '@/hooks/useApiCollection';
+import { useModeratorPermissions } from '@/hooks/useModeratorPermissions';
+import { cn } from "@/lib/utils";
+import {
+	AlertTriangle,ArrowRightLeft,
+	Bus as BusIcon,
+	Calendar,
+	Check,
+	ChevronDown,
+	Clock,
+	Eye,
+	FileText,
+	Loader2,
+	Phone,
+	RefreshCw,
+	Search,
+	Shield,
+	SlidersHorizontal,User,
+	X
+} from "lucide-react";
 
-import { supabase } from '@/lib/supabase-client';
 import { useToast } from '@/contexts/toast-context';
-import { isUpcomingApplication, getUpcomingStatus } from '@/lib/utils/application-eligibility';
+import { getUpcomingStatus,isUpcomingApplication } from '@/lib/utils/application-eligibility';
 
 import { PermissionDeniedCard } from '@/components/PermissionDeniedCard';
 

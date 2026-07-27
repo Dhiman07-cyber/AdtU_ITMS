@@ -3,19 +3,13 @@
 // Single audit capability via PostgreSQL. createAuditEvent is the canonical API.
 
 export {
-  createAuditEvent,
-  queryAuditEvents,
-  SYSTEM_ACTOR,
+	SYSTEM_ACTOR,createAuditEvent,
+	queryAuditEvents
 } from './services/audit.service.pg';
 
 export { resolveAuditActor } from './utils';
 
 export type {
-  AuditActorRole,
-  AuditEventInsert,
-  AuditEventRow,
-  AuditEventFilters,
-  AuditEventPagination,
-  AuditEventQueryResult,
-  AuditResult,
+	AuditActorRole,AuditEventFilters,AuditEventInsert,AuditEventPagination,
+	AuditEventQueryResult,AuditEventRow,AuditResult
 } from './services/audit.service.pg';

@@ -1,11 +1,11 @@
 "use client";
 
-import { useState } from 'react';
-import { useAuth } from '@/contexts/auth-context';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Alert,AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { Alert, AlertDescription } from '@/components/ui/alert';
-import { CheckCircle, XCircle, Loader2, UserPlus } from 'lucide-react';
+import { Card,CardContent,CardDescription,CardHeader,CardTitle } from '@/components/ui/card';
+import { useAuth } from '@/contexts/auth-context';
+import { CheckCircle,Loader2,UserPlus,XCircle } from 'lucide-react';
+import { useState } from 'react';
 
 export default function SetupAdminPage() {
   const { currentUser } = useAuth();

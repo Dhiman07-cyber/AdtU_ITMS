@@ -1,10 +1,10 @@
 "use client";
 
-import { ReactNode } from "react";
+import { cn } from "@/lib/utils";
+import { Home,Navigation,QrCode,Users } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Home, Users, Navigation, User, QrCode } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { ReactNode } from "react";
 
 interface DriverLayoutProps {
   children: ReactNode;

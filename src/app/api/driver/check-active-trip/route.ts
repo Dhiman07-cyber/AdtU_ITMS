@@ -1,9 +1,8 @@
-import { NextResponse } from 'next/server';
-import { getSupabaseServer } from '@/lib/supabase-server';
 import { withSecurity } from '@/lib/security/api-security';
-import { BusIdSchema } from '@/lib/security/validation-schemas';
 import { RateLimits } from '@/lib/security/rate-limiter';
-import { getDriverUidByBusId } from '@/domains/fleet/repositories/driver-assignment.repository';
+import { BusIdSchema } from '@/lib/security/validation-schemas';
+import { getSupabaseServer } from '@/lib/supabase-server';
+import { NextResponse } from 'next/server';
 
 /**
  * POST /api/driver/check-active-trip
@@ -22,35 +21,10 @@ export const POST = withSecurity(
 
     const supabase = getSupabaseServer();
 
-    // Verify driver assignment across active_trips, driver_assignments, buses, and driver_profiles
-    const [busResult, assignedDriverUid, driverProfileResult] = await Promise.all([
-      supabase.from('buses').select('id, driver_uid').eq('id', busId).maybeSingle(),
-      getDriverUidByBusId(busId),
-      supabase.from('driver_profiles').select('bus_id').eq('uid', driverUid).maybeSingle()
-    ]);
+    const { data: bus } = await supabase.from('buses').select('id, status').eq('id', busId).maybeSingle();
 
-    if (!busResult.data) {
+    if (!bus) {
       return NextResponse.json({ error: 'Bus not found' }, { status: 404 });
-    }
-
-    const { data: activeTripCheck } = await supabase
-      .from('active_trips')
-      .select('driver_id, bus_id')
-      .eq('driver_id', driverUid)
-      .eq('status', 'active')
-      .maybeSingle();
-
-    const driverClaimsBus =
-      activeTripCheck?.bus_id === busId ||
-      assignedDriverUid === driverUid ||
-      busResult.data.driver_uid === driverUid ||
-      driverProfileResult.data?.bus_id === busId;
-
-    if (!driverClaimsBus) {
-      return NextResponse.json(
-        { error: 'Driver is not assigned to this bus' },
-        { status: 403 }
-      );
     }
 
     // =====================================================

@@ -11,18 +11,18 @@
  * Triggered when clicking "Manual" badge in admin transaction history.
  */
 
-import React, { useState, useEffect } from 'react';
-import {
-    Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogHeader,
-    DialogTitle,
-} from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Loader2, X, User, Receipt, IndianRupee, Calendar, Clock, CheckCircle, Shield, CreditCard, FileText, Copy, Check } from 'lucide-react';
-import { PaymentDetailModalData, PaymentMethod, PaymentStatus, getStatusBadgeClass, getMethodBadgeClass } from '@/lib/types/payment';
+import {
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogHeader,
+	DialogTitle,
+} from '@/components/ui/dialog';
+import { PaymentDetailModalData,getMethodBadgeClass,getStatusBadgeClass } from '@/lib/types/payment';
+import { Calendar,Check,CheckCircle,Clock,Copy,CreditCard,FileText,IndianRupee,Loader2,Receipt,Shield,User,X } from 'lucide-react';
+import React,{ useEffect,useState } from 'react';
 import { toast } from 'sonner';
 
 // ============================================================================

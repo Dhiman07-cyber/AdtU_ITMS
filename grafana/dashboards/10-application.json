@@ -1,0 +1,102 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": true,
+  "panels": [
+    {
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "id": 1,
+      "title": "Applications Submitted Total",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(itms_applications_submitted_total)",
+          "legendFormat": "Submitted"
+        }
+      ]
+    },
+    {
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "id": 2,
+      "title": "Applications Approved Total",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(itms_applications_approved_total)",
+          "legendFormat": "Approved"
+        }
+      ]
+    },
+    {
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "id": 3,
+      "title": "Pending Verification Backlog",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(itms_applications_pending_queue_length)",
+          "legendFormat": "Pending Queue"
+        }
+      ]
+    },
+    {
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "id": 4,
+      "title": "Applications Rejected Total",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(itms_applications_rejected_total)",
+          "legendFormat": "Rejected"
+        }
+      ]
+    },
+    {
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "id": 5,
+      "title": "Application Funnel & Flow Rates",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "rate(itms_applications_submitted_total[1d])",
+          "legendFormat": "Submission Rate"
+        },
+        {
+          "expr": "rate(itms_applications_approved_total[1d])",
+          "legendFormat": "Approval Rate"
+        },
+        {
+          "expr": "rate(itms_applications_rejected_total[1d])",
+          "legendFormat": "Rejection Rate"
+        }
+      ]
+    },
+    {
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "id": 6,
+      "title": "Moderator Review Time & Conversion Rate",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(itms_application_review_duration_seconds_bucket[1d])) by (le)) / 3600",
+          "legendFormat": "P95 Review Time (Hours)"
+        },
+        {
+          "expr": "(sum(itms_applications_approved_total) / sum(itms_applications_submitted_total)) * 100",
+          "legendFormat": "Conversion Rate %"
+        }
+      ]
+    }
+  ],
+  "refresh": "1m",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["application", "moderator", "enrollment", "itms"],
+  "time": { "from": "now-30d", "to": "now" },
+  "title": "10 - Application Dashboard",
+  "uid": "itms-application",
+  "version": 1
+}

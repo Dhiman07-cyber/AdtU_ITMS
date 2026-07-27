@@ -1,5 +1,5 @@
-import { NextResponse } from 'next/server';
 import { getLandingConfig } from '@/domains/admin';
+import { NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
 

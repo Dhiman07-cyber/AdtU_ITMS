@@ -1,12 +1,12 @@
-import { NextResponse } from 'next/server';
-import { withSecurity } from '@/lib/security/api-security';
-import { LocationUpdateBodySchema } from '@/lib/security/validation-schemas';
-import { RateLimits } from '@/lib/security/rate-limiter';
 import { processUpdate } from '@/domains/gps';
 import { emitEvent } from '@/domains/realtime/event-emitter';
+import { withSecurity } from '@/lib/security/api-security';
+import { RateLimits } from '@/lib/security/rate-limiter';
+import { LocationUpdateBodySchema } from '@/lib/security/validation-schemas';
+import { NextResponse } from 'next/server';
 
 export const POST = withSecurity(
-  async (_request, { auth, body }) => {
+  async (_request, { auth, body, requestId }) => {
     const { busId, routeId, lat, lng, accuracy, speed, heading, timestamp, tripId } = body as any;
     const driverUid = auth.uid;
 
@@ -21,6 +21,7 @@ export const POST = withSecurity(
       heading: heading !== undefined ? Number(heading) : undefined,
       speed: speed !== undefined ? Number(speed) : undefined,
       timestamp: timestamp ? String(timestamp) : new Date().toISOString(),
+      correlationId: requestId,
     });
 
     if (!result.accepted) {

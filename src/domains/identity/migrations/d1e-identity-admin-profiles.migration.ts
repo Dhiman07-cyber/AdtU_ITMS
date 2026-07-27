@@ -15,9 +15,9 @@
  *
  * Infrastructure only. No business logic. No service calls.
  */
-import type { MigrationDefinition, MigrationResult, ValidationResult } from '@/infrastructure/migration/contracts';
+import { pgFindAdminById,pgInsertAdmin } from '@/domains/identity/repositories/identity.repository.pg';
+import type { MigrationDefinition,MigrationResult,ValidationResult } from '@/infrastructure/migration/contracts';
 import { adminDb } from '@/lib/firebase-admin';
-import { pgInsertAdmin, pgFindAdminById } from '@/domains/identity/repositories/identity.repository.pg';
 
 // ─── Firestore collection constants ──────────────────────────────────────────
 const ADMINS_COLLECTION = 'admins';

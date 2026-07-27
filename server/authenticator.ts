@@ -22,16 +22,26 @@ export async function authenticateSocket(request: IncomingMessage): Promise<Auth
     const decoded = await verifyToken(token);
     const uid = decoded.uid;
 
+    const roleFromToken = (decoded as any).role;
+    if (roleFromToken) {
+      return { authenticated: true, uid, role: roleFromToken };
+    }
+
     const { getSupabaseServer } = await import('@/lib/supabase-server');
     const supabase = getSupabaseServer();
 
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('role')
-      .eq('id', uid)
-      .maybeSingle();
+    const [studentRes, driverRes, modRes, adminRes] = await Promise.all([
+      supabase.from('student_profiles').select('uid').eq('uid', uid).maybeSingle(),
+      supabase.from('driver_profiles').select('uid').eq('uid', uid).maybeSingle(),
+      supabase.from('moderator_profiles').select('uid').eq('uid', uid).maybeSingle(),
+      supabase.from('admin_profiles').select('uid').eq('uid', uid).maybeSingle(),
+    ]);
 
-    const role = profile?.role || 'unknown';
+    const role = studentRes.data ? 'student'
+      : driverRes.data ? 'driver'
+      : modRes.data ? 'moderator'
+      : adminRes.data ? 'admin'
+      : 'student';
 
     return { authenticated: true, uid, role };
   } catch (err: any) {

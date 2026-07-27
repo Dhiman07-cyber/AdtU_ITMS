@@ -1,11 +1,9 @@
-import { NextResponse } from 'next/server';
-import { adminDb } from '@/lib/firebase-admin';
-import { resolveUserRole } from '@/lib/security/role-cache';
-import { getCurrentBusFee, updateBusFee } from '@/lib/bus-fee-service';
+import { getCurrentBusFee,updateBusFee } from '@/lib/bus-fee-service';
 import { withSecurity } from '@/lib/security/api-security';
-import { BusFeeQuerySchema, BusFeeUpdateSchema } from '@/lib/security/validation-schemas';
 import { RateLimits } from '@/lib/security/rate-limiter';
-import { notifyAllUsers } from '@/lib/services/fcm-notification-service';
+import { resolveUserRole } from '@/lib/security/role-cache';
+import { BusFeeQuerySchema,BusFeeUpdateSchema } from '@/lib/security/validation-schemas';
+import { NextResponse } from 'next/server';
 
 /**
  * Optimized Bus Fee API

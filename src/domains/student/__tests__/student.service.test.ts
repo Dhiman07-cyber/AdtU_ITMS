@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe,expect,it,vi } from 'vitest';
 
 vi.mock('../repositories/student.repository', () => ({
   findByUid: vi.fn().mockResolvedValue({ id: 's1', uid: 's1', status: 'active' }),
@@ -13,7 +13,7 @@ vi.mock('@/domains/payment', () => ({
   getByStudent: vi.fn().mockResolvedValue([{ id: 'p1' }]),
 }));
 
-import { getByUid, getAll, getByBusId, update } from '../services/student.service';
+import { getAll,getByBusId,getByUid,update } from '../services/student.service';
 
 describe('StudentService', () => {
   it('delegates uid lookup to the repository unchanged', async () => {

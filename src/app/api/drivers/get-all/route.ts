@@ -1,8 +1,8 @@
-﻿import { NextRequest, NextResponse } from 'next/server';
+﻿import { getDriversByStatus } from '@/domains/identity';
 import { withSecurity } from '@/lib/security/api-security';
-import { EmptySchema } from '@/lib/security/validation-schemas';
 import { RateLimits } from '@/lib/security/rate-limiter';
-import { getDriversByStatus } from '@/domains/identity';
+import { EmptySchema } from '@/lib/security/validation-schemas';
+import { NextResponse } from 'next/server';
 
 export const GET = withSecurity(
     async (request, { auth, requestId }) => {

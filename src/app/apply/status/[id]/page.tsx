@@ -1,23 +1,22 @@
 "use client";
 
-import { useEffect, useState } from 'react';
-import { useAuth } from '@/contexts/auth-context';
-import { useRouter, useParams, usePathname } from 'next/navigation';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card,CardContent,CardDescription,CardHeader,CardTitle } from '@/components/ui/card';
+import { useAuth } from '@/contexts/auth-context';
 import { useToast } from '@/contexts/toast-context';
+import { Application } from '@/lib/types/application';
 import {
-  Loader2,
-  CheckCircle,
-  XCircle,
-  Clock,
-  AlertCircle,
-  FileText,
-  ArrowRight
+	AlertCircle,
+	ArrowRight,
+	CheckCircle,
+	Clock,
+	FileText,
+	Loader2
 } from 'lucide-react';
 import Link from 'next/link';
-import { Application } from '@/lib/types/application';
+import { useParams,usePathname,useRouter } from 'next/navigation';
+import { useEffect,useState } from 'react';
 
 export default function ApplicationStatusPage() {
   const { currentUser, loading } = useAuth();

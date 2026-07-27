@@ -1,10 +1,10 @@
-import { describe, it, expect } from 'vitest';
+import { describe,expect,it } from 'vitest';
 import {
-    isValidLatLng,
-    haversineMeters,
-    isNewerTimestamp,
-    isImpossibleJump,
-    shouldEmitDisplayUpdate,
+	haversineMeters,
+	isImpossibleJump,
+	isNewerTimestamp,
+	isValidLatLng,
+	shouldEmitDisplayUpdate,
 } from '../location-display-guards';
 import { engineFromMapProvider } from '../map-provider-types';
 

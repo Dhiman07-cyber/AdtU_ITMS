@@ -1,8 +1,8 @@
-import { NextResponse } from 'next/server';
 import { withSecurity } from '@/lib/security/api-security';
-import { InvalidTokensQuerySchema } from '@/lib/security/validation-schemas';
 import { RateLimits } from '@/lib/security/rate-limiter';
+import { InvalidTokensQuerySchema } from '@/lib/security/validation-schemas';
 import { getSupabaseServer } from '@/lib/supabase-server';
+import { NextResponse } from 'next/server';
 
 export const GET = withSecurity(
     async (request, { body }) => {

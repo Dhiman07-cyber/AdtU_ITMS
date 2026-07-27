@@ -1,6 +1,6 @@
+import { getDriverById,getUsersByRole,getValidFcmTokensForUsers } from '@/domains/identity';
+import { adminAuth,adminDb,messaging } from '@/lib/firebase-admin';
 import { NextResponse } from 'next/server';
-import { adminAuth, adminDb, messaging } from '@/lib/firebase-admin';
-import { getDriverById, getUsersByRole, getValidFcmTokensForUsers } from '@/domains/identity';
 
 export async function POST(request: Request) {
   try {

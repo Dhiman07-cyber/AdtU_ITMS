@@ -1,24 +1,23 @@
 "use client";
 
-import { motion } from 'framer-motion';
-import { 
-  Zap, 
-  AlertTriangle, 
-  TrendingUp, 
-  TrendingDown, 
-  Bus, 
-  Users, 
-  Activity,
-  FileText,
-  Clock,
-  ArrowRight,
-  ShieldCheck
-} from 'lucide-react';
-import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { DashboardStats, BusUtilizationData, RouteOccupancyData } from './types';
-import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { Card,CardContent } from '@/components/ui/card';
+import { cn } from '@/lib/utils';
+import { motion } from 'framer-motion';
+import {
+	Activity,
+	AlertTriangle,
+	ArrowRight,
+	Bus,
+	Clock,
+	FileText,
+	ShieldCheck,
+	TrendingUp,
+	Users,
+	Zap
+} from 'lucide-react';
+import { BusUtilizationData,DashboardStats,RouteOccupancyData } from './types';
 
 interface SmartInsightsProps {
   stats: DashboardStats;

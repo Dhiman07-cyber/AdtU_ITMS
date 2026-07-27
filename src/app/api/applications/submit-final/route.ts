@@ -1,6 +1,6 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { withSecurity } from '@/lib/security/api-security';
 import { submitFinal } from '@/domains/application';
+import { withSecurity } from '@/lib/security/api-security';
+import { NextResponse } from 'next/server';
 
 type JsonRecord = Record<string, unknown>;
 

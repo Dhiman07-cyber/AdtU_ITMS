@@ -1,25 +1,23 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
-import { use } from "react";
-import { useRouter } from "next/navigation";
-import { signalCollectionRefresh } from '@/hooks/useEventDrivenRefresh';
+import EnhancedDatePicker from "@/components/enhanced-date-picker";
 import FacultyDepartmentSelector from '@/components/faculty-department-selector';
+import { PremiumPageLoader } from '@/components/LoadingSpinner';
+import ProfileImageAddModal from "@/components/ProfileImageAddModal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import Link from "next/link";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Select,SelectContent,SelectItem,SelectTrigger,SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from '@/contexts/toast-context';
-import { Info, Camera, AlertTriangle } from "lucide-react";
-import { getAllRoutes, getAllBuses, Route, getStudentById, updateStudent } from '@/lib/dataService';
-import { PremiumPageLoader } from '@/components/LoadingSpinner';
-import EnhancedDatePicker from "@/components/enhanced-date-picker";
-import ProfileImageAddModal from "@/components/ProfileImageAddModal";
+import { signalCollectionRefresh } from '@/hooks/useEventDrivenRefresh';
+import { getAllBuses,getAllRoutes,getStudentById,Route,updateStudent } from '@/lib/dataService';
 import { cn } from "@/lib/utils";
 import { normalizeShift } from "@/lib/utils/shift-utils";
+import { AlertTriangle,Camera,Info } from "lucide-react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import React,{ use,useEffect,useState } from "react";
 
 // Define the form data type - matching ADD form exactly
 type StudentFormData = {

@@ -1,15 +1,15 @@
-import { NextResponse } from 'next/server';
 import { withSecurity } from '@/lib/security/api-security';
-import { RateLimits } from '@/lib/security/rate-limiter';
-import { VerifyReceiptSchema } from '@/lib/security/validation-schemas';
-import { getModeratorPermissions } from '@/lib/security/moderator-permissions';
-import { verifyReceiptSignature, quickValidateReceiptToken } from '@/lib/security/receipt-security.service';
 import {
-  parseSecureQRData,
-  buildDocumentPayloadFromPayment,
-  verifyReceiptIntegrity,
+	buildDocumentPayloadFromPayment,
+	parseSecureQRData,
+	verifyReceiptIntegrity,
 } from '@/lib/security/document-crypto.service';
+import { getModeratorPermissions } from '@/lib/security/moderator-permissions';
+import { RateLimits } from '@/lib/security/rate-limiter';
+import { quickValidateReceiptToken,verifyReceiptSignature } from '@/lib/security/receipt-security.service';
+import { VerifyReceiptSchema } from '@/lib/security/validation-schemas';
 import { paymentsSupabaseService } from '@/lib/services/payments-supabase';
+import { NextResponse } from 'next/server';
 
 type VerifyReceiptBody = {
   receiptToken: string;

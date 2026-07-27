@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe,expect,it,vi } from 'vitest';
 
 vi.mock('../repositories/seat.repository', () => ({
   getBusCapacity: vi.fn().mockResolvedValue({ available: true, currentMembers: 10, shiftLoad: 5, capacity: 55 }),
@@ -8,7 +8,7 @@ vi.mock('../repositories/seat.repository', () => ({
   validateAssignment: vi.fn().mockResolvedValue({ canAssign: true, message: 'ok' }),
 }));
 
-import { getCapacity, assignSeat, releaseSeat, validateAssignment } from '../services/seat-assignment.service';
+import { assignSeat,getCapacity,releaseSeat,validateAssignment } from '../services/seat-assignment.service';
 
 describe('SeatAssignmentService', () => {
   it('delegates capacity check to the repository unchanged', async () => {

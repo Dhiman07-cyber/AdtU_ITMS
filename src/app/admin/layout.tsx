@@ -1,9 +1,8 @@
 "use client";
 
 import { useAuth } from '@/contexts/auth-context';
-import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { PremiumPageLoader } from '@/components/LoadingSpinner';
+import { useEffect } from 'react';
 
 export default function AdminLayout({
   children,

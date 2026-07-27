@@ -1,20 +1,20 @@
 "use client";
 
-import React from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import {
-  CheckCircle,
-  Loader2,
-  XCircle,
-  AlertTriangle,
-  Clock,
-  RefreshCw,
-} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
-  PaymentFrontendStatus,
-  getFriendlyPaymentStateContent,
+	PaymentFrontendStatus,
+	getFriendlyPaymentStateContent,
 } from '@/lib/payment/payment-state';
+import { AnimatePresence,motion } from 'framer-motion';
+import {
+	AlertTriangle,
+	CheckCircle,
+	Clock,
+	Loader2,
+	RefreshCw,
+	XCircle,
+} from 'lucide-react';
+import React from 'react';
 
 interface PaymentStatusPanelProps {
   status: PaymentFrontendStatus;

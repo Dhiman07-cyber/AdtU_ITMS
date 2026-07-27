@@ -1,9 +1,8 @@
 "use client";
 
-import React from "react";
-import { useRouter } from "next/navigation";
-import { ShieldAlert, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ArrowLeft,ShieldAlert } from "lucide-react";
+import { useRouter } from "next/navigation";
 
 interface PermissionDeniedCardProps {
     title?: string;

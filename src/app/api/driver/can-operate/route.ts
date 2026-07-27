@@ -1,10 +1,9 @@
-import { NextResponse } from 'next/server';
-import { withSecurity } from '@/lib/security/api-security';
-import { BusIdSchema } from '@/lib/security/validation-schemas';
-import { RateLimits } from '@/lib/security/rate-limiter';
 import * as tripService from '@/domains/trip';
+import { withSecurity } from '@/lib/security/api-security';
+import { RateLimits } from '@/lib/security/rate-limiter';
+import { BusIdSchema } from '@/lib/security/validation-schemas';
 import { getSupabaseServer } from '@/lib/supabase-server';
-import { getDriverUidByBusId } from '@/domains/fleet/repositories/driver-assignment.repository';
+import { NextResponse } from 'next/server';
 
 export const POST = withSecurity(
   async (request, { auth, body }) => {
@@ -13,31 +12,16 @@ export const POST = withSecurity(
 
     const supabase = getSupabaseServer();
 
-    const [busResult, assignedDriverUid, driverProfileResult] = await Promise.all([
-      supabase.from('buses').select('id, driver_uid').eq('id', busId).maybeSingle(),
-      getDriverUidByBusId(busId),
-      supabase.from('driver_profiles').select('bus_id').eq('uid', driverId).maybeSingle(),
-    ]);
+    const { data: bus } = await supabase.from('buses').select('id, status').eq('id', busId).maybeSingle();
 
-    if (!busResult.data) {
+    if (!bus) {
       return NextResponse.json({ error: 'Bus not found' }, { status: 404 });
     }
 
-    const { data: activeTrip } = await supabase
-      .from('active_trips')
-      .select('driver_id, bus_id')
-      .eq('driver_id', driverId)
-      .eq('status', 'active')
-      .maybeSingle();
-
-    const driverClaimsBus = activeTrip?.bus_id === busId;
-    const busClaimsDriver = assignedDriverUid === driverId || busResult.data.driver_uid === driverId;
-    const profileClaimsBus = driverProfileResult.data?.bus_id === busId;
-
-    if (!driverClaimsBus && !busClaimsDriver && !profileClaimsBus) {
+    if (bus.status === 'inactive') {
       return NextResponse.json({
         allowed: false,
-        reason: 'You are not assigned to this bus. Please contact operations.',
+        reason: 'This bus is inactive.',
       });
     }
 

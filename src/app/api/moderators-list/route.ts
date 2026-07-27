@@ -1,6 +1,6 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { verifyTokenOnly } from '@/lib/security/api-auth';
 import { getModeratorsByStatus } from '@/domains/identity';
+import { verifyTokenOnly } from '@/lib/security/api-auth';
+import { NextRequest,NextResponse } from 'next/server';
 
 export async function GET(request: NextRequest) {
   try {

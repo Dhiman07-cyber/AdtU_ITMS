@@ -1,6 +1,6 @@
-import { NextResponse } from 'next/server';
+import { getModeratorById,updateModerator } from '@/domains/identity';
 import { verifyApiAuth } from '@/lib/security/api-auth';
-import { updateModerator, getModeratorById } from '@/domains/identity';
+import { NextResponse } from 'next/server';
 
 export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {

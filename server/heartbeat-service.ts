@@ -28,18 +28,21 @@ export class HeartbeatService {
     const now = Date.now();
     const threshold = PING_INTERVAL + TIMEOUT_GRACE;
     for (const session of sessionManager.getActiveSockets()) {
+      const entry = connectionRegistry.get(session.socketId);
+
+      if (entry && entry.ws.readyState === entry.ws.OPEN) {
+        entry.ws.ping();
+      }
+
       const elapsed = now - session.lastHeartbeat;
       if (elapsed > threshold) {
         const missed = (this.missedCount.get(session.socketId) || 0) + 1;
         this.missedCount.set(session.socketId, missed);
 
         if (missed >= MAX_MISSED_BEFORE_WARN) {
-          const entry = connectionRegistry.get(session.socketId);
           if (entry) {
             logger.warn('heartbeat_timeout', { uid: session.uid, socketId: session.socketId, elapsedMs: elapsed, missed });
             entry.ws.close(4002, 'Heartbeat timeout');
-            sessionManager.delete(session.socketId);
-            connectionRegistry.unregister(session.socketId);
             metricsService.inc('heartbeatTimeouts');
           }
         }

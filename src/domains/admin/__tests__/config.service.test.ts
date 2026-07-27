@@ -3,7 +3,7 @@
  *
  * Tests business logic with mocked Firestore adminDb.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { beforeEach,describe,expect,it,vi } from 'vitest';
 
 // ─── Mock adminDb ─────────────────────────────────────────────────────────
 
@@ -27,16 +27,16 @@ vi.mock('@/lib/security/object-safety', () => ({
 
 // ─── Import SUT after mocking ────────────────────────────────────────────────
 import {
-  getSystemConfig,
-  updateSystemConfig,
-  getLandingConfig,
-  updateLandingConfig,
-  getUiConfig,
-  updateUiConfig,
-  getLegalConfig,
-  updateLegalConfig,
-  findMarker,
-  upsertMarker,
+	findMarker,
+	getLandingConfig,
+	getLegalConfig,
+	getSystemConfig,
+	getUiConfig,
+	updateLandingConfig,
+	updateLegalConfig,
+	updateSystemConfig,
+	updateUiConfig,
+	upsertMarker,
 } from '../services/config.service';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────

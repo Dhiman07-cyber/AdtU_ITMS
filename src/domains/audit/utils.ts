@@ -4,7 +4,7 @@
  * resolveAuditActor — resolves an admin/moderator UID to their display name
  * and role by reading PostgreSQL identity tables.
  */
-import { getAdminById, getModeratorById } from '@/domains/identity';
+import { getAdminById,getModeratorById } from '@/domains/identity';
 import type { AuditActorRole } from './services/audit.service.pg';
 
 export async function resolveAuditActor(

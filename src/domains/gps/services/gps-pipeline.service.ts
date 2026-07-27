@@ -1,7 +1,9 @@
 import { LocationValidationService } from '@/lib/security/location-validation-service';
+import { appLogger } from '@/lib/logger';
+import { ErrorClass } from '@/lib/error-classes';
 import { normalizeLocationUpdate } from './gps-normalizer.service';
-import { persistLocation, checkActiveTrip, getLastLocation } from './gps-persistence.service';
-import type { LocationUpdate, LocationUpdateNormalized, PipelineResult, LastLocation } from './types';
+import { checkActiveTrip,getLastLocation,persistLocation } from './gps-persistence.service';
+import type { LastLocation,LocationUpdate,LocationUpdateNormalized,PipelineResult } from './types';
 
 const validator = new LocationValidationService();
 
@@ -11,6 +13,7 @@ const MAX_ACCURACY_METERS = 1000;
 
 function validateBounds(n: LocationUpdateNormalized): string | null {
   if (!Number.isFinite(n.lat) || !Number.isFinite(n.lng)) return 'Valid latitude and longitude are required';
+  if (n.lat === 0 && n.lng === 0) return 'GPS fix not acquired (null island coordinates)';
   if (n.lat < -90 || n.lat > 90 || n.lng < -180 || n.lng > 180) return 'Coordinates are out of range';
   if (n.speed !== null && (n.speed < 0 || n.speed > MAX_SPEED_KMH)) return `Speed exceeds limit (${MAX_SPEED_KMH} km/h)`;
   if (n.heading !== null && (n.heading < 0 || n.heading > 360)) return 'Heading is out of range';
@@ -32,7 +35,15 @@ function validateJump(n: LocationUpdateNormalized, last: LastLocation): string |
   const lastTime = new Date(last.timestamp).getTime();
   const timeDiff = (n.timestamp.getTime() - lastTime) / 1000;
 
-  if (timeDiff <= 0) return null;
+  // Reject out-of-order packets — older than last accepted location
+  if (timeDiff < 0) return 'Out-of-order GPS packet (older than last accepted location)';
+
+  // Duplicate timestamp: only reject if coordinates changed significantly
+  if (timeDiff === 0) {
+    const distance = haversine(Number(last.lat), Number(last.lng), n.lat, n.lng);
+    if (distance > 50) return 'Duplicate timestamp with significant coordinate jump';
+    return null;
+  }
 
   const distance = haversine(Number(last.lat), Number(last.lng), n.lat, n.lng);
 
@@ -51,23 +62,55 @@ function validateJump(n: LocationUpdateNormalized, last: LastLocation): string |
 }
 
 export async function processLocationUpdate(raw: LocationUpdate): Promise<PipelineResult> {
+  const start = Date.now();
   const normalized = normalizeLocationUpdate(raw);
+  const logCtx = {
+    correlationId: (raw as any).correlationId as string | undefined,
+    busId: normalized.busId,
+    tripId: normalized.tripId,
+    driverId: normalized.driverId,
+  };
 
   const boundsError = validateBounds(normalized);
-  if (boundsError) return { accepted: false, reason: boundsError, normalized };
+  if (boundsError) {
+    const errorClass = boundsError.includes('null island')
+      ? ErrorClass.GPS_NULL_ISLAND
+      : boundsError.includes('speed')
+      ? ErrorClass.GPS_SPEED_EXCEEDED
+      : ErrorClass.GPS_INVALID_COORDINATES;
+    appLogger.warn('gps', 'location_rejected', { ...logCtx, reason: boundsError, errorClass, latencyMs: Date.now() - start });
+    return { accepted: false, reason: boundsError, normalized };
+  }
 
   const session = await checkActiveTrip(normalized.driverId, normalized.busId, normalized.tripId);
-  if (!session.valid) return { accepted: false, reason: session.reason, normalized };
+  if (!session.valid) {
+    appLogger.warn('gps', 'location_rejected', { ...logCtx, reason: session.reason, errorClass: ErrorClass.GPS_NO_ACTIVE_TRIP, latencyMs: Date.now() - start });
+    return { accepted: false, reason: session.reason, normalized };
+  }
 
   const lastLoc = await getLastLocation(normalized.busId, normalized.tripId);
   if (lastLoc) {
     const jumpError = validateJump(normalized, lastLoc);
-    if (jumpError) return { accepted: false, reason: jumpError, normalized };
+    if (jumpError) {
+      const errorClass = jumpError.includes('out-of-order')
+        ? ErrorClass.GPS_OUT_OF_ORDER
+        : jumpError.includes('duplicate')
+        ? ErrorClass.GPS_DUPLICATE_TIMESTAMP
+        : jumpError.includes('jump')
+        ? ErrorClass.GPS_JUMP_TOO_LARGE
+        : ErrorClass.GPS_SPEED_EXCEEDED;
+      appLogger.warn('gps', 'location_rejected', { ...logCtx, reason: jumpError, errorClass, latencyMs: Date.now() - start });
+      return { accepted: false, reason: jumpError, normalized };
+    }
   }
 
   const persisted = await persistLocation(normalized);
-  if (!persisted) return { accepted: false, reason: 'Failed to persist location', normalized };
+  if (!persisted) {
+    appLogger.error('gps', 'location_persist_failed', { ...logCtx, errorClass: ErrorClass.GPS_PERSIST_FAILED, latencyMs: Date.now() - start });
+    return { accepted: false, reason: 'Failed to persist location', normalized };
+  }
 
+  appLogger.debug('gps', 'location_accepted', { ...logCtx, lat: normalized.lat, lng: normalized.lng, latencyMs: Date.now() - start });
   return { accepted: true, normalized, persisted: true };
 }
 

@@ -14,8 +14,9 @@
  * overrides or administrative intervention."
  */
 
-import { SupabaseClient } from '@supabase/supabase-js';
 import { getSupabaseServer } from '@/lib/supabase-server';
+import { SupabaseClient } from '@supabase/supabase-js';
+import { appLogger } from '@/lib/logger';
 
 // Configuration from environment
 // 10 minutes — university buses commonly pass through connectivity dead zones.
@@ -53,6 +54,7 @@ export interface CanOperateResult {
 export interface StartTripResult {
     success: boolean;
     tripId?: string;
+    alreadyActive?: boolean;
     reason?: string;
     errorCode?: 'LOCKED_BY_OTHER' | 'SUPABASE_ERROR' | 'VALIDATION_ERROR';
 }
@@ -120,7 +122,7 @@ export class TripLockService {
             };
 
         } catch (error: unknown) {
-            console.error('Error checking lock status:', error);
+            appLogger.error('trip-lock', 'can_operate_error', { busId, driverId, error: getErrorMessage(error) });
             throw error;
         }
     }
@@ -160,7 +162,7 @@ export class TripLockService {
                 });
 
             if (rpcError) {
-                console.error('RPC error acquiring trip lock:', rpcError);
+                appLogger.error('trip-lock', 'acquire_lock_rpc_error', { busId, driverId, tripId, error: rpcError.message });
                 return { success: false, reason: rpcError.message, errorCode: 'SUPABASE_ERROR' };
             }
 
@@ -175,10 +177,10 @@ export class TripLockService {
                 return { success: false, reason: result?.error || 'Failed to acquire lock', errorCode: 'SUPABASE_ERROR' };
             }
 
-            return { success: true, tripId: result.tripId || tripId };
+            return { success: true, tripId: result.tripId || tripId, alreadyActive: result.alreadyActive === true };
 
         } catch (error: unknown) {
-            console.error('Start trip error:', error);
+            appLogger.error('trip-lock', 'start_trip_error', { busId, driverId, tripId, error: getErrorMessage(error) });
             return { success: false, reason: getErrorMessage(error) };
         }
     }
@@ -212,7 +214,7 @@ export class TripLockService {
                 });
 
             if (rpcError) {
-                console.error('RPC error extending trip lock:', rpcError);
+                appLogger.error('trip-lock', 'extend_lock_rpc_error', { tripId, driverId, busId, error: rpcError.message });
                 return { success: false, reason: 'Failed to update heartbeat' };
             }
 
@@ -229,7 +231,7 @@ export class TripLockService {
             return { success: true };
 
         } catch (error: unknown) {
-            console.error('Heartbeat error:', error);
+            appLogger.error('trip-lock', 'heartbeat_error', { tripId, driverId, busId, error: getErrorMessage(error) });
             return { success: false, reason: getErrorMessage(error) };
         }
     }
@@ -275,18 +277,18 @@ export class TripLockService {
                     });
 
                 if (rpcError) {
-                    console.error('RPC error releasing trip lock:', rpcError);
+                    appLogger.warn('trip-lock', 'release_lock_rpc_error', { tripId, driverId, busId, error: rpcError.message });
                     // Continue — the lock may have already been released
                 }
             } else {
-                console.warn('No active trip record found for trip:', tripId);
+                appLogger.warn('trip-lock', 'end_trip_no_record', { tripId, driverId, busId });
             }
 
             heartbeatWriteCache.delete(`${tripId}:${driverId}:${busId}`);
             return { success: true };
 
         } catch (error: unknown) {
-            console.error('End trip error:', error);
+            appLogger.error('trip-lock', 'end_trip_error', { tripId, driverId, busId, error: getErrorMessage(error) });
             return { success: false, reason: getErrorMessage(error) };
         }
     }
@@ -303,7 +305,7 @@ export class TripLockService {
             .maybeSingle();
 
         if (error) {
-            console.error('Error fetching active trip:', error);
+            appLogger.error('trip-lock', 'get_active_trip_error', { busId, error: (error as any).message || String(error) });
             return null;
         }
 

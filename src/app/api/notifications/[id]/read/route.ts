@@ -4,9 +4,9 @@
  * Marks a notification as read for the current user.
  * Replaces notificationService.markAsRead() from the old client-side NotificationService.
  */
-import { NextRequest, NextResponse } from 'next/server';
-import { withSecurity } from '@/lib/security/api-security';
 import * as Notification from '@/domains/notification';
+import { withSecurity } from '@/lib/security/api-security';
+import { NextResponse } from 'next/server';
 
 function extractId(url: string): string | null {
   const match = url.match(/\/api\/notifications\/([^/]+)\/read/);

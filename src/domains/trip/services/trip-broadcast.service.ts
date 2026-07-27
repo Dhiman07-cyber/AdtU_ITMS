@@ -1,4 +1,4 @@
-import { getActiveTransport, initializeTransport } from '@/domains/realtime/transport-manager';
+import { getActiveTransport,initializeTransport } from '@/domains/realtime/transport-manager';
 
 async function getTransport() {
   await initializeTransport();

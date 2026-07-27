@@ -1,21 +1,16 @@
 "use client";
 
+import { useTheme } from '@/components/theme-provider';
+import { cn } from '@/lib/utils';
 import { motion } from 'framer-motion';
 import {
-  Zap,
-  Bus,
-  Users,
-  Activity,
-  FileCheck,
-  DollarSign,
-  TrendingUp,
-  Clock,
-  MessageSquare as MessageSquareIcon
+	Bus,
+	MessageSquare as MessageSquareIcon,
+	Users,
+	Zap
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { DashboardStats } from './types';
-import { cn } from '@/lib/utils';
-import { useTheme } from '@/components/theme-provider';
 
 interface HealthMetricProps {
   icon: any;

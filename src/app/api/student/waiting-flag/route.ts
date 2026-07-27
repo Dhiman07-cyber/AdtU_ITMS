@@ -1,15 +1,15 @@
-import { NextResponse } from 'next/server';
-import { getSupabaseServer } from '@/lib/supabase-server';
-import { withSecurity } from '@/lib/security/api-security';
-import { 
-    WaitingFlagPostSchema, 
-    WaitingFlagQuerySchema, 
-    WaitingFlagDeleteSchema 
-} from '@/lib/security/validation-schemas';
-import { RateLimits } from '@/lib/security/rate-limiter';
-import { getTransportEntitlement } from '@/lib/entitlement/transport-entitlement';
-import { getByUid } from '@/domains/student';
 import { emitEvent } from '@/domains/realtime/event-emitter';
+import { getByUid } from '@/domains/student';
+import { getTransportEntitlement } from '@/lib/entitlement/transport-entitlement';
+import { withSecurity } from '@/lib/security/api-security';
+import { RateLimits } from '@/lib/security/rate-limiter';
+import {
+	WaitingFlagDeleteSchema,
+	WaitingFlagPostSchema,
+	WaitingFlagQuerySchema
+} from '@/lib/security/validation-schemas';
+import { getSupabaseServer } from '@/lib/supabase-server';
+import { NextResponse } from 'next/server';
 
 /**
  * POST /api/student/waiting-flag
@@ -50,7 +50,7 @@ export const POST = withSecurity(
             );
         }
 
-        const studentBusId = studentData.busId || studentData.busId;
+        const studentBusId = studentData.bus_id || studentData.busId || studentData.id;
         
         if (!studentBusId || studentBusId !== busId) {
             return NextResponse.json({
@@ -99,6 +99,9 @@ export const POST = withSecurity(
             .single();
 
         if (insertError) {
+            if (insertError.code === '23505') {
+                return NextResponse.json({ error: 'You already have an active waiting flag for this bus' }, { status: 409 });
+            }
             console.error('Supabase insert error:', insertError);
             return NextResponse.json({ error: 'Failed to create waiting flag' }, { status: 500 });
         }

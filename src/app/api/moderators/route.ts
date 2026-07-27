@@ -1,8 +1,8 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { getAllModerators } from '@/domains/identity';
 import { verifyApiAuth } from '@/lib/security/api-auth';
-import { applyRateLimit, createRateLimitId, RateLimits } from '@/lib/security/rate-limiter';
+import { applyRateLimit,createRateLimitId,RateLimits } from '@/lib/security/rate-limiter';
 import { handleApiError } from '@/lib/security/safe-error';
-import { getModeratorsByStatus } from '@/domains/identity';
+import { NextRequest,NextResponse } from 'next/server';
 
 interface Moderator {
   id: string;
@@ -31,7 +31,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Too many requests' }, { status: 429, headers: rl.headers });
     }
 
-    const moderatorRows = await getModeratorsByStatus('active');
+    const moderatorRows = await getAllModerators();
 
     const moderators: Moderator[] = moderatorRows.map((row: any) => ({
       id: row.uid,

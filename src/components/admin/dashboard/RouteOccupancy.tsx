@@ -1,33 +1,31 @@
 "use client";
 
-import { useState, useMemo, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import {
-   Navigation,
-   Activity,
-   ArrowRight,
-   ChevronRight,
-   AlertTriangle,
-   ChevronDown,
-   ChevronUp,
-   BarChart as BarChartIcon,
-   TrendingUp
-} from 'lucide-react';
-import {
-   BarChart,
-   Bar,
-   XAxis,
-   YAxis,
-   CartesianGrid,
-   Tooltip as RechartsTooltip,
-   ResponsiveContainer,
-   Cell
-} from 'recharts';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { RouteOccupancyData } from './types';
+import { Card,CardContent,CardDescription,CardHeader,CardTitle } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
+import { AnimatePresence,motion } from 'framer-motion';
+import {
+	AlertTriangle,
+	ArrowRight,
+	BarChart as BarChartIcon,
+	ChevronDown,
+	ChevronUp,
+	Navigation,
+	TrendingUp
+} from 'lucide-react';
+import { useEffect,useMemo,useState } from 'react';
+import {
+	Bar,
+	BarChart,
+	CartesianGrid,
+	Cell,
+	Tooltip as RechartsTooltip,
+	ResponsiveContainer,
+	XAxis,
+	YAxis
+} from 'recharts';
+import { RouteOccupancyData } from './types';
 
 interface RouteOccupancyProps {
    routeOccupancy: RouteOccupancyData[];

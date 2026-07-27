@@ -1,14 +1,14 @@
 "use client";
 
-import React, { useState } from 'react';
-import { useAuth } from '@/contexts/auth-context';
-import { useRouter } from 'next/navigation';
-import Link from 'next/link';
-import Image from 'next/image';
-import { Button } from '@/components/ui/button';
-import { MessageSquare } from 'lucide-react';
 import FeedbackModal from '@/components/FeedbackModal';
+import { Button } from '@/components/ui/button';
 import { APP_NAME } from '@/config/runtime';
+import { useAuth } from '@/contexts/auth-context';
+import { MessageSquare } from 'lucide-react';
+import Image from 'next/image';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import React,{ useState } from 'react';
 
 interface FooterProps {
   className?: string;

@@ -15,10 +15,10 @@
  * No manual overrides, no admin intervention - fully automatic.
  */
 
-import { NextResponse } from 'next/server';
+import { emitEvent } from '@/domains/realtime/event-emitter';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import crypto from 'crypto';
-import { emitEvent } from '@/domains/realtime/event-emitter';
+import { NextResponse } from 'next/server';
 
 // Configuration — 10 minutes; university buses commonly pass through
 // connectivity dead zones (tunnels, parking garages) where heartbeats

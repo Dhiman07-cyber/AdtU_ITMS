@@ -1,31 +1,30 @@
-import { NextResponse } from 'next/server';
-import { adminAuth } from '@/lib/firebase-admin';
-import { getUpdaterInfo } from '@/lib/utils/updatedBy';
-import { calculateRenewalDate } from '@/lib/utils/renewal-utils';
+import { getSystemConfig } from '@/domains/admin';
+import { createAuditEvent } from '@/domains/audit';
+import { getBusById,incrementBusCapacity } from '@/domains/fleet';
+import { assignDriverToBus } from '@/domains/fleet/repositories/driver-assignment.repository';
+import { createAdmin,createDriver,createModerator,createStudent,createUser,getStudentById } from '@/domains/identity';
+import * as routeService from '@/domains/route';
 import { sendBusFullAlert } from '@/lib/busCapacityService';
-import { incrementBusCapacity, getBusById } from '@/domains/fleet';
-import { generateOfflinePaymentId } from '@/lib/types/payment';
-import { computeBlockDatesFromValidUntil } from '@/lib/utils/deadline-computation';
+import { getDeadlineConfig } from '@/lib/deadline-config-service';
+import { adminAuth } from '@/lib/firebase-admin';
+import { withSecurity } from '@/lib/security/api-security';
+import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
+import { RateLimits } from '@/lib/security/rate-limiter';
+import { CreateUserSchema } from '@/lib/security/validation-schemas';
 import {
-    sendStudentAddedNotification,
-    getAdminEmailRecipients,
-    StudentAddedEmailData,
+	getAdminEmailRecipients,
+	sendStudentAddedNotification,
+	StudentAddedEmailData,
 } from '@/lib/services/admin-email.service';
 import { generateReceiptPdf } from '@/lib/services/receipt.service';
-import { getSystemConfig } from '@/domains/admin';
-import { getDeadlineConfig } from '@/lib/deadline-config-service';
-import { withSecurity } from '@/lib/security/api-security';
-import { CreateUserSchema } from '@/lib/security/validation-schemas';
-import { RateLimits } from '@/lib/security/rate-limiter';
-import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
-import { z } from 'zod';
-import { createAuditEvent } from '@/domains/audit';
-import { normalizeShift } from '@/lib/utils/shift-utils';
-import { createUser, createStudent, createDriver, getStudentById } from '@/domains/identity';
-import { assignDriverToBus } from '@/domains/fleet/repositories/driver-assignment.repository';
-import * as routeService from '@/domains/route';
 import { getSupabaseServer } from '@/lib/supabase-server';
-import crypto from 'crypto';
+import { generateOfflinePaymentId } from '@/lib/types/payment';
+import { computeBlockDatesFromValidUntil } from '@/lib/utils/deadline-computation';
+import { calculateRenewalDate } from '@/lib/utils/renewal-utils';
+import { normalizeShift } from '@/lib/utils/shift-utils';
+import { getUpdaterInfo } from '@/lib/utils/updatedBy';
+import { NextResponse } from 'next/server';
+import { z } from 'zod';
 
 type CreateUserBody = z.infer<typeof CreateUserSchema>;
 
@@ -139,9 +138,11 @@ export const POST = withSecurity<CreateUserBody>(
         try {
             const userRecord = await adminAuth.getUserByEmail(email);
             uid = userRecord.uid;
+            await adminAuth.setCustomUserClaims(uid, { role });
         } catch {
             const userRecord = await adminAuth.createUser({ email, emailVerified: true });
             uid = userRecord.uid;
+            await adminAuth.setCustomUserClaims(uid, { role });
             authUserCreated = true;
         }
 
@@ -354,15 +355,6 @@ export const POST = withSecurity<CreateUserBody>(
             }
         } else {
             // Moderator or Admin
-            const col = role === 'moderator' ? 'moderators' : 'admins';
-            const docData = {
-                uid, email, fullName: name, dob: dob || '', joiningDate: joiningDate || '',
-                aadharNumber: aadharNumber || '', phone: phone || '', altPhone: alternatePhone || '',
-                staffId: employeeId || staffId || '', employeeId: employeeId || staffId || '',
-                profilePhotoUrl: profilePhotoUrl || '', approvedBy: approvedByDisplay,
-                address: address || '', status: status || 'active', createdAt: now, updatedAt: now,
-            };
-
             // Write user to PostgreSQL (canonical source of truth)
             await createUser({
                 uid,
@@ -372,6 +364,31 @@ export const POST = withSecurity<CreateUserBody>(
                 createdAt: now,
             });
 
+            if (role === 'moderator') {
+                await createModerator({
+                    uid,
+                    email,
+                    fullName: name,
+                    phone: phone || '',
+                    employeeId: employeeId || staffId || '',
+                    profilePhotoUrl: profilePhotoUrl || '',
+                    createdBy: approvedByDisplay,
+                    status: status || 'active',
+                    createdAt: now,
+                    updatedAt: now,
+                });
+            } else if (role === 'admin') {
+                await createAdmin({
+                    uid,
+                    email,
+                    fullName: name,
+                    phone: phone || '',
+                    employeeId: employeeId || staffId || '',
+                    role: 'admin',
+                    createdAt: now,
+                    updatedAt: now,
+                });
+            }
         }
 
         return NextResponse.json({

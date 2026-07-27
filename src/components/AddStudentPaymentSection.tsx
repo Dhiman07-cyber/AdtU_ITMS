@@ -1,23 +1,20 @@
 "use client";
 
-import React from 'react';
-import { Card, CardContent } from '@/components/ui/card';
+import { Card,CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import {
-    Receipt,
-    Clock,
-    Calendar,
-    CheckCircle,
-    IndianRupee,
-    Wallet,
-    CreditCard,
-    Route as RouteIcon,
-    Bus,
-    MapPin
-} from 'lucide-react';
+import { Select,SelectContent,SelectItem,SelectTrigger,SelectValue } from '@/components/ui/select';
 import { Route } from '@/lib/types';
+import {
+	Bus,
+	Calendar,
+	CheckCircle,
+	Clock,
+	CreditCard,
+	Receipt,
+	Wallet
+} from 'lucide-react';
+import React from 'react';
 import RouteSelectionSection from './RouteSelectionSection';
 
 interface AddStudentPaymentSectionProps {

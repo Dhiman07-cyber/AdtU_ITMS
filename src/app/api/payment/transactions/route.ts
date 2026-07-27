@@ -1,8 +1,8 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { verifyToken } from '@/lib/firebase-admin';
-import { getAllPayments, getPaymentsByStudent } from '@/lib/payment/payment.service';
+import { getUserByEmail,getUserById } from '@/domains/identity';
 import { getByUid as getStudentByUid } from '@/domains/student';
-import { getUserById, getUserByEmail } from '@/domains/identity';
+import { verifyToken } from '@/lib/firebase-admin';
+import { getAllPayments,getPaymentsByStudent } from '@/lib/payment/payment.service';
+import { NextRequest,NextResponse } from 'next/server';
 
 export async function GET(request: NextRequest) {
   try {

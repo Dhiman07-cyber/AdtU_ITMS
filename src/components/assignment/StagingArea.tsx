@@ -1,45 +1,35 @@
 "use client";
 
-import { useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ScrollArea, ScrollBar } from "@/components/ui/scroll-area";
+import { Button } from "@/components/ui/button";
+import { ScrollArea,ScrollBar } from "@/components/ui/scroll-area";
 import {
-    Table,
-    TableBody,
-    TableCell,
-    TableHead,
-    TableHeader,
-    TableRow,
+	Table,
+	TableBody,
+	TableCell,
+	TableHead,
+	TableHeader,
+	TableRow,
 } from "@/components/ui/table";
 import {
-    Tooltip,
-    TooltipContent,
-    TooltipProvider,
-    TooltipTrigger,
+	Tooltip,
+	TooltipContent,
+	TooltipProvider,
+	TooltipTrigger,
 } from "@/components/ui/tooltip";
-import {
-    HoverCard,
-    HoverCardContent,
-    HoverCardTrigger,
-} from "@/components/ui/hover-card";
-import {
-    Trash2,
-    ArrowRightLeft,
-    CheckCircle2,
-    XCircle,
-    Bus,
-    User,
-    Route,
-    MapPin,
-    Info,
-    ArrowRight,
-    Bookmark,
-    Clock,
-} from "lucide-react";
+import type { StagedDriverAssignment,StagedRouteAssignment } from "@/lib/services/assignment-service";
 import { cn } from "@/lib/utils";
-import type { StagedDriverAssignment, StagedRouteAssignment } from "@/lib/services/assignment-service";
+import { AnimatePresence,motion } from "framer-motion";
+import {
+	ArrowRightLeft,
+	Bus,
+	CheckCircle2,
+	Info,
+	MapPin,
+	Route,
+	Trash2,
+	XCircle
+} from "lucide-react";
 
 // ============================================
 // DESIGN TOKENS

@@ -3,7 +3,7 @@
  * Consistent loading experience across the app
  */
 
-import React, { useState, useEffect } from 'react';
+import { useEffect,useState } from 'react';
 
 /**
  * Mobile Typewriter Loader

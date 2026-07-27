@@ -7,35 +7,35 @@
  * and payment receipts - matches driver's bus pass scanner UI exactly.
  */
 
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { PermissionDeniedCard } from "@/components/PermissionDeniedCard";
+import ReceiptVerificationModal from '@/components/ReceiptVerificationModal';
+import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/auth-context';
 import { useModeratorPermissions } from "@/hooks/useModeratorPermissions";
-import { PermissionDeniedCard } from "@/components/PermissionDeniedCard";
-import { useRouter } from 'next/navigation';
-import Image from 'next/image';
-import { Button } from '@/components/ui/button';
-import {
-    Camera,
-    CheckCircle,
-    XCircle,
-    AlertCircle,
-    Loader2,
-    Scan,
-    RotateCcw,
-    Layout,
-    LayoutGrid,
-    Check,
-    Copy,
-    Bus,
-    ShieldCheck,
-    User,
-} from 'lucide-react';
-import ReceiptVerificationModal from '@/components/ReceiptVerificationModal';
-import jsQR from 'jsqr';
-import { motion, AnimatePresence } from 'framer-motion';
-import { toast } from 'sonner';
 import { auth } from '@/lib/firebase';
 import { safeImageSrc } from '@/lib/security/url-sanitizer';
+import { AnimatePresence,motion } from 'framer-motion';
+import jsQR from 'jsqr';
+import {
+	AlertCircle,
+	Bus,
+	Camera,
+	Check,
+	CheckCircle,
+	Copy,
+	Layout,
+	LayoutGrid,
+	Loader2,
+	RotateCcw,
+	Scan,
+	ShieldCheck,
+	User,
+	XCircle,
+} from 'lucide-react';
+import Image from 'next/image';
+import { useRouter } from 'next/navigation';
+import { useCallback,useEffect,useRef,useState } from 'react';
+import { toast } from 'sonner';
 
 // Result interfaces
 interface StudentData {

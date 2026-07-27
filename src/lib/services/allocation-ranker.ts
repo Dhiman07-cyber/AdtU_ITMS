@@ -1,5 +1,5 @@
-import type { BusData, StudentData } from '@/app/admin/smart-allocation/page';
-import { normalizeShift, areShiftsCompatible, getShiftLoad } from '@/lib/utils/shift-utils';
+import type { BusData,StudentData } from '@/app/admin/smart-allocation/page';
+import { areShiftsCompatible,getShiftLoad,normalizeShift } from '@/lib/utils/shift-utils';
 
 interface ScoredBus extends BusData {
   score: number;

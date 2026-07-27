@@ -9,10 +9,10 @@
  *
  * Infrastructure only — no business logic.
  */
-import type { MigrationStore } from './migration-runner';
+import { getSupabaseServer } from '@/lib/supabase-server';
 import type { MigrationRecord } from './contracts';
 import { MigrationStatus } from './contracts';
-import { getSupabaseServer } from '@/lib/supabase-server';
+import type { MigrationStore } from './migration-runner';
 
 export class SupabaseMigrationStore implements MigrationStore {
   private get db() {

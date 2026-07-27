@@ -1,8 +1,8 @@
-import { NextResponse } from 'next/server';
-import { withSecurity } from '@/lib/security/api-security';
-import { LocationUpdateBodySchema } from '@/lib/security/validation-schemas';
-import { RateLimits } from '@/lib/security/rate-limiter';
 import { processUpdate } from '@/domains/gps';
+import { withSecurity } from '@/lib/security/api-security';
+import { RateLimits } from '@/lib/security/rate-limiter';
+import { LocationUpdateBodySchema } from '@/lib/security/validation-schemas';
+import { NextResponse } from 'next/server';
 
 export const POST = withSecurity(
   async (request, { auth, body }) => {

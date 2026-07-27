@@ -1,16 +1,24 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
-import { useRouter } from "next/navigation";
-import Image from "next/image";
-import { useAuth } from "@/contexts/auth-context";
-import { APP_NAME } from '@/config/runtime';
-import {
-  MapPin, Bell, Shield, Bus, Clock, GraduationCap, ArrowRight, Check,
-  PlayCircle, Users, CheckCircle2, Navigation, FileText, UserCheck,
-  ChevronLeft, ChevronRight
-} from "lucide-react";
 import Footer from "@/components/Footer";
+import { APP_NAME } from '@/config/runtime';
+import { useAuth } from "@/contexts/auth-context";
+import {
+	ArrowRight,
+	Bell,
+	Bus,
+	Check,
+	CheckCircle2,
+	Clock,
+	FileText,
+	Navigation,
+	PlayCircle,
+	Shield,
+	UserCheck
+} from "lucide-react";
+import Image from "next/image";
+import { useRouter } from "next/navigation";
+import { useEffect,useRef,useState } from "react";
 
 function LandingVideo() {
   const videoRef = useRef<HTMLVideoElement>(null);

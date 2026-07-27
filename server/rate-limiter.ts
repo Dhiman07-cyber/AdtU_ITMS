@@ -37,9 +37,13 @@ export function clearRateLimitsFor(socketId: string): void {
   }
 }
 
-setInterval(() => {
+const bucketCleanupTimer = setInterval(() => {
   const now = Date.now();
   for (const [k, v] of ipBuckets) { if (now > v.resetAt) ipBuckets.delete(k); }
   for (const [k, v] of userBuckets) { if (now > v.resetAt) userBuckets.delete(k); }
   for (const [k, v] of socketBuckets) { if (now > v.resetAt) socketBuckets.delete(k); }
 }, 60000);
+
+export function stopRateLimiter(): void {
+  clearInterval(bucketCleanupTimer);
+}

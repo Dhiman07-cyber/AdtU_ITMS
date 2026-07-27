@@ -15,32 +15,31 @@
  * - Status transitions: Pending → Completed (no deletions)
  */
 
-import { paymentsSupabaseService, type PaymentRecord } from '@/lib/services/payments-supabase';
-import { ensureReceiptSignature } from '@/lib/services/receipt.service';
-import { createAuditEvent } from '@/domains/audit';
-import { getDeadlineConfig } from '@/lib/deadline-config-service';
-import { calculateValidUntilDate } from '@/lib/utils/date-utils';
-import { fetchOrderDetails } from '@/lib/payment/razorpay.service';
-import { getByUid as getStudentByUid, getByEnrollmentId as getStudentByEnrollmentId, applyPaymentValidity } from '@/domains/student';
 import { getById as getApplicationById } from '@/domains/application';
-import * as Notification from '@/domains/notification';
+import { createAuditEvent } from '@/domains/audit';
 import { getUsersByRole } from '@/domains/identity';
+import * as Notification from '@/domains/notification';
+import { applyPaymentValidity,getByEnrollmentId as getStudentByEnrollmentId,getByUid as getStudentByUid } from '@/domains/student';
+import { getDeadlineConfig } from '@/lib/deadline-config-service';
+import { paymentsSupabaseService,type PaymentRecord } from '@/lib/services/payments-supabase';
+import { ensureReceiptSignature } from '@/lib/services/receipt.service';
 import {
-    PaymentDocument,
-    OnlinePaymentDocument,
-    OfflinePaymentDocument,
-    CreateOnlinePaymentRequest,
-    ApprovePaymentRequest,
-    RejectPaymentRequest,
-    PaymentQueryFilters,
-    PaginatedPaymentResponse,
-    PaymentDisplayData,
-    PaymentDetailModalData,
-    generateOfflinePaymentId,
-    generateOnlinePaymentId,
-    isOnlinePayment,
-    isOfflinePayment,
+	ApprovePaymentRequest,
+	CreateOnlinePaymentRequest,
+	OfflinePaymentDocument,
+	OnlinePaymentDocument,
+	PaginatedPaymentResponse,
+	PaymentDetailModalData,
+	PaymentDisplayData,
+	PaymentDocument,
+	PaymentQueryFilters,
+	RejectPaymentRequest,
+	generateOfflinePaymentId,
+	generateOnlinePaymentId,
+	isOfflinePayment,
+	isOnlinePayment,
 } from '@/lib/types/payment';
+import { calculateValidUntilDate } from '@/lib/utils/date-utils';
 
 // ============================================================================
 // PAYMENT CREATION - NOW WRITES TO SUPABASE

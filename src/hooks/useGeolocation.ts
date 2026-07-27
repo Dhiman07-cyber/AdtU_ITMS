@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback } from 'react';
-import { geolocationService, GeolocationPosition, GeolocationError } from '@/lib/geolocation-service';
+import { GeolocationError,GeolocationPosition,geolocationService } from '@/lib/geolocation-service';
+import { useCallback,useEffect,useState } from 'react';
 
 interface UseGeolocationOptions {
     watch?: boolean;

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe,expect,it,vi } from 'vitest';
 
 vi.mock('../repositories/identity.repository', () => ({
   findUserById: vi.fn().mockResolvedValue({ uid: 'u1', role: 'student' }),
@@ -12,7 +12,7 @@ vi.mock('@/lib/security/moderator-permissions', () => ({
   getModeratorPermissions: vi.fn().mockResolvedValue({ students: { canView: true } }),
 }));
 
-import { getUserById, getUsersByRole, getModeratorPermissions } from '../services/identity.service';
+import { getModeratorPermissions,getUserById,getUsersByRole } from '../services/identity.service';
 
 describe('IdentityService', () => {
   it('delegates user lookup to the repository unchanged', async () => {

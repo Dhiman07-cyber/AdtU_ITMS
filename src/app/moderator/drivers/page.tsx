@@ -1,63 +1,60 @@
-﻿"use client";
+"use client";
 
-import { useAuth } from '@/contexts/auth-context';
-import { useEffect, useState, useMemo } from 'react';
-import { useRouter } from 'next/navigation';
-import Link from 'next/link';
-import { cn } from "@/lib/utils";
-import { supabase } from "@/lib/supabase-client";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import Avatar from '@/components/Avatar';
 import { Button } from "@/components/ui/button";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
+	Card,
+	CardContent
 } from "@/components/ui/card";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogFooter,
+	DialogHeader,
+	DialogTitle,
+} from "@/components/ui/dialog";
+import {
+	DropdownMenu,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuLabel,
+	DropdownMenuSeparator,
+	DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
 } from "@/components/ui/select";
-import { MoreHorizontal, Eye, Edit, Trash2, Search, Loader2, Plus, Filter, ArrowRightLeft, RefreshCw } from "lucide-react";
-import { deleteDriver } from '@/lib/dataService';
+import {
+	Table,
+	TableBody,
+	TableCell,
+	TableHead,
+	TableHeader,
+	TableRow,
+} from "@/components/ui/table";
+import { useAuth } from '@/contexts/auth-context';
 import { useToast } from '@/contexts/toast-context';
+import { deleteDriver } from '@/lib/dataService';
 import { safeImageSrc } from "@/lib/security/url-sanitizer";
-import Avatar from '@/components/Avatar';
+import { supabase } from "@/lib/supabase-client";
+import { cn } from "@/lib/utils";
+import { ArrowRightLeft,Edit,Eye,Filter,Loader2,MoreHorizontal,Plus,RefreshCw,Search,Trash2 } from "lucide-react";
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { useEffect,useMemo,useState } from 'react';
 // Migrated: Server-side API → PostgreSQL (no Firestore client reads)
-import { useApiCollection, invalidateCollectionCache } from '@/hooks/useApiCollection';
-import { useEventDrivenRefresh } from '@/hooks/useEventDrivenRefresh';
-import { exportToExcel } from '@/lib/export-helpers';
 import { ExportButton } from '@/components/ExportButton';
-import { useModeratorPermissions } from '@/hooks/useModeratorPermissions';
 import { PermissionDeniedCard } from '@/components/PermissionDeniedCard';
+import { invalidateCollectionCache,useApiCollection } from '@/hooks/useApiCollection';
+import { useEventDrivenRefresh } from '@/hooks/useEventDrivenRefresh';
+import { useModeratorPermissions } from '@/hooks/useModeratorPermissions';
+import { exportToExcel } from '@/lib/export-helpers';
 import { formatDateDDMMYYYY } from '@/lib/utils/date-utils';
 
 export default function AdminDrivers() {
@@ -164,8 +161,8 @@ export default function AdminDrivers() {
       const busMap = new Map((rawBuses || []).map((b: any) => [b.id, b.bus_number || b.registration_number]));
 
       const driversData = (rawDrivers || []).map((driver: any, index: number) => {
-        const busAssigned = busMap.get(driver.bus_id) || (driver.bus_id ? `Bus-${driver.bus_id}` : 'Reserved');
-        const status = driver.status || (driver.bus_id ? 'Active' : 'Reserved');
+        const busAssigned = 'Dynamic (Trip Init)';
+        const status = driver.status || 'Active';
 
         return [
           (index + 1).toString(),

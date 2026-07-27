@@ -10,54 +10,53 @@
  * All persistence functions delegate to identity.repository.pg.
  * Naming convention: pg* prefixes are stripped for clean domain names.
  */
-import {
-  pgFindUserById,
-  pgFindUserByEmail,
-  pgFindUsersByRole,
-  pgFindAllUsers,
-  pgInsertUser,
-  pgUpdateUser,
-  pgRemoveUser,
-  pgFindStudentById,
-  pgFindStudentsByStatus,
-  pgFindStudentsByStatuses,
-  pgFindSeatOccupyingStudents,
-  pgGetBusOccupancyStats,
-  pgFindStudentsByShift,
-  pgFindStudentsByBusId,
-  pgFindStudentsByBusIds,
-  pgFindStudentsByRouteId,
-  pgFindStudentsByRouteIds,
-  pgInsertStudent,
-  pgUpdateStudent,
-  pgRemoveStudent,
-  pgFindAllStudents,
-  pgFindDriverById,
-  pgFindDriversByStatus,
-  pgFindAllDrivers,
-  pgFindAllDriversPaginated,
-  pgInsertDriver,
-  pgUpdateDriver,
-  pgRemoveDriver,
-  pgFindDriversByBusId,
-  pgFindModeratorById,
-  pgFindModeratorsByStatus,
-  pgInsertModerator,
-  pgUpdateModerator,
-  pgUpdateModeratorPermissions,
-  pgRemoveModerator,
-  pgFindAdminById,
-  pgInsertAdmin,
-  pgUpdateAdmin,
-  pgRemoveAdmin,
-  pgFindUnauthUserById,
-  pgInsertUnauthUser,
-  pgUpdateUnauthUser,
-  pgRemoveUnauthUser,
-  pgFindAllUnauthUsers,
-  type IdentityUser,
-} from './identity.repository.pg';
 import type { UserRole } from '@/lib/user-service';
+import {
+	pgFindAdminById,
+	pgFindAllDrivers,
+	pgFindAllDriversPaginated,
+	pgFindAllModerators,
+	pgFindAllStudents,
+	pgFindAllUnauthUsers,
+	pgFindAllUsers,
+	pgFindDriverById,
+	pgFindDriversByBusId,
+	pgFindDriversByStatus,
+	pgFindModeratorById,
+	pgFindModeratorsByStatus,
+	pgFindSeatOccupyingStudents,
+	pgFindStudentById,
+	pgFindStudentsByBusIds,
+	pgFindStudentsByRouteIds,
+	pgFindStudentsByShift,
+	pgFindStudentsByStatus,
+	pgFindStudentsByStatuses,
+	pgFindUnauthUserById,
+	pgFindUserByEmail,
+	pgFindUserById,
+	pgFindUsersByRole,
+	pgGetBusOccupancyStats,
+	pgInsertAdmin,
+	pgInsertDriver,
+	pgInsertModerator,
+	pgInsertStudent,
+	pgInsertUnauthUser,
+	pgInsertUser,
+	pgRemoveAdmin,
+	pgRemoveDriver,
+	pgRemoveModerator,
+	pgRemoveStudent,
+	pgRemoveUnauthUser,
+	pgRemoveUser,
+	pgUpdateAdmin,
+	pgUpdateDriver,
+	pgUpdateModerator,
+	pgUpdateModeratorPermissions,
+	pgUpdateStudent,
+	pgUpdateUnauthUser,
+	pgUpdateUser,
+	type IdentityUser
+} from './identity.repository.pg';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -189,6 +188,10 @@ export async function findModeratorById(uid: string): Promise<Record<string, any
 
 export async function findModeratorsByStatus(status: string): Promise<Record<string, any>[]> {
   return pgFindModeratorsByStatus(status);
+}
+
+export async function findAllModerators(): Promise<Record<string, any>[]> {
+  return pgFindAllModerators();
 }
 
 export async function insertModerator(moderator: Record<string, any>): Promise<void> {

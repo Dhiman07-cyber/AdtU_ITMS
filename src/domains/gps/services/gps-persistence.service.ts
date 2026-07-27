@@ -1,5 +1,5 @@
-import { getSupabaseServer } from '@/lib/supabase-server';
 import { shouldWriteLocationBreadcrumb } from '@/lib/services/location-write-throttle';
+import { getSupabaseServer } from '@/lib/supabase-server';
 import type { LocationUpdateNormalized } from './types';
 
 export async function persistLocation(n: LocationUpdateNormalized): Promise<boolean> {
@@ -39,20 +39,23 @@ export async function persistLocation(n: LocationUpdateNormalized): Promise<bool
 
 export async function checkActiveTrip(driverId: string, busId: string, tripId: string): Promise<{ valid: boolean; reason?: string }> {
   const supabase = getSupabaseServer();
-  const [statusResult, activeTripResult] = await Promise.all([
-    supabase.from('driver_status').select('status, bus_id, trip_id').eq('driver_uid', driverId).maybeSingle(),
-    supabase.from('active_trips').select('trip_id, route_id, driver_id, status').eq('bus_id', busId).eq('driver_id', driverId).eq('status', 'active').maybeSingle(),
-  ]);
 
-  if (statusResult.error || activeTripResult.error || !statusResult.data || !activeTripResult.data) {
-    return { valid: false, reason: 'No active session found for this driver/bus' };
+  const { data: activeTrip, error } = await supabase
+    .from('active_trips')
+    .select('trip_id, route_id, driver_id, status')
+    .eq('bus_id', busId)
+    .eq('driver_id', driverId)
+    .eq('status', 'active')
+    .maybeSingle();
+
+  if (error || !activeTrip) {
+    return { valid: false, reason: 'No active trip lock found for this driver/bus' };
   }
-  if (statusResult.data.bus_id !== busId || statusResult.data.status !== 'on_trip' || statusResult.data.trip_id !== activeTripResult.data.trip_id) {
-    return { valid: false, reason: 'No active session found for this driver/bus' };
-  }
-  if (activeTripResult.data.trip_id !== tripId) {
+
+  if (tripId && activeTrip.trip_id !== tripId) {
     return { valid: false, reason: 'Trip mismatch for location update' };
   }
+
   return { valid: true };
 }
 
