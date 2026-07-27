@@ -1,19 +1,22 @@
 /**
  * Stale Lock Cleanup Worker
- * 
+ *
  * Cron job endpoint that cleans up stale locks automatically.
  * Should be called every minute via Vercel Cron.
- * 
+ *
+ * D9: Fully migrated to PostgreSQL. No Firestore usage.
+ * The cleanup_stale_locks RPC handles all lock cleanup in PostgreSQL.
+ *
  * Actions:
  * 1. Clean stale active trips (no heartbeat > HEARTBEAT_TIMEOUT)
- * 2. Reconcile Firestore locks with Supabase state
- * 
+ * 2. Comprehensive cleanup of all trip-related tables
+ * 3. Broadcast trip end to connected clients
+ *
  * No manual overrides, no admin intervention - fully automatic.
  */
 
 import { NextResponse } from 'next/server';
 import { getSupabaseServer } from '@/lib/supabase-server';
-import { db as adminDb, FieldValue } from '@/lib/firebase-admin';
 import crypto from 'crypto';
 
 // Configuration — 10 minutes; university buses commonly pass through
@@ -48,7 +51,7 @@ export async function GET(request: Request) {
     const startTime = Date.now();
     const stats = {
         staleLocksCleaned: 0,
-        firestoreLocksReleased: 0,
+        comprehensiveCleanups: 0,
         errors: [] as string[]
     };
 
@@ -76,12 +79,9 @@ export async function GET(request: Request) {
             } else if (cleanedLocks && cleanedLocks.length > 0) {
                 stats.staleLocksCleaned = cleanedLocks.length;
 
-                // For each cleaned lock, also release Firestore lock
+                // For each cleaned lock, comprehensive cleanup
                 for (const lock of cleanedLocks) {
                     try {
-                        await releaseFirestoreLock(lock.cleaned_bus_id, lock.cleaned_trip_id);
-                        stats.firestoreLocksReleased++;
-
                         // Broadcast lock release
                         const channel = supabase.channel(`trip-status-${lock.cleaned_bus_id}`);
                         await channel.send({
@@ -102,7 +102,7 @@ export async function GET(request: Request) {
                         await Promise.allSettled([
                             // Delete driver_status — scoped to this trip's driver
                             supabase.from('driver_status').delete()
-                                .eq('driver_id', lock.cleaned_driver_id)
+                                .eq('driver_uid', lock.cleaned_driver_id)
                                 .eq('bus_id', lock.cleaned_bus_id),
                             // Delete bus_locations — scoped to this trip
                             supabase.from('bus_locations').delete()
@@ -110,7 +110,7 @@ export async function GET(request: Request) {
                                 .eq('trip_id', lock.cleaned_trip_id),
                             // Delete driver_location_updates — scoped to this trip's driver
                             supabase.from('driver_location_updates').delete()
-                                .eq('driver_id', lock.cleaned_driver_id)
+                                .eq('driver_uid', lock.cleaned_driver_id)
                                 .eq('trip_id', lock.cleaned_trip_id),
                             // Delete waiting_flags — scoped to this trip's bus
                             supabase.from('waiting_flags').delete()
@@ -120,11 +120,12 @@ export async function GET(request: Request) {
                             // Clean device sessions for this driver
                             supabase.from('device_sessions').delete().eq('user_id', lock.cleaned_driver_id),
                         ]);
+                        stats.comprehensiveCleanups++;
                         console.log(`✅ Comprehensive cleanup done for stale bus ${lock.cleaned_bus_id}`);
 
                     } catch (err: any) {
-                        console.error(`Error releasing Firestore lock for ${lock.cleaned_bus_id}:`, err);
-                        stats.errors.push(`firestore_lock_release_error`);
+                        console.error(`Error in comprehensive cleanup for ${lock.cleaned_bus_id}:`, err);
+                        stats.errors.push(`comprehensive_cleanup_error`);
                     }
                 }
 
@@ -135,55 +136,9 @@ export async function GET(request: Request) {
             stats.errors.push('stale_locks_general_error');
         }
 
-        // STEP 2: Reconcile Firestore locks with Supabase
-        // Find Firestore locks that have no corresponding active trip in Supabase
-        try {
-            if (adminDb) {
-                const busesSnapshot = await adminDb.collection('buses')
-                    .where('activeTripLock.active', '==', true)
-                    .limit(100)
-                    .get();
-
-                for (const busDoc of busesSnapshot.docs) {
-                    const busData = busDoc.data();
-                    const tripId = busData.activeTripLock?.tripId;
-
-                    if (tripId) {
-                        // Check if trip exists in Supabase
-                        const { data: activeTrip, error } = await supabase
-                            .from('active_trips')
-                            .select('trip_id, status')
-                            .eq('trip_id', tripId)
-                            .maybeSingle();
-
-                        if (!error && (!activeTrip || activeTrip.status !== 'active')) {
-                            // Orphaned Firestore lock - release it
-                            console.log(`⚠️ Found orphaned Firestore lock for bus ${busDoc.id}, releasing...`);
-                            await releaseFirestoreLock(busDoc.id, tripId);
-                            stats.firestoreLocksReleased++;
-
-                            // Cleanup driver_status — scoped to this trip's driver
-                            // to avoid deleting data from a new trip on the same bus.
-                            const lockDriverId = busData.activeTripLock?.driverId;
-                            if (lockDriverId) {
-                                await supabase
-                                    .from('driver_status')
-                                    .delete()
-                                    .eq('driver_id', lockDriverId)
-                                    .eq('bus_id', busDoc.id);
-                            }
-                        }
-                    }
-                }
-            }
-        } catch (err: any) {
-            console.error('Error in lock reconciliation:', err);
-            stats.errors.push('reconciliation_error');
-        }
-
         const elapsed = Date.now() - startTime;
 
-        if (stats.staleLocksCleaned > 0 || stats.firestoreLocksReleased > 0) {
+        if (stats.staleLocksCleaned > 0) {
             console.log(`✅ Cleanup completed in ${elapsed}ms:`, stats);
         }
 
@@ -201,33 +156,6 @@ export async function GET(request: Request) {
             { status: 500 }
         );
     }
-}
-
-async function releaseFirestoreLock(busId: string, expectedTripId?: string): Promise<void> {
-    if (!adminDb) return;
-
-    const busRef = adminDb.collection('buses').doc(busId);
-    await adminDb.runTransaction(async (transaction) => {
-        const doc = await transaction.get(busRef);
-        if (!doc.exists) return;
-        const currentTripId = doc.data()?.activeTripLock?.tripId;
-        if (expectedTripId && currentTripId && currentTripId !== expectedTripId) {
-            return;
-        }
-        transaction.update(busRef, {
-            activeTripLock: {
-                active: false,
-                tripId: null,
-                driverId: null,
-                shift: null,
-                since: null,
-                expiresAt: null
-            },
-            activeDriverId: null,
-            activeTripId: null,
-            lastEndedAt: FieldValue.serverTimestamp()
-        });
-    });
 }
 
 // Also support POST for manual trigger

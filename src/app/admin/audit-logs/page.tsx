@@ -26,6 +26,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/contexts/toast-context';
 import { authApiFetch } from '@/lib/secure-api-client';
+import type { AuditLogResponse as AuditLog } from '@/app/api/admin/audit-logs/route';
 import {
   Search,
   ChevronLeft,
@@ -46,27 +47,7 @@ import { cn } from '@/lib/utils';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-interface AuditLog {
-  id: string;
-  auditId: string;
-  createdAt: string;
-  expiresAt: string;
-  category: string;
-  action: string;
-  summary: string;
-  description: string;
-  severity: string;
-  performedBy: string;
-  performedByName: string;
-  performedByRole: string;
-  performedAt: string;
-  targetType: string;
-  targetId: string;
-  targetName: string;
-  metadata: Record<string, unknown>;
-  ipAddress: string;
-  userAgent: string;
-}
+// AuditLog is imported from the API route as the canonical type.
 
 interface AuditLogsResponse {
   logs: AuditLog[];
@@ -203,12 +184,6 @@ function AuditCard({
               {log.summary || formatAction(log.action)}
             </h4>
 
-            {log.description && (
-              <p className="text-xs text-zinc-400 mt-1 line-clamp-1">
-                {log.description}
-              </p>
-            )}
-
             <div className="flex items-center gap-3 mt-2 text-[11px] text-zinc-500">
               <span className="flex items-center gap-1">
                 <User className="h-3 w-3" />
@@ -261,7 +236,7 @@ function DetailsDialog({
         <DialogHeader>
           <DialogTitle className="text-base">{log.summary || formatAction(log.action)}</DialogTitle>
           <DialogDescription className="text-xs">
-            Audit ID: {log.auditId || log.id}
+            Audit ID: {log.id}
           </DialogDescription>
         </DialogHeader>
 
@@ -278,16 +253,6 @@ function DetailsDialog({
               {log.category}
             </Badge>
           </div>
-
-          {/* Description */}
-          {log.description && (
-            <div>
-              <label className="text-[10px] uppercase tracking-wider text-zinc-500 font-mono block mb-1">
-                Description
-              </label>
-              <p className="text-sm text-zinc-300">{log.description}</p>
-            </div>
-          )}
 
           {/* Actor Info */}
           <div className="grid grid-cols-2 gap-3">
@@ -330,32 +295,16 @@ function DetailsDialog({
           </div>
 
           {/* Timestamps */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-[10px] uppercase tracking-wider text-zinc-500 font-mono block mb-1">
-                Performed At
-              </label>
-              <p className="text-sm text-zinc-300">
-                {formatDate(log.performedAt || log.createdAt)}
-              </p>
-              <p className="text-xs text-zinc-500 font-mono">
-                {formatTime(log.performedAt || log.createdAt)}
-              </p>
-            </div>
-            <div>
-              <label className="text-[10px] uppercase tracking-wider text-zinc-500 font-mono block mb-1">
-                Expires At
-              </label>
-              <p className="text-sm text-zinc-300">{formatDate(log.expiresAt)}</p>
-            </div>
-          </div>
-
-          {/* Document ID */}
           <div>
             <label className="text-[10px] uppercase tracking-wider text-zinc-500 font-mono block mb-1">
-              Document ID
+              Performed At
             </label>
-            <p className="text-xs text-zinc-400 font-mono break-all">{log.id}</p>
+            <p className="text-sm text-zinc-300">
+              {formatDate(log.performedAt || log.createdAt)}
+            </p>
+            <p className="text-xs text-zinc-500 font-mono">
+              {formatTime(log.performedAt || log.createdAt)}
+            </p>
           </div>
 
           {/* Metadata */}

@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState, useEffect } from "react";
 import { use } from "react";
@@ -37,7 +37,7 @@ import { getBusById, getRouteById, getDriverById, deleteBus, getAllDrivers } fro
 
 // Define the interfaces
 interface Stop {
-  stopId: string;
+  stop_name: string;
   name: string;
   lat: number;
   lng: number;
@@ -66,8 +66,8 @@ interface Driver {
   licenseNumber?: string;
   driverId?: string;
   joiningDate?: string;
-  assignedBusId?: string;
-  assignedRouteId?: string;
+  busId?: string;
+  routeId?: string;
   createdAt?: string;
 }
 
@@ -295,7 +295,7 @@ export default function ViewBusPage({ params }: { params: Promise<{ id: string }
                         <Bus className="h-8 w-8 text-white" />
                       </div>
                       <div className="absolute -top-1 -right-1 w-6 h-6 rounded-full bg-gradient-to-br from-emerald-400 to-green-500 flex items-center justify-center shadow-md">
-                        <span className="text-xs font-bold text-white">{bus.status === 'Active' ? '✓' : '⚠'}</span>
+                        <span className="text-xs font-bold text-white">{bus.status === 'active' ? '✓' : '⚠'}</span>
                       </div>
                     </div>
 

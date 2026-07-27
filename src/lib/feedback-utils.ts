@@ -42,6 +42,33 @@ export async function readFeedback(): Promise<FeedbackEntry[]> {
 }
 
 /**
+ * Get paginated feedback entries from Firestore
+ * Supports server-side pagination for better performance
+ */
+export async function readFeedbackPaginated(
+  page: number = 1,
+  limit: number = 25
+): Promise<{ entries: FeedbackEntry[]; total: number }> {
+  try {
+    const totalSnapshot = await db.collection(COLLECTION).count().get();
+    const total = totalSnapshot.data().count;
+
+    const snapshot = await db.collection(COLLECTION)
+      .orderBy('created_at', 'desc')
+      .limit(limit)
+      .offset((page - 1) * limit)
+      .get();
+
+    const entries = snapshot.docs.map((doc: { data: () => FeedbackEntry; }) => doc.data() as FeedbackEntry);
+
+    return { entries, total };
+  } catch (error) {
+    console.error('Error reading paginated feedback from Firestore:', error);
+    return { entries: [], total: 0 };
+  }
+}
+
+/**
  * Add a single feedback entry to Firestore
  */
 export async function addFeedback(entry: FeedbackEntry): Promise<void> {

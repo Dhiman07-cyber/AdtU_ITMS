@@ -1,9 +1,9 @@
-import { NextResponse } from 'next/server';
-import { db as adminDb } from '@/lib/firebase-admin';
+﻿import { NextResponse } from 'next/server';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import { withSecurity } from '@/lib/security/api-security';
 import { MarkBoardedSchema } from '@/lib/security/validation-schemas';
 import { RateLimits } from '@/lib/security/rate-limiter';
+import { getDriverById } from '@/domains/identity';
 
 /**
  * POST /api/driver/ack-flag
@@ -41,15 +41,14 @@ export const POST = withSecurity(
     }
 
     // Verify driver is assigned to this bus/route
-    const driverDoc = await adminDb.collection('drivers').doc(driverUid).get();
-    if (!driverDoc.exists) {
+    const driverData = await getDriverById(driverUid);
+    if (!driverData) {
       return NextResponse.json({ error: 'Driver profile not found' }, { status: 404 });
     }
 
-    const driverData = driverDoc.data();
     const driverClaimsBus =
-      driverData?.assignedBusId === flagData.bus_id ||
-      driverData?.busId === flagData.bus_id;
+      driverData.busId === flagData.bus_id ||
+      driverData.busId === flagData.bus_id;
 
     if (!driverClaimsBus) {
       console.error('Driver assignment validation failed:', {

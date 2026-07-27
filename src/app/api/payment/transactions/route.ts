@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/firebase-admin';
-import { adminDb } from '@/lib/firebase-admin';
 import { getAllPayments, getPaymentsByStudent } from '@/lib/payment/payment.service';
-import { Timestamp } from 'firebase-admin/firestore';
+import { getByUid as getStudentByUid } from '@/domains/student';
+import { getUserById, getUserByEmail } from '@/domains/identity';
 
 export async function GET(request: NextRequest) {
   try {
@@ -14,13 +14,13 @@ export async function GET(request: NextRequest) {
     const decodedToken = await verifyToken(token);
     const userId = decodedToken.uid;
 
-    // Get user data to determine role
-    const userDoc = await adminDb.collection('users').doc(userId).get();
-    const userData = userDoc.data();
-
-    if (!userData) {
+    // Get user data via Identity domain API
+    const user = await getUserById(userId);
+    if (!user) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
+
+    const userData = user as any;
 
     const { searchParams } = new URL(request.url);
     const studentId = searchParams.get('studentId');
@@ -46,20 +46,17 @@ export async function GET(request: NextRequest) {
         if (userCache.has(cacheKey)) return userCache.get(cacheKey)!;
 
         try {
-          let userDoc;
+          let resolvedUser = null;
           if (userId) {
-            const docSnap = await adminDb.collection('users').doc(userId).get();
-            if (docSnap.exists) userDoc = docSnap;
+            resolvedUser = await getUserById(userId);
           }
 
-          if (!userDoc) {
-            const q = await adminDb.collection('users').where('email', '==', emailOrName).limit(1).get();
-            if (!q.empty) userDoc = q.docs[0];
+          if (!resolvedUser && emailOrName.includes('@')) {
+            resolvedUser = await getUserByEmail(emailOrName);
           }
 
-          if (userDoc?.exists) {
-            const data = userDoc.data();
-            const resolvedName = data?.fullName || data?.name || emailOrName;
+          if (resolvedUser) {
+            const resolvedName = (resolvedUser as any).fullName || (resolvedUser as any).name || emailOrName;
             userCache.set(cacheKey, resolvedName);
             return resolvedName;
           }
@@ -79,12 +76,12 @@ export async function GET(request: NextRequest) {
             const suffix = role.toLowerCase() === 'admin' ? '(ADMIN)' : `(${p.approvedBy.empId || 'STAFF'})`;
             approvedByStr = `${name} ${suffix}`;
           } else if (p.approvedBy.type === 'SYSTEM') {
-            approvedByStr = 'System Verified';
+            approvedByStr = 'System-Approved';
           }
         } else {
           // Handle string case
           const strValue = String(p.approvedBy);
-          approvedByStr = strValue;
+          approvedByStr = (strValue === 'AdtU ITMS System' || strValue === 'System Verified') ? 'System-Approved' : strValue;
 
           // Check if it's the specific "email (ID)" format (e.g. "shivdj519@gmail.com (MB-01)")
           const emailMatch = strValue.match(/^(.+?) \((.+?)\)$/);
@@ -115,7 +112,7 @@ export async function GET(request: NextRequest) {
         ...p,
         paymentMethod: p.method?.toLowerCase() || 'online',
         status: p.status?.toLowerCase() || 'completed',
-        approvedBy: approvedByStr,
+        approvedBy: approvedByStr || (p.method?.toLowerCase() === 'online' ? 'System-Approved' : '-'),
         timestamp: getTimestamp(p.createdAt || p.timestamp),
         validUntil: p.validUntil ? getTimestamp(p.validUntil) : 'N/A'
       };
@@ -123,54 +120,41 @@ export async function GET(request: NextRequest) {
 
     // For students, they can only view their own transactions
     if (userData.role === 'student') {
-      // Try to get enrollment ID for better payment lookup
+      // Get enrollment ID via Student domain API
       let enrollmentId = userData.enrollmentId;
 
-      // If not in users doc, check students doc
       if (!enrollmentId) {
         try {
-          const studentDoc = await adminDb.collection('students').doc(userId).get();
-          if (studentDoc.exists) {
-            enrollmentId = studentDoc.data()?.enrollmentId;
+          const student = await getStudentByUid(userId);
+          if (student) {
+            enrollmentId = (student as any).enrollmentId;
           }
         } catch (e) {
           console.warn('Failed to fetch student profile for enrollment ID', e);
         }
       }
 
-      const payments = await getPaymentsByStudent(userId, enrollmentId);
+      const { payments, total } = await getPaymentsByStudent(userId, enrollmentId, page, limit);
 
-      // Also fetch pending renewal requests to show in history
-      const renewalRequestsSnapshot = await adminDb.collection('renewal_requests')
-        .where('studentId', '==', userId)
-        .where('status', '==', 'pending')
-        .get();
+      // D8: Fetch pending renewal application from PostgreSQL instead of Firestore
+      const pendingRenewalApp = await import('@/domains/application').then(m => m.getByApplicantUid(userId));
 
-      // Robust timestamp extraction (same as mapToFrontend)
-      const getTimestamp = (val: any) => {
-        if (!val) return new Date().toISOString();
-        if (typeof val.toDate === 'function') return val.toDate().toISOString();
-        if (val instanceof Date) return val.toISOString();
-        if (typeof val === 'string') return val;
-        return new Date().toISOString();
-      };
-
-      const pendingRequests = renewalRequestsSnapshot.docs.map((doc: any) => {
-        const data = doc.data();
-        return {
-          paymentId: doc.id,
-          studentId: data.enrollmentId,
-          studentName: data.studentName,
-          amount: data.totalFee,
+      const pendingRequests = (pendingRenewalApp &&
+        pendingRenewalApp.state === 'submitted' &&
+        (pendingRenewalApp.applicationType === 'renewal' || pendingRenewalApp.applicationType === 'renewal_after_soft_block')
+      ) ? [{
+          paymentId: pendingRenewalApp.applicationId,
+          studentId: (pendingRenewalApp.formData as any)?.enrollmentId || '',
+          studentName: (pendingRenewalApp.formData as any)?.studentName || '',
+          amount: (pendingRenewalApp.formData as any)?.totalFee || 0,
           paymentMethod: 'offline',
           method: 'Offline',
           status: 'pending',
-          durationYears: data.durationYears,
-          timestamp: getTimestamp(data.createdAt),
+          durationYears: (pendingRenewalApp.formData as any)?.durationYears || 0,
+          timestamp: pendingRenewalApp.createdAt || new Date().toISOString(),
           validUntil: 'Pending Approval',
           isRequest: true
-        };
-      });
+        }] : [];
 
       const processedPayments = await Promise.all(payments.map(mapToFrontend));
 
@@ -184,7 +168,9 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({
         success: true,
         transactions,
-        total: transactions.length
+        total: total + pendingRequests.length,
+        page,
+        limit
       });
     }
 

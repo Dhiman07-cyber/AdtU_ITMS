@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { adminAuth, adminDb } from '@/lib/firebase-admin';
-import { NotificationService } from '@/lib/notifications/NotificationService';
-import { NotificationTarget } from '@/lib/notifications/types';
-import { getSystemConfig, updateSystemConfig } from '@/lib/system-config-service';
+import { adminAuth } from '@/lib/firebase-admin';
+import { pgInsertNotification } from '@/domains/notification/repositories/notification.repository.pg';
+import { getSystemConfig, updateSystemConfig } from '@/domains/admin';
+import { getUserById, getAdminById } from '@/domains/identity';
 
-// GET: Retrieve system config from Firestore (public — no sensitive data)
+// GET: Retrieve system config from PostgreSQL (public — no sensitive data)
 export async function GET(req: NextRequest) {
     try {
-        const config = await getSystemConfig();
-        return NextResponse.json({ config });
+        const systemConfigResult = await getSystemConfig();
+        return NextResponse.json({ config: systemConfigResult.data, updatedAt: systemConfigResult.updatedAt });
     } catch (error: any) {
         console.error('Error fetching system config:', error);
         return NextResponse.json(
@@ -35,9 +35,9 @@ export async function POST(req: NextRequest) {
         const decodedToken = await adminAuth.verifyIdToken(token);
         const uid = decodedToken.uid;
 
-        // Check if user is admin
-        const userDoc = await adminDb.collection('users').doc(uid).get();
-        if (!userDoc.exists || userDoc.data()?.role !== 'admin') {
+        // Check if user is admin via PostgreSQL (canonical source of truth)
+        const user = await getUserById(uid);
+        if (!user || user.role !== 'admin') {
             return NextResponse.json(
                 { message: 'Access denied. Admin only.' },
                 { status: 403 }
@@ -59,13 +59,13 @@ export async function POST(req: NextRequest) {
         const config = rawConfig;
 
         // Read current config to compare changes
-        const oldConfig = await getSystemConfig();
+        const oldConfigResult = await getSystemConfig();
+        const oldConfig = oldConfigResult.data;
 
         // Prepare updated config object
         const updatedConfig = {
             ...oldConfig,
             ...config,
-            lastUpdated: new Date().toISOString(),
         };
 
         // Special handling for bus fee updates (history, notifications)
@@ -86,12 +86,8 @@ export async function POST(req: NextRequest) {
 
             // Notify users about bus fee change
             try {
-                const adminDoc = await adminDb.collection('admins').doc(uid).get();
-                const adminData = adminDoc.exists ? adminDoc.data() : {};
+                const adminData = await getAdminById(uid);
                 const adminName = adminData?.name || adminData?.fullName || 'Admin';
-
-                const notificationService = new NotificationService();
-                const target: NotificationTarget = { type: 'all_users' };
 
                 const oldAmount = oldConfig.busFee?.amount || 0;
                 const newAmount = config.busFee.amount;
@@ -99,19 +95,27 @@ export async function POST(req: NextRequest) {
                 const notificationContent = `The bus fee for the upcoming session has been revised from ₹${oldAmount.toLocaleString('en-IN')} to ₹${newAmount.toLocaleString('en-IN')}. ` +
                     `Please update your payment plans accordingly. For any queries, contact the administration office.`;
 
-                await notificationService.createNotification(
-                    { userId: uid, userName: adminName, userRole: 'admin' },
-                    target,
-                    notificationContent,
-                    '💰 Bus Fee Update - Important Notice',
-                    { type: 'announcement' }
-                );
+                await pgInsertNotification({
+                    title: '💰 Bus Fee Update - Important Notice',
+                    content: notificationContent,
+                    type: 'announcement',
+                    sender: {
+                        userId: uid,
+                        userName: adminName,
+                        userRole: 'admin'
+                    },
+                    target: {
+                        type: 'all_users',
+                    },
+                    recipientIds: [],
+                    readByUserIds: [],
+                });
             } catch (error) {
                 console.error('Failed to send notification:', error);
             }
         }
 
-        // Sync with Firestore via service (handles cleaning and history limiting)
+        // Save via service (handles cleaning and history limiting)
         const savedConfig = await updateSystemConfig(updatedConfig, uid);
 
         return NextResponse.json({

@@ -41,19 +41,12 @@ export const ReassignStudentsSchema = z.object({
         fromBusId: z.string().min(1).max(100),
         toBusId: z.string().min(1).max(100),
         toBusNumber: z.string().min(1).max(50),
-        shift: z.enum(['Morning', 'Evening', 'Both']),
-        stopId: z.string().max(100).optional(),
-        stopName: z.string().max(200).optional(),
+        shift: z.enum(['Morning', 'Evening']),
+        stop_name: z.string().max(200).optional(),
     })),
     sourceBusId: z.string().min(1).max(100),
     actorId: z.string().min(1).max(128).optional(),
     actorName: z.string().min(1).max(200).optional(),
-});
-
-export const AdminSwapBusSchema = z.object({
-    routeId: z.string().min(1).max(100),
-    fromBusId: z.string().min(1).max(100),
-    toBusId: z.string().min(1).max(100),
 });
 
 export const UpdateProfilePhotoSchema = z.object({
@@ -82,9 +75,7 @@ export const CreateUserSchema = z.object({
     driverId: z.string().max(100).optional(),
     employeeId: z.string().max(100).optional(),
     staffId: z.string().max(100).optional(),
-    assignedRouteId: z.string().max(100).optional(),
     routeId: z.string().max(100).optional(),
-    assignedBusId: z.string().max(100).optional(),
     busId: z.string().max(100).optional(),
     address: z.string().max(500).optional(),
     bloodGroup: z.string().max(10).optional(),
@@ -95,7 +86,7 @@ export const CreateUserSchema = z.object({
     sessionEndYear: z.number().int().optional(),
     validUntil: z.string().optional(),
     pickupPoint: z.string().max(200).optional(),
-    stopId: z.string().max(100).optional(),
+    stop_name: z.string().max(100).optional(),
     status: z.string().max(50).optional(),
 });
 
@@ -104,7 +95,7 @@ export const AckWaitingSchema = z.object({
 });
 
 export const FirestoreCleanupSchema = z.object({
-    cleanupType: z.enum(['active_trips', 'reassignment_logs', 'driver_location_updates', 'waiting_flags', 'missed_bus_requests', 'all']),
+    cleanupType: z.enum(['active_trips', 'reassignment_logs', 'driver_location_updates', 'waiting_flags', 'all']),
     daysOld: z.number().int().min(1).max(3650).optional(),
 });
 
@@ -248,8 +239,7 @@ export const WaitingFlagSchema = z.object({
     studentName: z.string().max(200),
     busId: z.string().max(50),
     routeId: z.string().max(50),
-    stopId: z.string().max(50).optional(),
-    stopName: z.string().max(200).optional(),
+    stop_name: z.string().max(200).optional(),
     stopLat: z.number().min(-90).max(90).optional(),
     stopLng: z.number().min(-180).max(180).optional(),
     message: z.string().max(500).optional(),
@@ -275,15 +265,7 @@ export const LocationUpdateSchema = z.object({
 // Driver Schemas
 // ============================================================================
 
-export const DriverSwapRequestSchema = z.object({
-    fromDriverUID: UIDSchema,
-    toDriverUID: UIDSchema,
-    busId: z.string().max(50),
-    routeId: z.string().max(50),
-    startsAt: DateSchema,
-    endsAt: DateSchema,
-    reason: z.string().max(500).optional(),
-});
+
 
 // ============================================================================
 // Trip & Journey Schemas
@@ -335,15 +317,7 @@ export const BusIdSchema = z.object({
 
 export const EmptySchema = z.object({});
 
-/** Swap request body (idToken removed by security wrapper) */
-export const SwapRequestBodySchema = z.object({
-    busId: z.string().min(1).max(100),
-    toDriverUid: z.string().min(1).max(128),
-});
 
-export const AcceptSwapSchema = z.object({
-    swapRequestId: z.string().min(1).max(200),
-});
 
 export const HandleProfileUpdateSchema = z.object({
     requestId: z.string().min(1).max(200),
@@ -402,8 +376,7 @@ export const WaitingFlagPostSchema = z.object({
     message: z.string().max(500).optional(),
     timestamp: z.number().optional(),
     routeId: z.string().max(100).optional(),
-    stopName: z.string().max(200).optional(),
-    stopId: z.string().max(100).optional(),
+    stop_name: z.string().max(200).optional(),
     stopLat: z.number().min(-90).max(90).optional(),
     stopLng: z.number().min(-180).max(180).optional(),
 });
@@ -505,7 +478,7 @@ export const RequestWaitSchema = z.object({
     busId: z.string().min(1).max(100),
     studentId: z.string().min(1).max(128),
     studentName: z.string().min(1).max(200).optional(),
-    stopName: z.string().min(1).max(200).optional(),
+    stop_name: z.string().min(1).max(200).optional(),
 });
 
 export const RespondWaitSchema = z.object({

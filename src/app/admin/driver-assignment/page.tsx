@@ -1,9 +1,9 @@
-"use client";
+﻿"use client";
 
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { db } from "@/lib/firebase";
-import { collection } from "firebase/firestore";
+
+
 import { useAuth } from "@/contexts/auth-context";
 import { toast } from "react-hot-toast";
 import { trackEvent } from "@/components/Analytics";
@@ -45,7 +45,6 @@ import {
 } from "@/lib/services/assignment-service";
 import {
     computeNetAssignments,
-    commitNetChanges,
     validateStagingPreCheck,
     type StagedOperation,
     type DbSnapshot,
@@ -84,9 +83,7 @@ interface DriverData {
     driverId?: string;
     employeeId?: string;
     busId?: string;
-    assignedBusId?: string;
     routeId?: string;
-    assignedRouteId?: string;
     shift?: string;
     status?: string;
     profilePhotoUrl?: string;
@@ -106,7 +103,7 @@ interface BusData {
     activeTripId?: string;
     status?: string;
     shift?: string;
-    stops?: Array<{ name: string; stopId?: string; sequence: number }>;
+    stops?: Array<{ name: string; stop_name?: string; sequence: number }>;
 }
 
 interface RouteData {
@@ -114,7 +111,7 @@ interface RouteData {
     routeId: string;
     routeName: string;
     totalStops: number;
-    stops?: Array<{ name: string; sequence: number; stopId?: string }>;
+    stops?: Array<{ name: string; sequence: number; stop_name?: string }>;
     estimatedTime?: string;
 }
 
@@ -131,7 +128,7 @@ function getDriversForBusSlots(bus: BusData, drivers: DriverData[]): DriverSlotI
 
     // Also check drivers who reference this bus
     drivers.forEach(d => {
-        const dBusId = d.assignedBusId || d.busId;
+        const dBusId = d.busId || d.busId;
         if (dBusId === bus.id || dBusId === bus.busId) {
             driverIds.add(d.id);
         }
@@ -236,16 +233,20 @@ export default function SmartDriverAssignmentPage() {
 
         setLoading(true);
         try {
-            const { getDocs } = await import("firebase/firestore");
-            const [driversSnap, busesSnap, routesSnap] = await Promise.all([
-                getDocs(collection(db, "drivers")),
-                getDocs(collection(db, "buses")),
-                getDocs(collection(db, "routes")),
+
+
+            const [driversRes, busesRes, routesRes] = await Promise.all([
+                fetch('/api/drivers'),
+                fetch('/api/buses'),
+                fetch('/api/routes'),
             ]);
 
-            const driversData = driversSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })) as DriverData[];
-            const busesData = busesSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })) as BusData[];
-            const routesData = routesSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })) as RouteData[];
+            const driversJson = await driversRes.json();
+            const driversData = (Array.isArray(driversJson) ? driversJson : driversJson.drivers || []).map((d: any) => ({ id: d.id || d.uid, ...d })) as DriverData[];
+            const busesJson = await busesRes.json();
+            const busesData = (busesJson.buses || []).map((b: any) => ({ ...b, id: b.busId || b.id })) as BusData[];
+            const routesJson = await routesRes.json();
+            const routesData = (Array.isArray(routesJson) ? routesJson : routesJson.routes || []).map((r: any) => ({ id: r.id || r.routeId, ...r })) as RouteData[];
 
             setDrivers(driversData);
             setBuses(busesData);
@@ -301,7 +302,7 @@ export default function SmartDriverAssignmentPage() {
         , [selectedDriverId, drivers]);
 
     const getBusForDriver = useCallback((driver: DriverData): BusData | null => {
-        const busId = driver.assignedBusId || driver.busId;
+        const busId = driver.busId || driver.busId;
         if (!busId) return null;
         return buses.find(b => b.id === busId || b.busId === busId) || null;
     }, [buses]);
@@ -317,7 +318,7 @@ export default function SmartDriverAssignmentPage() {
             const driver = drivers.find(d => d.id === driverId);
             if (driver) return driver;
         }
-        return drivers.find(d => d.assignedBusId === bus.id || d.busId === bus.id) || null;
+        return drivers.find(d => d.busId === bus.id || d.busId === bus.id) || null;
     }, [drivers]);
 
     const selectedDriverBus = useMemo(() =>
@@ -586,8 +587,8 @@ export default function SmartDriverAssignmentPage() {
                 id: d.id,
                 name: d.fullName || d.name || "Unknown",
                 employeeId: d.driverId || d.employeeId || d.id,
-                busId: d.assignedBusId || d.busId || null,
-                isReserved: d.isReserved || (!d.assignedBusId && !d.busId),
+                busId: d.busId || d.busId || null,
+                isReserved: d.isReserved || (!d.busId && !d.busId),
             })),
             buses: buses.map(b => ({
                 id: b.id,
@@ -668,13 +669,22 @@ export default function SmartDriverAssignmentPage() {
             });
 
             const adminName = userData?.fullName || userData?.name || "Admin";
-            const result = await commitNetChanges(
-                netAssignmentResult.netChanges,
-                netAssignmentResult.driverFinalState,
-                stagedOps,
-                currentUser.uid,
-                { name: adminName, role: "admin", label: `${adminName} (Admin)` }
-            );
+            const token = await currentUser.getIdToken();
+            const response = await fetch('/api/fleet/assign-drivers', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    netChanges: Array.from(netAssignmentResult.netChanges.values()),
+                    driverFinalState: Array.from(netAssignmentResult.driverFinalState.values()),
+                    stagingSnapshot: stagedOps,
+                    actorInfo: { name: adminName, role: "admin", label: `${adminName} (Admin)` },
+                }),
+            });
+
+            const result = await response.json();
 
             if (result.success) {
                 trackEvent('driver_reassignment');

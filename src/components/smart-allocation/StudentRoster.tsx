@@ -15,7 +15,7 @@ interface StudentRosterProps {
   students: StudentData[];
   selectedStudents: Set<string>;
   onToggleSelection: (studentId: string) => void;
-  onSelectByStop: (stopId: string, limit?: number) => void;
+  onSelectByStop: (stop_name: string, limit?: number) => void;
 }
 
 export default function StudentRoster({
@@ -32,9 +32,9 @@ export default function StudentRoster({
     const groups = new Map<string, StudentData[]>();
 
     students.forEach(student => {
-      const existing = groups.get(student.stopId) || [];
+      const existing = groups.get(student.stop_name) || [];
       existing.push(student);
-      groups.set(student.stopId, existing);
+      groups.set(student.stop_name, existing);
     });
 
     return groups;
@@ -56,7 +56,7 @@ export default function StudentRoster({
 
     // Apply stop filter
     if (stopFilter !== 'all') {
-      filtered = filtered.filter(student => student.stopId === stopFilter);
+      filtered = filtered.filter(student => student.stop_name === stopFilter);
     }
 
     return filtered;
@@ -66,7 +66,7 @@ export default function StudentRoster({
   const uniqueStops = useMemo(() => {
     const stops = new Map<string, string>();
     students.forEach(student => {
-      stops.set(student.stopId, student.stopName);
+      stops.set(student.stop_name, student.stop_name);
     });
     return Array.from(stops.entries()).map(([id, name]) => ({ id, name }));
   }, [students]);
@@ -74,7 +74,7 @@ export default function StudentRoster({
   // Render student row
   const renderStudentRow = (student: StudentData) => {
     const isSelected = selectedStudents.has(student.id);
-    const stopCount = stopGroups.get(student.stopId)?.length || 0;
+    const stopCount = stopGroups.get(student.stop_name)?.length || 0;
 
     return (
       <div
@@ -131,7 +131,7 @@ export default function StudentRoster({
         {/* Stop Info */}
         <div className="flex items-center gap-1.5 text-[10px] sm:text-xs min-w-[80px] sm:min-w-[100px]">
           <MapPin className="w-3 h-3 text-muted-foreground" />
-          <span className="text-muted-foreground truncate">{student.stopName}</span>
+          <span className="text-muted-foreground truncate">{student.stop_name}</span>
         </div>
 
         {/* Quick Actions */}
@@ -141,7 +141,7 @@ export default function StudentRoster({
           className="text-xs h-7 px-2"
           onClick={(e) => {
             e.stopPropagation();
-            onSelectByStop(student.stopId);
+            onSelectByStop(student.stop_name);
           }}
         >
           <ChevronRight className="w-3 h-3" />

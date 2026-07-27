@@ -55,8 +55,8 @@ type StudentFormData = {
 export default function EditStudentPage({ params }: { params: Promise<{ id: string }> }) {
   const router = useRouter();
   const { addToast } = useToast();
-  // Unwrap the params promise using React's use function
-  const { id: studentId } = use(params);
+  const { id: rawStudentId } = use(params);
+  const studentId = decodeURIComponent(rawStudentId || '').trim();
 
   // State for routes and buses
   const [routes, setRoutes] = useState<Route[]>([]);
@@ -187,7 +187,7 @@ export default function EditStudentPage({ params }: { params: Promise<{ id: stri
           parentPhone: studentData.parentPhone || '',
           busAssigned: studentData.busAssigned || '',
           busId: studentData.busId || '',
-          routeId: studentData.routeId || studentData.assignedRouteId || '',
+          routeId: studentData.routeId || studentData.routeId || '',
           profilePhoto: null,
           profilePhotoUrl: studentData.profilePhotoUrl || '',
           address: studentData.address || studentData.location || '',
@@ -198,8 +198,8 @@ export default function EditStudentPage({ params }: { params: Promise<{ id: stri
           sessionStartYear: studentData.sessionStartYear || new Date().getUTCFullYear(),
           sessionEndYear: studentData.sessionEndYear || (new Date().getUTCFullYear() + 1),
           validUntil: studentData.validUntil || (deadlineConfig ? new Date(Date.UTC(studentData.sessionEndYear || (new Date().getUTCFullYear() + 1), deadlineConfig.academicYear?.anchorMonth ?? 5, deadlineConfig.academicYear?.anchorDay ?? 30, 23, 59, 59, 999)).toISOString() : new Date(Date.UTC(new Date().getUTCFullYear() + 1, 5, 30, 23, 59, 59, 999)).toISOString()),
-          // PRIORITIZE stopName as requested by user since it's the valid field in Firestore
-          pickupPoint: studentData.stopName || studentData.pickupPoint || studentData.stopId || '',
+          // PRIORITIZE stop_name as requested by user since it's the valid field in Firestore
+          pickupPoint: studentData.stop_name || studentData.pickupPoint || studentData.stop_name || '',
         };
 
         setFormData(initialFormData);
@@ -862,9 +862,9 @@ export default function EditStudentPage({ params }: { params: Promise<{ id: stri
                           )
                         }
 
-                        return stops.slice(0, -1).map((stopName: string, idx: number) => (
-                          <SelectItem key={`${stopName}-${idx}`} value={stopName} className="capitalize">
-                            {stopName}
+                        return stops.slice(0, -1).map((stop_name: string, idx: number) => (
+                          <SelectItem key={`${stop_name}-${idx}`} value={stop_name} className="capitalize">
+                            {stop_name}
                           </SelectItem>
                         ));
                       })()}

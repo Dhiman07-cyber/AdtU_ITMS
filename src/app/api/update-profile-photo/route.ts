@@ -1,7 +1,7 @@
 /**
  * POST /api/update-profile-photo — Update User Profile Photo
  * ───────────────────────────────────────────────────────────
- * Updates the profilePhotoUrl in Firestore and deletes the old Cloudinary
+ * Updates the profilePhotoUrl in PostgreSQL (canonical) and deletes the old Cloudinary
  * image via the SDK.
  *
  * SECURITY HARDENING (March 2026):
@@ -12,10 +12,17 @@
  */
 
 import { NextResponse } from 'next/server';
-import { FieldValue } from 'firebase-admin/firestore';
 import { withSecurity } from '@/lib/security/api-security';
 import { extractPublicId, deleteAsset } from '@/lib/cloudinary-server';
 import { z } from 'zod';
+import {
+    getStudentById,
+    getDriverById,
+    getModeratorById,
+    updateStudent,
+    updateDriver,
+    updateModerator
+} from '@/domains/identity';
 
 const UpdateProfilePhotoSchema = z.object({
     targetType: z.enum(['student', 'driver', 'moderator']),
@@ -34,12 +41,6 @@ export const POST = withSecurity(
             const requesterUid = auth.uid;
             const requesterRole = auth.role;
 
-            // Authorization check
-            const { adminDb } = await import('@/lib/firebase-admin');
-            if (!adminDb) {
-                return NextResponse.json({ success: false, error: 'Server SDK not available' }, { status: 500 });
-            }
-
             let isAuthorized = false;
             if (requesterRole === 'admin') {
                 isAuthorized = true;
@@ -53,14 +54,21 @@ export const POST = withSecurity(
                 return NextResponse.json({ success: false, error: 'Unauthorized to update this profile' }, { status: 403 });
             }
 
-            const collectionName = targetType === 'student' ? 'students' : targetType === 'driver' ? 'drivers' : 'moderators';
-            const targetDoc = await adminDb.collection(collectionName).doc(targetId).get();
-            if (!targetDoc.exists) {
+            // Fetch target details from PostgreSQL (canonical source of truth)
+            let currentData: any = null;
+            if (targetType === 'student') {
+                currentData = await getStudentById(targetId);
+            } else if (targetType === 'driver') {
+                currentData = await getDriverById(targetId);
+            } else if (targetType === 'moderator') {
+                currentData = await getModeratorById(targetId);
+            }
+
+            if (!currentData) {
                 return NextResponse.json({ success: false, error: `${targetType} not found` }, { status: 404 });
             }
 
-            const currentData = targetDoc.data();
-            const currentImageUrl = oldImageUrl || currentData?.profilePhotoUrl;
+            const currentImageUrl = oldImageUrl || currentData.profilePhotoUrl;
 
             // Delete old Cloudinary image via SDK
             if (currentImageUrl && currentImageUrl !== newImageUrl) {
@@ -70,11 +78,14 @@ export const POST = withSecurity(
                 }
             }
 
-            // Update Firestore
-            await adminDb.collection(collectionName).doc(targetId).update({
-                profilePhotoUrl: newImageUrl,
-                updatedAt: FieldValue.serverTimestamp(),
-            });
+            // Update PostgreSQL (canonical source of truth)
+            if (targetType === 'student') {
+                await updateStudent(targetId, { profilePhotoUrl: newImageUrl });
+            } else if (targetType === 'driver') {
+                await updateDriver(targetId, { profilePhotoUrl: newImageUrl });
+            } else if (targetType === 'moderator') {
+                await updateModerator(targetId, { profilePhotoUrl: newImageUrl });
+            }
 
             return NextResponse.json({
                 success: true,

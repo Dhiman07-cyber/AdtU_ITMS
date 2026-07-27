@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { exportToExcel } from '@/lib/export-helpers';
 import { ExportButton } from '@/components/ExportButton';
+import { cn } from '@/lib/utils';
+import { supabase } from '@/lib/supabase-client';
 import { useToast } from '@/contexts/toast-context';
 import { normalizeRouteStatus } from '@/lib/formatters';
 import {
@@ -47,7 +49,8 @@ import {
   MapPin,
   Filter,
   Bus as BusIcon,
-  Activity
+  Activity,
+  RefreshCw
 } from "lucide-react";
 import {
   Dialog,
@@ -58,11 +61,10 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { deleteRoute } from "@/lib/dataService";
-// SPARK PLAN SAFETY: Migrated to usePaginatedCollection
-import { usePaginatedCollection, invalidateCollectionCache } from '@/hooks/usePaginatedCollection';
+// Migrated: Server-side API → PostgreSQL (no Firestore client reads)
+import { useApiCollection, invalidateCollectionCache } from '@/hooks/useApiCollection';
 import { useEventDrivenRefresh } from '@/hooks/useEventDrivenRefresh';
 import { useTheme } from '@/components/theme-provider';
-import { cn } from '@/lib/utils';
 
 // Use local interfaces to avoid type conflicts
 interface RouteItem {
@@ -83,13 +85,12 @@ export default function RoutesPage() {
   const { addToast } = useToast();
   const { theme } = useTheme();
 
-  // Real-time data listeners
-  // Fetch routes from the canonical 'routes' collection
-  const { data: routesData, loading: loadingRoutes, refresh: refreshRoutesData } = usePaginatedCollection('routes', {
+  // Server-side API reads from PostgreSQL — no Firestore client reads
+  const { data: routesData, loading: loadingRoutes, refresh: refreshRoutesData } = useApiCollection('routes', {
     pageSize: 50, orderByField: 'routeName', orderDirection: 'asc', autoRefresh: false,
   });
   // Fetch buses to determine assignments
-  const { data: buses, loading: loadingBuses, refresh: refreshBuses } = usePaginatedCollection('buses', {
+  const { data: buses, loading: loadingBuses, refresh: refreshBuses } = useApiCollection('buses', {
     pageSize: 50, orderByField: 'busNumber', orderDirection: 'asc', autoRefresh: false,
   });
 
@@ -155,6 +156,21 @@ export default function RoutesPage() {
   const [deleteItem, setDeleteItem] = useState<{ id: string; name: string } | null>(null);
 
   const isLoading = loadingRoutes || loadingBuses;
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      invalidateCollectionCache('routes');
+      await Promise.all([refreshRoutesData(), refreshBuses()]);
+      addToast('Data refreshed', 'success');
+    } catch (error) {
+      console.error('Error refreshing routes:', error);
+      addToast('Failed to refresh data', 'error');
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
 
   // Helper function to extract number from route name or ID for sorting
   const extractRouteNumber = (str: string): number => {
@@ -183,60 +199,78 @@ export default function RoutesPage() {
     });
   }, [routes, searchTerm, shiftFilter]);
 
-  // Export routes data
+  // Export routes data from Supabase
   const handleExportRoutes = async () => {
     try {
       const currentDate = new Date();
       const dateStr = currentDate.toISOString().split('T')[0].replace(/-/g, '-');
 
-      // Sort routes by number
-      const sortedRoutes = [...routes].sort((a: any, b: any) => {
-        return extractRouteNumber(a.routeName) - extractRouteNumber(b.routeName);
+      // Fetch all routes directly from Supabase PostgreSQL table 'routes'
+      const { data: rawRoutes, error: routesError } = await supabase
+        .from('routes')
+        .select('*')
+        .order('route_name', { ascending: true });
+
+      if (routesError) throw routesError;
+
+      // Fetch buses to resolve assigned buses per route
+      const { data: rawBuses } = await supabase
+        .from('buses')
+        .select('id, bus_number, route_id');
+
+      const busRouteMap = new Map<string, string[]>();
+      (rawBuses || []).forEach((b: any) => {
+        if (b.route_id) {
+          const existing = busRouteMap.get(b.route_id) || [];
+          existing.push(b.bus_number);
+          busRouteMap.set(b.route_id, existing);
+        }
       });
 
-      // Generate routes data 
-      const exportData = sortedRoutes.map((route: any, index: number) => {
-        const stops = route.stops
-          ? Array.isArray(route.stops)
-            ? route.stops.map((s: any) => s.stopName || s.name || s).join(', ')
-            : route.stops
-          : 'N/A';
+      const exportData = (rawRoutes || []).map((route: any, index: number) => {
+        const stopsList = Array.isArray(route.stops) ? route.stops : [];
+        const stopsSummary = stopsList.length > 0
+          ? stopsList.map((s: any) => s.stop_name || s.name || s).join(', ')
+          : (route.start_location ? `${route.start_location} - ADTU Campus` : 'No stops defined');
 
-        const assignedBusesStr = route.assignedBuses.map((b: any) => b.busNumber).join(', ');
+        const assignedBusesList = busRouteMap.get(route.id) || [];
+        const busesStr = assignedBusesList.length > 0 ? assignedBusesList.join(', ') : 'None';
+        const status = route.status || 'Active';
 
         return [
           (index + 1).toString(),
-          route.routeName || 'N/A',
-          stops,
-          route.totalStops,
-          assignedBusesStr || 'None',
-          route.status || 'Active'
+          route.route_name || route.route_number || 'N/A',
+          stopsSummary,
+          route.total_stops || stopsList.length || 0,
+          busesStr,
+          status.charAt(0).toUpperCase() + status.slice(1)
         ];
       });
 
       // Add headers
       exportData.unshift([
-        'Sl No', 'Route Number', 'Stops', 'Total Stops', 'Buses Assigned', 'Status'
+        'Sl No', 'Route Name', 'Stops Summary', 'Total Stops', 'Buses Assigned', 'Status'
       ]);
 
       // Add section header
-      exportData.unshift(['ALL ROUTES REPORT'], ['']);
+      exportData.unshift(['ALL ROUTES REPORT (SUPABASE)'], ['']);
 
-      // Export to Excel
       await exportToExcel(exportData, `ADTU_Routes_Report_${dateStr}`, 'Routes');
 
       addToast(
-        `Routes exported successfully`,
+        `Exported ${(rawRoutes || []).length} routes to ADTU_Routes_Report_${dateStr}.xlsx`,
         'success'
       );
     } catch (error) {
-      console.error('❌ Error exporting routes:', error);
+      console.error('❌ Error exporting routes from Supabase:', error);
       addToast(
-        'Failed to export routes data.',
+        'Failed to export routes data. Please try again.',
         'error'
       );
     }
   };
+
+  const commonBtnClass = "group h-8 px-4 bg-white hover:bg-gray-50 text-gray-700 hover:text-purple-600 border border-gray-200 hover:border-purple-200 shadow-sm hover:shadow-lg hover:shadow-purple-500/10 font-bold text-[10px] uppercase tracking-widest rounded-lg transition-all duration-300 active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer";
 
   const handleDelete = (id: string, name: string) => {
     setDeleteItem({ id, name });
@@ -293,17 +327,23 @@ export default function RoutesPage() {
           </Button>
           <ExportButton
             onClick={() => handleExportRoutes()}
-            label="Export Routes"
-            className={cn(
-              "border transition-all duration-200 hover:scale-105 hover:shadow-lg rounded-md px-2.5 py-1.5 text-xs h-8",
-              theme === 'dark' ? "bg-white hover:bg-gray-100 text-black border-gray-300" : "bg-white hover:bg-gray-50 text-[#111827] border-[#E5E7EB]"
-            )}
+            label="EXPORT"
+            className={commonBtnClass}
           />
+          <Button
+            size="sm"
+            onClick={handleRefresh}
+            disabled={isRefreshing}
+            className={commonBtnClass}
+          >
+            <RefreshCw className={cn("h-3.5 w-3.5 transition-transform duration-500", isRefreshing ? "animate-spin" : "group-hover:rotate-180")} />
+            REFRESH
+          </Button>
         </div>
       </div>
 
-      <Card className={cn("border-border", theme === 'dark' ? "bg-gray-900" : "bg-admin-bg")}>
-        <CardContent className="pt-3">
+      <Card className={cn("border-border min-h-[480px] flex flex-col", theme === 'dark' ? "bg-gray-900" : "bg-admin-bg")}>
+        <CardContent className="pt-3 flex-1 flex flex-col min-h-0 pb-4">
           <div className="mb-3">
             {/* Search Bar and Filters */}
             <div className="flex flex-col md:flex-row gap-3">
@@ -327,10 +367,10 @@ export default function RoutesPage() {
                     "h-8 text-xs min-w-[120px] flex-1 md:w-[180px] md:bg-transparent border",
                     theme === 'dark' ? "bg-gray-800 border-gray-700" : "bg-white border-[#E5E7EB]"
                   )}>
-                    <SelectValue placeholder="Status" />
+                    <SelectValue placeholder="Shift" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all" className="text-xs">All Statuses</SelectItem>
+                    <SelectItem value="all" className="text-xs">All Shifts</SelectItem>
                     <SelectItem value="active" className="text-xs">Active</SelectItem>
                     <SelectItem value="inactive" className="text-xs">Inactive</SelectItem>
                     <SelectItem value="maintenance" className="text-xs">Maintenance</SelectItem>
@@ -343,8 +383,8 @@ export default function RoutesPage() {
                     size="sm"
                     onClick={() => setShiftFilter("all")}
                     className={cn(
-                      "h-8 px-3 text-xs flex-shrink-0",
-                      theme === 'dark' ? "bg-red-500 hover:bg-red-600 text-white" : "bg-[#EF4444] hover:bg-[#DC2626] text-white"
+                      "h-8 px-3 text-xs",
+                      theme === 'dark' ? "bg-red-500 hover:bg-red-600" : "bg-[#EF4444] hover:bg-[#DC2626]"
                     )}
                   >
                     Clear
@@ -353,8 +393,8 @@ export default function RoutesPage() {
               </div>
             </div>
           </div>
-          <div className="students-section">
-            <div className="students-scroll-wrapper rounded-md border" role="region" aria-label="Routes list">
+          <div className="students-section md:mt-5 flex-1 flex flex-col min-h-0">
+            <div className="students-scroll-wrapper rounded-md border overflow-x-auto flex-1 flex flex-col min-h-0" role="region" aria-label="Routes list">
               <Table>
                 <TableHeader>
                   <TableRow className="h-10">
@@ -366,9 +406,9 @@ export default function RoutesPage() {
                     <TableHead className="text-xs font-semibold text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
-                <TableBody>
-                  {filteredRoutes.length > 0 ? (
-                    filteredRoutes.map((route: any) => (
+                {filteredRoutes.length > 0 && (
+                  <TableBody>
+                    {filteredRoutes.map((route: any) => (
                       <TableRow key={route.id}>
                         <TableCell>
                           <div className="flex items-center">
@@ -463,16 +503,15 @@ export default function RoutesPage() {
                           </DropdownMenu>
                         </TableCell>
                       </TableRow>
-                    ))
-                  ) : (
-                    <TableRow>
-                      <TableCell colSpan={6} className="h-24 text-center">
-                        No routes found.
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
+                    ))}
+                  </TableBody>
+                )}
               </Table>
+              {filteredRoutes.length === 0 && (
+                <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-xs text-muted-foreground min-h-[220px]">
+                  No routes found.
+                </div>
+              )}
             </div>
           </div>
         </CardContent>

@@ -1,10 +1,10 @@
-/**
+﻿/**
  * API Route: Verify Secure QR Token
  * POST /api/bus-pass/verify-secure-qr
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { adminDb } from '@/lib/firebase-admin';
+import { getSupabaseServer } from '@/lib/supabase-server';
 import { decryptQRCodeData, quickValidateQRToken } from '@/lib/security/encryption.service';
 import { checkRateLimit, RateLimits, createRateLimitId } from '@/lib/security/rate-limiter';
 import { verifyApiAuth } from '@/lib/security/api-auth';
@@ -13,6 +13,7 @@ import {
     validateStudentScannerContext,
 } from '@/lib/security/scanner-auth';
 import { getTransportEntitlement } from '@/lib/entitlement/transport-entitlement';
+import { getByUid } from '@/domains/student';
 
 function getValidUntilDate(validUntil: unknown): Date | null {
     if (!validUntil) return null;
@@ -81,28 +82,25 @@ export async function POST(request: NextRequest) {
 
         const qrPayload = decryptQRCodeData(secureToken);
 
-        // 1. Fetch activeTripId from buses collection and verify consistency
+        // 1. D9: Fetch active trip from Supabase (authoritative source)
         let activeTripId: string | null = null;
         let isTripStale = false;
         try {
-            const busDoc = await adminDb.collection('buses').doc(scannerBusId).get();
-            if (busDoc.exists) {
-                const busData = busDoc.data();
-                const possibleTripId = busData?.activeTripId;
-                if (possibleTripId) {
-                    const tripDoc = await adminDb.collection('trip_sessions').doc(possibleTripId).get();
-                    if (tripDoc.exists) {
-                        const tripData = tripDoc.data();
-                        const isExpired = tripData?.status !== 'active' ||
-                            (tripData?.createdAt && (Date.now() - tripData.createdAt.toDate().getTime() > 12 * 60 * 60 * 1000));
-                        if (isExpired) {
-                            isTripStale = true;
-                        } else {
-                            activeTripId = possibleTripId;
-                        }
-                    } else {
-                        isTripStale = true;
-                    }
+            const supabase = getSupabaseServer();
+            const { data: activeTrip } = await supabase
+                .from('active_trips')
+                .select('trip_id, status, created_at')
+                .eq('bus_id', scannerBusId)
+                .eq('status', 'active')
+                .maybeSingle();
+
+            if (activeTrip) {
+                const createdAt = new Date(activeTrip.created_at).getTime();
+                const isExpired = (Date.now() - createdAt) > 12 * 60 * 60 * 1000;
+                if (isExpired) {
+                    isTripStale = true;
+                } else {
+                    activeTripId = activeTrip.trip_id;
                 }
             }
         } catch (e) {
@@ -119,8 +117,8 @@ export async function POST(request: NextRequest) {
             });
         }
 
-        const studentDoc = await adminDb.collection('students').doc(qrPayload.uid).get();
-        if (!studentDoc.exists) {
+        const studentData = await getByUid(qrPayload.uid) as Record<string, any> | null;
+        if (!studentData) {
             return NextResponse.json({
                 status: 'invalid',
                 message: 'Student not found. This QR code is not registered.',
@@ -130,11 +128,9 @@ export async function POST(request: NextRequest) {
                 isTripStale
             });
         }
-
-        const studentData = studentDoc.data();
         const validUntilDate = getValidUntilDate(studentData?.validUntil);
-        const assignedBusId = studentData?.assignedBus || studentData?.busId || studentData?.currentBusId;
-        const busMatchesScanner = scannerBusMatchesStudent(scannerBusId, assignedBusId);
+        const busId = studentData?.assignedBus || studentData?.busId || studentData?.currentBusId;
+        const busMatchesScanner = scannerBusMatchesStudent(scannerBusId, busId);
 
         // CANONICAL entitlement (Phase 3) — same single source of truth as the
         // dashboard / tracking / QR display. Denies soft-blocked, past-soft-block,
@@ -158,14 +154,14 @@ export async function POST(request: NextRequest) {
                 enrollmentId: studentData?.enrollmentId || qrPayload.enrollmentId,
                 gender: studentData?.gender,
                 profilePhotoUrl: studentData?.profilePhotoUrl || studentData?.photoURL,
-                assignedBus: assignedBusId,
-                busId: assignedBusId,
+                assignedBus: busId,
+                busId: busId,
                 assignedShift: studentData?.assignedShift || studentData?.shift,
                 shift: studentData?.assignedShift || studentData?.shift,
                 validUntil: validUntilDate?.toISOString(),
                 status: studentData?.status,
             },
-            isAssigned: Boolean(assignedBusId),
+            isAssigned: Boolean(busId),
             matchesScannerBus: busMatchesScanner,
             canBoard: accountValid && busMatchesScanner,
             sessionActive: accountValid,

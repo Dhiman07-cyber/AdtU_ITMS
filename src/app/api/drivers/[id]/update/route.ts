@@ -1,7 +1,7 @@
-import { NextResponse } from 'next/server';
+﻿import { NextResponse } from 'next/server';
 import { verifyApiAuth } from '@/lib/security/api-auth';
 import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
-import { adminDb } from '@/lib/firebase-admin';
+import { getDriverById, updateDriver } from '@/domains/identity';
 
 export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -11,19 +11,14 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     const permissionDenied = await requireModeratorPermission(auth, 'drivers', 'canEdit');
     if (permissionDenied) return permissionDenied;
 
-    if (!adminDb) {
-      return NextResponse.json({ error: 'Database not available' }, { status: 500 });
-    }
-
     const { id } = await params;
     const requestBody = await request.json();
 
-    // FIELD ALLOW-LIST: Only safe fields may be updated via API
     const ALLOWED_FIELDS = new Set([
-      'fullName', 'name', 'email', 'phone', 'employeeId', 'photoURL', 'phone_number'
+      'fullName', 'name', 'email', 'phone', 'employeeId', 'profilePhotoUrl', 'phone_number'
     ]);
     const BLOCKED_FIELDS = new Set([
-      'busId', 'routeId', 'role', 'status', 'assignedBusId', 'assignedRouteId'
+      'busId', 'routeId', 'role', 'status', 'busId', 'routeId'
     ]);
 
     const updatedDriverData: Record<string, any> = {};
@@ -37,44 +32,22 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       }
     }
 
-    const driverDocRef = adminDb.collection('drivers').doc(id);
-    const driverDoc = await driverDocRef.get();
-    if (!driverDoc.exists) {
+    const existingDriver = await getDriverById(id);
+    if (!existingDriver) {
       return NextResponse.json({ error: 'Driver not found' }, { status: 404 });
     }
 
-    if (updatedDriverData.profilePhotoUrl !== undefined) {
-      if (typeof updatedDriverData.profilePhotoUrl !== 'string') {
-        delete updatedDriverData.profilePhotoUrl;
-      } else if (updatedDriverData.profilePhotoUrl.trim() === '') {
-        updatedDriverData.profilePhotoUrl = null;
-      }
-    }
-
     updatedDriverData.updatedAt = new Date().toISOString();
+    await updateDriver(id, updatedDriverData);
 
-    await driverDocRef.update(updatedDriverData);
-
-    const freshDoc = await driverDocRef.get();
-    const data = freshDoc.data();
-    const updatedDriver = {
-      id: freshDoc.id,
-      name: data?.fullName || data?.name || '',
-      email: data?.email || '',
-      phone: data?.phone || '',
-      alternatePhone: data?.alternatePhone || '',
-      licenseNumber: data?.licenseNumber || '',
-      busAssigned: data?.busAssigned || data?.assignedBusId || '',
-      routeId: data?.routeId || data?.assignedRouteId || '',
-      profilePhotoUrl: data?.profilePhotoUrl || '',
-      dob: data?.dob || '',
-      joiningDate: data?.joiningDate || '',
-      aadharNumber: data?.aadharNumber || '',
-      employeeId: data?.employeeId || '',
-      address: data?.address || '',
-    };
-
-    return NextResponse.json(updatedDriver);
+    const freshDriver = await getDriverById(id);
+    return NextResponse.json({
+      id,
+      name: (freshDriver as any)?.fullName || (freshDriver as any)?.name || '',
+      email: (freshDriver as any)?.email || '',
+      phone: (freshDriver as any)?.phone || '',
+      ...freshDriver,
+    });
   } catch (error: any) {
     console.error('Error updating driver:', error);
     return NextResponse.json({ error: 'Failed to update driver' }, { status: 500 });

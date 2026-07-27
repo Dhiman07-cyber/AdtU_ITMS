@@ -4,7 +4,7 @@ import React, { useState } from "react";
 import { Navigation, Clock, Users, Play, Target, MapPin, ChevronRight } from "lucide-react";
 
 interface RouteStop {
-  stopId: string;
+  stop_name: string;
   name: string;
   sequence: number;
   lat?: number;
@@ -88,7 +88,7 @@ export default function RouteJourney({
 
               return (
                 <div
-                  key={stop.stopId}
+                  key={stop.stop_name}
                   className="flex items-start"
                 >
                   {/* Stop Point Station */}

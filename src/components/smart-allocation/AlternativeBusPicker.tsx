@@ -53,9 +53,9 @@ function getShiftLoad(
   bus: AlternativeBusData,
   shift: CanonicalShift
 ): number {
-  const load = bus.load || { morningCount: 0, eveningCount: 0 };
-  const morning = load.morningCount || 0;
-  const evening = load.eveningCount || 0;
+  const load = bus.load || {};
+  const morning = Number((bus as any).morningLoad ?? (bus as any).morning_load ?? load.morningCount ?? 0);
+  const evening = Number((bus as any).eveningLoad ?? (bus as any).evening_load ?? load.eveningCount ?? 0);
   if (shift === "Both") return Math.max(morning, evening);
   if (shift === "Evening") return evening;
   return morning;
@@ -100,7 +100,11 @@ export default function AlternativeBusPicker({
 
   return (
     <Dialog open onOpenChange={onClose}>
-      <DialogContent className="max-w-xl bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 p-0 shadow-2xl flex flex-col max-h-[85vh] overflow-hidden">
+      <DialogContent 
+        onPointerDownOutside={(e) => e.preventDefault()}
+        onInteractOutside={(e) => e.preventDefault()}
+        className="max-w-xl bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 p-0 shadow-2xl flex flex-col max-h-[85vh] overflow-hidden"
+      >
         {/* Header — same gradient as ReassignmentPanel */}
         <DialogHeader className="px-5 py-4 border-b border-zinc-200 dark:border-zinc-800 bg-gradient-to-r from-purple-50 via-pink-50 to-purple-50 dark:from-purple-950/30 dark:via-pink-950/30 dark:to-purple-950/30 flex-shrink-0">
           <div className="flex items-center gap-3">

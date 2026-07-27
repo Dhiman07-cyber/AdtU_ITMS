@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withSecurity } from '@/lib/security/api-security';
-import { adminDb } from '@/lib/firebase-admin';
 import { UpdatePermissionsSchema, UIDSchema, validateInput } from '@/lib/security/validation-schemas';
+import { updateModeratorPermissions, getModeratorById } from '@/domains/identity';
 
 /**
  * GET /api/moderators/[id]/permissions
- * Fetch a moderator's permissions
+ * Fetch a moderator's permissions (reads from PostgreSQL)
  */
 export const GET = withSecurity(
     async (request, { auth, requestId }) => {
@@ -14,30 +14,26 @@ export const GET = withSecurity(
             const pathParts = url.pathname.split('/');
             const id = pathParts[pathParts.length - 2];
 
-            if (!adminDb) {
-                return NextResponse.json({ error: 'Database not available' }, { status: 500 });
-            }
-
             const uidValidation = validateInput(UIDSchema, id);
             if (!uidValidation.success) {
                 return NextResponse.json({ error: 'Invalid moderator ID' }, { status: 400 });
             }
 
-            const modDoc = await adminDb.collection('moderators').doc(id).get();
-            if (!modDoc.exists) {
+            const modData = await getModeratorById(id);
+
+            if (!modData) {
                 return NextResponse.json({ error: 'Moderator not found' }, { status: 404 });
             }
 
-            const modData = modDoc.data();
             return NextResponse.json({
                 success: true,
-                permissions: modData?.permissions || null,
+                permissions: modData.permissions || null,
                 moderator: {
-                    id: modDoc.id,
-                    name: modData?.fullName || modData?.name || 'Unknown',
-                    email: modData?.email || '',
-                    employeeId: modData?.employeeId || modData?.empId || '',
-                    status: modData?.status || 'active',
+                    id,
+                    name: modData.fullName || modData.name || 'Unknown',
+                    email: modData.email || '',
+                    employeeId: modData.employeeId || modData.empId || '',
+                    status: modData.status || 'active',
                 },
             });
         } catch (error: any) {
@@ -61,27 +57,19 @@ export const PUT = withSecurity(
             const pathParts = url.pathname.split('/');
             const id = pathParts[pathParts.length - 2];
 
-            if (!adminDb) {
-                return NextResponse.json({ error: 'Database not available' }, { status: 500 });
-            }
-
             const uidValidation = validateInput(UIDSchema, id);
             if (!uidValidation.success) {
                 return NextResponse.json({ error: 'Invalid moderator ID' }, { status: 400 });
             }
 
-            const modDoc = await adminDb.collection('moderators').doc(id).get();
-            if (!modDoc.exists) {
+            const existingMod = await getModeratorById(id);
+            if (!existingMod) {
                 return NextResponse.json({ error: 'Moderator not found' }, { status: 404 });
             }
 
             const { permissions } = body as { permissions: Record<string, any> };
 
-            await adminDb.collection('moderators').doc(id).update({
-                permissions,
-                permissionsUpdatedAt: new Date().toISOString(),
-                permissionsUpdatedBy: auth.uid,
-            });
+            await updateModeratorPermissions(id, permissions as any, auth.uid);
 
             console.log(`Permissions updated for moderator ${id} by admin ${auth.uid}`);
 

@@ -6,6 +6,8 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { exportToExcel } from '@/lib/export-helpers';
 import { ExportButton } from '@/components/ExportButton';
+import { cn } from '@/lib/utils';
+import { supabase } from '@/lib/supabase-client';
 import {
     Dialog,
     DialogContent,
@@ -52,8 +54,8 @@ import { deleteStudent } from '@/lib/dataService';
 import { useToast } from '@/contexts/toast-context';
 import { safeImageSrc } from "@/lib/security/url-sanitizer";
 import Avatar from '@/components/Avatar';
-// SPARK PLAN SAFETY: Event-driven refresh - only fetches when mutations occur
-import { usePaginatedCollection, invalidateCollectionCache } from '@/hooks/usePaginatedCollection';
+// Migrated: Server-side API → PostgreSQL (no Firestore client reads)
+import { useApiCollection, invalidateCollectionCache } from '@/hooks/useApiCollection';
 import { useEventDrivenRefresh } from '@/hooks/useEventDrivenRefresh';
 import { useModeratorPermissions } from '@/hooks/useModeratorPermissions';
 import { PermissionDeniedCard } from '@/components/PermissionDeniedCard';
@@ -64,18 +66,18 @@ export default function AdminStudents() {
     const { canStudentView, canStudentAdd, canStudentEdit, canStudentDelete, canStudentReassign, loading: permsLoading } = useModeratorPermissions();
     const router = useRouter();
 
-    // SPARK PLAN SAFETY: Event-driven refresh - only fetches when mutations occur
+    // Server-side API reads from PostgreSQL — no Firestore client reads
     const {
         data: students,
         loading: loadingStudents,
         refresh: refreshStudents,
         fetchNextPage: fetchMoreStudents,
         hasMore: hasMoreStudents
-    } = usePaginatedCollection('students', {
+    } = useApiCollection('students', {
         pageSize: 50, orderByField: 'updatedAt', orderDirection: 'desc',
         autoRefresh: false, // EVENT-DRIVEN: Only refresh when mutations occur
     });
-    const { data: buses, loading: loadingBuses, refresh: refreshBuses } = usePaginatedCollection('buses', {
+    const { data: buses, loading: loadingBuses, refresh: refreshBuses } = useApiCollection('buses', {
         pageSize: 50, orderByField: 'busNumber', orderDirection: 'asc',
         autoRefresh: false,
     });
@@ -133,40 +135,12 @@ export default function AdminStudents() {
             setIsSearching(true);
             try {
                 const term = debouncedSearchTerm.trim();
-                const termLower = term.toLowerCase();
-
-                // Dynamic import to avoid top-level SSR issues with firebase/firestore if not already imported
-                const { collection, query, where, getDocs, limit } = await import('firebase/firestore');
-                const { db } = await import('@/lib/firebase');
-
-                const studentsRef = collection(db, 'students');
-                const capitalizedTerm = term.charAt(0).toUpperCase() + term.slice(1).toLowerCase();
-
-                // Perform multiple queries to find matches across different fields
-                const queries = [
-                    // Name prefix match (Capitalized)
-                    query(studentsRef, where('name', '>=', capitalizedTerm), where('name', '<=', capitalizedTerm + '\uf8ff'), limit(20)),
-                    // FullName prefix match (Capitalized)
-                    query(studentsRef, where('fullName', '>=', capitalizedTerm), where('fullName', '<=', capitalizedTerm + '\uf8ff'), limit(20)),
-                    // Email exact match
-                    query(studentsRef, where('email', '==', termLower), limit(1)),
-                    // Enrollment ID exact match
-                    query(studentsRef, where('enrollmentId', '==', term), limit(1)),
-                    query(studentsRef, where('enrollmentId', '==', term.toUpperCase()), limit(1))
-                ];
-
-                const snapshots = await Promise.all(queries.map(q => getDocs(q)));
-
-                // Deduplicate results
-                const resultsMap = new Map();
-                snapshots.forEach(snap => {
-                    snap.docs.forEach(doc => {
-                        resultsMap.set(doc.id, { id: doc.id, ...doc.data() });
-                    });
+                const token = await currentUser?.getIdToken();
+                const res = await fetch('/api/students?q=' + encodeURIComponent(term), {
+                    headers: token ? { Authorization: 'Bearer ' + token } : {},
                 });
-
-                const results = Array.from(resultsMap.values());
-                setSearchResults(results);
+                const data = await res.json();
+                setSearchResults(data.students || []);
 
             } catch (error) {
                 console.error("Search failed:", error);
@@ -177,7 +151,7 @@ export default function AdminStudents() {
         }
 
         performSearch();
-    }, [debouncedSearchTerm, addToast]);
+    }, [debouncedSearchTerm, addToast, currentUser]);
 
 
 
@@ -240,42 +214,45 @@ export default function AdminStudents() {
         index === self.findIndex((s) => s.id === student.id)
     ), [filteredStudents]);
 
-    // Export students data
+    // Export students data from Supabase
     const handleExportStudents = async () => {
         try {
             const currentDate = new Date();
             const dateStr = currentDate.toISOString().split('T')[0].replace(/-/g, '-');
 
-            // Generate students data in the same format as the comprehensive report
-            const studentsData = students.map((student, index) => {
-                // Find assigned bus - check multiple possible fields
-                const assignedBus = buses.find(b =>
-                    b.id === student.busId ||
-                    b.busId === student.busId ||
-                    b.id === student.assignedBusId ||
-                    b.busId === student.assignedBusId ||
-                    b.id === student.currentBusId ||
-                    b.busId === student.currentBusId
-                );
+            // Fetch all students directly from Supabase PostgreSQL table 'student_profiles'
+            const { data: rawStudents, error: studentsError } = await supabase
+                .from('student_profiles')
+                .select('*')
+                .order('full_name', { ascending: true });
 
-                // Use actual status field from Firestore (not calculated)
+            if (studentsError) throw studentsError;
+
+            // Fetch buses to map assigned bus IDs to bus numbers
+            const { data: rawBuses } = await supabase
+                .from('buses')
+                .select('id, bus_number, registration_number');
+
+            const busMap = new Map((rawBuses || []).map((b: any) => [b.id, b.bus_number || b.registration_number]));
+
+            const studentsData = (rawStudents || []).map((student: any, index: number) => {
+                const busId = student.bus_id || student.bus_id;
+                const busDisplay = busMap.get(busId) || (busId ? `Bus-${busId}` : 'Not Assigned');
                 const status = student.status || 'N/A';
-
-                // Use correct field name: durationYears (not sessionDuration)
-                const yearsAvailed = student.durationYears ? `${student.durationYears} year${student.durationYears > 1 ? 's' : ''}` : 'N/A';
+                const sessionDuration = student.session_duration ? `${student.session_duration} year${Number(student.session_duration) > 1 ? 's' : ''}` : 'N/A';
 
                 return [
                     (index + 1).toString(),
-                    student.fullName || student.name || 'N/A',
+                    student.full_name || student.name || 'N/A',
                     student.email || 'N/A',
-                    student.phoneNumber || student.phone || 'N/A',
+                    student.phone || student.phoneNumber || 'N/A',
                     student.faculty || 'N/A',
-                    student.enrollmentId || 'N/A',
-                    assignedBus ? `Bus-${extractNumber(assignedBus.busId || assignedBus.id)}` : 'Not Assigned',
+                    student.enrollment_id || student.enrollmentId || 'N/A',
+                    busDisplay,
                     student.shift ? student.shift.charAt(0).toUpperCase() + student.shift.slice(1) : 'N/A',
-                    student.sessionStartYear || 'N/A',
-                    student.sessionEndYear || 'N/A',
-                    yearsAvailed,
+                    student.sessionStartYear || student.session_start_year || 'N/A',
+                    student.sessionEndYear || student.session_end_year || 'N/A',
+                    sessionDuration,
                     status
                 ];
             });
@@ -283,21 +260,20 @@ export default function AdminStudents() {
             // Add headers
             studentsData.unshift([
                 'Sl No', 'Name', 'Email', 'Phone', 'Faculty', 'Enrollment ID',
-                'Bus Assigned', 'Shift', 'Session Start', 'Session End', 'Years Availed', 'Status'
+                'Bus Assigned', 'Shift', 'Session Start', 'Session End', 'Session Duration', 'Status'
             ]);
 
             // Add section header
-            studentsData.unshift(['ALL STUDENTS'], ['']);
+            studentsData.unshift(['ALL STUDENTS REPORT (SUPABASE)'], ['']);
 
-            // Export to Excel
             await exportToExcel(studentsData, `ADTU_Students_Report_${dateStr}`, 'Students');
 
             addToast(
-                `Students data exported to ADTU_Students_Report_${dateStr}.xlsx`,
+                `Exported ${(rawStudents || []).length} students to ADTU_Students_Report_${dateStr}.xlsx`,
                 'success'
             );
         } catch (error) {
-            console.error('❌ Error exporting students:', error);
+            console.error('❌ Error exporting students from Supabase:', error);
             addToast(
                 'Failed to export students data. Please try again.',
                 'error'
@@ -305,29 +281,7 @@ export default function AdminStudents() {
         }
     };
 
-    // Helper function to extract number from string
-    const extractNumber = (str: string): string => {
-        if (!str) return '0';
-        const match = str.match(/\d+/);
-        return match ? match[0] : '0';
-    };
-
-    // Only show full page loader on initial load (when no data exists)
-    // AND we are strictly in a loading state. 
-    // This prevents the page from "jumping" during search or refresh.
-    const showFullPageLoader = authLoading || (isLoading && students.length === 0 && !searchResults);
-
-    if (showFullPageLoader) {
-        return <PremiumPageLoader message="Curating Student Directory..." subMessage="Fetching student profiles and status..." />;
-    }
-
-    if (!currentUser || !userData || userData.role !== 'moderator') {
-        return null;
-    }
-
-    if (!permsLoading && !canStudentView) {
-        return <PermissionDeniedCard title="Students Section Restricted" actionName="Viewing Students" showGoBack={false} />;
-    }
+    const commonBtnClass = "group h-8 px-4 bg-white hover:bg-gray-50 text-gray-700 hover:text-purple-600 border border-gray-200 hover:border-purple-200 shadow-sm hover:shadow-lg hover:shadow-purple-500/10 font-bold text-[10px] uppercase tracking-widest rounded-lg transition-all duration-300 active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer";
 
     return (
         <div className="mt-12 space-y-6">
@@ -335,7 +289,7 @@ export default function AdminStudents() {
             <div className="flex justify-between items-center">
                 <div>
                     <h1 className="text-3xl font-bold text-foreground">Student Management</h1>
-                    <p className="text-muted-foreground mt-1">View and manage all students</p>
+                    <p className="text-muted-foreground mt-1">View and manage all student accounts</p>
                 </div>
                 <div className="flex gap-2">
                     {canStudentAdd && (
@@ -347,14 +301,6 @@ export default function AdminStudents() {
                         </Link>
                     )}
 
-                    {canStudentReassign && (
-                        <Link href="/moderator/smart-allocation">
-                            <Button className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white border-0 transition-all duration-200 hover:scale-105 hover:shadow-lg hover:shadow-purple-500/25 rounded-md px-2.5 py-1.5 text-xs h-8">
-                                <ArrowRightLeft className="mr-1.5 h-3.5 w-3.5" />
-                                Student Reassignment
-                            </Button>
-                        </Link>
-                    )}
                     <Link href="/moderator/verification">
                         <Button className="bg-cyan-600 hover:bg-cyan-700 text-white border border-cyan-700 transition-all duration-200 hover:scale-105 hover:shadow-lg rounded-md px-2.5 py-1.5 text-xs h-8">
                             <QrCode className="mr-1.5 h-3.5 w-3.5" />
@@ -363,24 +309,23 @@ export default function AdminStudents() {
                     </Link>
                     <ExportButton
                         onClick={() => handleExportStudents()}
-                        label="Export"
-                        className="h-8 px-4 bg-white hover:bg-gray-50 text-gray-600 hover:text-purple-600 border border-gray-200 hover:border-purple-200 shadow-sm hover:shadow-lg hover:shadow-purple-500/10 font-bold text-[10px] uppercase tracking-widest rounded-lg transition-all duration-300 active:scale-95"
+                        label="EXPORT"
+                        className={commonBtnClass}
                     />
                     <Button
                         size="sm"
                         onClick={handleRefresh}
                         disabled={isRefreshing}
-                        className="group h-8 px-4 bg-white hover:bg-gray-50 text-gray-600 hover:text-purple-600 border border-gray-200 hover:border-purple-200 shadow-sm hover:shadow-lg hover:shadow-purple-500/10 font-bold text-[10px] uppercase tracking-widest rounded-lg transition-all duration-300 active:scale-95"
+                        className={commonBtnClass}
                     >
-                        <RefreshCw className={`mr-2 h-3.5 w-3.5 transition-transform duration-500 ${isRefreshing ? 'animate-spin' : 'group-hover:rotate-180'}`} />
-                        Refresh
+                        <RefreshCw className={cn("h-3.5 w-3.5 transition-transform duration-500", isRefreshing ? "animate-spin" : "group-hover:rotate-180")} />
+                        REFRESH
                     </Button>
-
                 </div>
             </div>
 
-            <Card className="bg-gray-50 dark:bg-gray-900 border-border">
-                <CardContent className="pt-3">
+            <Card className="bg-gray-50 dark:bg-gray-900 border-border min-h-[480px] flex flex-col">
+                <CardContent className="pt-3 flex-1 flex flex-col min-h-0 pb-4">
                     <div className="mb-3">
                         {/* Search Bar and Filters */}
                         <div className="flex flex-col md:flex-row gap-3">
@@ -441,8 +386,8 @@ export default function AdminStudents() {
                         </div>
                     </div>
 
-                    <div className="students-section">
-                        <div className="students-scroll-wrapper rounded-md border overflow-x-auto" role="region" aria-label="Student list">
+                    <div className="students-section md:mt-5 flex-1 flex flex-col min-h-0">
+                        <div className="students-scroll-wrapper rounded-md border overflow-x-auto flex-1 flex flex-col min-h-0" role="region" aria-label="Student list">
                             <Table>
                                 <TableHeader>
                                     <TableRow className="h-8">
@@ -455,25 +400,19 @@ export default function AdminStudents() {
                                         <TableHead className="text-[11px] py-1.5 text-right">Actions</TableHead>
                                     </TableRow>
                                 </TableHeader>
-                                <TableBody>
-                                    {/* Show loader inside table when refreshing/searching with existing data */}
-                                    {isLoading && (students.length > 0 || searchResults) && (
-                                        <TableRow>
-                                            <TableCell colSpan={7} className="h-1 p-0">
-                                                <div className="w-full h-1 bg-blue-100 dark:bg-blue-900 overflow-hidden">
-                                                    <div className="animate-progress w-full h-full bg-blue-500 origin-left-right"></div>
-                                                </div>
-                                            </TableCell>
-                                        </TableRow>
-                                    )}
-                                    {uniqueFilteredStudents.length === 0 ? (
-                                        <TableRow>
-                                            <TableCell colSpan={7} className="text-center py-6 text-[11px] text-gray-500">
-                                                No students found
-                                            </TableCell>
-                                        </TableRow>
-                                    ) : (
-                                        uniqueFilteredStudents.map((student) => (
+                                {uniqueFilteredStudents.length > 0 && (
+                                    <TableBody>
+                                        {/* Show loader inside table when refreshing/searching with existing data */}
+                                        {isLoading && (students.length > 0 || searchResults) && (
+                                            <TableRow>
+                                                <TableCell colSpan={7} className="h-1 p-0">
+                                                    <div className="w-full h-1 bg-blue-100 dark:bg-blue-900 overflow-hidden">
+                                                        <div className="animate-progress w-full h-full bg-blue-500 origin-left-right"></div>
+                                                    </div>
+                                                </TableCell>
+                                            </TableRow>
+                                        )}
+                                        {uniqueFilteredStudents.map((student) => (
                                             <TableRow key={student.id} className="h-auto">
                                                 <TableCell className="py-1.5">
                                                     <div className="flex flex-row items-center gap-2">
@@ -543,14 +482,14 @@ export default function AdminStudents() {
                                                             <DropdownMenuLabel className="text-white text-[11px] font-semibold px-2 py-1.5">Actions</DropdownMenuLabel>
                                                             <DropdownMenuSeparator className="bg-gray-600" />
                                                             <DropdownMenuItem asChild>
-                                                                <Link href={`/moderator/students/view/${student.id}`} className="text-white hover:bg-gray-700 dark:hover:bg-gray-800 focus:bg-gray-700 dark:focus:bg-gray-800 px-2 py-1.5 !text-white text-[11px]">
+                                                                <Link href={`/moderator/students/view/${encodeURIComponent(student.uid || student.id)}`} className="text-white hover:bg-gray-700 dark:hover:bg-gray-800 focus:bg-gray-700 dark:focus:bg-gray-800 px-2 py-1.5 !text-white text-[11px]">
                                                                     <Eye className="mr-1.5 h-3 w-3 text-blue-400" />
                                                                     View Details
                                                                 </Link>
                                                             </DropdownMenuItem>
                                                             {canStudentEdit && (
                                                                 <DropdownMenuItem asChild>
-                                                                    <Link href={`/moderator/students/edit/${student.id}`} className="text-white hover:bg-gray-700 dark:hover:bg-gray-800 focus:bg-gray-700 dark:focus:bg-gray-800 px-2 py-1.5 !text-white text-[11px]">
+                                                                    <Link href={`/moderator/students/edit/${encodeURIComponent(student.uid || student.id)}`} className="text-white hover:bg-gray-700 dark:hover:bg-gray-800 focus:bg-gray-700 dark:focus:bg-gray-800 px-2 py-1.5 !text-white text-[11px]">
                                                                         <Edit className="mr-1.5 h-3 w-3 text-yellow-400" />
                                                                         Edit
                                                                     </Link>
@@ -575,10 +514,15 @@ export default function AdminStudents() {
                                                     </DropdownMenu>
                                                 </TableCell>
                                             </TableRow>
-                                        ))
-                                    )}
-                                </TableBody>
+                                        ))}
+                                    </TableBody>
+                                )}
                             </Table>
+                            {uniqueFilteredStudents.length === 0 && (
+                                <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-[11px] text-gray-500 min-h-[220px]">
+                                    No students found
+                                </div>
+                            )}
                         </div>
                     </div>
 

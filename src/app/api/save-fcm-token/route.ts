@@ -1,15 +1,14 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { adminDb } from '@/lib/firebase-admin';
+﻿import { NextRequest, NextResponse } from 'next/server';
 import { saveToken, isValidTokenFormat, subscribeToTopic } from '@/lib/services/fcm-token-service';
 import { withSecurity } from '@/lib/security/api-security';
 import { SaveFCMTokenSchema } from '@/lib/security/validation-schemas';
 import { RateLimits } from '@/lib/security/rate-limiter';
+import { getStudentById } from '@/domains/identity';
 
 /**
  * POST /api/save-fcm-token
  * 
- * Saves FCM tokens into a subcollection model:
- *   {collection}/{userId}/tokens/{sha256(token)}
+ * Saves FCM tokens to PostgreSQL (fcm_tokens table).
  * 
  * Security:
  * - JWT-authenticated (via withSecurity)
@@ -50,13 +49,10 @@ export const POST = withSecurity(
       }, { status: 403 });
     }
 
-    // 4. Use students collection explicitly
-    const targetCollection = 'students';
-
-    // 5. Validate user exists in students collection before saving token
-    const userDoc = await adminDb.collection(targetCollection).doc(uid).get();
-    if (!userDoc.exists) {
-      console.warn(`[${requestId}] User ${uid} does not exist in ${targetCollection} collection`);
+    // 4. Validate user exists in students database in PostgreSQL (canonical source of truth) before saving token
+    const userData = await getStudentById(uid);
+    if (!userData) {
+      console.warn(`[${requestId}] User ${uid} does not exist in PostgreSQL student_profiles`);
       return NextResponse.json({
         success: false,
         error: 'User account not found. Please contact support.',
@@ -64,9 +60,8 @@ export const POST = withSecurity(
       }, { status: 404 });
     }
 
-    // 6. Additional validation: Only allow active student accounts
-    const userData = userDoc.data();
-    if (!userData || userData.status === 'inactive' || userData.status === 'suspended') {
+    // 5. Additional validation: Only allow active student accounts
+    if (userData.status === 'inactive' || userData.status === 'suspended') {
       console.warn(`[${requestId}] Student ${uid} account is not active`);
       return NextResponse.json({
         success: false,
@@ -75,8 +70,8 @@ export const POST = withSecurity(
       }, { status: 403 });
     }
 
-    // 7. Save token to subcollection (multi-device support)
-    const result = await saveToken(uid, targetCollection, token, platform || 'web');
+    // 6. Save token to PostgreSQL (multi-device support)
+    const result = await saveToken(uid, 'students', token, platform || 'web');
 
     if (!result.success) {
       console.error(`[${requestId}] FCM Token Service error:`, result.error);
@@ -86,8 +81,8 @@ export const POST = withSecurity(
       );
     }
 
-    // 8. Topic Subscription: Subscribe to route-specific topic for high-performance notifications
-    const routeId = userData.routeId || userData.route_id || userData.assignedRouteId;
+    // 7. Topic Subscription: Subscribe to route-specific topic for high-performance notifications
+    const routeId = userData.routeId || userData.route_id || userData.routeId;
     if (routeId) {
       try {
         const topic = `route_${routeId}`;
@@ -97,21 +92,8 @@ export const POST = withSecurity(
       }
     }
 
-    // 9. Legacy field sync (backward compatibility with older notification queries)
-    try {
-      await adminDb.collection(targetCollection).doc(uid).set({
-        fcmToken: token,
-        fcmPlatform: platform || 'web',
-        fcmUpdatedAt: new Date().toISOString(),
-      }, { merge: true });
-    } catch (err) {
-      // Non-critical: subcollection is the source of truth
-      console.warn(`[${requestId}] Legacy FCM sync failed (non-critical):`, err);
-    }
-
     return NextResponse.json({
       success: true,
-      collection: targetCollection,
       requestId,
     });
   },

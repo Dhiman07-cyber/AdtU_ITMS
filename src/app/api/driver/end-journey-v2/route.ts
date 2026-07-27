@@ -2,15 +2,13 @@
  * POST /api/driver/end-journey-v2
  * 
  * End trip with comprehensive event-driven cleanup:
- * - Immediate cleanup of ALL trip-related Supabase tables
- * - Parallel Supabase cleanup
+ * - Parallel Supabase cleanup (driver_location_updates, waiting_flags, device_sessions)
  * - Broadcast notifications
  * - FCM notifications to students
  * - Stale FCM token auto-removal
  */
 
 import { NextResponse } from 'next/server';
-import { db as adminDb } from '@/lib/firebase-admin';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import { tripLockService } from '@/lib/services/trip-lock-service';
 import { withSecurity } from '@/lib/security/api-security';
@@ -23,27 +21,20 @@ const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 interface CleanupStats {
-  busLocations: number;
   waitingFlags: number;
   driverLocationUpdates: number;
   activeTrips: number;
-  driverStatus: number;
-  missedBusRequests: number;
   deviceSessions: number;
   totalTime: number;
 }
 
 /**
- * Comprehensive Supabase cleanup — ALL trip-related tables
+ * Cleanup trip-related state (non-durable data only)
  * 
  * Tables cleaned on trip end:
- * 1. bus_locations        — Delete all location rows for this bus
- * 2. driver_location_updates — Delete historical breadcrumbs
- * 3. waiting_flags        — Delete raised/acknowledged flags for this bus
- * 4. active_trips         — DELETE rows for this bus/driver
- * 5. driver_status        — Delete driver status row entirely
- * 6. missed_bus_requests  — Expire any pending requests linked to this bus/trip
- * 7. device_sessions      — Clean up driver's device sessions
+ * 1. driver_location_updates — historical breadcrumbs
+ * 2. waiting_flags          — raised/acknowledged flags for this bus
+ * 3. device_sessions        — driver's device sessions
  */
 async function cleanupSupabase(
   supabase: any,
@@ -58,20 +49,7 @@ async function cleanupSupabase(
 
   // Execute all cleanup operations in parallel
   const results = await Promise.allSettled([
-    // 1. Delete bus_locations for this bus (current state)
-    (tripId
-      ? supabase.from('bus_locations').delete().eq('bus_id', busId).eq('trip_id', tripId)
-      : supabase.from('bus_locations').delete().eq('bus_id', busId).eq('driver_uid', driverUid)
-    )
-      .then(({ count, error }: { count: number | null, error: any }) => {
-        if (error) console.error('❌ Error deleting bus_locations:', error);
-        else {
-          stats.busLocations = count || 0;
-          console.log(`✅ Deleted ${count || 0} bus_locations`);
-        }
-      }),
-
-    // 2. Delete driver_location_updates for this bus (historical trail)
+    // 1. Delete driver_location_updates for this bus (historical trail)
     supabase
       .from('driver_location_updates')
       .delete()
@@ -97,46 +75,7 @@ async function cleanupSupabase(
         }
       }),
 
-    // 5. DELETE this driver's status row only
-    (tripId
-      ? supabase.from('driver_status').delete().eq('driver_uid', driverUid).eq('trip_id', tripId)
-      : supabase.from('driver_status').delete().eq('driver_uid', driverUid)
-    )
-      .then(({ count, error }: { count: number | null, error: any }) => {
-        if (error) console.error('❌ Error deleting driver_status:', error);
-        else {
-          stats.driverStatus = count || 0;
-          console.log(`✅ Deleted ${count || 0} driver_status row(s)`);
-        }
-      }),
-
-    // 5b. Also delete driver_status by driver_uid (safety fallback)
-    supabase
-      .from('driver_status')
-      .delete()
-      .eq('driver_uid', driverUid)
-      .eq('trip_id', tripId || '')
-      .then(({ count, error }: { count: number | null, error: any }) => {
-        if (error) console.error('❌ Error deleting driver_status by driver_uid:', error);
-        else console.log(`✅ Deleted ${count || 0} driver_status row(s) by driver_uid`);
-      }),
-
-    // 6. Expire any pending missed_bus_requests that reference this bus's route
-    //    These are no longer actionable once the trip has ended
-    supabase
-      .from('missed_bus_requests')
-      .update({ status: 'expired' })
-      .eq('status', 'pending')
-      .eq('route_id', routeId)
-      .then(({ count, error }: { count: number | null, error: any }) => {
-        if (error) console.error('❌ Error expiring missed_bus_requests:', error);
-        else {
-          stats.missedBusRequests = count || 0;
-          console.log(`✅ Expired ${count || 0} missed_bus_requests`);
-        }
-      }),
-
-    // 7. Clean up device sessions for this driver
+    // 4. Clean up device sessions for this driver
     supabase
       .from('device_sessions')
       .delete()
@@ -147,6 +86,16 @@ async function cleanupSupabase(
           stats.deviceSessions = count || 0;
           console.log(`✅ Deleted ${count || 0} device_sessions`);
         }
+      }),
+
+    // 5. Update driver_status to idle
+    supabase
+      .from('driver_status')
+      .update({ status: 'idle', trip_id: null })
+      .eq('driver_uid', driverUid)
+      .then(({ error }: { error: any }) => {
+        if (error) console.error('❌ Error updating driver_status on end trip:', error);
+        else console.log('✅ Updated driver_status to idle');
       })
   ]);
 
@@ -230,12 +179,16 @@ export const POST = withSecurity(
 
     console.log(`🏁 Ending journey for bus ${busId}, trip ${tripId || 'current'}...`);
 
-    // 1. Single Firestore read for bus metadata and lock verification
-    const busDoc = await adminDb.collection('buses').doc(busId).get();
-    if (!busDoc.exists) return NextResponse.json({ error: 'Bus not found' }, { status: 404 });
-    
-    const busData = busDoc.data();
-    let activeTripId = tripId || busData?.activeTripId;
+    // 1. D9: Read bus metadata from Supabase instead of Firestore
+    const { data: busData } = await supabase
+      .from('buses')
+      .select('id, bus_number, route_id, route_name')
+      .eq('id', busId)
+      .maybeSingle();
+
+    if (!busData) return NextResponse.json({ error: 'Bus not found' }, { status: 404 });
+
+    let activeTripId = tripId;
 
     if (!activeTripId) {
       const { data: activeTrip } = await supabase
@@ -249,16 +202,29 @@ export const POST = withSecurity(
       activeTripId = activeTrip?.trip_id || null;
     }
 
-    const rawBusNumber = busData?.busNumber || busId;
+    const rawBusNumber = busData.bus_number || busId;
     const busNumber = formatIdForDisplay(rawBusNumber);
-    const routeId = busData?.routeId || busData?.route_id || busId;
-    const rawRouteName = busData?.routeName || `Route for Bus ${busNumber}`;
+    const routeId = busData.route_id || busId;
+    const rawRouteName = busData.route_name || `Route for Bus ${busNumber}`;
     const routeName = formatIdForDisplay(rawRouteName);
 
-    // Lock verification
-    const lock = busData?.activeTripLock;
-    if (lock?.active && lock.driverId && lock.driverId !== driverUid) {
-      return NextResponse.json({ error: 'Not the lock holder', errorCode: 'NOT_LOCK_HOLDER' }, { status: 403 });
+    // D9: Lock verification via active_trips instead of Firestore activeTripLock
+    if (activeTripId) {
+      const { data: lockTrip } = await supabase
+        .from('active_trips')
+        .select('driver_id, status, expires_at')
+        .eq('trip_id', activeTripId)
+        .eq('bus_id', busId)
+        .eq('status', 'active')
+        .maybeSingle();
+
+      if (lockTrip && lockTrip.driver_id && lockTrip.driver_id !== driverUid) {
+        // Check if lock has expired
+        const isExpired = lockTrip.expires_at && Date.now() > new Date(lockTrip.expires_at).getTime();
+        if (!isExpired) {
+          return NextResponse.json({ error: 'Not the lock holder', errorCode: 'NOT_LOCK_HOLDER' }, { status: 403 });
+        }
+      }
     }
 
     if (activeTripId) {
@@ -293,24 +259,18 @@ export const POST = withSecurity(
 
     // Prepare cleanup summary
     const cleanupSummary = {
-      busLocations: supabaseStats.busLocations || 0,
       waitingFlags: supabaseStats.waitingFlags || 0,
       driverLocationUpdates: supabaseStats.driverLocationUpdates || 0,
       activeTrips: activeTripId ? 1 : 0,
-      driverStatus: supabaseStats.driverStatus || 0,
-      missedBusRequests: supabaseStats.missedBusRequests || 0,
       deviceSessions: supabaseStats.deviceSessions || 0,
       supabaseTime: supabaseStats.totalTime || 0,
       totalTime: totalElapsed
     };
 
     console.log('\n📊 CLEANUP SUMMARY:');
-    console.log(`  Bus Locations: ${cleanupSummary.busLocations}`);
     console.log(`  Waiting Flags: ${cleanupSummary.waitingFlags}`);
     console.log(`  Location Updates: ${cleanupSummary.driverLocationUpdates}`);
     console.log(`  Active Trips Ended: ${cleanupSummary.activeTrips}`);
-    console.log(`  Driver Status: ${cleanupSummary.driverStatus}`);
-    console.log(`  Missed Bus Requests: ${cleanupSummary.missedBusRequests}`);
     console.log(`  Device Sessions: ${cleanupSummary.deviceSessions}`);
     console.log(`  Supabase Time: ${cleanupSummary.supabaseTime}ms`);
     console.log(`  Total Time: ${cleanupSummary.totalTime}ms`);

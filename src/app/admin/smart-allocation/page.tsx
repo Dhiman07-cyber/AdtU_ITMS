@@ -3,26 +3,15 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { db } from "@/lib/firebase";
-import {
-  collection,
-  query,
-  where,
-  getDocs,
-} from "firebase/firestore";
 import { useAuth } from "@/contexts/auth-context";
 import { toast } from "react-hot-toast";
 import {
   Bus,
   Users,
-  AlertTriangle,
   ChevronRight,
-  Search,
-  Filter,
   Download,
   Sparkles,
-  RotateCcw,
   Activity,
-  Shield,
   Target,
   ArrowRightLeft,
   History,
@@ -55,7 +44,6 @@ import HeatStrip from "@/components/smart-allocation/HeatStrip";
 import RouteVisualization from "@/components/smart-allocation/RouteVisualization";
 import StudentRoster from "@/components/smart-allocation/StudentRoster";
 import ReassignmentPanel from "@/components/smart-allocation/ReassignmentPanel";
-import UndoPanel from "@/components/smart-allocation/UndoPanel";
 import ReassignmentSnackbar, {
   type RevertBufferData,
 } from "@/components/smart-allocation/ReassignmentSnackbar";
@@ -63,12 +51,11 @@ import { ReassignmentHistoryModal } from "@/components/assignment/ReassignmentHi
 import { PremiumPageLoader } from "@/components/LoadingSpinner";
 
 // Hooks
-// SPARK PLAN SAFETY: Routes data now uses paginated fetch
-import { usePaginatedCollection } from '@/hooks/usePaginatedCollection';
+// Data fetching via server-side API (PostgreSQL)
+import { useApiCollection } from '@/hooks/useApiCollection';
 
 // Services
 import { StopBusMapper } from "@/lib/services/stop-bus-mapper";
-import { ReassignmentService } from "@/lib/services/reassignment-service";
 import { AllocationRanker } from "@/lib/services/allocation-ranker";
 
 import {
@@ -107,7 +94,7 @@ export interface BusData {
     routeId: string;
     routeName: string;
     stops: Array<{
-      stopId: string;
+      stop_name: string;
       name: string;
       sequence: number;
     }>;
@@ -118,9 +105,8 @@ export interface StudentData {
   id: string;
   fullName: string;
   enrollmentId: string;
-  stopId: string;
-  stopName: string;
-  assignedBusId: string;
+  stop_name: string;
+  busId: string;
   semester?: string;
   phone?: string;
   photoURL?: string;
@@ -133,7 +119,7 @@ export interface ReassignmentPlan {
   fromBusId: string;
   toBusId: string;
   toBusNumber: string;
-  stopId: string;
+  stop_name: string;
   reason?: string;
   studentShift?: string; // Optimized: pass shift to avoid extra reads
 }
@@ -150,6 +136,7 @@ export default function SmartAllocationPage() {
     new Set(),
   );
   const [loading, setLoading] = useState(true);
+  const [isRefreshingCards, setIsRefreshingCards] = useState(false);
 
   // UI State
   const [overloadThreshold, setOverloadThreshold] = useState(0); // Default 0 = show all
@@ -171,11 +158,10 @@ export default function SmartAllocationPage() {
 
   // Services
   const stopBusMapper = useRef(new StopBusMapper());
-  const reassignmentService = useRef(new ReassignmentService());
   const ranker = useRef(new AllocationRanker());
 
   // Data Fetching
-  const { data: routesData, refresh: refreshRoutes } = usePaginatedCollection('routes', {
+  const { data: routesData, refresh: refreshRoutes } = useApiCollection('routes', {
     pageSize: 50, orderByField: 'routeName', orderDirection: 'asc', autoRefresh: false,
   });
 
@@ -192,40 +178,43 @@ export default function SmartAllocationPage() {
   }, [currentUser, userData, authLoading, router]);
 
   // Load Buses - One-time fetch
-  // SPARK PLAN SAFETY: Using getDocs (one-time) instead of onSnapshot (realtime)
-  // onSnapshot on entire collections was causing excessive reads!
-  const fetchBusData = useCallback(async () => {
-    if (!currentUser) return;
+  // Server-side API reads from PostgreSQL — no Firestore client reads
+  const fetchBusData = useCallback(async (silent = false): Promise<BusData[]> => {
+    if (!currentUser) return [];
 
-    setLoading(true);
+    if (silent) {
+      setIsRefreshingCards(true);
+    } else {
+      setLoading(true);
+    }
     try {
-      const [busesSnapshot, driversSnapshot] = await Promise.all([
-        getDocs(collection(db, "buses")),
-        getDocs(collection(db, "drivers")),
+      const token = await currentUser.getIdToken();
+      const [busesRes, driversRes, routesRes] = await Promise.all([
+        fetch('/api/buses', { headers: { Authorization: `Bearer ${token}` } }),
+        fetch('/api/drivers', { headers: { Authorization: `Bearer ${token}` } }),
+        fetch('/api/routes', { headers: { Authorization: `Bearer ${token}` } }),
       ]);
+      const busesJson = await busesRes.json();
+      const busesRaw = busesJson.buses || [];
+      const driversJson = await driversRes.json();
+      const driversRaw = Array.isArray(driversJson) ? driversJson : driversJson.drivers || [];
+      const routesJson = await routesRes.json();
+      const fetchedRoutes = routesJson.routes || (Array.isArray(routesJson) ? routesJson : []);
+      const allAvailableRoutes = [...fetchedRoutes, ...routesData];
+
       const busData: BusData[] = [];
       const driverMap = new Map<string, any>();
       const stopCountsByBus = new Map<string, Map<string, number>>();
 
-      driversSnapshot.forEach((driverDoc) => {
-        driverMap.set(driverDoc.id, driverDoc.data());
-      });
-      driversSnapshot.forEach((driverDoc) => {
-        driverMap.set(driverDoc.id, driverDoc.data());
-      });
-      // studentSnapshot logic REMOVED - using pre-calculated counts on bus docs
+      for (const d of driversRaw) {
+        const id = d.id || d.uid;
+        driverMap.set(id, d);
+      }
 
-      for (const busDoc of busesSnapshot.docs) {
-        const data = busDoc.data();
+      for (const data of busesRaw) {
+        const busId = data.busId || data.id;
 
-        console.log(`📄 Raw Firestore data for ${busDoc.id}:`, {
-          busNumber: data.busNumber,
-          routeId: data.routeId,
-          hasRoute: "route" in data,
-          hasStops: "stops" in data,
-        });
-
-        // Get driver info if exists - use CORRECT Firestore fields
+        // Get driver info if exists
         let driverData = {};
         const driverId = data.activeDriverId || data.assignedDriverId;
         if (driverId) {
@@ -238,18 +227,17 @@ export default function SmartAllocationPage() {
           }
         }
 
-        // JOIN DATA: Resolve Route from 'routes' collection using routeId
+        // JOIN DATA: Resolve Route from fetched routes using routeId
         let routeInfo = null;
-        let routeStops: Array<{
+        let route_stops: Array<{
           id: string;
           name: string;
           sequence: number;
           coordinates?: { lat: number; lng: number };
         }> = [];
 
-        // 1. Try to find route in the fetched routes collection (Best Practice)
-        if (data.routeId && routesData.length > 0) {
-          const matchedRoute = routesData.find(
+        if (data.routeId && allAvailableRoutes.length > 0) {
+          const matchedRoute = allAvailableRoutes.find(
             (r: any) =>
               r.id === data.routeId ||
               r.routeId === data.routeId ||
@@ -260,7 +248,7 @@ export default function SmartAllocationPage() {
             routeInfo = matchedRoute;
             // Map stops from matched route
             if (matchedRoute.stops && Array.isArray(matchedRoute.stops)) {
-              routeStops = matchedRoute.stops.map(
+              route_stops = matchedRoute.stops.map(
                 (stop: any, index: number) => {
                   if (typeof stop === "string") {
                     return {
@@ -271,9 +259,9 @@ export default function SmartAllocationPage() {
                   } else {
                     return {
                       id:
-                        stop.stopId || stop.id || stop.name || `stop_${index}`,
+                        stop.stop_name || stop.id || stop.name || `stop_${index}`,
                       name:
-                        stop.name || stop.stopName || `Stop ${index + 1}`,
+                        stop.name || stop.stop_name || `Stop ${index + 1}`,
                       sequence: stop.sequence || index + 1,
                       coordinates: stop.coordinates,
                     };
@@ -291,7 +279,7 @@ export default function SmartAllocationPage() {
           );
           const stopsArray = data.route?.stops || data.stops;
           if (Array.isArray(stopsArray)) {
-            routeStops = stopsArray.map((stop: any, index: number) => {
+            route_stops = stopsArray.map((stop: any, index: number) => {
               if (typeof stop === "string") {
                 return {
                   id: stop,
@@ -300,8 +288,8 @@ export default function SmartAllocationPage() {
                 };
               } else {
                 return {
-                  id: stop.stopId || stop.id || stop.name || `stop_${index}`,
-                  name: stop.name || stop.stopName || `Stop ${index + 1}`,
+                  id: stop.stop_name || stop.id || stop.name || `stop_${index}`,
+                  name: stop.name || stop.stop_name || `Stop ${index + 1}`,
                   sequence: stop.sequence || index + 1,
                   coordinates: stop.coordinates,
                 };
@@ -313,8 +301,8 @@ export default function SmartAllocationPage() {
         // Count students per stop - Use pre-calculated stopCounts from Firestore
         const stopCountsMap = new Map<string, number>();
         if (data.stopCounts) {
-          Object.entries(data.stopCounts).forEach(([stopId, count]) => {
-            stopCountsMap.set(stopId, count as number);
+          Object.entries(data.stopCounts).forEach(([stop_name, count]) => {
+            stopCountsMap.set(stop_name, count as number);
           });
         }
 
@@ -331,25 +319,32 @@ export default function SmartAllocationPage() {
           formattedRouteName = "Route-" + formattedRouteName;
         }
 
+        const morningCount = Number(data.morningLoad ?? data.morning_load ?? data.load?.morningCount ?? data.load?.morning_count ?? 0);
+        const eveningCount = Number(data.eveningLoad ?? data.evening_load ?? data.load?.eveningCount ?? data.load?.evening_count ?? 0);
+        const currentMembers = Number(data.currentMembers ?? data.current_members ?? (morningCount + eveningCount));
+
         const busObject = {
-          id: busDoc.id,
-          busNumber: data.busNumber || "Unknown",
-          routeId: data.route?.routeId || data.routeId || "",
+          id: busId,
+          busNumber: data.busNumber || data.bus_number || "Unknown",
+          routeId: data.route?.routeId || data.routeId || data.route_id || "",
           routeName: formattedRouteName,
           driverId: driverId,
-          currentMembers: data.currentMembers || 0,
-          capacity: data.capacity || 50,
-          shift: data.shift || "morning",
-          stops: routeStops,
+          currentMembers: currentMembers,
+          capacity: Number(data.capacity || 50),
+          shift: data.shift || "both",
+          stops: route_stops,
           stopCounts: stopCountsMap,
-          load: data.load || { morningCount: 0, eveningCount: 0 },
+          load: {
+            morningCount,
+            eveningCount,
+          },
           // Include full route object for ReassignmentPanel
           route: {
             routeId:
-              routeInfo?.routeId || data.route?.routeId || data.routeId || "",
+              routeInfo?.routeId || routeInfo?.id || data.route?.routeId || data.routeId || data.route_id || "",
             routeName: formattedRouteName,
-            stops: routeStops.map((s) => ({
-              stopId: s.id,
+            stops: route_stops.map((s) => ({
+              stop_name: s.id,
               name: s.name,
               sequence: s.sequence,
             })),
@@ -370,12 +365,13 @@ export default function SmartAllocationPage() {
       return [];
     } finally {
       setLoading(false);
+      setIsRefreshingCards(false);
     }
   }, [currentUser, routesData]);
 
   useEffect(() => {
-    fetchBusData();
-  }, [fetchBusData]);
+    fetchBusData(false);
+  }, [currentUser]);
 
   // Load Students for Selected Bus
   useEffect(() => {
@@ -395,78 +391,54 @@ export default function SmartAllocationPage() {
         // Query students with multiple possible field values
         // Students may have busId stored as document ID (bus_6), busNumber (AS-01-SC-1392), or just a number
         // Firestore doesn't support OR queries easily, so we'll do multiple queries
-        const possibleBusIds = [
-          selectedBus.id,           // Firestore document ID (e.g., "bus_6")
-          selectedBus.busNumber,    // Vehicle registration (e.g., "AS-01-SC-1392")
-        ].filter(Boolean);
+        const possibleBusIds = Array.from(new Set([
+          selectedBus.id,
+          selectedBus.busNumber,
+          (selectedBus as any).busId,
+        ].filter(Boolean)));
 
         console.log("📋 Searching with bus identifiers:", possibleBusIds);
 
-        const queries = [];
-
-        // Query by busId field with all possible values
-        for (const busId of possibleBusIds) {
-          queries.push(
-            getDocs(
-              query(
-                collection(db, "students"),
-                where("busId", "==", busId),
-                where("status", "==", "active"),
-              ),
-            ),
-          );
-          // Also query by assignedBusId
-          queries.push(
-            getDocs(
-              query(
-                collection(db, "students"),
-                where("assignedBusId", "==", busId),
-                where("status", "==", "active"),
-              ),
-            ),
-          );
+        const allStudents: any[] = [];
+        const token = await currentUser.getIdToken();
+        for (const busIdParam of possibleBusIds) {
+          const res = await fetch(`/api/students?busId=${encodeURIComponent(busIdParam)}`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (res.ok) {
+            const students = await res.json();
+            allStudents.push(...students);
+          }
         }
 
-
-        const queryResults = await Promise.all(queries);
         const studentData: StudentData[] = [];
         const processedIds = new Set<string>();
 
-        console.log(`📊 Got ${queryResults.length} query result sets`);
+        console.log(`📊 Got ${allStudents.length} students from API`);
 
-        // Process ALL query results and deduplicate
-        queryResults.forEach((snapshot, index) => {
-          console.log(`📋 Query ${index + 1}: ${snapshot.docs.length} students found`);
-          snapshot.forEach((doc) => {
-            if (processedIds.has(doc.id)) return; // Skip duplicates
-            processedIds.add(doc.id);
+        // Deduplicate and map API results
+        for (const s of allStudents) {
+          const id = s.id;
+          if (processedIds.has(id)) continue;
+          processedIds.add(id);
 
-            const data = doc.data();
-            // Match student stopId with bus stop stopId (case-insensitive)
-            const studentStopId = (data.stopId || "").toLowerCase();
-            const stop = selectedBus.stops.find(
-              (s) => (s.id || "").toLowerCase() === studentStopId,
-            );
+          const studentStopId = (s.stop_name || "").toLowerCase();
+          const stop = selectedBus.stops.find(
+            (st) => (st.id || "").toLowerCase() === studentStopId,
+          );
 
-            console.log(
-              `Student ${data.fullName}: stopId="${data.stopId}", matched stop:`,
-              stop?.name || "NOT FOUND",
-            );
-
-            studentData.push({
-              id: doc.id,
-              fullName: data.fullName || data.name || "Unknown",
-              enrollmentId: data.enrollmentId || "N/A",
-              stopId: data.stopId || "",
-              stopName: stop?.name || data.stopName || "Unknown Stop",
-              assignedBusId: data.busId || data.assignedBusId || selectedBus.id,
-              semester: data.semester,
-              phone: data.phone,
-              photoURL: data.photoURL,
-              shift: data.shift,
-            });
+          studentData.push({
+            id,
+            fullName: s.name || "Unknown",
+            enrollmentId: s.enrollmentId || "N/A",
+            stop_name: s.stop_name || stop?.name || stop?.id || "Unknown Stop",
+            busId: s.busId || s.busId || selectedBus.id,
+            semester: s.semester,
+            phone: s.phone,
+            photoURL: s.profilePhotoUrl,
+            shift: s.shift,
           });
-        });
+        }
 
         console.log("✅ Loaded students:", studentData.length);
         console.log(
@@ -486,21 +458,22 @@ export default function SmartAllocationPage() {
           (s) => (s.shift || "").toLowerCase().includes("evening")
         ).length;
 
-        // Update the buses state to reflect actual counts
-        setBuses((prevBuses) =>
-          prevBuses.map((b) =>
-            b.id === selectedBus.id
-              ? {
-                ...b,
-                load: {
-                  morningCount: morningStudents,
-                  eveningCount: eveningStudents,
-                },
-                currentMembers: studentData.length,
-              }
-              : b
-          )
-        );
+        if (studentData.length > 0) {
+          setBuses((prevBuses) =>
+            prevBuses.map((b) =>
+              b.id === selectedBus.id
+                ? {
+                  ...b,
+                  load: {
+                    morningCount: morningStudents,
+                    eveningCount: eveningStudents,
+                  },
+                  currentMembers: studentData.length,
+                }
+                : b
+            )
+          );
+        }
 
         console.log(`📊 Updated bus ${selectedBus.busNumber} counts: Morning=${morningStudents}, Evening=${eveningStudents}`);
 
@@ -549,13 +522,12 @@ export default function SmartAllocationPage() {
     // Evening tab: show buses with shift "both" only (Evening students can only be on Both buses)
     if (shiftFilter === "morning") {
       filtered = filtered.filter((bus) => {
-        const s = bus.shift?.toLowerCase();
+        const s = (bus.shift || "both").toLowerCase();
         return s === "morning" || s === "both";
       });
     } else if (shiftFilter === "evening") {
       filtered = filtered.filter((bus) => {
-        const s = bus.shift?.toLowerCase();
-        // Evening students can ride Evening-only buses OR Both-shift buses
+        const s = (bus.shift || "both").toLowerCase();
         return s === "evening" || s === "both";
       });
     }
@@ -619,21 +591,21 @@ export default function SmartAllocationPage() {
   };
 
   // Select/Deselect Students by Stop (TOGGLE behavior)
-  // Uses case-insensitive stopId matching for consistency
+  // Uses case-insensitive stop_name matching for consistency
   // Selects ALL students at this stop regardless of shift (matching displayStudents behavior)
-  const selectByStop = (stopId: string, limit?: number) => {
-    const normalizedStopId = (stopId || "").toLowerCase().trim();
+  const selectByStop = (stop_name: string, limit?: number) => {
+    const normalizedStopId = (stop_name || "").toLowerCase().trim();
 
     // Get all students at this stop (no shift filter - show all students on selected bus)
     const stopStudents = students
       .filter((s) => {
         const matchesStop =
-          (s.stopId || "").toLowerCase().trim() === normalizedStopId;
+          (s.stop_name || "").toLowerCase().trim() === normalizedStopId;
         return matchesStop;
       })
       .slice(0, limit || undefined);
 
-    console.log(`🎯 selectByStop called for "${stopId}":`, {
+    console.log(`🎯 selectByStop called for "${stop_name}":`, {
       normalizedStopId,
       totalStudentsAtStop: stopStudents.length,
       studentNames: stopStudents.map((s) => s.fullName),
@@ -641,7 +613,7 @@ export default function SmartAllocationPage() {
     });
 
     if (stopStudents.length === 0) {
-      console.log(`   ⚠️ No students found at stop "${stopId}"`);
+      console.log(`   ⚠️ No students found at stop "${stop_name}"`);
       return;
     }
 
@@ -985,6 +957,11 @@ export default function SmartAllocationPage() {
                               : "bg-white dark:bg-zinc-800 hover:bg-red-50/30 dark:hover:bg-zinc-800/80 border-zinc-200 dark:border-zinc-700 hover:border-red-300 dark:hover:border-red-800",
                           )}
                         >
+                          {isRefreshingCards && (
+                            <div className="absolute inset-0 bg-white/70 dark:bg-zinc-900/70 backdrop-blur-[1px] rounded-lg flex items-center justify-center z-10">
+                              <div className="w-4 h-4 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />
+                            </div>
+                          )}
                           <div className="flex items-center justify-between mb-1.5">
                             <div className="flex items-center gap-2">
                               <div
@@ -1120,7 +1097,7 @@ export default function SmartAllocationPage() {
                     bus={selectedBus}
                     students={students}
                     selectedStudents={selectedStudents}
-                    onStopClick={(stopId) => selectByStop(stopId)}
+                    onStopClick={(stop_name) => selectByStop(stop_name)}
                     shiftFilter={shiftFilter}
                   />
                 </CardContent>
@@ -1264,13 +1241,11 @@ export default function SmartAllocationPage() {
             // Don't deselect students when closing the panel
             // setSelectedStudents(new Set()); // Removed this line
           }}
-          onSuccess={(result) => {
+          onSuccess={async (result) => {
             // Store revert buffer for undo
             const revertData: RevertBufferData = {
+              operationId: result.operationId,
               affectedStudents: result.assignments.map((assignment) => {
-                // Find the student's original shift BEFORE reassignment.
-                // The students array still holds the pre-reassignment state because
-                // state is refreshed only after fetchBusData() completes below.
                 const originalStudent = students.find((s) => s.id === assignment.studentId);
                 return {
                   uid: assignment.studentId,
@@ -1278,13 +1253,8 @@ export default function SmartAllocationPage() {
                   newBusId: assignment.targetBusId,
                   oldRouteId: selectedBus?.routeId || "",
                   newRouteId: "",
-                  stopId: originalStudent?.stopId || "",
-                  stopName: (originalStudent as any)?.stopName || "",
-                  // shift = Target Shift (what the student now has)
+                  stop_name: originalStudent?.stop_name || "",
                   shift: assignment.shift,
-                  // oldShift = Original Shift (what the student had before reassignment)
-                  // Falls back to assignment.shift if the original could not be found
-                  // (worst case: undo will still correctly update bus counters for same-shift reassignments)
                   oldShift: (originalStudent?.shift
                     ? (originalStudent.shift.charAt(0).toUpperCase() + originalStudent.shift.slice(1).toLowerCase()) as CanonicalShift
                     : assignment.shift),
@@ -1297,13 +1267,18 @@ export default function SmartAllocationPage() {
             setRevertBuffer(revertData);
             setSnackbarStudentCount(result.movedCount);
             setShowSnackbar(true);
-            // Reset selection state only after successful reassignment
             setSelectedStudents(new Set());
             setShowSuggestions(false);
 
-            // Explicitly refresh data since onSnapshot was removed for performance
-            refreshRoutes();
-            fetchBusData();
+            // Silently refresh bus data without triggering full-page reload
+            const freshBuses: BusData[] = await fetchBusData(true);
+            if (Array.isArray(freshBuses) && freshBuses.length > 0 && selectedBus) {
+              const currentBusId = selectedBus.id;
+              const updatedBus = freshBuses.find((b: BusData) => b.id === currentBusId);
+              if (updatedBus) {
+                setSelectedBus(updatedBus);
+              }
+            }
           }}
         />
       )}
@@ -1315,120 +1290,33 @@ export default function SmartAllocationPage() {
         revertBuffer={revertBuffer}
         autoDismissSeconds={120}
         onRevert={async () => {
-          if (!revertBuffer) return;
+          if (!revertBuffer || !currentUser) return;
 
           try {
-            // Revert the reassignment using a transaction
-            const { runTransaction, doc, serverTimestamp, getDoc } =
-              await import("firebase/firestore");
-
-            await runTransaction(db, async (transaction) => {
-              // Track load changes per bus for revert
-              const busLoadChanges = new Map<
-                string,
-                {
-                  morningDelta: number;
-                  eveningDelta: number;
-                }
-              >();
-
-              // Calculate the reverse deltas for each bus
-              for (const student of revertBuffer.affectedStudents) {
-                // For the OLD bus (where student is going BACK to):
-                // INCREMENT using ORIGINAL shift (student.oldShift).
-                // For the NEW bus (where student was moved to):
-                // DECREMENT using TARGET shift (student.shift).
-                if (!busLoadChanges.has(student.oldBusId)) {
-                  busLoadChanges.set(student.oldBusId, { morningDelta: 0, eveningDelta: 0 });
-                }
-                if (!busLoadChanges.has(student.newBusId)) {
-                  busLoadChanges.set(student.newBusId, { morningDelta: 0, eveningDelta: 0 });
-                }
-
-                const oldBusChanges = busLoadChanges.get(student.oldBusId)!;
-                const newBusChanges = busLoadChanges.get(student.newBusId)!;
-
-                // Revert source bus (old bus) — increment with ORIGINAL shift
-                const originalShift = normalizeShift(student.oldShift || student.shift);
-                const oldDeltas = getShiftDeltas(originalShift);
-                if (oldDeltas.affectsMorning) oldBusChanges.morningDelta += 1;
-                if (oldDeltas.affectsEvening) oldBusChanges.eveningDelta += 1;
-
-                // Revert destination bus (new bus) — decrement with TARGET shift
-                const targetShift = normalizeShift(student.shift);
-                const newDeltas = getShiftDeltas(targetShift);
-                if (newDeltas.affectsMorning) newBusChanges.morningDelta -= 1;
-                if (newDeltas.affectsEvening) newBusChanges.eveningDelta -= 1;
-              }
-
-              // First, read all affected bus documents (must be done before writes)
-              const busSnapshots = new Map<string, any>();
-              for (const busId of busLoadChanges.keys()) {
-                const busRef = doc(db, "buses", busId);
-                const busSnap = await transaction.get(busRef);
-                if (busSnap.exists()) {
-                  busSnapshots.set(busId, busSnap.data());
-                }
-              }
-
-              // Update all bus documents with reverted counts
-              for (const [busId, changes] of busLoadChanges) {
-                const busRef = doc(db, "buses", busId);
-                const busData = busSnapshots.get(busId);
-
-                if (busData) {
-                  const currentLoad = busData.load || {
-                    morningCount: 0,
-                    eveningCount: 0,
-                  };
-                  const newMorningCount = Math.max(
-                    0,
-                    (currentLoad.morningCount || 0) + changes.morningDelta,
-                  );
-                  const newEveningCount = Math.max(
-                    0,
-                    (currentLoad.eveningCount || 0) + changes.eveningDelta,
-                  );
-
-                  transaction.update(busRef, {
-                    "load.morningCount": newMorningCount,
-                    "load.eveningCount": newEveningCount,
-                    "load.totalCount": newMorningCount + newEveningCount,
-                    currentMembers: newMorningCount + newEveningCount,
-                    updatedAt: serverTimestamp(),
-                  });
-
-                  console.log(
-                    `🔄 Reverting bus ${busId}: morning ${currentLoad.morningCount}→${newMorningCount}, evening ${currentLoad.eveningCount}→${newEveningCount}`,
-                  );
-                }
-              }
-
-              // Revert student documents — restore busId, routeId, shift, AND stopId/stopName
-              for (const student of revertBuffer.affectedStudents) {
-                const studentRef = doc(db, "students", student.uid);
-                transaction.update(studentRef, {
-                  busId: student.oldBusId,
-                  routeId: student.oldRouteId,
-                  // Restore the original shift the student had before reassignment.
-                  shift: student.oldShift || student.shift,
-                  // Restore the original stop the student had before reassignment.
-                  stopId: student.stopId || '',
-                  stopName: student.stopName || '',
-                  updatedAt: serverTimestamp(),
-                });
-
-                console.log(
-                  `🔄 Reverting student ${student.uid}: busId ${student.newBusId}→${student.oldBusId}, shift ${student.shift}→${student.oldShift || student.shift}`,
-                );
-              }
+            // Call the PostgreSQL-based rollback API
+            const token = await currentUser.getIdToken();
+            const response = await fetch('/api/admin/rollback-reassignment', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`,
+              },
+              body: JSON.stringify({
+                operationId: revertBuffer.operationId,
+              }),
             });
 
+            const result = await response.json();
+
+            if (!response.ok || !result.success) {
+              throw new Error(result.error || 'Rollback failed');
+            }
+
             // Refresh data to reflect the reversion
-            const freshBuses = await fetchBusData();
+            const freshBuses = await fetchBusData(true);
             refreshRoutes();
 
-            toast.success("✅ Reassignment reverted successfully");
+            toast.success(`✅ Rolled back ${result.studentCount || revertBuffer.affectedStudents.length} student(s)`);
             setRevertBuffer(null);
             setShowSnackbar(false);
 
@@ -1449,13 +1337,15 @@ export default function SmartAllocationPage() {
             toast.error("Failed to revert: " + error.message);
           }
         }}
-        onConfirm={() => {
-          // Finalize the reassignment
+        onConfirm={async () => {
+          // Finalize the reassignment and trigger card refresh
           toast.success(
             `✅ ${snackbarStudentCount} students reassigned successfully`,
           );
           setRevertBuffer(null);
           setShowSnackbar(false);
+          refreshRoutes();
+          await fetchBusData(true);
         }}
         onDismiss={() => {
           setShowSnackbar(false);

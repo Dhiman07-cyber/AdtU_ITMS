@@ -79,7 +79,7 @@ function StudentBusLive() {
           console.log('Student data fetched in bus page:', student);
 
           // Fetch route data first
-          const routeId = student.routeId || student.assignedRouteId;
+          const routeId = student.routeId || student.routeId;
           if (routeId) {
             console.log('Fetching route data for routeId:', routeId);
             const route = await getRouteById(routeId);
@@ -90,7 +90,7 @@ function StudentBusLive() {
 
               // Set default selected stop to the first stop
               if (route.stops && route.stops.length > 0) {
-                setSelectedStop(route.stops[0].stopId);
+                setSelectedStop(route.stops[0].stop_name);
               }
 
               // Fetch buses for this route
@@ -109,7 +109,7 @@ function StudentBusLive() {
           }
 
           // Also try direct bus ID if available (fallback)
-          const busId = student.busId || student.assignedBusId;
+          const busId = student.busId || student.busId;
           if (busId && !busData) {
             console.log('Fetching direct bus data for busId:', busId);
             const bus = await getBusById(busId);
@@ -208,7 +208,7 @@ function StudentBusLive() {
   }, [permissionDenied]);
 
   // Handle raising waiting flag
-  const handleRaiseFlag = useCallback(async (stopId: string, stopName: string) => {
+  const handleRaiseFlag = useCallback(async (stop_name: string) => {
     if (raisingFlag) return;
     if (!currentUser || !studentData?.busId || !studentData?.routeId) return;
 
@@ -218,7 +218,7 @@ function StudentBusLive() {
       const token = await currentUser.getIdToken();
 
       // Find stop details
-      const stop = stops.find(s => s.stopId === stopId);
+      const stop = stops.find(s => s.stop_name === stop_name);
       if (!stop) {
         addToast("Stop not found", "error");
         return;
@@ -232,8 +232,7 @@ function StudentBusLive() {
           idToken: token,
           busId: studentData.busId,
           routeId: studentData.routeId,
-          stopId: stopId,
-          stopName: stopName
+          stop_name: stop_name
         })
       });
 
@@ -243,7 +242,7 @@ function StudentBusLive() {
         setWaiting(true);
         setWaitingFlagId(result.flagId);
         setShowWaitingFlagModal(false);
-        addToast(`🚩 Waiting flag raised at ${stopName}! Driver has been notified.`, "success");
+        addToast(`🚩 Waiting flag raised at ${stop_name}! Driver has been notified.`, "success");
       } else {
         addToast(result.error || "Failed to raise waiting flag", "error");
       }
@@ -393,7 +392,7 @@ function StudentBusLive() {
                   </div>
                   <div>
                     <p className="text-sm text-muted-foreground">Current Passengers</p>
-                    <p className="font-medium">{busData.currentPassengerCount || 0} passengers</p>
+                    <p className="font-medium">{busData.currentMembers || 0} passengers</p>
                   </div>
                 </div>
 
@@ -519,7 +518,7 @@ function StudentBusLive() {
           </CardHeader>
           <CardContent>
             <DynamicStudentMap
-              busId={studentData.busId || studentData.assignedBusId}
+              busId={studentData.busId || studentData.busId}
               routeId={studentData.routeId}
               journeyActive={tripActive}
               studentLocation={position ? { lat: position.lat, lng: position.lng, accuracy: position.accuracy } : undefined}

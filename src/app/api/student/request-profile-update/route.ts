@@ -1,8 +1,9 @@
-import { NextResponse } from 'next/server';
-import { db as adminDb, FieldValue } from '@/lib/firebase-admin';
+﻿import { NextResponse } from 'next/server';
+import { db as adminDb } from '@/lib/firebase-admin';
 import { withSecurity } from '@/lib/security/api-security';
 import { RequestProfileUpdateSchema } from '@/lib/security/validation-schemas';
 import { RateLimits } from '@/lib/security/rate-limiter';
+import { getById, update } from '@/domains/student';
 
 /**
  * POST /api/student/request-profile-update
@@ -14,21 +15,20 @@ export const POST = withSecurity(
         const { newImageUrl, fullName } = body as any;
         const studentUid = auth.uid;
 
-        // Check if the student record exists
-        const studentDoc = await adminDb.collection('students').doc(studentUid).get();
-        if (!studentDoc.exists) {
+        // Check if the student record exists in PostgreSQL
+        const student = await getById(studentUid);
+        if (!student) {
             return NextResponse.json(
                 { error: 'Student record not found' },
                 { status: 404 }
             );
         }
 
-        const studentData = studentDoc.data()!;
-        const currentImageUrl = studentData.profilePhotoUrl || '';
-        const currentName = studentData.fullName || studentData.name || '';
-        const assignedBusId = studentData.assignedBusId || studentData.busId || null;
+        const currentImageUrl = student.profilePhotoUrl || '';
+        const currentName = student.fullName || student.name || '';
+        const busId = student.busId || student.busId || null;
 
-        // Create a profile update request
+        // Create a profile update request document
         const requestId = `profile_update_${studentUid}_${Date.now()}`;
         const requestData = {
             requestId,
@@ -38,28 +38,19 @@ export const POST = withSecurity(
             newImageUrl,
             currentName,
             newName: fullName || currentName,
-            assignedBusId, // Store the bus ID so drivers can filter requests
+            busId, // Store the bus ID so drivers can filter requests
             status: 'pending',
-            createdAt: FieldValue.serverTimestamp(),
-            updatedAt: FieldValue.serverTimestamp()
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
         };
 
-        // Save the request and update student ref atomically
-        await adminDb.runTransaction(async (transaction) => {
-            const requestRef = adminDb.collection('profile_update_requests').doc(requestId);
-            const studentRef = adminDb.collection('students').doc(studentUid);
+        // Save review request to Firestore (driver approval queue belongs to Driver domain)
+        const requestRef = adminDb.collection('profile_update_requests').doc(requestId);
+        await requestRef.set(requestData);
 
-            // Read student inside transaction for consistency
-            const freshStudent = await transaction.get(studentRef);
-            if (!freshStudent.exists) {
-                throw new Error('Student record not found');
-            }
-
-            transaction.set(requestRef, requestData);
-            transaction.update(studentRef, {
-                pendingProfileUpdate: requestId,
-                updatedAt: FieldValue.serverTimestamp()
-            });
+        // Update the student profile's pending flag in PostgreSQL
+        await update(studentUid, {
+            pendingProfileUpdate: requestId,
         });
 
         console.log(`Profile update request created for student ${studentUid}: ${requestId}`);

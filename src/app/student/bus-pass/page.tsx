@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 /**
  * Student Bus Pass Page
@@ -51,16 +51,16 @@ export default function StudentBusPassPage() {
             ...data,
             uid: currentUser.uid, // Ensure UID is stored
             fullName: data.fullName || data.name,
-            busId: data.busId || data.assignedBusId,
-            routeId: data.routeId || data.assignedRouteId,
+            busId: data.busId || data.busId,
+            routeId: data.routeId || data.routeId,
             status: data.status || 'pending',
             shift: data.shift || 'Not Set',
-            stopId: data.stopId || data.stopName || 'Not Set'
+            stop_name: data.stop_name || data.stop_name || 'Not Set'
           });
 
           // Fetch bus and route data for display purposes
-          const studentBusId = data.busId || data.assignedBusId;
-          const studentRouteId = data.routeId || data.assignedRouteId;
+          const studentBusId = data.busId || data.busId;
+          const studentRouteId = data.routeId || data.routeId;
 
           if (studentBusId) {
             try {
@@ -239,7 +239,7 @@ export default function StudentBusPassPage() {
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Stop Point</span>
                       <span className="text-sm font-bold text-slate-200 truncate ml-4 text-right">
-                        {studentData.stopName || 'Not Assigned'}
+                        {studentData.stop_name || 'Not Assigned'}
                       </span>
                     </div>
                   </div>

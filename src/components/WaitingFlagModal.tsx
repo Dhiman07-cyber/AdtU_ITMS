@@ -20,7 +20,7 @@ import {
 } from "@/components/ui/select";
 
 interface RouteStop {
-  stopId: string;
+  stop_name: string;
   name: string;
   lat: number;
   lng: number;
@@ -31,7 +31,7 @@ interface RouteStop {
 interface WaitingFlagModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onConfirm: (stopId: string, stopName: string) => void;
+  onConfirm: (stop_name: string) => void;
   stops: RouteStop[];
   loading?: boolean;
 }
@@ -43,14 +43,14 @@ export default function WaitingFlagModal({
   stops,
   loading = false
 }: WaitingFlagModalProps) {
-  const [selectedStopId, setSelectedStopId] = useState<string>("");
+  const [selected_stop_name, setSelectedStopId] = useState<string>("");
 
   const handleConfirm = () => {
-    if (!selectedStopId) return;
+    if (!selected_stop_name) return;
     
-    const selectedStop = stops.find(s => s.stopId === selectedStopId);
+    const selectedStop = stops.find(s => s.stop_name === selected_stop_name);
     if (selectedStop) {
-      onConfirm(selectedStopId, selectedStop.name);
+      onConfirm(selected_stop_name);
       setSelectedStopId(""); // Reset
     }
   };
@@ -93,7 +93,7 @@ export default function WaitingFlagModal({
               Select your stop
             </label>
             <Select
-              value={selectedStopId}
+              value={selected_stop_name}
               onValueChange={setSelectedStopId}
             >
               <SelectTrigger className="w-full">
@@ -101,7 +101,7 @@ export default function WaitingFlagModal({
               </SelectTrigger>
               <SelectContent>
                 {stops.map((stop) => (
-                  <SelectItem key={stop.stopId} value={stop.stopId}>
+                  <SelectItem key={stop.stop_name} value={stop.stop_name}>
                     {stop.name} {stop.time && `(${stop.time})`}
                   </SelectItem>
                 ))}
@@ -114,7 +114,7 @@ export default function WaitingFlagModal({
           <Button 
             onClick={handleConfirm} 
             className="w-full"
-            disabled={!selectedStopId || loading}
+            disabled={!selected_stop_name || loading}
           >
             {loading ? (
               <>

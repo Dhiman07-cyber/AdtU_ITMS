@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState, useEffect } from "react";
 import { useAuth } from '@/contexts/auth-context';
@@ -43,7 +43,7 @@ export default function AddBusPage() {
     driverUID: "",
     routeId: "",
     shift: "", // No default shift
-    status: "Active",
+    status: "active",
     morningLoad: "",
     eveningLoad: ""
   });
@@ -83,7 +83,7 @@ export default function AddBusPage() {
         const nextNum = busesData.length + 1;
         const nextIdDisplay = nextNum.toString();
 
-        setBusData(prev => ({ ...prev, busId: nextIdDisplay, status: "Active" }));
+        setBusData(prev => ({ ...prev, busId: nextIdDisplay, status: "active" }));
         setDefaultBusIdValue(nextIdDisplay);
         setBuses(busesData);
 
@@ -216,7 +216,7 @@ export default function AddBusPage() {
             morningCount: parseInt(busData.morningLoad) || 0,
             eveningCount: parseInt(busData.eveningLoad) || 0
           },
-          status: busData.status || "Active"
+          status: busData.status || "active"
         }),
       });
 
@@ -247,7 +247,7 @@ export default function AddBusPage() {
       driverUID: "",
       routeId: "",
       shift: "",
-      status: "Active",
+      status: "active",
       morningLoad: "",
       eveningLoad: ""
     });
@@ -357,7 +357,7 @@ export default function AddBusPage() {
                     Reserved (Category-1)
                   </div>
                   {drivers
-                    .filter(d => !d.assignedBusId && !d.busId && !d.busAssigned)
+                    .filter(d => !d.busId && !d.busId && !d.busAssigned)
                     .map(driver => (
                       <SelectItem key={driver.uid} value={driver.uid || driver.id}>
                         {driver.fullName || driver.name || 'Unknown'}
@@ -368,9 +368,9 @@ export default function AddBusPage() {
                     Assigned (Category-2)
                   </div>
                   {drivers
-                    .filter(d => d.assignedBusId || d.busId || d.busAssigned)
+                    .filter(d => d.busId || d.busId || d.busAssigned)
                     .map(driver => {
-                      const busId = driver.assignedBusId || driver.busId || driver.busAssigned;
+                      const busId = driver.busId || driver.busId || driver.busAssigned;
                       const bus = buses.find(b => b.busId === busId || b.id === busId);
                       return (
                         <SelectItem key={driver.uid} value={driver.uid || driver.id} disabled>
@@ -451,13 +451,13 @@ export default function AddBusPage() {
                   label="Status"
                   value={busData.status}
                   onChange={(value) => setBusData(prev => ({ ...prev, status: value }))}
-                  placeholder="Active"
+                  placeholder="active"
                   className="bg-gray-800 border-gray-700 focus:border-purple-500 text-white py-6 cursor-pointer"
                   required
                 >
-                  <SelectItem value="Active">Active</SelectItem>
-                  <SelectItem value="Inactive">Inactive</SelectItem>
-                  <SelectItem value="Maintenance">Maintenance</SelectItem>
+                  <SelectItem value="active">Active</SelectItem>
+                  <SelectItem value="inactive">Inactive</SelectItem>
+                  <SelectItem value="maintenance">Maintenance</SelectItem>
                 </OptimizedSelect>
               </div>
 

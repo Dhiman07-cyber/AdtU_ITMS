@@ -1,28 +1,30 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { adminAuth, adminDb } from '@/lib/firebase-admin';
-import { getSystemConfig, updateSystemConfig } from '@/lib/system-config-service';
-import { DEFAULT_BUS_FEE } from '@/config/runtime';
-// NotificationService import might need adjustment if not handling notifications in this route anymore, 
-// but seemingly it sends notifications.
-import { NotificationService } from '@/lib/notifications/NotificationService';
-import { NotificationTarget } from '@/lib/notifications/types';
+import { adminAuth } from '@/lib/firebase-admin';
+import { pgInsertNotification } from '@/domains/notification/repositories/notification.repository.pg';
+import { getSystemConfig, updateSystemConfig } from '@/domains/admin';
+import { getUserById, getAdminById } from '@/domains/identity';
 
-// GET: Retrieve bus fees from system config (Firestore)
+// GET: Retrieve bus fees from system config (Firestore settings/config)
 export async function GET(req: NextRequest) {
   try {
-    const systemConfig = await getSystemConfig();
-    // Access busFee from system config
-    const busFeeData = systemConfig?.busFee || { amount: DEFAULT_BUS_FEE };
+    const systemConfigResult = await getSystemConfig();
+    const busFeeAmount = systemConfigResult.data?.busFee?.amount;
+    if (typeof busFeeAmount !== 'number') {
+      return NextResponse.json(
+        { message: 'Bus fee configuration is missing in Firestore settings. Please try again later.' },
+        { status: 503 }
+      );
+    }
 
     return NextResponse.json({
-      amount: busFeeData.amount,
-      fees: busFeeData.amount
+      amount: busFeeAmount,
+      fees: busFeeAmount
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error fetching bus fees:', error);
     return NextResponse.json(
-      { message: 'Failed to fetch bus fees' },
-      { status: 500 }
+      { message: error?.message || 'Unstable network detected, please try again later' },
+      { status: 503 }
     );
   }
 }
@@ -39,9 +41,9 @@ export async function POST(req: NextRequest) {
     const decodedToken = await adminAuth.verifyIdToken(token);
     const uid = decodedToken.uid;
 
-    // Check if user is admin
-    const userDoc = await adminDb.collection('users').doc(uid).get();
-    if (!userDoc.exists || userDoc.data()?.role !== 'admin') {
+    // Check if user is admin via PostgreSQL (canonical source of truth)
+    const user = await getUserById(uid);
+    if (!user || user.role !== 'admin') {
       return NextResponse.json({ message: 'Access denied. Admin only.' }, { status: 403 });
     }
 
@@ -52,84 +54,76 @@ export async function POST(req: NextRequest) {
     }
 
     // Get current config
-    const systemConfig = await getSystemConfig();
-    const oldAmount = systemConfig?.busFee?.amount || DEFAULT_BUS_FEE;
+    const systemConfigResult = await getSystemConfig();
+    const oldAmount = systemConfigResult.data?.busFee?.amount || 0;
 
     // Prepare updated bus fee data
     // Note: The service will handle truncation of history
-    const existingHistory = systemConfig?.busFee?.history || [];
+    const existingHistory = systemConfigResult.data?.busFee?.history || [];
     const newHistoryEntry = {
       amount: oldAmount,
-      updatedAt: systemConfig?.busFee?.updatedAt || new Date().toISOString(),
+      updatedAt: systemConfigResult.data?.busFee?.updatedAt || new Date().toISOString(),
     };
+    const combinedHistory = [...existingHistory, newHistoryEntry].slice(-3);
 
     // Construct new config object
     // We clone the existing config to preserve other fields
     const updatedConfig = {
-      ...systemConfig,
+      ...systemConfigResult.data,
       busFee: {
         amount: amount,
         updatedAt: new Date().toISOString(),
-        version: (systemConfig?.busFee?.version || 0) + 1,
-        history: [...existingHistory, newHistoryEntry]
+        version: (systemConfigResult.data?.busFee?.version || 0) + 1,
+        history: combinedHistory
       }
     };
 
-    // Save to Firestore using service (which handles cleaning/truncation)
+    // Save via service (which handles cleaning/truncation)
     await updateSystemConfig(updatedConfig, uid);
 
     console.log(`✅ Bus fee updated by admin ${uid}: ${oldAmount} -> ${amount}`);
 
     // --- Notification Logic ---
     // Get admin user details for notification sender
-    const adminDoc = await adminDb.collection('admins').doc(uid).get();
-    const adminData = adminDoc.exists ? adminDoc.data() : {};
+    const adminData = await getAdminById(uid);
     const adminName = adminData?.name || adminData?.fullName || 'Admin';
-    const adminEmployeeId = adminData?.employeeId || undefined;
 
     let notificationSent = false;
     try {
-      // Assuming NotificationService is compatible with this environment
-      // We need to instantiate it or use static methods if defined
-      // The original code used `new NotificationService()`.
-      // Ensure NotificationService is robust.
-      const notificationService = new NotificationService(); // Verify if this constructor requires args? Standard service pattern usually doesn't.
-
-      const target: NotificationTarget = { type: 'all_users' };
-
       const notificationContent = `The bus fee for the upcoming session has been revised from ₹${oldAmount.toLocaleString('en-IN')} to ₹${amount.toLocaleString('en-IN')}. ` +
         `Please update your payment plans accordingly. For any queries, contact the administration office.`;
 
-      const sender = {
-        userId: uid,
-        userName: adminName,
-        userRole: 'admin' as const,
-        ...(adminEmployeeId && { employeeId: adminEmployeeId })
-      };
-
-      // Note: createNotification might need 'await'
-      await notificationService.createNotification(
-        sender,
-        target,
-        notificationContent,
-        '💰 Bus Fee Update - Important Notice',
-        { type: 'announcement' }
-      );
+      await pgInsertNotification({
+        title: '💰 Bus Fee Update - Important Notice',
+        content: notificationContent,
+        type: 'announcement',
+        sender: {
+          userId: uid,
+          userName: adminName,
+          userRole: 'admin'
+        },
+        target: {
+          type: 'all_users',
+        },
+        recipientIds: [],
+        readByUserIds: [],
+      });
       notificationSent = true;
-      console.log('✅ Notification sent to all users');
-    } catch (notificationError: any) {
-      console.error('Failed to send notification (non-critical):', notificationError);
+    } catch (error) {
+      console.error('Failed to send announcement notification:', error);
     }
 
     return NextResponse.json({
-      message: notificationSent
-        ? 'Bus fees updated successfully. Notification sent to all users.'
-        : 'Bus fees updated successfully.',
-      amount: amount,
-      oldAmount: oldAmount
+      message: 'Bus fee updated successfully',
+      fees: amount,
+      notificationSent
     });
+
   } catch (error) {
     console.error('Error updating bus fees:', error);
-    return NextResponse.json({ message: 'Failed to update bus fees' }, { status: 500 });
+    return NextResponse.json(
+      { message: 'Failed to update bus fees' },
+      { status: 500 }
+    );
   }
 }

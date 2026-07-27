@@ -1,15 +1,17 @@
 import { NextResponse } from 'next/server';
-import { db } from '@/lib/firebase-admin';
 import { verifyApiAuth } from '@/lib/security/api-auth';
 import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
+import * as routeService from '@/domains/route';
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const auth = await verifyApiAuth(request, ['admin', 'moderator']);
+    const auth = await verifyApiAuth(request, ['admin', 'moderator', 'driver', 'student']);
     if (!auth.authenticated) return auth.response;
 
-    const permissionDenied = await requireModeratorPermission(auth, 'routes', 'canView');
-    if (permissionDenied) return permissionDenied;
+    if (auth.role === 'moderator') {
+      const permissionDenied = await requireModeratorPermission(auth, 'routes', 'canView');
+      if (permissionDenied) return permissionDenied;
+    }
 
     const { id } = await params;
 
@@ -17,20 +19,16 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       return NextResponse.json({ error: 'Route ID is required' }, { status: 400 });
     }
 
-    if (!db) {
-      return NextResponse.json({ error: 'Database unavailable' }, { status: 503 });
-    }
+    const route = await routeService.getById(id);
 
-    // Fetch route data directly from Firestore using Admin SDK
-    const routeDoc = await db.collection('routes').doc(id).get();
-
-    if (!routeDoc.exists) {
+    if (!route) {
       return NextResponse.json({ error: 'Route not found' }, { status: 404 });
     }
 
+    // Return with legacy active flag mapped for backward compatibility
     return NextResponse.json({
-      id: routeDoc.id,
-      ...routeDoc.data()
+      ...route,
+      active: route.status === 'active'
     });
   } catch (error) {
     console.error('Error fetching route:', error);

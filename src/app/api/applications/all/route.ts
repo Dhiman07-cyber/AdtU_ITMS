@@ -1,11 +1,14 @@
-// @ts-nocheck
 import { NextRequest, NextResponse } from 'next/server';
-import { adminAuth, adminDb } from '@/lib/firebase-admin';
+import { adminAuth } from '@/lib/firebase-admin';
+import { resolveUserRole } from '@/lib/security/role-cache';
+import { getAllPaginated } from '@/domains/application';
+
+const DEFAULT_LIMIT = 50;
+const MAX_LIMIT = 200;
 
 export async function GET(request: NextRequest) {
   try {
     const token = request.headers.get('Authorization')?.replace('Bearer ', '');
-    
     if (!token) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
@@ -13,26 +16,18 @@ export async function GET(request: NextRequest) {
     const decodedToken = await adminAuth.verifyIdToken(token);
     const uid = decodedToken.uid;
 
-    const adminDoc = await adminDb.collection('admins').doc(uid).get();
-    const modDoc = await adminDb.collection('moderators').doc(uid).get();
-    
-    if (!adminDoc.exists && !modDoc.exists) {
+    const userRole = await resolveUserRole(uid);
+    if (userRole.role !== 'admin' && userRole.role !== 'moderator') {
       return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 });
     }
 
-    // Get all applications from applications collection, ordered by most recent
-    const applicationsQuery = await adminDb.collection('applications')
-      .orderBy('submittedAt', 'desc')
-      .get();
+    const { searchParams } = new URL(request.url);
+    const limit = Math.min(parseInt(searchParams.get('limit') || String(DEFAULT_LIMIT), 10), MAX_LIMIT);
+    const offset = parseInt(searchParams.get('offset') || '0', 10);
 
-    const applications = applicationsQuery.docs.map(doc => ({
-      ...doc.data(),
-      applicationId: doc.data().applicationId || doc.id // Use applicationId field or fallback to doc.id
-    }));
+    const applications = await getAllPaginated(limit, offset);
 
-    return NextResponse.json({
-      applications
-    });
+    return NextResponse.json({ applications });
   } catch (error: any) {
     console.error('Error fetching applications:', error);
     return NextResponse.json(
@@ -41,4 +36,3 @@ export async function GET(request: NextRequest) {
     );
   }
 }
-

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/firebase-admin';
 import { readFeedback, deleteFeedback } from '@/lib/feedback-utils';
+import { resolveUserRole } from '@/lib/security/role-cache';
 
 /**
  * DELETE /api/feedback/:id
@@ -38,13 +39,11 @@ export async function DELETE(
 
     const userId = decodedToken.uid;
 
-    // Get user role from Firestore
-    const { db } = await import('@/lib/firebase-admin');
-    const adminDoc = await db.collection('admins').doc(userId).get();
-    const moderatorDoc = await db.collection('moderators').doc(userId).get();
+    // Get user role from PostgreSQL
+    const userRole = await resolveUserRole(userId);
 
     // Only Admin can delete feedback
-    if (!adminDoc.exists) {
+    if (userRole.role !== 'admin') {
       return NextResponse.json(
         { error: 'Access denied. Admin role required.' },
         { status: 403 }

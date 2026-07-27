@@ -20,8 +20,6 @@ export interface SystemConfig {
     softBlock?: string;
     hardBlock?: string;
     version?: string;
-    lastUpdated?: string;
-    updatedBy?: string;
     [key: string]: any;
 }
 

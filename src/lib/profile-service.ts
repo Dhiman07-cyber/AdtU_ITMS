@@ -3,8 +3,8 @@
  * Fetches and normalizes user profile data with reference resolution
  */
 
-import { doc, getDoc, collection, getDocs, query, where, Timestamp } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { getById as getRouteById } from '@/domains/route';
+import { getAdminById } from '@/domains/identity';
 
 export type UserRole = 'student' | 'driver' | 'moderator' | 'admin';
 
@@ -33,8 +33,8 @@ export interface StudentProfile extends BaseProfile {
   address?: string;
   routeId?: string;
   routeName?: string;
-  routeStops?: string[];
-  stopId?: string;
+  route_stops?: string[];
+  stop_name?: string;
   busId?: string;
   busNumber?: string;
   busCapacity?: string;
@@ -57,10 +57,10 @@ export interface DriverProfile extends BaseProfile {
   role: 'driver';
   licenseNumber?: string;
   busId?: string | string[];
-  assignedBusIds?: string[];
+  busIds?: string[];
   busNumbers?: string[];
-  assignedRouteId?: string | string[];
-  assignedRouteIds?: string[];
+  routeId?: string | string[];
+  routeIds?: string[];
   routeNames?: string[];
   shift?: string;
   joiningDate?: Date | null;
@@ -181,19 +181,21 @@ async function resolveBus(busId: string): Promise<any | null> {
       cleanBusId = `Bus-${number}`;
     }
     
-    // Try to fetch the bus document
-    const busDoc = await getDoc(doc(db, 'buses', cleanBusId));
-    if (busDoc.exists()) {
-      const result = { id: busDoc.id, ...busDoc.data() };
+    // Try to fetch the bus via API
+    const res = await fetch(`/api/buses/${encodeURIComponent(cleanBusId)}`);
+    if (res.ok) {
+      const busData = await res.json();
+      const result = { id: busData.id || cleanBusId, ...busData };
       busCache.set(busId, { data: result, timestamp: now });
       return result;
     }
     
     // If not found, try with the original busId
     if (cleanBusId !== busId) {
-      const originalDoc = await getDoc(doc(db, 'buses', busId));
-      if (originalDoc.exists()) {
-        const result = { id: originalDoc.id, ...originalDoc.data() };
+      const originalRes = await fetch(`/api/buses/${encodeURIComponent(busId)}`);
+      if (originalRes.ok) {
+        const busData = await originalRes.json();
+        const result = { id: busData.id || busId, ...busData };
         busCache.set(busId, { data: result, timestamp: now });
         return result;
       }
@@ -212,6 +214,14 @@ async function resolveBus(busId: string): Promise<any | null> {
  * Resolve Route document by ID with in-memory caching
  */
 const routeCache = new Map<string, { data: any, timestamp: number }>();
+
+export function clearRouteCache(routeId?: string): void {
+  if (routeId) {
+    routeCache.delete(routeId);
+  } else {
+    routeCache.clear();
+  }
+}
 
 async function resolveRoute(routeId: string): Promise<any | null> {
   if (!routeId) return null;
@@ -232,21 +242,19 @@ async function resolveRoute(routeId: string): Promise<any | null> {
       cleanRouteId = `Route-${number}`;
     }
     
-    // Try to fetch the route document
-    const routeDoc = await getDoc(doc(db, 'routes', cleanRouteId));
-    if (routeDoc.exists()) {
-      const result = { id: routeDoc.id, ...routeDoc.data() };
-      routeCache.set(routeId, { data: result, timestamp: now });
-      return result;
+    // Try to fetch the route document via dataService (Postgres)
+    const routeData = await getRouteById(cleanRouteId);
+    if (routeData) {
+      routeCache.set(routeId, { data: routeData, timestamp: now });
+      return routeData;
     }
     
     // If not found, try with the original routeId
     if (cleanRouteId !== routeId) {
-      const originalDoc = await getDoc(doc(db, 'routes', routeId));
-      if (originalDoc.exists()) {
-        const result = { id: originalDoc.id, ...originalDoc.data() };
-        routeCache.set(routeId, { data: result, timestamp: now });
-        return result;
+      const originalData = await getRouteById(routeId);
+      if (originalData) {
+        routeCache.set(routeId, { data: originalData, timestamp: now });
+        return originalData;
       }
     }
     
@@ -279,19 +287,33 @@ async function getRecentActions(uid: string, limit: number = 10): Promise<Action
 
 /**
  * Fetch Student Profile with all references resolved
+ *
+ * Migration status: COMPLETED — reads student data from PostgreSQL
+ * (student_profiles table via D3 Student domain).
+ * Bus/route references still resolved from Firestore (separate domains).
  */
 async function fetchStudentProfile(uid: string): Promise<StudentProfile | null> {
   try {
-    const userDoc = await getDoc(doc(db, 'students', uid));
-    if (!userDoc.exists()) return null;
+    let student: any = null;
 
-    const data = userDoc.data();
-    
-    // Resolve bus reference
+    if (typeof window !== 'undefined') {
+      const res = await fetch(`/api/students/${uid}`);
+      if (!res.ok) return null;
+      student = await res.json();
+      student.fullName = student.name;
+    } else {
+      const { getByUid } = await import('@/domains/student');
+      student = await getByUid(uid);
+    }
+
+    if (!student) return null;
+
+    // Resolve bus reference (bus domain still in Firestore)
     let busNumber: string | undefined;
     let busCapacity: string | undefined;
-    if (data.busId || data.assignedBusId) {
-      const bus = await resolveBus(data.busId || data.assignedBusId);
+    const targetBusId = student.busId || student.busId;
+    if (targetBusId) {
+      const bus = await resolveBus(targetBusId);
       if (bus) {
         busNumber = bus.busNumber || bus.id;
         if (bus.capacity) {
@@ -300,59 +322,60 @@ async function fetchStudentProfile(uid: string): Promise<StudentProfile | null> 
       }
     }
 
-    // Resolve route reference
+    // Resolve route reference (route domain still in Firestore)
     let routeName: string | undefined;
-    let routeStops: string[] | undefined;
-    if (data.routeId || data.assignedRouteId) {
-      const route = await resolveRoute(data.routeId || data.assignedRouteId);
+    let route_stops: string[] | undefined;
+    const targetRouteId = student.routeId || student.routeId;
+    if (targetRouteId) {
+      const route = await resolveRoute(targetRouteId);
       if (route) {
         routeName = route.routeName || route.routeNumber || route.id;
-        routeStops = route.stops || [];
+        route_stops = route.stops || [];
       }
     }
 
     // Get session history
     const sessionHistory = await getSessionHistory(uid);
 
-    const dob = toDate(data.dob);
+    const dob = toDate(student.dob);
 
     return {
       uid,
       role: 'student',
-      fullName: data.fullName || data.name || 'Unknown',
-      email: data.email || '',
-      phone: data.phoneNumber || data.phone || '',
-      profilePhotoUrl: data.profilePhotoUrl || data.profilePicture,
-      createdAt: toDate(data.createdAt),
-      updatedAt: toDate(data.updatedAt),
-      enrollmentId: data.enrollmentId,
-      faculty: data.faculty,
-      department: data.department,
-      semester: data.semester,
+      fullName: student.fullName || student.name || 'Unknown',
+      email: student.email || '',
+      phone: student.phone || '',
+      profilePhotoUrl: student.profilePhotoUrl,
+      createdAt: toDate(student.createdAt),
+      updatedAt: toDate(student.updatedAt),
+      enrollmentId: student.enrollmentId,
+      faculty: student.faculty,
+      department: student.department,
+      semester: student.semester,
       dob,
-      gender: data.gender,
-      bloodGroup: data.bloodGroup,
-      parentName: data.parentName,
-      parentPhone: data.parentPhone,
-      address: data.address,
-      routeId: data.routeId || data.assignedRouteId,
+      gender: student.gender,
+      bloodGroup: student.bloodGroup,
+      parentName: student.parentName,
+      parentPhone: student.parentPhone,
+      address: student.address,
+      routeId: student.routeId || student.routeId,
       routeName,
-      routeStops,
-      stopId: data.stopId,
-      busId: data.busId || data.assignedBusId,
+      route_stops,
+      stop_name: student.stop_name || student.stop_name,
+      busId: student.busId || student.busId,
       busNumber,
       busCapacity,
-      assignedShift: data.shift || data.assignedShift,
-      sessionStartYear: data.sessionStartYear,
-      sessionEndYear: data.sessionEndYear,
-      validUntil: toDate(data.validUntil),
-      durationYears: data.durationYears,
-      paymentAmount: data.paymentInfo?.amountPaid || data.amountPaid,
-      paymentVerified: data.paymentInfo?.paymentVerified || false,
-      paymentCurrency: data.paymentInfo?.currency || 'INR',
-      status: data.status,
-      approvedBy: data.approvedBy,
-      approvedAt: toDate(data.approvedAt),
+      assignedShift: student.shift,
+      sessionStartYear: student.sessionStartYear,
+      sessionEndYear: student.sessionEndYear,
+      validUntil: toDate(student.validUntil),
+      durationYears: typeof student.sessionDuration === 'string' ? Number(student.sessionDuration) || undefined : student.sessionDuration,
+      paymentAmount: student.paymentAmount,
+      paymentVerified: student.paymentVerified || false,
+      paymentCurrency: student.paymentCurrency || 'INR',
+      status: student.status,
+      approvedBy: student.approvedBy,
+      approvedAt: toDate(student.approvedAt),
       sessionHistory,
     };
   } catch (error) {
@@ -366,27 +389,28 @@ async function fetchStudentProfile(uid: string): Promise<StudentProfile | null> 
  */
 async function fetchDriverProfile(uid: string): Promise<DriverProfile | null> {
   try {
-    const userDoc = await getDoc(doc(db, 'drivers', uid));
-    if (!userDoc.exists()) return null;
+    const res = await fetch(`/api/drivers/${uid}`);
+    if (!res.ok) return null;
 
-    const data = userDoc.data();
+    const { driver: data } = await res.json();
+    if (!data) return null;
     
     // Debug log to see what data is being fetched
-    console.log('Driver profile data from Firestore:', data);
+    console.log('Driver profile data from API:', data);
     console.log('Approved by field:', data.approvedBy);
 
     // Resolve bus references - handle multiple fields but deduplicate
     const busIds: string[] = [];
     
     // Collect all possible bus IDs from different fields
-    if (data.assignedBusIds && Array.isArray(data.assignedBusIds)) {
-      busIds.push(...data.assignedBusIds);
+    if (data.busIds && Array.isArray(data.busIds)) {
+      busIds.push(...data.busIds);
     }
     if (data.busId && !busIds.includes(data.busId)) {
       busIds.push(data.busId);
     }
-    if (data.assignedBusId && !busIds.includes(data.assignedBusId)) {
-      busIds.push(data.assignedBusId);
+    if (data.busId && !busIds.includes(data.busId)) {
+      busIds.push(data.busId);
     }
     
     // Resolve bus numbers from bus documents and deduplicate
@@ -420,14 +444,14 @@ async function fetchDriverProfile(uid: string): Promise<DriverProfile | null> {
     const routeIds: string[] = [];
     
     // Collect all possible route IDs from different fields
-    if (data.assignedRouteIds && Array.isArray(data.assignedRouteIds)) {
-      routeIds.push(...data.assignedRouteIds);
+    if (data.routeIds && Array.isArray(data.routeIds)) {
+      routeIds.push(...data.routeIds);
     }
     if (data.routeId && !routeIds.includes(data.routeId)) {
       routeIds.push(data.routeId);
     }
-    if (data.assignedRouteId && !routeIds.includes(data.assignedRouteId)) {
-      routeIds.push(data.assignedRouteId);
+    if (data.routeId && !routeIds.includes(data.routeId)) {
+      routeIds.push(data.routeId);
     }
 
     // Resolve route names from route documents and deduplicate
@@ -470,10 +494,10 @@ async function fetchDriverProfile(uid: string): Promise<DriverProfile | null> {
       approvedBy: data.approvedBy || 'Not available',
       licenseNumber: data.licenseNumber,
       busId: busIds.length > 0 ? busIds[0] : undefined,
-      assignedBusIds: busIds,
+      busIds: busIds,
       busNumbers,
-      assignedRouteId: routeIds.length > 0 ? routeIds[0] : undefined,
-      assignedRouteIds: routeIds,
+      routeId: routeIds.length > 0 ? routeIds[0] : undefined,
+      routeIds: routeIds,
       routeNames,
       shift: data.shift,
       joiningDate,
@@ -494,10 +518,11 @@ async function fetchDriverProfile(uid: string): Promise<DriverProfile | null> {
  */
 async function fetchModeratorProfile(uid: string): Promise<ModeratorProfile | null> {
   try {
-    const userDoc = await getDoc(doc(db, 'moderators', uid));
-    if (!userDoc.exists()) return null;
+    const res = await fetch(`/api/moderators/${uid}`);
+    if (!res.ok) return null;
 
-    const data = userDoc.data();
+    const data = await res.json();
+    if (!data) return null;
     const joiningDate = toDate(data.joiningDate);
     const yearsOfService = calculateYearsOfService(joiningDate);
     const recentActions = await getRecentActions(uid);
@@ -530,10 +555,8 @@ async function fetchModeratorProfile(uid: string): Promise<ModeratorProfile | nu
  */
 async function fetchAdminProfile(uid: string): Promise<AdminProfile | null> {
   try {
-    const userDoc = await getDoc(doc(db, 'admins', uid));
-    if (!userDoc.exists()) return null;
-
-    const data = userDoc.data();
+    const data = await getAdminById(uid);
+    if (!data) return null;
     const joiningDate = toDate(data.joiningDate);
     const yearsOfService = calculateYearsOfService(joiningDate);
     const recentActions = await getRecentActions(uid);

@@ -62,10 +62,9 @@ describe('Diagnose Dashboard Counts API Queries', () => {
       await runQuery("routes.get()", () => adminDb.collection('routes').get());
       await runQuery("applications.where('state', '==', 'submitted').count()", () => adminDb.collection('applications').where('state', '==', 'submitted').count().get());
       await runQuery("applications.where('state', '==', 'awaiting_verification').count()", () => adminDb.collection('applications').where('state', '==', 'awaiting_verification').count().get());
-      await runQuery("renewal_requests.where('status', '==', 'pending').count()", () => adminDb.collection('renewal_requests').where('status', '==', 'pending').count().get());
+      await runQuery("supabase.applications (renewal pending count)", () => supabase!.from('applications').select('*', { count: 'exact', head: true }).eq('state', 'submitted').in('application_type', ['renewal', 'renewal_after_soft_block']));
       await runQuery("feedbacks.where('createdAt', '>=', sevenDaysAgo).count()", () => adminDb.collection('feedbacks').where('createdAt', '>=', sevenDaysAgo).count().get());
       await runQuery("settings.doc('config').get()", () => adminDb.collection('settings').doc('config').get());
-      await runQuery("settings.doc('deadline').get()", () => adminDb.collection('settings').doc('deadline').get());
     }
 
     // 2. Supabase

@@ -1,10 +1,10 @@
-/**
+﻿/**
  * API Route: Verify Student by UID
  * POST /api/bus-pass/verify-student
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { adminDb } from '@/lib/firebase-admin';
+import { getSupabaseServer } from '@/lib/supabase-server';
 import { checkRateLimit, RateLimits, createRateLimitId } from '@/lib/security/rate-limiter';
 import { verifyApiAuth } from '@/lib/security/api-auth';
 import {
@@ -12,6 +12,7 @@ import {
     validateStudentScannerContext,
 } from '@/lib/security/scanner-auth';
 import { getTransportEntitlement } from '@/lib/entitlement/transport-entitlement';
+import { getByUid } from '@/domains/student';
 
 function getValidUntilDate(validUntil: unknown): Date | null {
     if (!validUntil) return null;
@@ -68,15 +69,7 @@ export async function POST(request: NextRequest) {
 
         let studentData: any = null;
         try {
-            const studentDoc = await adminDb.collection('students').doc(studentUid.trim()).get();
-            if (studentDoc.exists) {
-                studentData = studentDoc.data();
-            } else {
-                const userDoc = await adminDb.collection('users').doc(studentUid.trim()).get();
-                if (userDoc.exists && userDoc.data()?.role === 'student') {
-                    studentData = userDoc.data();
-                }
-            }
+            studentData = await getByUid(studentUid.trim()) as Record<string, any> | null;
         } catch {
             return NextResponse.json({
                 status: 'invalid',
@@ -87,28 +80,25 @@ export async function POST(request: NextRequest) {
             }, { status: 400 });
         }
 
-        // 1. Fetch activeTripId from buses collection and verify consistency
+        // 1. D9: Fetch active trip from Supabase (authoritative source)
         let activeTripId: string | null = null;
         let isTripStale = false;
         try {
-            const busDoc = await adminDb.collection('buses').doc(scannerBusId).get();
-            if (busDoc.exists) {
-                const busData = busDoc.data();
-                const possibleTripId = busData?.activeTripId;
-                if (possibleTripId) {
-                    const tripDoc = await adminDb.collection('trip_sessions').doc(possibleTripId).get();
-                    if (tripDoc.exists) {
-                        const tripData = tripDoc.data();
-                        const isExpired = tripData?.status !== 'active' ||
-                            (tripData?.createdAt && (Date.now() - tripData.createdAt.toDate().getTime() > 12 * 60 * 60 * 1000));
-                        if (isExpired) {
-                            isTripStale = true;
-                        } else {
-                            activeTripId = possibleTripId;
-                        }
-                    } else {
-                        isTripStale = true;
-                    }
+            const supabase = getSupabaseServer();
+            const { data: activeTrip } = await supabase
+                .from('active_trips')
+                .select('trip_id, status, created_at')
+                .eq('bus_id', scannerBusId)
+                .eq('status', 'active')
+                .maybeSingle();
+
+            if (activeTrip) {
+                const createdAt = new Date(activeTrip.created_at).getTime();
+                const isExpired = (Date.now() - createdAt) > 12 * 60 * 60 * 1000;
+                if (isExpired) {
+                    isTripStale = true;
+                } else {
+                    activeTripId = activeTrip.trip_id;
                 }
             }
         } catch (e) {
@@ -127,8 +117,8 @@ export async function POST(request: NextRequest) {
         }
 
         const validUntilDate = getValidUntilDate(studentData.validUntil);
-        const assignedBusId = studentData.assignedBus || studentData.busId || studentData.currentBusId;
-        const busMatchesScanner = scannerBusMatchesStudent(scannerBusId, assignedBusId);
+        const busId = studentData.assignedBus || studentData.busId || studentData.currentBusId;
+        const busMatchesScanner = scannerBusMatchesStudent(scannerBusId, busId);
 
         // CANONICAL entitlement (Phase 3): a pass is valid for boarding ONLY while the
         // student owns transport access. This is the SAME source of truth used by the
@@ -152,17 +142,17 @@ export async function POST(request: NextRequest) {
             studentData: {
                 uid: studentUid.trim(),
                 fullName: studentData.fullName || studentData.name,
-                enrollmentId: studentData.enrollmentId || studentData.enrollmentNo,
+                enrollmentId: studentData.enrollmentId || studentData.enrollmentId,
                 gender: studentData.gender,
                 profilePhotoUrl: studentData.profilePhotoUrl || studentData.photoURL || studentData.avatar,
-                assignedBus: assignedBusId,
-                busId: assignedBusId,
+                assignedBus: busId,
+                busId: busId,
                 assignedShift: studentData.assignedShift || studentData.shift,
                 shift: studentData.assignedShift || studentData.shift,
                 validUntil: validUntilDate ? validUntilDate.toISOString() : undefined,
                 status: studentData.status,
             },
-            isAssigned: Boolean(assignedBusId),
+            isAssigned: Boolean(busId),
             matchesScannerBus: busMatchesScanner,
             canBoard: accountValid && busMatchesScanner,
             sessionActive: accountValid,

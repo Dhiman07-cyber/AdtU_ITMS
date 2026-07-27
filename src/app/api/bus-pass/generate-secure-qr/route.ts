@@ -1,4 +1,4 @@
-/**
+﻿/**
  * API Route: Generate Secure QR Token
  * POST /api/bus-pass/generate-secure-qr
  * 
@@ -13,12 +13,12 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { adminDb } from '@/lib/firebase-admin';
 import { encryptQRCodeData } from '@/lib/security/encryption.service';
 import { checkRateLimit, RateLimits, createRateLimitId } from '@/lib/security/rate-limiter';
 import { verifyApiAuth } from '@/lib/security/api-auth';
 import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
 import { getTransportEntitlement } from '@/lib/entitlement/transport-entitlement';
+import { getByUid } from '@/domains/student';
 
 export async function POST(request: NextRequest) {
     try {
@@ -70,17 +70,15 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        // Fetch student data
-        const studentDoc = await adminDb.collection('students').doc(targetUid).get();
+        // Fetch student data from PostgreSQL
+        const studentData = await getByUid(targetUid) as Record<string, any> | null;
 
-        if (!studentDoc.exists) {
+        if (!studentData) {
             return NextResponse.json(
                 { success: false, error: 'Student not found' },
                 { status: 404 }
             );
         }
-
-        const studentData = studentDoc.data();
 
         // CANONICAL entitlement (Phase 3): a QR may be generated ONLY while the
         // student currently owns transport access. Same single source of truth as
@@ -101,7 +99,7 @@ export async function POST(request: NextRequest) {
         const secureToken = encryptQRCodeData(targetUid, {
             enrollmentId: studentData?.enrollmentId,
             name: studentData?.fullName || studentData?.name,
-            busId: studentData?.busId || studentData?.assignedBusId
+            busId: studentData?.busId || studentData?.busId
         });
 
         return NextResponse.json({

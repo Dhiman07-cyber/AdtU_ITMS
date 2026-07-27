@@ -1,9 +1,9 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { adminDb } from '@/lib/firebase-admin';
+﻿import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import { withSecurity } from '@/lib/security/api-security';
 import { WaitingFlagPostSchema } from '@/lib/security/validation-schemas';
 import { RateLimits } from '@/lib/security/rate-limiter';
+import { getByUid } from '@/domains/student';
 
 // Initialize Supabase client
 const supabase = getSupabaseServer();
@@ -20,7 +20,7 @@ export const POST = withSecurity(
     const {
       busId,
       routeId,
-      stopName,
+      stop_name,
       accuracy,
       message
     } = body;
@@ -32,17 +32,16 @@ export const POST = withSecurity(
       }
 
       // 2. Resolve student profile and verify role
-      const studentDoc = await adminDb.collection('students').doc(studentUid).get();
-      if (!studentDoc.exists) {
+      const studentData = await getByUid(studentUid) as Record<string, any> | null;
+      if (!studentData) {
         console.warn(`[${requestId}] Student profile not found for ${studentUid}`);
         return NextResponse.json({ success: false, error: 'Student profile not found', requestId }, { status: 404 });
       }
 
-      const studentData = studentDoc.data();
-      const studentName = studentData?.fullName || studentData?.name || 'Student';
+      const studentName = studentData.fullName || studentData.name || 'Student';
 
       // 3. Authorization: Is student assigned to this bus?
-      const isAssigned = studentData?.assignedBusId === busId || studentData?.busId === busId;
+      const isAssigned = studentData.busId === busId || studentData.busId === busId;
       if (!isAssigned) {
         return NextResponse.json({ success: false, error: 'Authorization failed: Student not assigned to this bus', requestId }, { status: 403 });
       }
@@ -88,7 +87,7 @@ export const POST = withSecurity(
         student_name: studentName,
         bus_id: busId,
         route_id: routeId,
-        stop_name: stopName || 'Current Location',
+        stop_name: stop_name || 'Current Location',
         accuracy,
         status: 'raised',
         message: message || null,
@@ -118,7 +117,7 @@ export const POST = withSecurity(
             flagId: flag.id,
             studentUid,
             studentName,
-            stopName: flagData.stop_name,
+            stop_name: flagData.stop_name,
             accuracy,
             message: flagData.message,
             timestamp: flagData.created_at
@@ -126,17 +125,6 @@ export const POST = withSecurity(
         });
       } catch (broadcastError) {
         console.warn(`[${requestId}] Real-time broadcast failed (non-critical):`, broadcastError);
-      }
-
-      // 8. Legacy Backup (Firestore) - opportunistic
-      try {
-        await adminDb.collection('waiting_flags').doc(flag.id).set({
-          ...flagData,
-          supabaseId: flag.id,
-          syncedAt: now.toISOString()
-        });
-      } catch (backupErr) {
-        console.warn(`[${requestId}] Firestore backup write failed (non-critical, Supabase is source of truth):`, backupErr);
       }
 
       const elapsed = Date.now() - startTime;

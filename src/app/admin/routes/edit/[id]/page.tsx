@@ -17,7 +17,7 @@ import { signalCollectionRefresh } from '@/hooks/useEventDrivenRefresh';
 type Stop = {
   name: string;
   sequence: number;
-  stopId: string;
+  stop_name: string;
 };
 
 type RouteFormData = {
@@ -35,7 +35,7 @@ export default function EditRoutePage({ params }: { params: Promise<{ id: string
   const [routeData, setRouteData] = useState<RouteFormData>({
     routeId: "",
     routeName: "",
-    status: "Active"
+    status: "active"
   });
 
   const [stops, setStops] = useState<Stop[]>([]);
@@ -61,14 +61,14 @@ export default function EditRoutePage({ params }: { params: Promise<{ id: string
         setRouteData({
           routeId: displayId,
           routeName: foundRoute.routeName || "",
-          status: foundRoute.status || "Active"
+          status: foundRoute.status || "active"
         });
 
         if (foundRoute.stops && Array.isArray(foundRoute.stops)) {
           const convertedStops: Stop[] = foundRoute.stops.map((stop: any, index: number) => ({
             name: typeof stop === 'string' ? stop : stop.name || stop.toString(),
             sequence: stop.sequence || index + 1,
-            stopId: stop.stopId || (typeof stop === 'string' ? stop.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '') : `stop_${index}`)
+            stop_name: stop.stop_name || (typeof stop === 'string' ? stop.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '') : `stop_${index}`)
           }));
           setStops(convertedStops);
         }
@@ -117,16 +117,16 @@ export default function EditRoutePage({ params }: { params: Promise<{ id: string
     }
   }, [currentStopInput, stops]);
 
-  const generateStopId = (stopName: string): string => {
-    return stopName.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+  const generateStopId = (stop_name: string): string => {
+    return stop_name.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
   };
 
-  const addStop = (stopName: string) => {
-    if (!stopName.trim()) return;
+  const addStop = (stop_name: string) => {
+    if (!stop_name.trim()) return;
     const newStop: Stop = {
-      name: stopName,
+      name: stop_name,
       sequence: stops.length + 1,
-      stopId: generateStopId(stopName)
+      stop_name: generateStopId(stop_name)
     };
     setStops([...stops, newStop]);
     setCurrentStopInput("");
@@ -193,14 +193,13 @@ export default function EditRoutePage({ params }: { params: Promise<{ id: string
 
     try {
       const idToken = await currentUser?.getIdToken();
-      const response = await fetch('/api/routes/update', {
+      const response = await fetch(`/api/routes/${id}/update`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${idToken}`
         },
         body: JSON.stringify({
-          routeId: routeData.routeId.match(/^\d+$/) ? `route_${routeData.routeId}` : routeData.routeId,
           routeName: routeData.routeName,
           stops: stops,
           status: routeData.status
@@ -292,9 +291,8 @@ export default function EditRoutePage({ params }: { params: Promise<{ id: string
                     <SelectValue placeholder="Select Status" />
                   </SelectTrigger>
                   <SelectContent position="popper" side="bottom" align="start">
-                    <SelectItem value="Active">Active</SelectItem>
-                    <SelectItem value="Inactive">Inactive</SelectItem>
-                    <SelectItem value="Under Maintenance">Under Maintenance</SelectItem>
+                    <SelectItem value="active">Active</SelectItem>
+                    <SelectItem value="inactive">Inactive</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -353,7 +351,7 @@ export default function EditRoutePage({ params }: { params: Promise<{ id: string
                       <div className="bg-blue-500/20 text-blue-400 font-bold w-8 h-8 flex items-center justify-center rounded-lg text-sm border border-blue-500/20">{stop.sequence}</div>
                       <div className="flex-1">
                         <div className="text-white font-medium text-sm">{stop.name}</div>
-                        <div className="text-[10px] text-gray-500 font-mono italic">ID: {stop.stopId}</div>
+                        <div className="text-[10px] text-gray-500 font-mono italic">ID: {stop.stop_name}</div>
                       </div>
                       <button
                         type="button"

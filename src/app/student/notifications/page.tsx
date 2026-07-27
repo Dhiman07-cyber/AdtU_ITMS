@@ -22,7 +22,6 @@ import { Bell, Bus, Info, MapPin, Clock, RefreshCw } from "lucide-react";
 import { useNotifications } from "@/contexts/NotificationContext";
 import { useToast } from "@/contexts/toast-context";
 import NotificationCardV2 from "@/components/NotificationCardV2";
-import { Timestamp } from "firebase/firestore";
 import { PremiumPageLoader } from "@/components/LoadingSpinner";
 
 type TabType = 'all' | 'trip' | 'notice' | 'pickup' | 'dropoff' | 'announcement';

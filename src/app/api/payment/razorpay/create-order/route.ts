@@ -3,9 +3,9 @@ import { createRazorpayOrder, generateReceiptId } from '@/lib/payment/razorpay.s
 import { withSecurity } from '@/lib/security/api-security';
 import { CreateOrderSchema } from '@/lib/security/validation-schemas';
 import { RateLimits } from '@/lib/security/rate-limiter';
-import { adminDb } from '@/lib/firebase-admin';
-import { getSystemConfig } from '@/lib/system-config-service';
+import { getSystemConfig } from '@/domains/admin';
 import { z } from 'zod';
+import { getByUid as getStudentByUid } from '@/domains/student';
 
 type CreateOrderBody = z.infer<typeof CreateOrderSchema>;
 
@@ -18,8 +18,8 @@ export const POST = withSecurity<CreateOrderBody>(
         const { amount, notes, userName, purpose, enrollmentId, durationYears } = body;
         const trustedUserId = auth.uid;
         const trustedDurationYears = durationYears || Number(notes?.duration || 1);
-        const systemConfig = await getSystemConfig();
-        const busFeeAmount = Number(systemConfig.busFee?.amount || 0);
+        const systemConfigResult = await getSystemConfig();
+        const busFeeAmount = Number(systemConfigResult.data.busFee?.amount || 0);
         const expectedAmount = busFeeAmount * trustedDurationYears;
 
         if (!busFeeAmount || !amountsMatch(amount, expectedAmount)) {
@@ -29,8 +29,8 @@ export const POST = withSecurity<CreateOrderBody>(
             );
         }
 
-        const studentDoc = await adminDb.collection('students').doc(trustedUserId).get().catch(() => null);
-        const studentData = studentDoc?.exists ? studentDoc.data() : null;
+        const student = await getStudentByUid(trustedUserId).catch(() => null);
+        const studentData = student as any;
         const trustedEnrollmentId = studentData?.enrollmentId || enrollmentId || notes?.enrollmentId || '';
         const trustedStudentName = studentData?.fullName || studentData?.name || userName || auth.name || 'Unknown';
 
@@ -52,8 +52,18 @@ export const POST = withSecurity<CreateOrderBody>(
             timestamp: new Date().toISOString(),
         };
 
-        // Create Razorpay order
-        const order = await createRazorpayOrder(expectedAmount, receipt, orderNotes);
+        // Create Razorpay order with error handling
+        let order;
+        try {
+            order = await createRazorpayOrder(expectedAmount, receipt, orderNotes);
+        } catch (orderErr: any) {
+            console.error('❌ Failed to create Razorpay order:', orderErr?.message || orderErr);
+            const status = orderErr?.statusCode || 500;
+            return NextResponse.json(
+                { success: false, error: orderErr?.message || 'Failed to create payment order' },
+                { status }
+            );
+        }
 
         console.log('📝 Order created:', {
             orderId: order.id,

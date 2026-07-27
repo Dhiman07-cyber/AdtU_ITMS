@@ -85,9 +85,9 @@ export default function AddStudentPaymentSection({
         }
     };
 
-    // Handle updates from RouteSelectionSection (maps stopId -> pickupPoint)
+    // Handle updates from RouteSelectionSection (maps stop_name -> pickupPoint)
     const handleReferenceChange = (field: string, value: any) => {
-        if (field === 'stopId') {
+        if (field === 'stop_name') {
             onFormChange('pickupPoint', value);
         } else {
             onFormChange(field, value);
@@ -118,7 +118,7 @@ export default function AddStudentPaymentSection({
                             buses={buses}
                             selectedRouteId={formData.routeId}
                             selectedBusId={formData.busId || ''}
-                            selectedStopId={formData.pickupPoint}
+                            selected_stop_name={formData.pickupPoint}
                             selectedShift={formData.shift}
                             busAssigned={formData.busAssigned}
                             onReferenceChange={handleReferenceChange}

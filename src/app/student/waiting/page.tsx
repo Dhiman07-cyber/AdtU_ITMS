@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState, useEffect } from "react";
 import { useAuth } from "@/contexts/auth-context";
@@ -45,7 +45,7 @@ export default function StudentWaitingPage() {
           console.log('Student data fetched in waiting page:', student);
 
           // Fetch route data first
-          const routeId = student.routeId || student.assignedRouteId;
+          const routeId = student.routeId || student.routeId;
           if (routeId) {
             console.log('Fetching route data for routeId:', routeId);
             const route = await getRouteById(routeId);
@@ -69,7 +69,7 @@ export default function StudentWaitingPage() {
           }
 
           // Also try direct bus ID if available (fallback)
-          const busId = student.busId || student.assignedBusId;
+          const busId = student.busId || student.busId;
           if (busId && !busData) {
             console.log('Fetching direct bus data for busId:', busId);
             const bus = await getBusById(busId);
@@ -132,7 +132,7 @@ export default function StudentWaitingPage() {
           body: JSON.stringify({
             busId: studentData.busId || "",
             routeId: studentData.routeId || "",
-            stopName: routeData?.stops?.[0]?.name || "Unknown Stop",
+            stop_name: routeData?.stops?.[0]?.name || "Unknown Stop",
             lat: position?.coords.latitude || null,
             lng: position?.coords.longitude || null
           }),
@@ -301,7 +301,7 @@ export default function StudentWaitingPage() {
           </CardHeader>
           <CardContent>
             <BusMap
-              busId={studentData.busId || studentData.assignedBusId}
+              busId={studentData.busId || studentData.busId}
               busNumber={busData?.busNumber}
               journeyActive={true}
             />

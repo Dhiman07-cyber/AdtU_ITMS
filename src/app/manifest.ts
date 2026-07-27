@@ -1,15 +1,15 @@
 import { MetadataRoute } from 'next';
-import { getSystemConfig } from '@/lib/system-config-service';
+import { getSystemConfig } from '@/domains/admin';
 
 export default async function manifest(): Promise<MetadataRoute.Manifest> {
     let appName = 'AdtU Bus Services';
     let shortName = 'AdtU Bus';
 
     try {
-        const config = await getSystemConfig();
-        if (config?.appName) {
-            appName = config.appName;
-            shortName = config.appName;
+        const systemConfigResult = await getSystemConfig();
+        if (systemConfigResult.data?.appName) {
+            appName = systemConfigResult.data.appName;
+            shortName = systemConfigResult.data.appName;
         }
     } catch (e) {
         console.error('Error reading system config for manifest:', e);

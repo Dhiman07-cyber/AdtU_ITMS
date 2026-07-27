@@ -105,18 +105,18 @@ export class AllocationRanker {
     sourceBus: BusData
   ): number {
     // Get unique stop IDs from students
-    const studentStops = new Set(students.map(s => s.stopId));
+    const studentStops = new Set(students.map(s => s.stop_name));
 
     // Calculate average proximity score
     let totalScore = 0;
     let count = 0;
 
-    for (const stopId of studentStops) {
+    for (const stop_name of studentStops) {
       // Find stop index in source bus
-      const sourceIndex = sourceBus.stops.findIndex(s => s.id === stopId);
+      const sourceIndex = sourceBus.stops.findIndex(s => s.id === stop_name);
 
       // Find stop index in candidate bus
-      const candidateIndex = bus.stops.findIndex(s => s.id === stopId);
+      const candidateIndex = bus.stops.findIndex(s => s.id === stop_name);
 
       if (sourceIndex !== -1 && candidateIndex !== -1) {
         // Calculate proximity based on sequence difference
@@ -243,7 +243,7 @@ export class AllocationRanker {
 
       // Check which students can be assigned to this bus
       const assignableStudents = remainingStudents.filter(student =>
-        bus.stops.some(stop => stop.id === student.stopId)
+        bus.stops.some(stop => stop.id === student.stop_name)
       );
 
       if (assignableStudents.length > 0) {

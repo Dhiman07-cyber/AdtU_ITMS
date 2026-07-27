@@ -1,13 +1,16 @@
-import { NextResponse } from 'next/server';
+﻿import { NextResponse } from 'next/server';
 import { adminAuth, adminDb } from '@/lib/firebase-admin';
 import { v2 as cloudinary } from 'cloudinary';
 import { decrementBusCapacity } from '@/lib/busCapacityService';
+import { getSupabaseServer } from '@/lib/supabase-server';
 import { getDeadlineConfig } from '@/lib/deadline-config-service';
 import { isSeatReleaseAtSoftBlockEnabled, wasSeatReleased } from '@/lib/config/capacity-flags';
 import { withSecurity } from '@/lib/security/api-security';
 import { SimulateDeadlinesSchema } from '@/lib/security/validation-schemas';
 import { RateLimits } from '@/lib/security/rate-limiter';
 import { deriveAcademicLifecycle } from '@/lib/utils/deadline-computation';
+import { createAuditEvent } from '@/domains/audit';
+import { getAllStudents, getStudentById, updateStudent, deleteStudent, deleteUser, deleteFcmToken, hashFcmToken } from '@/domains/identity';
 
 if (process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME) {
     cloudinary.config({
@@ -39,22 +42,22 @@ export const POST = withSecurity(
             if (customDeadlines.renewalDeadline) config.renewalDeadline = { ...config.renewalDeadline, ...customDeadlines.renewalDeadline };
         }
 
-        const studentsSnapshot = await adminDb.collection('students').get();
+        // Query students from PostgreSQL (canonical source)
+        const studentsFromPg = await getAllStudents();
         const allStudents: StudentStatus[] = [];
         const eligibleForSoftBlock: StudentStatus[] = [];
         const eligibleForHardDelete: StudentStatus[] = [];
         const alreadyBlocked: StudentStatus[] = [];
 
-        studentsSnapshot.docs.forEach((doc: any) => {
-            const data = doc.data();
+        studentsFromPg.forEach((student: any) => {
             let validUntil: Date | null = null;
-            if (data.validUntil) {
-                validUntil = typeof data.validUntil === 'string' ? new Date(data.validUntil) : (data.validUntil.toDate ? data.validUntil.toDate() : null);
+            if (student.validUntil) {
+                validUntil = new Date(student.validUntil);
             }
 
             const sessionEndYear = syncSessionYear ? simYear : (validUntil ? validUntil.getFullYear() : null);
             if (!sessionEndYear) {
-                allStudents.push({ uid: doc.id, name: data.name || data.fullName || 'Unknown', enrollmentId: data.enrollmentId || data.id || 'N/A', email: data.email || 'N/A', validUntil: 'Not Set', sessionEndYear: 0, status: data.status || 'unknown', softBlockDate: 'N/A', hardDeleteDate: 'N/A', shouldSoftBlock: false, shouldHardDelete: false, daysPastSoftBlock: 0, daysPastHardDelete: 0 });
+                allStudents.push({ uid: student.uid, name: student.fullName || student.name || 'Unknown', enrollmentId: student.enrollmentId || 'N/A', email: student.email || 'N/A', validUntil: 'Not Set', sessionEndYear: 0, status: student.status || 'unknown', softBlockDate: 'N/A', hardDeleteDate: 'N/A', shouldSoftBlock: false, shouldHardDelete: false, daysPastSoftBlock: 0, daysPastHardDelete: 0 });
                 return;
             }
 
@@ -62,15 +65,15 @@ export const POST = withSecurity(
             const startDay = config.academicSessionStart?.day ?? 1;
             const lifecycle = deriveAcademicLifecycle(startMonth, startDay, sessionEndYear);
 
-            const studentSoftBlockDate = data.softBlock ? new Date(data.softBlock) : lifecycle.softBlock;
-            const studentHardDeleteDate = data.hardBlock ? new Date(data.hardBlock) : lifecycle.hardDelete;
+            const studentSoftBlockDate = student.softBlock ? new Date(student.softBlock) : lifecycle.softBlock;
+            const studentHardDeleteDate = student.hardBlock ? new Date(student.hardBlock) : lifecycle.hardDelete;
 
             const isPastSoftBlock = simDate >= studentSoftBlockDate;
             const isPastHardDelete = simDate >= studentHardDeleteDate;
 
             const studentStatus: StudentStatus = {
-                uid: doc.id, name: data.name || data.fullName || 'Unknown', enrollmentId: data.enrollmentId || data.id || 'N/A', email: data.email || 'N/A',
-                validUntil: validUntil?.toISOString() || 'N/A', sessionEndYear, status: data.status || 'active',
+                uid: student.uid, name: student.fullName || student.name || 'Unknown', enrollmentId: student.enrollmentId || 'N/A', email: student.email || 'N/A',
+                validUntil: validUntil?.toISOString() || 'N/A', sessionEndYear, status: student.status || 'active',
                 softBlockDate: studentSoftBlockDate.toISOString(), hardDeleteDate: studentHardDeleteDate.toISOString(),
                 shouldSoftBlock: isPastSoftBlock && !isPastHardDelete, shouldHardDelete: isPastHardDelete,
                 daysPastSoftBlock: isPastSoftBlock ? Math.floor((simDate.getTime() - studentSoftBlockDate.getTime()) / 86400000) : 0,
@@ -79,7 +82,7 @@ export const POST = withSecurity(
 
             allStudents.push(studentStatus);
             if (!manualMode) {
-                if (data.status === 'soft_blocked' || data.status === 'pending_deletion') alreadyBlocked.push(studentStatus);
+                if (student.status === 'soft_blocked' || student.status === 'pending_deletion') alreadyBlocked.push(studentStatus);
                 else if (isPastHardDelete) eligibleForHardDelete.push(studentStatus);
                 else if (isPastSoftBlock) eligibleForSoftBlock.push(studentStatus);
             }
@@ -93,40 +96,57 @@ export const POST = withSecurity(
         if (execute && !dryRun) {
             const executionResults = { softBlocked: 0, hardDeleted: 0, errors: [] as string[] };
             const releaseSeatAtSoftBlock = isSeatReleaseAtSoftBlockEnabled();
+            
             for (const student of eligibleForSoftBlock) {
                 try {
-                    // Re-read the live doc so we (a) honour the idempotency guard and
-                    // (b) have busId/shift for the seat release. The summary objects do
-                    // not carry transport fields.
-                    const sbDocRef = adminDb.collection('students').doc(student.uid);
-                    const sbDoc = await sbDocRef.get();
-                    if (!sbDoc.exists) { continue; }
-                    const sbData = sbDoc.data() || {};
+                    // Re-read student from PostgreSQL
+                    const sbData = await getStudentById(student.uid);
+                    if (!sbData) { continue; }
+                    
                     // Idempotency: only release/transition a student who is still active.
                     if (sbData.status !== 'active') { continue; }
 
                     const nowIso = new Date().toISOString();
-                    await sbDocRef.update({
-                        status: 'soft_blocked',
-                        softBlockedAt: nowIso,
-                        ...(releaseSeatAtSoftBlock ? { seatReleasedAt: nowIso } : {})
-                    });
-                    executionResults.softBlocked++;
+                    const sbBusId = sbData.busId || sbData.busId;
+                    const sbShift = sbData.shift;
 
-                    if (releaseSeatAtSoftBlock) {
-                        const sbBusId = sbData.busId || sbData.currentBusId || sbData.assignedBusId;
-                        if (sbBusId) {
-                            try {
-                                await decrementBusCapacity(sbBusId, student.uid, sbData.shift);
-                                await adminDb.collection('activity_logs').add({
-                                    action: 'seat_released', reason: 'soft_block_simulation',
-                                    targetId: student.uid, targetName: sbData.fullName || '',
-                                    details: { busId: sbBusId, shift: sbData.shift || null, at: nowIso },
-                                    timestamp: nowIso
-                                }).catch(() => {});
-                            } catch (e: any) {
-                                executionResults.errors.push(`Soft-block decrement failed for ${student.uid}: ${e.message}`);
-                            }
+                    // Call the atomic RPC to soft-block and release the seat
+                    const supabase = getSupabaseServer();
+                    const { data: rpcResult, error: rpcError } = await supabase.rpc('soft_block_student_with_seat_release', {
+                        p_student_uid: student.uid,
+                        p_bus_id: releaseSeatAtSoftBlock ? sbBusId : null,
+                        p_shift: sbShift,
+                        p_release_seat: releaseSeatAtSoftBlock,
+                        p_soft_blocked_at: nowIso,
+                        p_seat_released_at: nowIso
+                    });
+
+                    if (rpcError) {
+                        executionResults.errors.push(`Soft block failed for ${student.uid}: ${rpcError.message}`);
+                    } else if (!rpcResult || !rpcResult.success) {
+                        executionResults.errors.push(`Soft block failed for ${student.uid}: ${rpcResult?.error || 'Unknown RPC warning'}`);
+                    } else {
+                        executionResults.softBlocked++;
+
+                        if (releaseSeatAtSoftBlock && sbBusId) {
+                            void createAuditEvent({
+                                action: 'seat_released',
+                                actor_id: 'system',
+                                actor_name: 'System (Simulation)',
+                                actor_role: 'admin',
+                                target_id: student.uid,
+                                target_type: 'student',
+                                target_name: sbData.fullName || '',
+                                category: 'system',
+                                summary: 'Seat released during simulation',
+                                severity: 'low',
+                                metadata: {
+                                    reason: 'soft_block_simulation',
+                                    busId: sbBusId,
+                                    shift: sbData.shift || null,
+                                    at: nowIso,
+                                },
+                            });
                         }
                     }
                 } catch (err: any) { executionResults.errors.push(`Soft block failed for ${student.uid}: ${err.message}`); }
@@ -134,8 +154,8 @@ export const POST = withSecurity(
 
             for (const student of eligibleForHardDelete) {
                 try {
-                    const studentDoc = await adminDb.collection('students').doc(student.uid).get();
-                    const studentData = studentDoc.exists ? studentDoc.data() : null;
+                    const studentData = await getStudentById(student.uid);
+                    if (!studentData) { continue; }
 
                     const profilePhotoUrl = studentData?.profilePhotoUrl || studentData?.profileImage || studentData?.photoUrl;
                     if (profilePhotoUrl && cloudinary.config().api_key) {
@@ -152,14 +172,15 @@ export const POST = withSecurity(
                         } catch (e) {}
                     }
 
-                    const fcmTokens = await adminDb.collection('fcm_tokens').where('userUid', '==', student.uid).limit(400).get();
-                    if (!fcmTokens.empty) { const b = adminDb.batch(); fcmTokens.docs.forEach((d: any) => b.delete(d.ref)); await b.commit(); }
+                    // Delete FCM tokens from PostgreSQL
+                    const { deleteUserTokens } = await import('@/lib/services/fcm-token-service');
+                    await deleteUserTokens(student.uid);
 
                     const waitingFlags = await adminDb.collection('waiting_flags').where('student_uid', '==', student.uid).limit(400).get();
                     if (!waitingFlags.empty) { const b = adminDb.batch(); waitingFlags.docs.forEach((d: any) => b.delete(d.ref)); await b.commit(); }
 
                     // DEDUP GUARD: skip decrement if the seat was already released at soft block.
-                    const busId = studentData?.busId || studentData?.currentBusId || studentData?.assignedBusId;
+                    const busId = studentData?.busId || studentData?.busId;
                     if (busId && !wasSeatReleased(studentData)) {
                         await decrementBusCapacity(busId, student.uid, studentData?.shift).catch(() => {});
                     }
@@ -172,9 +193,10 @@ export const POST = withSecurity(
                         await adminAuth.deleteUser(student.uid);
                     } catch (e) {}
 
-                    console.log(`🚨 [AUDIT] SIMULATION Hard delete for ${student.uid}. CALLER STACK:`, new Error().stack);
-                    await adminDb.collection('students').doc(student.uid).delete();
-                    await adminDb.collection('users').doc(student.uid).delete().catch(() => {});
+                    // Delete from PostgreSQL
+                    await deleteStudent(student.uid);
+                    await deleteUser(student.uid).catch(() => {});
+
                     executionResults.hardDeleted++;
                 } catch (err: any) { executionResults.errors.push(`Hard delete failed for ${student.uid}: ${err.message}`); }
             }

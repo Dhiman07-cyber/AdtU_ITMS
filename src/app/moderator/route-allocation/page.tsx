@@ -2,8 +2,9 @@
 
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { db } from "@/lib/firebase";
-import { collection, getDocs } from "firebase/firestore";
+
+
+
 import { useAuth } from "@/contexts/auth-context";
 import { useModeratorPermissions } from "@/hooks/useModeratorPermissions";
 import { PermissionDeniedCard } from "@/components/PermissionDeniedCard";
@@ -58,7 +59,6 @@ import {
 } from "@/lib/services/assignment-service";
 import {
     computeNetRouteAssignments,
-    commitNetRouteChanges,
     validateRouteStagingPreCheck,
     type StagedRouteOperation,
     type DbRouteSnapshot,
@@ -113,7 +113,7 @@ interface RouteData {
     routeId: string;
     routeName: string;
     totalStops: number;
-    stops: Array<{ name: string; sequence: number; stopId?: string }>;
+    stops: Array<{ name: string; sequence: number; stop_name?: string }>;
     status?: string;
     active?: boolean;
 }
@@ -182,21 +182,23 @@ export default function SmartRouteAllocationPage() {
 
         setLoading(true);
         try {
-            // Fetch both collections in parallel (one-time reads)
-            const [busesSnapshot, routesSnapshot] = await Promise.all([
-                getDocs(collection(db, "buses")),
-                getDocs(collection(db, "routes")),
+            // Fetch both collections via API (PostgreSQL)
+            const [busesRes, routesRes] = await Promise.all([
+                fetch('/api/buses'),
+                fetch('/api/routes'),
             ]);
 
-            const busesData: BusData[] = busesSnapshot.docs.map((doc) => ({
-                id: doc.id,
-                ...doc.data(),
+            const busesJson = await busesRes.json();
+            const busesData: BusData[] = (busesJson.buses || []).map((b: any) => ({
+                id: b.busId || b.id,
+                ...b,
             })) as BusData[];
             setBuses(busesData);
 
-            const routesData: RouteData[] = routesSnapshot.docs.map((doc) => ({
-                id: doc.id,
-                ...doc.data(),
+            const routesJson = await routesRes.json();
+            const routesData: RouteData[] = (Array.isArray(routesJson) ? routesJson : routesJson.routes || []).map((r: any) => ({
+                id: r.id || r.routeId,
+                ...r,
             })) as RouteData[];
             setRoutes(routesData);
 
@@ -329,7 +331,7 @@ export default function SmartRouteAllocationPage() {
             return;
         }
 
-        if (route.active === false || route.status === "Inactive") {
+        if (route.active === false || route.status === "inactive") {
             toast.error(`Route ${route.routeName} is not active`);
             return;
         }
@@ -517,12 +519,25 @@ export default function SmartRouteAllocationPage() {
                 stagedAt: Date.now() + index,
             }));
 
-            // Commit using the new atomic transaction function
-            const result = await commitNetRouteChanges(
-                netRouteAssignmentResult.netChanges,
-                currentUser.uid,
-                stagedOps
-            );
+            // Commit using the new API route
+            const token = await currentUser.getIdToken();
+            const response = await fetch('/api/fleet/assign-routes', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    netChanges: Array.from(netRouteAssignmentResult.netChanges.values()),
+                    stagingSnapshot: stagedOps,
+                    actorInfo: {
+                        name: userData?.fullName || userData?.name || 'Unknown',
+                        role: userData?.role || 'moderator',
+                    },
+                }),
+            });
+
+            const result = await response.json();
 
             if (result.success) {
                 toast.success(`✅ Successfully assigned ${result.updatedBuses.length} bus(es) to routes`);

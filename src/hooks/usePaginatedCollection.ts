@@ -44,12 +44,12 @@ import { useVisibilityAwareListener } from '@/utils/useVisibilityAwareListener';
 // ============================================================================
 // GLOBAL CACHE - Prevents duplicate fetches during HMR and rapid remounts
 // ============================================================================
-interface CacheEntry<T> {
+export interface CacheEntry<T> {
     data: T[];
     timestamp: number;
 }
 
-const dataCache = new Map<string, CacheEntry<any>>();
+export const dataCache = new Map<string, CacheEntry<any>>();
 const MAX_CACHE_ENTRIES = 100;
 
 function getDefaultTTL(collectionName: string): number {

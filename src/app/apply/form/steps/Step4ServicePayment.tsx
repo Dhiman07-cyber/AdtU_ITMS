@@ -38,6 +38,8 @@ export default function Step4ServicePayment({
     'July', 'August', 'September', 'October', 'November', 'December'
   ];
   const startMonthName = monthNames[startMonthIndex] || 'July';
+  const endMonthIndex = deadlineConfig?.academicYear?.anchorMonth ?? ((startMonthIndex + 11) % 12);
+  const endMonthName = deadlineConfig?.academicYear?.anchorMonthName || monthNames[endMonthIndex] || 'June';
 
   const triggerCaution = React.useCallback(() => {
     setShowCaution(true);
@@ -59,13 +61,13 @@ export default function Step4ServicePayment({
               Caution
             </DialogTitle>
             <DialogDescription className="text-zinc-400 text-sm mt-3 text-justify leading-relaxed">
-              The university follows a {startMonthName}-to-{startMonthName} academic session cycle. Please carefully select the academic session for which you want transportation services. The selected academic session determines the validity period of your transportation access. Ensure that the selected session matches the academic year in which you intend to use the service before continuing.
+              The university follows a {startMonthName}-to-{endMonthName} academic session cycle. Please carefully select the academic session for which you want transportation services. The selected academic session determines the validity period of your transportation access. Ensure that the selected session matches the academic year in which you intend to use the service before continuing.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="mt-6">
             <Button
               onClick={dismissCaution}
-              className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold h-11 rounded-xl shadow-lg shadow-indigo-600/20 transition-all duration-200"
+              className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold h-11 rounded-xl transition-all duration-200"
             >
               I Understand
             </Button>
@@ -229,7 +231,7 @@ export default function Step4ServicePayment({
         </Button>
         <Button 
           onClick={onNext} 
-          className="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold h-11 px-6 rounded-xl shadow-lg shadow-indigo-600/20 transition-colors flex items-center gap-2"
+          className="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold h-11 px-6 rounded-xl transition-colors flex items-center gap-2"
         >
           Continue
           <ArrowRight className="w-4 h-4" />

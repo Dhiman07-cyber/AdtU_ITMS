@@ -12,16 +12,15 @@ import { cn } from "@/lib/utils";
 import type { CanonicalShift } from '@/lib/utils/shift-utils';
 
 export interface RevertBufferData {
+  operationId: string;
   affectedStudents: Array<{
     uid: string;
     oldBusId: string;
     newBusId: string;
     oldRouteId: string;
     newRouteId: string;
-    /** Original Stop ID — restored on revert */
-    stopId: string;
     /** Original Stop Name — restored on revert */
-    stopName: string;
+    stop_name: string;
     /** Target Shift — shift persisted on the student after reassignment */
     shift: CanonicalShift;
     /** Original Shift — shift the student had BEFORE reassignment. Used to correctly reverse source-bus counters and restore student.shift. */

@@ -1,9 +1,14 @@
 /**
- * Trip Lock Service (Simplified)
- * 
+ * Trip Lock Service (PostgreSQL-only)
+ *
  * Handles multi-driver lock management with automatic heartbeat recovery.
  * No audit logging, no admin intervention - fully automatic and driver-driven.
- * 
+ *
+ * D9: All Firestore usage has been removed. The trip lock now lives entirely
+ * in PostgreSQL active_trips table via RPCs. The unique partial indexes on
+ * active_trips enforce the same atomic lock semantics that Firestore
+ * transactions previously provided.
+ *
  * "The system enforces exclusive bus operation using a server-controlled
  * distributed lock and automatic heartbeat recovery, without manual
  * overrides or administrative intervention."
@@ -11,8 +16,6 @@
 
 import { SupabaseClient } from '@supabase/supabase-js';
 import { getSupabaseServer } from '@/lib/supabase-server';
-import { db as adminDb, FieldValue } from '@/lib/firebase-admin';
-import { Timestamp } from 'firebase-admin/firestore';
 
 // Configuration from environment
 // 10 minutes — university buses commonly pass through connectivity dead zones.
@@ -26,25 +29,10 @@ function getErrorMessage(error: unknown): string {
     return error instanceof Error ? error.message : 'Unknown error';
 }
 
-function timestampToMillis(value: unknown): number | null {
-    if (!value) return null;
-    if (typeof value === 'object' && value !== null && 'toMillis' in value && typeof value.toMillis === 'function') {
-        return value.toMillis();
-    }
-    if (typeof value === 'object' && value !== null && '_seconds' in value && typeof value._seconds === 'number') {
-        return value._seconds * 1000;
-    }
-    if (!(value instanceof Date) && typeof value !== 'string' && typeof value !== 'number') {
-        return null;
-    }
-    const parsed = new Date(value).getTime();
-    return Number.isFinite(parsed) ? parsed : null;
-}
-
-function isLockExpired(lock: ActiveTripLock | undefined, nowMs = Date.now()): boolean {
-    if (!lock?.active) return true;
-    const expiresAtMs = timestampToMillis(lock.expiresAt);
-    return expiresAtMs === null || nowMs > expiresAtMs;
+function isLockExpired(expiresAt: string | null | undefined, nowMs = Date.now()): boolean {
+    if (!expiresAt) return true;
+    const expiresAtMs = new Date(expiresAt).getTime();
+    return nowMs > expiresAtMs;
 }
 
 // Types
@@ -53,8 +41,8 @@ export interface ActiveTripLock {
     tripId: string | null;
     driverId: string | null;
     shift: 'morning' | 'evening' | 'both' | null;
-    since: FirebaseFirestore.Timestamp | null;
-    expiresAt: FirebaseFirestore.Timestamp | null;
+    since: string | null;
+    expiresAt: string | null;
 }
 
 export interface CanOperateResult {
@@ -66,7 +54,7 @@ export interface StartTripResult {
     success: boolean;
     tripId?: string;
     reason?: string;
-    errorCode?: 'LOCKED_BY_OTHER' | 'FIRESTORE_ERROR' | 'SUPABASE_ERROR' | 'VALIDATION_ERROR';
+    errorCode?: 'LOCKED_BY_OTHER' | 'SUPABASE_ERROR' | 'VALIDATION_ERROR';
 }
 
 export interface EndTripResult {
@@ -81,6 +69,11 @@ export interface HeartbeatResult {
 
 /**
  * Trip Lock Service Class
+ *
+ * D9: Pure PostgreSQL implementation. Uses RPCs for atomic lock operations
+ * and direct queries for reads. The unique partial index on
+ * active_trips(bus_id) WHERE status = 'active' enforces single-driver
+ * exclusion — the same guarantee that Firestore transactions provided.
  */
 export class TripLockService {
     private supabase: SupabaseClient;
@@ -91,30 +84,32 @@ export class TripLockService {
 
     /**
      * Check if a driver can operate a specific bus
+     *
+     * D9: Reads from PostgreSQL active_trips instead of Firestore buses.activeTripLock.
+     * Uses the same expiry logic: if the lock exists and hasn't expired, only the
+     * owning driver can operate.
      */
     async canOperate(driverId: string, busId: string): Promise<CanOperateResult> {
-        if (!adminDb) {
-            throw new Error('Firebase Admin not initialized');
-        }
-
         try {
-            // Read current lock state from Firestore
-            const busDoc = await adminDb.collection('buses').doc(busId).get();
+            const { data: activeTrip } = await this.supabase
+                .from('active_trips')
+                .select('driver_id, expires_at')
+                .eq('bus_id', busId)
+                .eq('status', 'active')
+                .maybeSingle();
 
-            if (!busDoc.exists) {
-                return { allowed: false, reason: 'Bus not found' };
-            }
-
-            const busData = busDoc.data();
-            const lock = busData?.activeTripLock as ActiveTripLock | undefined;
-
-            // No lock, inactive lock, or expired lock
-            if (!lock || !lock.active || isLockExpired(lock)) {
+            // No active trip — bus is free
+            if (!activeTrip) {
                 return { allowed: true };
             }
 
-            // Lock exists - check if it's the same driver (continuation)
-            if (lock.driverId === driverId) {
+            // Active trip exists — check if expired
+            if (isLockExpired(activeTrip.expires_at)) {
+                return { allowed: true };
+            }
+
+            // Lock exists and is valid — check if same driver (continuation)
+            if (activeTrip.driver_id === driverId) {
                 return { allowed: true };
             }
 
@@ -132,11 +127,14 @@ export class TripLockService {
 
     /**
      * Start a trip with exclusive lock acquisition
-     * 
+     *
+     * D9: Uses PostgreSQL RPC for atomic lock acquisition. The unique partial
+     * index on active_trips(bus_id) WHERE status = 'active' enforces the same
+     * single-driver exclusion that the Firestore transaction provided.
+     *
      * Steps:
-     * 1. Acquire Firestore lock (transaction)
-     * 2. Create active_trips record (Supabase)
-     * 3. On failure: clear Firestore lock
+     * 1. Call acquire_trip_lock RPC (atomic INSERT with unique constraint)
+     * 2. On unique violation → check if it's our own trip (idempotent retry)
      */
     async startTrip(
         driverId: string,
@@ -145,137 +143,39 @@ export class TripLockService {
         shift: 'morning' | 'evening' | 'both',
         tripId: string
     ): Promise<StartTripResult> {
-        if (!adminDb) {
-            return { success: false, reason: 'Firebase Admin not initialized', errorCode: 'FIRESTORE_ERROR' };
-        }
-
         const idPattern = /^[a-zA-Z0-9_-]{1,128}$/;
         if (!idPattern.test(driverId) || !idPattern.test(busId) || !idPattern.test(routeId) || !idPattern.test(tripId)) {
             return { success: false, reason: 'Invalid ID formats provided', errorCode: 'VALIDATION_ERROR' };
         }
 
         try {
-            // STEP 1: Acquire Firestore lock via transaction
-            const busRef = adminDb.collection('buses').doc(busId) as FirebaseFirestore.DocumentReference<FirebaseFirestore.DocumentData>;
-            const now = new Date();
-            const expiresAt = new Date(now.getTime() + LOCK_TTL_SECONDS * 1000);
-            let acquiredNewLock = false;
-            let lockedTripId = tripId;
-
-            try {
-                lockedTripId = await adminDb.runTransaction(async (transaction: FirebaseFirestore.Transaction) => {
-                    const busDoc = await transaction.get(busRef);
-
-                    if (!busDoc.exists) {
-                        throw new Error('Bus not found');
-                    }
-
-                    const busData = busDoc.data();
-                    const lock = busData?.activeTripLock as ActiveTripLock | undefined;
-                    const expired = isLockExpired(lock, now.getTime());
-
-                    // Idempotent double-click/retry: return the existing active trip for this driver.
-                    if (lock?.active && lock.driverId === driverId && lock.tripId && !expired) {
-                        return lock.tripId;
-                    }
-
-                    // Check if already locked by another driver
-                    if (lock?.active && lock.driverId !== driverId && !expired) {
-                        throw new Error('LOCKED_BY_OTHER');
-                    }
-
-                    // Acquire lock
-                    transaction.update(busRef, {
-                        activeTripLock: {
-                            active: true,
-                            tripId: tripId,
-                            driverId: driverId,
-                            shift: shift,
-                            since: FieldValue.serverTimestamp(),
-                            expiresAt: Timestamp.fromDate(expiresAt),
-                            startFcmSent: false,
-                            endFcmSent: false
-                        },
-                        activeDriverId: driverId,
-                        activeTripId: tripId
-                    });
-
-                    acquiredNewLock = true;
-                    return tripId;
+            const { data: result, error: rpcError } = await this.supabase
+                .rpc('acquire_trip_lock', {
+                    p_trip_id: tripId,
+                    p_bus_id: busId,
+                    p_driver_id: driverId,
+                    p_route_id: routeId,
+                    p_shift: shift,
+                    p_ttl_seconds: LOCK_TTL_SECONDS,
                 });
 
-            } catch (txError: unknown) {
-                console.error('Firestore transaction error:', txError);
+            if (rpcError) {
+                console.error('RPC error acquiring trip lock:', rpcError);
+                return { success: false, reason: rpcError.message, errorCode: 'SUPABASE_ERROR' };
+            }
 
-                const message = getErrorMessage(txError);
-                if (message === 'LOCKED_BY_OTHER') {
+            if (!result?.success) {
+                if (result?.error === 'LOCKED_BY_OTHER') {
                     return {
                         success: false,
                         reason: 'This bus is currently being operated by another driver. Please wait or try again later.',
                         errorCode: 'LOCKED_BY_OTHER'
                     };
                 }
-
-                return { success: false, reason: message, errorCode: 'FIRESTORE_ERROR' };
+                return { success: false, reason: result?.error || 'Failed to acquire lock', errorCode: 'SUPABASE_ERROR' };
             }
 
-            if (!acquiredNewLock) {
-                return { success: true, tripId: lockedTripId };
-            }
-
-            // STEP 2: Create active_trips record
-            const staleCutoff = new Date(now.getTime() - HEARTBEAT_TIMEOUT_SECONDS * 1000).toISOString();
-            await Promise.allSettled([
-                this.supabase
-                    .from('active_trips')
-                    .update({ status: 'ended', end_time: now.toISOString() })
-                    .eq('bus_id', busId)
-                    .eq('status', 'active')
-                    .lt('last_heartbeat', staleCutoff),
-                this.supabase
-                    .from('active_trips')
-                    .update({ status: 'ended', end_time: now.toISOString() })
-                    .eq('driver_id', driverId)
-                    .eq('status', 'active')
-                    .lt('last_heartbeat', staleCutoff)
-            ]);
-
-            const { error: activeInsertError } = await this.supabase
-                .from('active_trips')
-                .insert({
-                    trip_id: tripId,
-                    bus_id: busId,
-                    driver_id: driverId,
-                    route_id: routeId,
-                    shift: shift,
-                    status: 'active',
-                    start_time: now.toISOString(),
-                    last_heartbeat: now.toISOString()
-                });
-
-            if (activeInsertError) {
-                console.error('Error creating active_trips record:', activeInsertError);
-
-                const { data: existingTrip } = await this.supabase
-                    .from('active_trips')
-                    .select('trip_id, bus_id, driver_id, route_id')
-                    .eq('status', 'active')
-                    .or(`bus_id.eq.${busId},driver_id.eq.${driverId}`)
-                    .limit(1)
-                    .maybeSingle();
-
-                if (existingTrip?.driver_id === driverId && existingTrip?.bus_id === busId) {
-                    await this.updateFirestoreLockTripId(busId, existingTrip.trip_id);
-                    return { success: true, tripId: existingTrip.trip_id };
-                }
-
-                // Rollback: release Firestore lock acquired by this request.
-                await this.releaseLockIfMatches(busId, tripId);
-
-                return { success: false, reason: 'Failed to create trip record', errorCode: 'SUPABASE_ERROR' };
-            }
-
-            return { success: true, tripId: tripId };
+            return { success: true, tripId: result.tripId || tripId };
 
         } catch (error: unknown) {
             console.error('Start trip error:', error);
@@ -285,16 +185,15 @@ export class TripLockService {
 
     /**
      * Update heartbeat for an active trip
+     *
+     * D9: Uses PostgreSQL RPC for heartbeat extension. No Firestore transaction needed.
+     * The heartbeat write cache prevents excessive database writes.
      */
     async heartbeat(
         tripId: string,
         driverId: string,
         busId: string
     ): Promise<HeartbeatResult> {
-        if (!adminDb) {
-            return { success: false, reason: 'Firebase Admin not initialized' };
-        }
-
         const now = new Date();
         const cacheKey = `${tripId}:${driverId}:${busId}`;
         const lastWrite = heartbeatWriteCache.get(cacheKey) || 0;
@@ -303,43 +202,23 @@ export class TripLockService {
             return { success: true };
         }
 
-        const expiresAt = new Date(now.getTime() + LOCK_TTL_SECONDS * 1000);
-
         try {
-            // Update Supabase heartbeat
-            const { data: heartbeatRows, error: updateError } = await this.supabase
-                .from('active_trips')
-                .update({ last_heartbeat: now.toISOString() })
-                .eq('trip_id', tripId)
-                .eq('driver_id', driverId)
-                .eq('bus_id', busId)
-                .eq('status', 'active')
-                .select('trip_id');
+            const { data: result, error: rpcError } = await this.supabase
+                .rpc('extend_trip_lock', {
+                    p_trip_id: tripId,
+                    p_driver_id: driverId,
+                    p_bus_id: busId,
+                    p_ttl_seconds: LOCK_TTL_SECONDS,
+                });
 
-            if (updateError) {
-                console.error('Error updating heartbeat:', updateError);
+            if (rpcError) {
+                console.error('RPC error extending trip lock:', rpcError);
                 return { success: false, reason: 'Failed to update heartbeat' };
             }
 
-            if (!heartbeatRows || heartbeatRows.length === 0) {
-                return { success: false, reason: 'Active trip not found for this driver and bus' };
+            if (!result?.success) {
+                return { success: false, reason: result?.error || 'Active trip not found' };
             }
-
-            // Update Firestore lock expiration — verify ownership inside a
-            // transaction so a stale heartbeat cannot extend a lock that was
-            // already released and reassigned to a different driver.
-            const busRef = adminDb.collection('buses').doc(busId);
-            await adminDb.runTransaction(async (transaction) => {
-                const busDoc = await transaction.get(busRef);
-                if (!busDoc.exists) return;
-                const lock = busDoc.data()?.activeTripLock;
-                // Only extend if this driver still owns the lock for this trip
-                if (lock?.active && lock?.driverId === driverId && lock?.tripId === tripId) {
-                    transaction.update(busRef, {
-                        'activeTripLock.expiresAt': Timestamp.fromDate(expiresAt)
-                    });
-                }
-            });
 
             heartbeatWriteCache.set(cacheKey, now.getTime());
             if (heartbeatWriteCache.size > 5000) {
@@ -358,19 +237,15 @@ export class TripLockService {
     /**
      * End a trip cleanly (IDEMPOTENT + OWNERSHIP VERIFIED)
      * Updates active_trips to 'ended' status instead of deleting (audit trail).
+     *
+     * D9: Uses PostgreSQL RPC for lock release. No Firestore lock to release.
      */
     async endTrip(
         tripId: string,
         driverId: string,
         busId: string
     ): Promise<EndTripResult> {
-        if (!adminDb) {
-            return { success: false, reason: 'Firebase Admin not initialized' };
-        }
-
         try {
-            const now = new Date();
-
             // Verify driver ownership before ending
             const { data: activeTrip } = await this.supabase
                 .from('active_trips')
@@ -387,116 +262,33 @@ export class TripLockService {
 
                 // IDEMPOTENT: If already ended, return success
                 if (activeTrip.status === 'ended') {
-                    await this.releaseLockIfMatches(busId, tripId);
                     heartbeatWriteCache.delete(`${tripId}:${driverId}:${busId}`);
                     return { success: true };
                 }
 
-                // Update to 'ended' status instead of deleting (preserves audit trail)
-                const { error: updateError } = await this.supabase
-                    .from('active_trips')
-                    .update({
-                        status: 'ended',
-                        end_time: now.toISOString(),
-                    })
-                    .eq('trip_id', tripId)
-                    .eq('driver_id', driverId)
-                    .eq('bus_id', busId)
-                    .eq('status', 'active');
+                // Release lock via RPC
+                const { error: rpcError } = await this.supabase
+                    .rpc('release_trip_lock', {
+                        p_trip_id: tripId,
+                        p_bus_id: busId,
+                        p_driver_id: driverId,
+                    });
 
-                if (updateError) {
-                    console.error('Error ending trip in Supabase:', updateError);
-                    // Write outbox record so the stale active_trips row is detectable
-                    // and recoverable by the next cron or reconciliation pass.
-                    try {
-                        await adminDb.collection('audit_failures').add({
-                            kind: 'trip_supabase_end_failure',
-                            tripId,
-                            driverId,
-                            busId,
-                            error: updateError.message || 'Supabase update failed',
-                            recovered: false,
-                            createdAtISO: new Date().toISOString(),
-                        });
-                    } catch (outboxErr) {
-                        console.error('CRITICAL: Could not write outbox for Supabase trip end failure:', outboxErr);
-                    }
+                if (rpcError) {
+                    console.error('RPC error releasing trip lock:', rpcError);
+                    // Continue — the lock may have already been released
                 }
             } else {
                 console.warn('No active trip record found for trip:', tripId);
             }
 
-            // Release Firestore lock ONLY if it still matches this trip (prevents wiping newer locks)
-            await this.releaseLockIfMatches(busId, tripId);
             heartbeatWriteCache.delete(`${tripId}:${driverId}:${busId}`);
-
             return { success: true };
 
         } catch (error: unknown) {
             console.error('End trip error:', error);
             return { success: false, reason: getErrorMessage(error) };
         }
-    }
-
-    /**
-     * Release a Firestore lock
-     */
-    private async releaseLock(busId: string): Promise<void> {
-        if (!adminDb) return;
-
-        try {
-            await adminDb.collection('buses').doc(busId).update({
-                activeTripLock: {
-                    active: false,
-                    tripId: null,
-                    driverId: null,
-                    shift: null,
-                    since: null,
-                    expiresAt: null
-                },
-                activeDriverId: null,
-                activeTripId: null,
-                lastEndedAt: FieldValue.serverTimestamp()
-            });
-        } catch (error) {
-            console.error('Error releasing lock:', error);
-            throw error;
-        }
-    }
-
-    private async releaseLockIfMatches(busId: string, tripId: string): Promise<void> {
-        if (!adminDb) return;
-
-        await adminDb.runTransaction(async (transaction) => {
-            const busRef = adminDb.collection('buses').doc(busId);
-            const busDoc = await transaction.get(busRef);
-            const lock = busDoc.data()?.activeTripLock;
-
-            if (lock?.tripId === tripId) {
-                transaction.update(busRef, {
-                    activeTripLock: {
-                        active: false,
-                        tripId: null,
-                        driverId: null,
-                        shift: null,
-                        since: null,
-                        expiresAt: null
-                    },
-                    activeDriverId: null,
-                    activeTripId: null,
-                    lastEndedAt: FieldValue.serverTimestamp()
-                });
-            }
-        });
-    }
-
-    private async updateFirestoreLockTripId(busId: string, tripId: string): Promise<void> {
-        if (!adminDb) return;
-
-        await adminDb.collection('buses').doc(busId).update({
-            'activeTripLock.tripId': tripId,
-            activeTripId: tripId
-        });
     }
 
     /**

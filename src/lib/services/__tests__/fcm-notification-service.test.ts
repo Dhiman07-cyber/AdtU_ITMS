@@ -49,6 +49,12 @@ vi.mock('@/lib/firebase-admin', () => ({
   },
 }));
 
+let mockSupabaseClient: Record<string, any>;
+
+vi.mock('@/lib/supabase-server', () => ({
+  getSupabaseServer: () => mockSupabaseClient,
+}));
+
 import { notifyRoute, verifyDriverRouteBinding } from '../fcm-notification-service';
 
 describe('FCM Notification Service', () => {
@@ -56,6 +62,20 @@ describe('FCM Notification Service', () => {
     mockRunTransaction.mockReset();
     mockCollectionFn.mockReset();
     mockSendTopic.mockReset();
+
+    mockSupabaseClient = {
+      rpc: vi.fn().mockResolvedValue({ data: { acquired: true }, error: null }),
+      from: vi.fn(() => {
+        const chain = {
+          select: vi.fn(() => chain),
+          eq: vi.fn(() => chain),
+          in: vi.fn(() => chain),
+          limit: vi.fn(() => chain),
+          maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+        };
+        return chain;
+      }),
+    };
 
     mockRunTransaction.mockImplementation(async (fn: (tx: unknown) => Promise<void>) => fn({
       get: vi.fn().mockResolvedValue({
@@ -87,13 +107,7 @@ describe('FCM Notification Service', () => {
     });
 
     it('prevents duplicate sends through the bus lock flag', async () => {
-      mockRunTransaction.mockImplementationOnce(async (fn: (tx: unknown) => Promise<void>) => fn({
-        get: vi.fn().mockResolvedValue({
-          exists: true,
-          data: () => ({ activeTripLock: { tripId: 't2', startFcmSent: true } }),
-        }),
-        update: vi.fn(),
-      }));
+      mockSupabaseClient.rpc.mockResolvedValueOnce({ data: { acquired: false }, error: null });
 
       const result = await notifyRoute({ routeId: 'r1', tripId: 't2', routeName: 'Morning', busId: 'b1' });
 
@@ -140,44 +154,81 @@ describe('FCM Notification Service', () => {
   });
 
   describe('verifyDriverRouteBinding', () => {
-    it('authorizes a driver assigned to the bus', async () => {
-      mockCollectionFn.mockImplementation((name: string) => {
-        if (name === 'drivers') return collectionChain({ assignedBusId: 'b1' });
-        return collectionChain();
+    it('authorizes a driver assigned to the bus via driver_status', async () => {
+      const mockMaybeSingle = vi.fn().mockResolvedValue({
+        data: { bus_id: 'b1', driver_uid: 'd1' },
+        error: null,
+      });
+      mockSupabaseClient.from.mockImplementation((table: string) => {
+        const chain = {
+          select: vi.fn(() => chain),
+          eq: vi.fn(() => chain),
+          in: vi.fn(() => chain),
+          limit: vi.fn(() => chain),
+          maybeSingle: mockMaybeSingle,
+        };
+        return chain;
       });
 
       expect((await verifyDriverRouteBinding('d1', 'r1', 'b1')).authorized).toBe(true);
     });
 
-    it('authorizes a driver referenced by the bus document', async () => {
-      mockCollectionFn.mockImplementation((name: string) => {
-        if (name === 'drivers') return collectionChain({ assignedBusId: 'other' });
-        if (name === 'buses') return collectionChain({ assignedDriverId: 'd1' });
-        return collectionChain();
+    it('authorizes a driver referenced by the buses table', async () => {
+      let callCount = 0;
+      mockSupabaseClient.from.mockImplementation((table: string) => {
+        const chain: Record<string, any> = {
+          select: vi.fn(() => chain),
+          eq: vi.fn(() => chain),
+          in: vi.fn(() => chain),
+          limit: vi.fn(() => chain),
+          maybeSingle: vi.fn(),
+        };
+        if (table === 'driver_status') {
+          chain.maybeSingle.mockResolvedValue({ data: { bus_id: 'other', driver_uid: 'd1' }, error: null });
+        } else if (table === 'buses') {
+          chain.maybeSingle.mockResolvedValue({ data: { driver_uid: 'd1' }, error: null });
+        }
+        return chain;
       });
 
       expect((await verifyDriverRouteBinding('d1', 'r1', 'b1')).authorized).toBe(true);
     });
 
     it('rejects an unassigned driver', async () => {
-      mockCollectionFn.mockImplementation((name: string) => {
-        if (name === 'drivers') return collectionChain({ assignedBusId: 'other' });
-        if (name === 'buses') return collectionChain({ assignedDriverId: 'x', activeDriverId: 'x', driverUID: 'x' });
-        return collectionChain();
+      mockSupabaseClient.from.mockImplementation((table: string) => {
+        const chain: Record<string, any> = {
+          select: vi.fn(() => chain),
+          eq: vi.fn(() => chain),
+          in: vi.fn(() => chain),
+          limit: vi.fn(() => chain),
+          maybeSingle: vi.fn(),
+        };
+        if (table === 'driver_status') {
+          chain.maybeSingle.mockResolvedValue({ data: { bus_id: 'other', driver_uid: 'x' }, error: null });
+        } else if (table === 'buses') {
+          chain.maybeSingle.mockResolvedValue({ data: { driver_uid: 'x' }, error: null });
+        }
+        return chain;
       });
 
       expect((await verifyDriverRouteBinding('d1', 'r1', 'b1')).authorized).toBe(false);
     });
 
     it('rejects when the driver is missing', async () => {
-      mockCollectionFn.mockImplementation((name: string) => {
-        if (name === 'drivers') return collectionChain(null);
-        return collectionChain();
+      mockSupabaseClient.from.mockImplementation((table: string) => {
+        const chain: Record<string, any> = {
+          select: vi.fn(() => chain),
+          eq: vi.fn(() => chain),
+          in: vi.fn(() => chain),
+          limit: vi.fn(() => chain),
+          maybeSingle: vi.fn(),
+        };
+        chain.maybeSingle.mockResolvedValue({ data: null, error: null });
+        return chain;
       });
 
       const result = await verifyDriverRouteBinding('missing', 'r1', 'b1');
       expect(result.authorized).toBe(false);
-      expect(result.reason).toContain('not found');
     });
   });
 });

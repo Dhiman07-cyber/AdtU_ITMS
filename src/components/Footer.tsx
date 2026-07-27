@@ -37,7 +37,7 @@ const Footer = React.memo(function Footer({ className = '' }: FooterProps) {
             {/* Branding */}
             <div className="space-y-1.5 sm:space-y-3 col-span-2 lg:col-span-3">
               <div className="space-y-1.5 sm:space-y-2">
-                <Image src="/adtu-new-logo.svg" alt="AdtU Logo" width={144} height={56} className="w-24 h-auto sm:w-36" />
+                <Image src="/adtu-new-logo.svg" alt="AdtU Logo" width={144} height={56} className="w-24 h-auto sm:w-36" style={{ height: 'auto' }} />
                 <div>
                   <h3 className="text-sm sm:text-lg font-bold text-white">{appName}</h3>
                   <p className="text-[10px] sm:text-xs text-[#9CA3AF] leading-relaxed max-w-[280px]">Official Real-Time Campus Transportation Management Platform</p>

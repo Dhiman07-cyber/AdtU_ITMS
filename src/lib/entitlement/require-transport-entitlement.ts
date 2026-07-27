@@ -1,15 +1,19 @@
 import { NextResponse } from 'next/server';
-import { adminDb } from '@/lib/firebase-admin';
+import { getByUid } from '@/domains/student';
 import { getTransportEntitlement, EntitlementResult } from './transport-entitlement';
 
 /**
  * Server-side guard for student transport API routes (Phase 3).
  *
- * Loads the student document and applies the CANONICAL entitlement rule. Use this
- * at the top of any API that delivers transport data or actions (tracking, trip
- * status, waiting flags, missed-bus, driver notifications). Returns the student
- * data on success, or a ready-to-return 403 NextResponse when the caller does not
- * currently own transport access.
+ * Loads the student document from PostgreSQL and applies the CANONICAL
+ * entitlement rule. Use this at the top of any API that delivers transport
+ * data or actions (tracking, trip status, waiting flags,
+ * driver notifications). Returns the student data on success, or a
+ * ready-to-return 403 NextResponse when the caller does not currently
+ * own transport access.
+ *
+ * Migration status: COMPLETED — reads from PostgreSQL (student_profiles).
+ * Firestore (students collection) is no longer accessed.
  *
  * Usage:
  *   const gate = await requireTransportEntitlement(auth.uid);
@@ -24,13 +28,7 @@ export async function requireTransportEntitlement(
 > {
   let student: Record<string, any> | null = null;
   try {
-    const doc = await adminDb.collection('students').doc(uid).get();
-    if (doc.exists) {
-      student = doc.data() as Record<string, any>;
-    } else {
-      const q = await adminDb.collection('students').where('uid', '==', uid).limit(1).get();
-      if (!q.empty) student = q.docs[0].data() as Record<string, any>;
-    }
+    student = await getByUid(uid) as Record<string, any> | null;
   } catch {
     student = null;
   }

@@ -1,5 +1,4 @@
 import { NextResponse } from 'next/server';
-import { db as adminDb } from '@/lib/firebase-admin';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import { withSecurity } from '@/lib/security/api-security';
 import { MarkBoardedSchema } from '@/lib/security/validation-schemas';
@@ -12,7 +11,6 @@ import { RateLimits } from '@/lib/security/rate-limiter';
  * 
  * Optimized:
  * - Parallel broadcasts to all channels
- * - Non-blocking Firestore sync
  * - Atomic Supabase update
  */
 export const POST = withSecurity(
@@ -44,8 +42,7 @@ export const POST = withSecurity(
         const { data: updatedData, error: updateError } = await supabase
             .from('waiting_flags')
             .update({
-                status: 'picked_up',
-                boarded_at: new Date().toISOString(),
+                status: 'boarded',
                 ack_by_driver_uid: driverUid
             })
             .eq('id', flagId)
@@ -66,31 +63,19 @@ export const POST = withSecurity(
             supabase.channel(`waiting_flags_${flagData.bus_id}`).send({
                 type: 'broadcast',
                 event: 'waiting_flag_updated',
-                payload: { flagId, studentUid: flagData.student_uid, status: 'picked_up', timestamp: new Date().toISOString() }
+                payload: { flagId, studentUid: flagData.student_uid, status: 'boarded', timestamp: new Date().toISOString() }
             }),
             supabase.channel(`student_${flagData.student_uid}`).send({
                 type: 'broadcast',
                 event: 'flag_acknowledged',
-                payload: { flagId, busId: flagData.bus_id, status: 'picked_up', ackByDriverUid: driverUid, timestamp: new Date().toISOString(), message: 'Driver has arrived!' }
+                payload: { flagId, busId: flagData.bus_id, status: 'boarded', ackByDriverUid: driverUid, timestamp: new Date().toISOString(), message: 'Driver has arrived!' }
             }),
             supabase.channel(`route_${flagData.route_id}`).send({
                 type: 'broadcast',
                 event: 'waiting_flag_updated',
-                payload: { flagId, studentUid: flagData.student_uid, busId: flagData.bus_id, routeId: flagData.route_id, status: 'picked_up', timestamp: new Date().toISOString() }
+                payload: { flagId, studentUid: flagData.student_uid, busId: flagData.bus_id, routeId: flagData.route_id, status: 'boarded', timestamp: new Date().toISOString() }
             })
         ]);
-
-        // 4. Non-blocking Firestore sync
-        const firestoreTask = (async () => {
-            try {
-                const snapshot = await adminDb.collection('waiting_flags').where('supabaseId', '==', flagId).limit(1).get();
-                if (!snapshot.empty) {
-                    await snapshot.docs[0].ref.update({ status: 'picked_up', boarded_at: new Date().toISOString() });
-                }
-            } catch (err) { 
-                console.error('Firestore sync failed:', err); 
-            }
-        })();
 
         // Await broadcasts briefly to ensure they are initiated
         await broadcastTask;

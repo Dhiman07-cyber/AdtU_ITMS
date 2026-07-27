@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '@/contexts/auth-context';
-import { DEFAULT_BUS_FEE } from '@/config/runtime';
 import FacultyDepartmentSelector from '@/components/faculty-department-selector';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -10,22 +9,18 @@ import { Label } from '@/components/ui/label';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { signalCollectionRefresh } from '@/hooks/useEventDrivenRefresh';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Textarea } from '@/components/ui/textarea';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { SelectItem } from '@/components/ui/select';
 import { useToast } from '@/contexts/toast-context';
-import { Info, Camera, PenSquare, Trash2, Loader2 } from "lucide-react";
-import { getAllRoutes, getAllBuses, getModeratorById } from '@/lib/dataService';
+import { Camera, Trash2, Loader2 } from "lucide-react";
+import { getAllRoutes, getAllBuses } from '@/lib/dataService';
 import { Route } from '@/lib/types';
 import EnhancedDatePicker from "@/components/enhanced-date-picker";
 import { calculateValidUntilDate } from '@/lib/utils/date-utils';
-import { checkBusCapacity, type BusCapacityInfo, type CapacityCheckResult } from '@/lib/bus-capacity-checker';
-import { AlertCircle, ExternalLink } from 'lucide-react';
-import { Alert, AlertDescription } from '@/components/ui/alert';
+import { checkBusCapacity, type CapacityCheckResult } from '@/lib/bus-capacity-checker';
+
 import ProfileImageAddModal from '@/components/ProfileImageAddModal';
 import Image from 'next/image';
 
-import ApplyFormNavbar from '@/components/ApplyFormNavbar';
 import { uploadImage } from '@/lib/upload';
 import AddStudentPaymentSection from '@/components/AddStudentPaymentSection';
 import { useDebouncedStorage } from '@/hooks/useDebouncedStorage';
@@ -69,7 +64,7 @@ export default function AddStudentForm() {
   // Helper function to get initial form data from localStorage
   const getInitialFormData = (): StudentFormData => {
     const currentYear = new Date().getUTCFullYear();
-    const defaultValidUntil = calculateValidUntilDate(currentYear, 1, { month: 5, day: 30 }).toISOString();
+    const defaultValidUntil = '';
 
     const defaultData: StudentFormData = {
       name: '',
@@ -147,9 +142,9 @@ export default function AddStudentForm() {
   const [loadingBuses, setLoadingBuses] = useState(true);
   const [facultySelected, setFacultySelected] = useState(false);
 
-  // Initialize bus fee and deadline state
-  const [busFee, setBusFee] = useState<number>(DEFAULT_BUS_FEE);
-  const [academicDeadline, setAcademicDeadline] = useState<{ month: number; day: number }>({ month: 5, day: 30 }); // Default June 30
+  // Initialize bus fee and deadline state from live config (no hardcoded fallbacks)
+  const [busFee, setBusFee] = useState<number>(0);
+  const [academicDeadline, setAcademicDeadline] = useState<{ month: number; day: number } | null>(null);
 
   // Fetch system config to get current bus fee and deadline config from canonical source
   useEffect(() => {
@@ -344,13 +339,13 @@ export default function AddStudentForm() {
 
   const handleRefChange = (field: string, value: any) => {
     // Determine the field name to update based on component output
-    // The component sends 'routeId', 'busId', 'stopId', 'busAssigned', 'sessionStartYear'
+    // The component sends 'routeId', 'busId', 'stop_name', 'busAssigned', 'sessionStartYear'
     console.log(`🔄 [Admin] Ref change: ${field} =`, value);
 
     if (field === 'sessionStartYear') {
       handleSessionStartYearChange(value);
-    } else if (field === 'stopId') {
-      // Map 'stopId' to 'pickupPoint' as per form data structure
+    } else if (field === 'stop_name') {
+      // Map 'stop_name' to 'pickupPoint' as per form data structure
       setFormData(prev => ({ ...prev, pickupPoint: value }));
     } else {
       setFormData(prev => ({ ...prev, [field]: value }));
@@ -570,7 +565,7 @@ export default function AddStudentForm() {
             sessionStartYear: formData.sessionStartYear,
             sessionEndYear: formData.sessionEndYear,
             validUntil: formData.validUntil,
-            stopId: formData.pickupPoint // Renamed from pickupPoint
+            stop_name: formData.pickupPoint // Renamed from pickupPoint
           }),
         });
 

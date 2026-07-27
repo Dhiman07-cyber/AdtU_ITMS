@@ -88,38 +88,19 @@ export const POST = withSecurity<LocationUpdateBody>(
 
     const supabase = getSupabaseServer();
 
-    const [statusResult, activeTripResult] = await Promise.all([
-      supabase
-        .from('driver_status')
-        .select('status, bus_id, route_id, trip_id')
-        .eq('driver_uid', driverUid)
-        .maybeSingle(),
-      supabase
-        .from('active_trips')
-        .select('trip_id, bus_id, route_id, driver_id, status')
-        .eq('bus_id', busId)
-        .eq('driver_id', driverUid)
-        .eq('status', 'active')
-        .maybeSingle(),
-    ]);
+    const { data: activeTrip, error: activeTripError } = await supabase
+      .from('active_trips')
+      .select('trip_id, bus_id, route_id, driver_id, status')
+      .eq('bus_id', busId)
+      .eq('driver_id', driverUid)
+      .eq('status', 'active')
+      .maybeSingle();
 
-    const statusData = statusResult.data;
-    const activeTrip = activeTripResult.data;
-
-    if (
-      statusResult.error ||
-      activeTripResult.error ||
-      !statusData ||
-      !activeTrip ||
-      statusData.status !== 'on_trip' ||
-      statusData.bus_id !== busId ||
-      statusData.trip_id !== activeTrip.trip_id ||
-      activeTrip.route_id !== routeId
-    ) {
+    if (activeTripError || !activeTrip) {
       return NextResponse.json({ error: 'No active session found for this driver/bus' }, { status: 403 });
     }
 
-    if (tripId && activeTrip.trip_id !== tripId) {
+    if (tripId && activeTrip.trip_id !== tripId && String(activeTrip.trip_id) !== String(tripId)) {
       return NextResponse.json({ error: 'Trip mismatch for location update' }, { status: 403 });
     }
 
@@ -147,7 +128,7 @@ export const POST = withSecurity<LocationUpdateBody>(
     const timestampIso = now.toISOString();
     const commonData = {
       bus_id: busId,
-      route_id: routeId,
+      route_id: routeId || activeTrip.route_id,
       driver_uid: driverUid,
       lat: latNum,
       lng: lngNum,
@@ -176,7 +157,8 @@ export const POST = withSecurity<LocationUpdateBody>(
 
     const failedWrite = writeResults.find(writeFailed);
     if (failedWrite) {
-      return NextResponse.json({ error: 'Failed to save location update' }, { status: 500 });
+      const writeErr = failedWrite.status === 'rejected' ? failedWrite.reason : (failedWrite.value as any)?.error;
+      return NextResponse.json({ error: 'Failed to save location update', details: writeErr?.message }, { status: 500 });
     }
 
     return NextResponse.json({

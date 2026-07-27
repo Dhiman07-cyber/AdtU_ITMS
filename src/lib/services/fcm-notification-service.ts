@@ -3,9 +3,15 @@
  *
  * Route trip notifications use FCM topics so starting/ending a bus journey does
  * not require fetching and batching every student token during the trip request.
+ *
+ * D9: FCM notification lock moved from Firestore buses.activeTripLock to
+ * PostgreSQL active_trips via acquire_fcm_lock RPC. Driver/bus verification
+ * moved to Supabase. Student queries moved to Supabase.
  */
 
-import { db as adminDb, messaging, FieldValue } from '@/lib/firebase-admin';
+import { messaging } from '@/lib/firebase-admin';
+import { getSupabaseServer } from '@/lib/supabase-server';
+import { getDriverUidByBusId } from '@/domains/fleet/repositories/driver-assignment.repository';
 
 export type TripEventType = 'TRIP_STARTED' | 'TRIP_ENDED';
 export type RouteTopicEventType = TripEventType | 'BUS_CHANGED';
@@ -20,57 +26,27 @@ export interface NotifyRouteResult {
   error?: string;
 }
 
-async function updateStudentNotifications(
-  studentIds: Set<string>,
-  payload: { body: string; type: TripEventType; timestamp: string }
-): Promise<void> {
-  if (!adminDb || studentIds.size === 0) return;
-
-  const ids = Array.from(studentIds);
-  for (let i = 0; i < ids.length; i += 400) {
-    const batch = adminDb.batch();
-
-    ids.slice(i, i + 400).forEach(id => {
-      batch.update(adminDb.collection('students').doc(id), {
-        fcmMessage: {
-          ...payload,
-          receivedAt: FieldValue.serverTimestamp(),
-        },
-      });
-    });
-
-    try {
-      await batch.commit();
-    } catch (error) {
-      console.warn('Non-critical student notification status update failed:', error);
-    }
-  }
-}
-
 async function acquireNotificationLock(busId: string, tripId: string, eventType: TripEventType): Promise<void> {
-  if (!adminDb) throw new Error('Firebase Admin not initialized');
+  // D9: Use PostgreSQL RPC instead of Firestore transaction
+  const supabase = getSupabaseServer();
+  const lockType = eventType === 'TRIP_ENDED' ? 'end' : 'start';
 
-  const lockFlag = eventType === 'TRIP_ENDED' ? 'endFcmSent' : 'startFcmSent';
-  const busRef = adminDb.collection('buses').doc(busId);
-
-  await adminDb.runTransaction(async tx => {
-    const busDoc = await tx.get(busRef);
-    if (!busDoc.exists) throw new Error('BUS_NOT_FOUND');
-
-    const lock = busDoc.data()?.activeTripLock;
-    if (lock?.tripId !== tripId && lock?.trip_id !== tripId) {
-      console.warn(`Lock tripId mismatch: doc=${lock?.tripId || lock?.trip_id}, current=${tripId}`);
-    }
-
-    if (lock?.[lockFlag]) {
-      throw new Error('NOTIFICATION_ALREADY_SENT');
-    }
-
-    tx.update(busRef, {
-      [`activeTripLock.${lockFlag}`]: true,
-      [`activeTripLock.${lockFlag}At`]: FieldValue.serverTimestamp(),
+  const { data: result, error } = await supabase
+    .rpc('acquire_fcm_lock', {
+      p_trip_id: tripId,
+      p_bus_id: busId,
+      p_lock_type: lockType,
     });
-  });
+
+  if (error) {
+    console.error('FCM lock RPC error:', error);
+    throw new Error('FCM_LOCK_ERROR');
+  }
+
+  // acquired=false means already sent (idempotent)
+  if (result && !result.acquired) {
+    throw new Error('NOTIFICATION_ALREADY_SENT');
+  }
 }
 
 export async function verifyDriverRouteBinding(
@@ -78,28 +54,42 @@ export async function verifyDriverRouteBinding(
   _routeId: string,
   busId: string
 ): Promise<{ authorized: boolean; reason?: string }> {
-  if (!adminDb) return { authorized: false, reason: 'Firebase Admin not initialized' };
-
   try {
-    const driverDoc = await adminDb.collection('drivers').doc(driverId).get();
-    if (!driverDoc.exists) return { authorized: false, reason: 'Driver not found' };
+    const supabase = getSupabaseServer();
 
-    const driverData = driverDoc.data();
-    const driverClaimsBus = driverData?.assignedBusId === busId || driverData?.busId === busId;
-    if (driverClaimsBus) return { authorized: true };
+    // 1. Check active_trips for active assignment
+    const { data: activeTrip } = await supabase
+      .from('active_trips')
+      .select('bus_id, driver_id')
+      .eq('driver_id', driverId)
+      .eq('status', 'active')
+      .maybeSingle();
 
-    const busDoc = await adminDb.collection('buses').doc(busId).get();
-    if (!busDoc.exists) return { authorized: false, reason: 'Bus not found' };
+    if (activeTrip?.bus_id === busId) return { authorized: true };
 
-    const busData = busDoc.data();
-    const busClaimsDriver =
-      busData?.assignedDriverId === driverId ||
-      busData?.activeDriverId === driverId ||
-      busData?.driverUID === driverId;
+    // 2. Check canonical driver_assignments table
+    const assignedDriverUid = await getDriverUidByBusId(busId);
+    if (assignedDriverUid === driverId) return { authorized: true };
 
-    return busClaimsDriver
-      ? { authorized: true }
-      : { authorized: false, reason: 'Driver is not assigned to this bus' };
+    // 3. Check buses table (driver_uid)
+    const { data: bus } = await supabase
+      .from('buses')
+      .select('driver_uid')
+      .eq('id', busId)
+      .maybeSingle();
+
+    if (bus?.driver_uid === driverId) return { authorized: true };
+
+    // 4. Check driver_profiles table (bus_id)
+    const { data: driverProfile } = await supabase
+      .from('driver_profiles')
+      .select('bus_id')
+      .eq('uid', driverId)
+      .maybeSingle();
+
+    if (driverProfile?.bus_id === busId) return { authorized: true };
+
+    return { authorized: false, reason: 'Driver is not assigned to this bus' };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Driver authorization failed';
     console.error('Error verifying driver-route binding:', message);
@@ -122,47 +112,22 @@ export async function notifyRoute(params: {
     try {
       await acquireNotificationLock(busId, tripId, eventType);
     } catch (error) {
-      if (error instanceof Error && error.message === 'NOTIFICATION_ALREADY_SENT') {
-        return {
-          success: true,
-          successCount: 0,
-          failureCount: 0,
-          totalTokens: 0,
-          batchCount: 0,
-          invalidTokensRemoved: 0,
-          error: 'already_sent',
-        };
-      }
+      console.warn(`[notifyRoute] Skipping push notification for trip ${tripId} (${eventType}):`, error instanceof Error ? error.message : error);
+      return {
+        success: true,
+        successCount: 0,
+        failureCount: 0,
+        totalTokens: 0,
+        batchCount: 0,
+        invalidTokensRemoved: 0,
+        error: error instanceof Error ? error.message : 'already_sent',
+      };
     }
   }
 
   const topicResult = await notifyRouteTopic({ routeId, tripId, routeName, busId, eventType });
 
-  void (async () => {
-    try {
-      const studentsSnap = await adminDb.collection('students')
-        .where('routeId', '==', routeId)
-        .where('status', '==', 'active')
-        .limit(100)
-        .get();
 
-      if (studentsSnap.empty) return;
-
-      const isStart = eventType === 'TRIP_STARTED';
-      await updateStudentNotifications(
-        new Set<string>(studentsSnap.docs.map(doc => doc.id)),
-        {
-          body: isStart
-            ? `Bus for ${routeName} has started.`
-            : `Bus trip for ${routeName} has ended.`,
-          type: eventType,
-          timestamp: new Date().toISOString(),
-        }
-      );
-    } catch (error) {
-      console.warn('Background student status update failed:', error);
-    }
-  })();
 
   return {
     success: topicResult.success,

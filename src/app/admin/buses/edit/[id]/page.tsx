@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState, useEffect, use } from "react";
 import { useRouter } from "next/navigation";
@@ -75,7 +75,7 @@ export default function EditBusPage({ params }: { params: Promise<{ id: string }
     driverUID: "",
     routeId: "",
     shift: "",
-    status: "Active",
+    status: "active",
     morningLoad: "0",
     eveningLoad: "0"
   });
@@ -127,7 +127,7 @@ export default function EditBusPage({ params }: { params: Promise<{ id: string }
           driverUID: bus.assignedDriverId || bus.driverUID || bus.activeDriverId || "",
           routeId: bus.routeId,
           shift: bus.shift || "",
-          status: bus.status || "Active",
+          status: bus.status || "active",
           morningLoad: mLoad.toString(),
           eveningLoad: eLoad.toString()
         });
@@ -388,7 +388,7 @@ export default function EditBusPage({ params }: { params: Promise<{ id: string }
                     <div className="px-2 py-1.5 text-xs font-bold text-yellow-500 uppercase tracking-wider bg-gray-800/50">
                       Reserved
                     </div>
-                    {drivers.filter(d => !d.assignedBusId || d.assignedBusId === formData.busId || d.assignedBusId === id || d.uid === formData.driverUID).map(driver => (
+                    {drivers.filter(d => !d.busId || d.busId === formData.busId || d.busId === id || d.uid === formData.driverUID).map(driver => (
                       <SelectItem key={driver.uid} value={driver.uid || ''}>{driver.fullName || driver.name}</SelectItem>
                     ))}
                   </SelectContent>
@@ -471,9 +471,9 @@ export default function EditBusPage({ params }: { params: Promise<{ id: string }
                     <SelectValue placeholder="Select Status" />
                   </SelectTrigger>
                   <SelectContent position="popper" side="bottom" align="start">
-                    <SelectItem value="Active">Active</SelectItem>
-                    <SelectItem value="Inactive">Inactive</SelectItem>
-                    <SelectItem value="Maintenance">Maintenance</SelectItem>
+                    <SelectItem value="active">Active</SelectItem>
+                    <SelectItem value="inactive">Inactive</SelectItem>
+                    <SelectItem value="maintenance">Maintenance</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

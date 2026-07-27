@@ -1,10 +1,10 @@
 import { NextResponse } from 'next/server';
-import { adminDb } from '@/lib/firebase-admin';
 import {
   DEFAULT_MODERATOR_PERMISSIONS,
   type ModeratorPermissions,
 } from '@/lib/types/moderator-permissions';
 import type { SecurityAuth } from '@/lib/security/api-security';
+import { getModeratorById } from '@/domains/identity';
 
 type PermissionCategory = keyof ModeratorPermissions;
 type PermissionKey<C extends PermissionCategory> = keyof ModeratorPermissions[C];
@@ -29,9 +29,9 @@ export async function getModeratorPermissions(uid: string): Promise<ModeratorPer
     return cached.permissions;
   }
 
-  const moderatorDoc = await adminDb.collection('moderators').doc(uid).get();
+  const moderator = await getModeratorById(uid);
   const permissions = mergeWithDefaults(
-    moderatorDoc.exists ? moderatorDoc.data()?.permissions : undefined
+    moderator?.permissions as Partial<ModeratorPermissions> | undefined
   );
 
   permissionCache.set(uid, {
@@ -45,6 +45,18 @@ export async function getModeratorPermissions(uid: string): Promise<ModeratorPer
   }
 
   return permissions;
+}
+
+export async function requireAdminPermission(
+  auth: SecurityAuth,
+  requestId?: string
+): Promise<NextResponse | null> {
+  if (auth.role === 'admin') return null;
+
+  return NextResponse.json(
+    { success: false, error: 'Insufficient permissions', requestId },
+    { status: 403 }
+  );
 }
 
 export async function requireModeratorPermission<C extends PermissionCategory>(

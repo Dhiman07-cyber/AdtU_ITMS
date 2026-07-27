@@ -126,6 +126,7 @@ export default function ViewStudentPage({ params }: { params: Promise<{ id: stri
   const { addToast } = useToast();
   const { canStudentView, loading: permsLoading } = useModeratorPermissions();
   const { id } = use(params);
+  const cleanId = decodeURIComponent(id || '').trim();
   const [student, setStudent] = useState<any>(null);
   const [payments, setPayments] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -137,18 +138,15 @@ export default function ViewStudentPage({ params }: { params: Promise<{ id: stri
   useEffect(() => {
     const fetchStudentAndPayments = async () => {
       try {
-        // Fetch student first to get enrollment ID for better payment lookup
-        const foundStudent = await getStudentById(id);
+        const foundStudent = await getStudentById(cleanId);
 
-        if (foundStudent) {
+        if (foundStudent && (foundStudent.uid || foundStudent.id || foundStudent.enrollmentId)) {
           setStudent(foundStudent);
-          // Fetch payments using both UID and Enrollment ID (if available)
-          const foundPayments = await getPaymentsByStudentUid(id, foundStudent.enrollmentId);
+          const targetUid = foundStudent.uid || foundStudent.id || cleanId;
+          const foundPayments = await getPaymentsByStudentUid(targetUid, foundStudent.enrollmentId);
           setPayments(foundPayments || []);
         } else {
-          // If student not found, try fetching payments by UID anyway
-          const foundPayments = await getPaymentsByStudentUid(id);
-          setPayments(foundPayments || []);
+          setStudent(null);
         }
       } catch (error) {
         console.error('Error fetching student or payments:', error);
@@ -160,7 +158,7 @@ export default function ViewStudentPage({ params }: { params: Promise<{ id: stri
     };
 
     fetchStudentAndPayments();
-  }, [id, addToast]);
+  }, [cleanId, addToast]);
 
   const handleEdit = () => {
     router.push(`/moderator/students/edit/${id}`);
@@ -395,18 +393,24 @@ export default function ViewStudentPage({ params }: { params: Promise<{ id: stri
   if (!student) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-transparent">
-        <div className="text-center max-w-md mx-auto px-4">
-          <div className="mb-8 inline-flex items-center justify-center w-24 h-24 rounded-full bg-gradient-to-br from-red-500 to-pink-500 shadow-2xl">
-            <AlertCircle className="w-12 h-12 text-white" />
+        <div className="text-center max-w-xl mx-auto px-4">
+          <div className="mb-6 inline-flex items-center justify-center w-20 h-20 rounded-full bg-gradient-to-br from-amber-500 to-orange-500 shadow-2xl">
+            <AlertCircle className="w-10 h-10 text-white" />
           </div>
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-3">Student Not Found</h1>
-          <p className="text-gray-600 dark:text-gray-400 mb-8">The student profile you're looking for doesn't exist or has been removed from the system.</p>
-          <Link href="/moderator/students">
-            <Button className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white shadow-xl hover:shadow-2xl transition-all duration-300 px-8 py-6 text-base rounded-2xl">
-              <ArrowLeft className="w-5 h-5 mr-2" />
-              Back to Students
+          <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-white mb-2 whitespace-normal sm:whitespace-nowrap">
+            Student doesn't exist in the system yet
+          </h1>
+          <p className="text-sm text-gray-600 dark:text-gray-400 mb-6 max-w-md mx-auto">
+            The viewed student profile might not be approved yet, or has been removed from the system.
+          </p>
+          <div className="flex justify-center gap-3">
+            <Button
+              onClick={() => router.back()}
+              className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white shadow-xl hover:shadow-2xl transition-all duration-300 px-6 py-4 text-sm rounded-xl">
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              Go Back
             </Button>
-          </Link>
+          </div>
         </div>
       </div>
     );
@@ -540,7 +544,7 @@ export default function ViewStudentPage({ params }: { params: Promise<{ id: stri
 
                 <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full border border-green-200/50 dark:border-green-800/50 bg-gradient-to-r from-green-50/50 to-green-100/50 dark:from-green-950/20 dark:to-green-900/30 shadow-sm w-fit">
                   <Phone className="w-3 h-3 text-green-600 dark:text-green-400" />
-                  <span className="text-[10px] font-medium text-foreground">{student.phoneNumber}</span>
+                  <span className="text-[10px] font-medium text-foreground">{student.phone || student.phoneNumber || 'Not Available'}</span>
                 </div>
 
               </div>
@@ -610,29 +614,29 @@ export default function ViewStudentPage({ params }: { params: Promise<{ id: stri
           </div>
           <div className="p-6">
             <div className="grid md:grid-cols-2 gap-x-8 gap-y-3">
-              <div className="flex justify-between py-2 border-b border-border">
-                <span className="text-muted-foreground font-medium">Full Name</span>
-                <span className="text-foreground font-semibold">{student.fullName || student.name}</span>
+              <div className="flex justify-between items-start py-2 border-b border-border">
+                <span className="text-muted-foreground font-medium flex-shrink-0 pr-4">Full Name</span>
+                <span className="text-foreground font-semibold text-right break-words max-w-[65%]">{student.fullName || student.name}</span>
               </div>
-              <div className="flex justify-between py-2 border-b border-border">
-                <span className="text-muted-foreground font-medium">Date of Birth</span>
-                <span className="text-foreground font-semibold">{formatDate(student.dob)}</span>
+              <div className="flex justify-between items-start py-2 border-b border-border">
+                <span className="text-muted-foreground font-medium flex-shrink-0 pr-4">Date of Birth</span>
+                <span className="text-foreground font-semibold text-right flex-shrink-0">{formatDate(student.dob)}</span>
               </div>
-              <div className="flex justify-between py-2 border-b border-border">
-                <span className="text-muted-foreground font-medium">Email</span>
-                <span className="text-foreground font-semibold truncate max-w-xs">{student.email}</span>
+              <div className="flex justify-between items-start py-2 border-b border-border">
+                <span className="text-muted-foreground font-medium flex-shrink-0 pr-4">Email</span>
+                <span className="text-foreground font-semibold text-right break-words max-w-[65%]">{student.email}</span>
               </div>
-              <div className="flex justify-between py-2 border-b border-border">
-                <span className="text-muted-foreground font-medium">Phone</span>
-                <span className="text-foreground font-semibold">{student.phoneNumber || 'Not Available'}</span>
+              <div className="flex justify-between items-start py-2 border-b border-border">
+                <span className="text-muted-foreground font-medium flex-shrink-0 pr-4">Phone</span>
+                <span className="text-foreground font-semibold text-right flex-shrink-0">{student.phone || student.phoneNumber || 'Not Available'}</span>
               </div>
-              <div className="flex justify-between py-2 border-b border-border">
-                <span className="text-muted-foreground font-medium">Alternate Phone</span>
-                <span className="text-foreground font-semibold">{student.alternatePhone || 'Not Available'}</span>
+              <div className="flex justify-between items-start py-2 border-b border-border">
+                <span className="text-muted-foreground font-medium flex-shrink-0 pr-4">Alternate Phone</span>
+                <span className="text-foreground font-semibold text-right flex-shrink-0">{student.altPhone || student.alternatePhone || 'Not Available'}</span>
               </div>
-              <div className="flex justify-between py-2 border-b border-border">
-                <span className="text-muted-foreground font-medium">Address</span>
-                <span className="text-foreground font-semibold text-right">{student.address || 'Not Available'}</span>
+              <div className="flex justify-between items-start py-2 border-b border-border">
+                <span className="text-muted-foreground font-medium flex-shrink-0 pr-4">Address</span>
+                <span className="text-foreground font-semibold text-right break-words max-w-[65%]">{student.address || 'Not Available'}</span>
               </div>
             </div>
           </div>
@@ -648,33 +652,33 @@ export default function ViewStudentPage({ params }: { params: Promise<{ id: stri
               <h3 className="text-xl font-bold text-foreground">Academic Profile</h3>
             </div>
           </div>
-          <div>
-            <div className="divide-y divide-border">
-              <div className="grid md:grid-cols-3 gap-4 px-8 py-4 hover:bg-muted/30 transition-colors">
-                <span className="text-muted-foreground font-medium">Enrollment ID</span>
-                <span className="md:col-span-2 text-foreground font-semibold">{student.enrollmentId || 'Not provided'}</span>
+          <div className="p-6">
+            <div className="grid md:grid-cols-2 gap-x-8 gap-y-3">
+              <div className="flex justify-between items-start py-2 border-b border-border">
+                <span className="text-muted-foreground font-medium flex-shrink-0 pr-4">Enrollment ID</span>
+                <span className="text-foreground font-semibold text-right break-words max-w-[65%]">{student.enrollmentId || 'Not provided'}</span>
               </div>
-              <div className="grid md:grid-cols-3 gap-4 px-8 py-4 hover:bg-muted/30 transition-colors">
-                <span className="text-muted-foreground font-medium">Faculty</span>
-                <span className="md:col-span-2 text-foreground font-semibold">{student.faculty || 'Not provided'}</span>
+              <div className="flex justify-between items-start py-2 border-b border-border">
+                <span className="text-muted-foreground font-medium flex-shrink-0 pr-4">Faculty</span>
+                <span className="text-foreground font-semibold text-right break-words max-w-[65%] leading-snug">{student.faculty || 'Not provided'}</span>
               </div>
-              <div className="grid md:grid-cols-3 gap-4 px-8 py-4 hover:bg-muted/30 transition-colors">
-                <span className="text-muted-foreground font-medium">Department</span>
-                <span className="md:col-span-2 text-foreground font-semibold">{student.department || 'Not provided'}</span>
+              <div className="flex justify-between items-start py-2 border-b border-border">
+                <span className="text-muted-foreground font-medium flex-shrink-0 pr-4">Department</span>
+                <span className="text-foreground font-semibold text-right break-words max-w-[65%] leading-snug">{student.department || 'Not provided'}</span>
               </div>
-              <div className="grid md:grid-cols-3 gap-4 px-8 py-4 hover:bg-muted/30 transition-colors">
-                <span className="text-muted-foreground font-medium">Semester</span>
-                <span className="md:col-span-2 text-foreground font-semibold">{student.semester || 'Not provided'}</span>
+              <div className="flex justify-between items-start py-2 border-b border-border">
+                <span className="text-muted-foreground font-medium flex-shrink-0 pr-4">Semester</span>
+                <span className="text-foreground font-semibold text-right break-words max-w-[65%]">{student.semester || 'Not provided'}</span>
               </div>
-              <div className="grid md:grid-cols-3 gap-4 px-8 py-4 hover:bg-muted/30 transition-colors">
-                <span className="text-muted-foreground font-medium">Session Period</span>
-                <span className="md:col-span-2 text-foreground font-semibold">
+              <div className="flex justify-between items-start py-2 border-b border-border">
+                <span className="text-muted-foreground font-medium flex-shrink-0 pr-4">Session Period</span>
+                <span className="text-foreground font-semibold text-right break-words max-w-[65%]">
                   {student.sessionStartYear && student.sessionEndYear ? `${student.sessionStartYear} - ${student.sessionEndYear}` : 'Not provided'}
                 </span>
               </div>
-              <div className="grid md:grid-cols-3 gap-4 px-8 py-4 hover:bg-muted/30 transition-colors">
-                <span className="text-muted-foreground font-medium">Valid Until</span>
-                <span className="md:col-span-2 text-foreground font-semibold">
+              <div className="flex justify-between items-start py-2 border-b border-border">
+                <span className="text-muted-foreground font-medium flex-shrink-0 pr-4">Valid Until</span>
+                <span className="text-foreground font-semibold text-right break-words max-w-[65%]">
                   {student.validUntil ? formatDate(student.validUntil) : 'Not provided'}
                 </span>
               </div>
@@ -696,13 +700,13 @@ export default function ViewStudentPage({ params }: { params: Promise<{ id: stri
             </div>
             <div className="p-4">
               <div className="space-y-2">
-                <div>
-                  <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Parent Name</p>
-                  <p className="text-sm font-bold text-foreground">{student.parentName || 'Not provided'}</p>
+                <div className="flex justify-between">
+                  <span className="text-sm text-muted-foreground">Parent Name</span>
+                  <span className="text-sm font-bold text-foreground text-right">{student.parentName || 'Not provided'}</span>
                 </div>
-                <div>
-                  <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Parent Phone</p>
-                  <p className="text-sm font-bold text-foreground">{student.parentPhone || 'Not provided'}</p>
+                <div className="flex justify-between">
+                  <span className="text-sm text-muted-foreground">Parent Phone</span>
+                  <span className="text-sm font-bold text-foreground text-right">{student.parentPhone || 'Not provided'}</span>
                 </div>
               </div>
             </div>
@@ -736,7 +740,12 @@ export default function ViewStudentPage({ params }: { params: Promise<{ id: stri
                 </div>
                 <div className="flex justify-between">
                   <span className="text-sm text-muted-foreground">Pickup Point</span>
-                  <span className="text-sm font-bold text-foreground text-right">{student.stopId.replace(student.stopId, student.stopId.charAt(0).toUpperCase() + student.stopId.slice(1)) || 'Not Assigned'}</span>
+                  <span className="text-sm font-bold text-foreground text-right">
+                    {(() => {
+                      const stopName = student?.stop_name || student?.stopName || student?.pickupPoint;
+                      return stopName ? stopName.charAt(0).toUpperCase() + stopName.slice(1) : 'Not Assigned';
+                    })()}
+                  </span>
                 </div>
               </div>
             </div>

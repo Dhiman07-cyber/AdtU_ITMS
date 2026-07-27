@@ -87,7 +87,7 @@ export default function Step2Academic({
         </Button>
         <Button 
           onClick={onNext} 
-          className="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold h-11 px-6 rounded-xl shadow-lg shadow-indigo-600/20 transition-colors flex items-center gap-2"
+          className="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold h-11 px-6 rounded-xl transition-colors flex items-center gap-2"
         >
           Continue
           <ArrowRight className="w-4 h-4" />

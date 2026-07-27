@@ -1,65 +1,110 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { adminDb } from '@/lib/firebase-admin';
 import { verifyApiAuth } from '@/lib/security/api-auth';
+import { applyRateLimit, createRateLimitId, RateLimits } from '@/lib/security/rate-limiter';
+import { handleApiError } from '@/lib/security/safe-error';
+import {
+  getStudentsByStatus,
+  getStudentsByBusIds,
+} from '@/domains/identity';
+import { getSupabaseServer } from '@/lib/supabase-server';
 
-// Define types for our data
-interface Student {
-  id: string;
-  name: string;
-  email: string;
-  phone?: string;
-  altPhone?: string;
-  enrollmentId?: string;
-  gender?: string;
-  dob?: string;
-  faculty: string;
-  department: string;
-  parentName?: string;
-  parentPhone?: string;
-  busId?: string;
-  routeId?: string;
-  profilePhotoUrl?: string;
-  [key: string]: any;
-}
+// D1 Identity — Student list API. Runtime owner: PostgreSQL (student_profiles table).
+// Supports optional query filters: busId, enrollmentId, q (search), limit, offset
+
+const DEFAULT_LIMIT = 50;
+const MAX_LIMIT = 200;
 
 export async function GET(request: NextRequest) {
   try {
-    // SECURITY: Require admin or moderator authentication
     const auth = await verifyApiAuth(request, ['admin', 'moderator']);
     if (!auth.authenticated) return auth.response;
 
-    if (!adminDb) {
-      return NextResponse.json({ error: 'Database unavailable' }, { status: 503 });
+    const rl = await applyRateLimit(createRateLimitId(auth.uid, 'students-list'), RateLimits.READ);
+    if (!rl.allowed) {
+      return NextResponse.json({ error: 'Too many requests' }, { status: 429, headers: rl.headers });
     }
 
-    const studentsRef = adminDb.collection('students');
-    const querySnapshot = await studentsRef.get();
+    const { searchParams } = new URL(request.url);
+    const busId = searchParams.get('busId');
+    const enrollmentId = searchParams.get('enrollmentId');
+    const q = searchParams.get('q');
+    const limit = Math.min(parseInt(searchParams.get('limit') || String(DEFAULT_LIMIT), 10), MAX_LIMIT);
+    const offset = parseInt(searchParams.get('offset') || '0', 10);
 
-    const students: Student[] = [];
-    querySnapshot.forEach((doc: any) => {
-      const data = doc.data();
-      students.push({
-        id: doc.id,
-        name: data.fullName || '',
-        email: data.email || '',
-        phone: data.phone || '',
-        altPhone: data.altPhone || '',
-        enrollmentId: data.enrollmentId || '',
-        gender: data.gender || '',
-        dob: data.dob || '',
-        faculty: data.faculty || '',
-        department: data.department || '',
-        parentName: data.parentName || '',
-        parentPhone: data.parentPhone || '',
-        busId: data.busId || '',
-        routeId: data.routeId || '',
-        profilePhotoUrl: data.profilePhotoUrl || '',
-      });
-    });
+    let studentRows: Record<string, any>[];
 
-    return NextResponse.json(students);
+    if (busId) {
+      studentRows = await getStudentsByBusIds([busId]);
+      studentRows = studentRows.filter((row: any) => !row.status || row.status === 'active');
+    } else if (q) {
+      // Server-side search via ILIKE instead of loading all rows
+      const db = getSupabaseServer();
+      // Escape ILIKE wildcards to prevent abuse
+      const escaped = q.replace(/%/g, '\\%').replace(/_/g, '\\_');
+      const pattern = `%${escaped}%`;
+      const { data, error } = await db
+        .from('student_profiles')
+        .select('uid, full_name, email, phone, alt_phone, enrollment_id, gender, dob, faculty, department, parent_name, parent_phone, bus_id, route_id, status, shift, profile_photo_url, session_start_year, session_end_year')
+        .or(`full_name.ilike.${pattern},email.ilike.${pattern},enrollment_id.ilike.${pattern}`)
+        .order('full_name', { ascending: true })
+        .range(offset, offset + limit - 1);
+
+      if (error) throw error;
+      studentRows = (data || []).map((row: any) => ({
+        uid: row.uid,
+        fullName: row.full_name,
+        email: row.email,
+        phone: row.phone,
+        altPhone: row.alt_phone,
+        enrollmentId: row.enrollment_id,
+        gender: row.gender,
+        dob: row.dob,
+        faculty: row.faculty,
+        department: row.department,
+        parentName: row.parent_name,
+        parentPhone: row.parent_phone,
+        busId: row.bus_id,
+        routeId: row.route_id,
+        status: row.status,
+        shift: row.shift,
+        profilePhotoUrl: row.profile_photo_url,
+        sessionStartYear: row.session_start_year,
+        sessionEndYear: row.session_end_year,
+      }));
+    } else {
+      studentRows = await getStudentsByStatus('active');
+    }
+
+    const students = (enrollmentId ? studentRows.filter((row: any) =>
+      (row.enrollmentId || '').toLowerCase() === enrollmentId.toLowerCase()
+    ) : studentRows).map((row: any) => ({
+      id: row.uid || row.id,
+      name: row.fullName || row.name || '',
+      email: row.email || '',
+      phone: row.phone || '',
+      altPhone: row.altPhone || '',
+      enrollmentId: row.enrollmentId || '',
+      gender: row.gender || '',
+      dob: row.dob || '',
+      faculty: row.faculty || '',
+      department: row.department || '',
+      parentName: row.parentName || '',
+      parentPhone: row.parentPhone || '',
+      busId: row.busId || row.bus_id || '',
+      routeId: row.routeId || row.route_id || '',
+      stop_name: row.stop_name || row.stop_name || row.stop_name || row.stop_name || '',
+      profilePhotoUrl: row.profilePhotoUrl || row.profile_photo_url || '',
+      status: row.status || 'active',
+      shift: row.shift || '',
+      semester: row.semester || '',
+      sessionStartYear: row.sessionStartYear || '',
+      sessionEndYear: row.sessionEndYear || '',
+      enrollmentYear: row.sessionStartYear || '',
+    }));
+
+    return NextResponse.json(students, { headers: rl.headers });
   } catch (error) {
     console.error('Error fetching students:', error);
-    return NextResponse.json({ error: 'Failed to fetch students' }, { status: 500 });
+    return NextResponse.json(handleApiError(error, 'students-get', 'Failed to fetch students'), { status: 500 });
   }
 }

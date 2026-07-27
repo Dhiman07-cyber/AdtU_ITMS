@@ -15,7 +15,6 @@
  */
 
 import { NextResponse } from 'next/server';
-import { db as adminDb } from '@/lib/firebase-admin';
 import { tripLockService } from '@/lib/services/trip-lock-service';
 import { notifyRoute } from '@/lib/services/fcm-notification-service';
 import { getSupabaseServer } from '@/lib/supabase-server';
@@ -69,10 +68,14 @@ export const POST = withSecurity<EndTripBody>(
         // Fetch route name for FCM notification
         if (routeId) {
             try {
-                const routeDoc = await adminDb.collection('routes').doc(routeId).get();
-                if (routeDoc.exists) {
-                    const routeData = routeDoc.data();
-                    routeName = routeData?.name || routeData?.routeName || routeId;
+                const supabase = getSupabaseServer();
+                const { data: routeData } = await supabase
+                    .from('routes')
+                    .select('name, route_name')
+                    .eq('id', routeId)
+                    .maybeSingle();
+                if (routeData) {
+                    routeName = routeData.name || routeData.route_name || routeId;
                     if (routeName.includes('_') || routeName.startsWith('route')) {
                         routeName = formatIdForDisplay(routeName);
                     }

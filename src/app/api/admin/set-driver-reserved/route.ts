@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db as adminDb } from '@/lib/firebase-admin';
 import { verifyApiAuth } from '@/lib/security/api-auth';
 import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
+import { getDriverById } from '@/domains/identity';
+import { unassignDriver, getActiveAssignmentByDriverUid } from '@/domains/fleet/repositories/driver-assignment.repository';
 
 /**
  * Set a driver as "Reserved" (not assigned to any bus)
@@ -25,84 +26,39 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Get driver document
-    const driverDoc = await adminDb.collection('drivers').doc(driverUID).get();
+    // Get driver from PostgreSQL (canonical source of truth)
+    const driverData = await getDriverById(driverUID);
     
-    if (!driverDoc.exists) {
+    if (!driverData) {
       return NextResponse.json(
         { success: false, error: 'Driver not found' },
         { status: 404 }
       );
     }
 
-    const driverData = driverDoc.data();
-    const oldBusId = driverData?.assignedBusId || driverData?.busId;
+    const oldAssignment = await getActiveAssignmentByDriverUid(driverUID);
+    const oldBusId = oldAssignment?.busId ?? driverData.busId;
 
     console.log(`🔄 Setting driver ${driverUID.substring(0,8)}... as Reserved`);
     console.log(`   Old bus: ${oldBusId}`);
 
-    // Remove driver from ALL buses that reference them
-    // Check both assignedDriverId and activeDriverId
-    const [assignedBuses, activeBuses] = await Promise.all([
-      adminDb.collection('buses').where('assignedDriverId', '==', driverUID).get(),
-      adminDb.collection('buses').where('activeDriverId', '==', driverUID).get()
-    ]);
-
-    console.log(`   Found ${assignedBuses.size} buses with assignedDriverId`);
-    console.log(`   Found ${activeBuses.size} buses with activeDriverId`);
-
-    const batch = adminDb.batch();
-    const updatedBuses: string[] = [];
-
-    // Include driver doc update in the same batch for atomicity
-    batch.update(driverDoc.ref, {
-      assignedBusId: null,
-      busId: null,
-      assignedRouteId: null,
-      routeId: null,
-      status: 'active'
-    });
-
-    // Remove from assignedDriverId buses
-    assignedBuses.docs.forEach((doc: any) => {
-      const data = doc.data();
-      batch.update(doc.ref, {
-        assignedDriverId: null,
-        activeDriverId: null
-      });
-      updatedBuses.push(data.busNumber || doc.id);
-      console.log(`   🔄 Removing from bus ${data.busNumber} (assignedDriverId)`);
-    });
-
-    // Remove from activeDriverId buses (if not already handled)
-    const processedBusIds = new Set(assignedBuses.docs.map((d: any) => d.id));
-    activeBuses.docs.forEach((doc: any) => {
-      if (!processedBusIds.has(doc.id)) {
-        const data = doc.data();
-        batch.update(doc.ref, {
-          activeDriverId: null
-        });
-        updatedBuses.push(data.busNumber || doc.id);
-        console.log(`   🔄 Removing from bus ${data.busNumber} (activeDriverId)`);
-      }
-    });
-
-    await batch.commit();
-    console.log(`   ✅ Removed driver from ${updatedBuses.length} bus(es): ${updatedBuses.join(', ')}`);
+    try {
+      await unassignDriver(driverUID, 'admin_reassign');
+    } catch (err) {
+      console.error(`⚠️ Failed to unassign driver ${driverUID} in driver_assignments:`, err);
+    }
 
     console.log(`✅ Driver ${driverUID.substring(0,8)}... is now Reserved`);
 
     return NextResponse.json({
       success: true,
-      message: `${driverData?.fullName || 'Driver'} is now Reserved and available for swap`,
+      message: `${driverData?.fullName || 'Driver'} is now Reserved`,
       driver: {
         uid: driverUID,
         name: driverData?.fullName,
         oldBusId,
         newStatus: 'Reserved'
-      },
-      busesUpdated: updatedBuses.length,
-      busesCleaned: updatedBuses
+      }
     });
 
   } catch (error: any) {

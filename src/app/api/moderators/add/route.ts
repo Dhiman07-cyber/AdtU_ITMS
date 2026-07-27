@@ -1,17 +1,15 @@
 import { NextResponse } from 'next/server';
 import { withSecurity } from '@/lib/security/api-security';
 import { AddModeratorSchema, validateInput } from '@/lib/security/validation-schemas';
-import { adminDb } from '@/lib/firebase-admin';
-import { FieldValue } from 'firebase-admin/firestore';
+import { createUser, createModerator } from '@/domains/identity';
 
 export const POST = withSecurity(
   async (request, { auth, body, requestId }) => {
     try {
-      if (!adminDb) {
-        return NextResponse.json({ error: 'Database not available' }, { status: 500 });
-      }
-
       const validated = body as { email: string; name: string; phone?: string; faculty?: string; employeeId?: string };
+
+      const now = new Date().toISOString();
+      const uid = `mod_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
 
       const newModerator = {
         email: validated.email,
@@ -22,7 +20,7 @@ export const POST = withSecurity(
         employeeId: validated.employeeId || '',
         role: 'moderator',
         status: 'active',
-        createdAt: new Date().toISOString(),
+        createdAt: now,
         permissions: {
           students: { canView: false, canAdd: false, canEdit: false, canDelete: false, canReassign: false },
           drivers: { canView: false, canAdd: false, canEdit: false, canDelete: false, canReassign: false },
@@ -32,12 +30,32 @@ export const POST = withSecurity(
           payments: { canApproveOfflinePayment: false, canRejectOfflinePayment: false },
         },
         createdBy: auth.uid,
-        createdAtServer: FieldValue.serverTimestamp(),
       };
 
-      const docRef = await adminDb.collection('moderators').add(newModerator);
+      await createUser({
+        uid,
+        email: validated.email,
+        name: validated.name,
+        role: 'moderator',
+        createdAt: now,
+      });
 
-      return NextResponse.json({ id: docRef.id, ...newModerator }, { status: 201 });
+      await createModerator({
+        uid,
+        email: validated.email,
+        fullName: validated.name,
+        name: validated.name,
+        phone: validated.phone || '',
+        faculty: validated.faculty || '',
+        employeeId: validated.employeeId || '',
+        role: 'moderator',
+        status: 'active',
+        permissions: newModerator.permissions,
+        createdBy: auth.uid,
+        createdAt: now,
+      });
+
+      return NextResponse.json({ id: uid, ...newModerator }, { status: 201 });
     } catch (error) {
       console.error('Error adding moderator:', error);
       return NextResponse.json({ error: 'Failed to add moderator' }, { status: 500 });

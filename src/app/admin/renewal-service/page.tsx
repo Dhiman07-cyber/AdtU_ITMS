@@ -48,8 +48,8 @@ import {
   Copy
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { collection, query, where, getDocs, orderBy, limit } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+
+import { supabase } from '@/lib/supabase-client';
 import Image from 'next/image';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
@@ -106,6 +106,8 @@ interface RenewalRequest {
 interface Transaction {
   studentId: string;
   studentName: string;
+  studentUid?: string;
+  student_uid?: string;
   amount: number;
   paymentMethod: 'online' | 'offline' | 'manual';
   paymentId: string;
@@ -358,25 +360,52 @@ export default function AdminRenewalServicePage() {
 
       try {
         setLoadingRequests(true);
-        const renewalRef = collection(db, 'renewal_requests');
-        const q = query(renewalRef, where('status', '==', 'pending'), orderBy('createdAt', 'desc'));
-        const snapshot = await getDocs(q);
-
-        const requests: RenewalRequest[] = [];
-        snapshot.forEach((doc) => {
-          requests.push({ id: doc.id, ...doc.data() } as RenewalRequest);
+        const token = await currentUser.getIdToken();
+        const res = await fetch('/api/applications/all?limit=200', {
+          headers: { Authorization: `Bearer ${token}` }
         });
+        if (!res.ok) throw new Error(`API error: ${res.status}`);
+        const responseData = await res.json();
+        const apps = responseData.applications || [];
+
+        const requests: RenewalRequest[] = apps
+          .filter((row: any) => {
+            const state = row.state || '';
+            const type = row.applicationType || row.application_type || '';
+            return (state === 'submitted' || state === 'awaiting_verification' || state === 'pending') &&
+                   (type === 'renewal' || type === 'renewal_after_soft_block');
+          })
+          .map((row: any) => ({
+            id: row.applicationId || row.application_id || row.id,
+            studentId: row.applicantUid || row.applicant_uid || row.studentId,
+            enrollmentId: row.formData?.enrollmentId || row.form_data?.enrollmentId || '',
+            studentName: row.formData?.studentName || row.form_data?.studentName || row.applicantEmail || '',
+            totalFee: row.formData?.totalFee || row.form_data?.totalFee || 0,
+            durationYears: row.formData?.durationYears || row.form_data?.durationYears || 0,
+            paymentMode: row.formData?.paymentMode || row.form_data?.paymentMode || 'online',
+            paymentId: row.formData?.paymentId || row.form_data?.paymentId || row.paymentId || '',
+            receiptImageUrl: row.formData?.receiptImageUrl || row.form_data?.receiptImageUrl || '',
+            studentEmail: row.formData?.studentEmail || row.form_data?.studentEmail || row.applicantEmail || '',
+            studentPhone: row.formData?.studentPhone || row.form_data?.studentPhone || '',
+            paidAt: row.formData?.paidAt || row.form_data?.paidAt || row.createdAt || row.created_at || '',
+            status: 'pending',
+            createdAt: row.createdAt || row.created_at,
+            updatedAt: row.updatedAt || row.updated_at,
+          }));
 
         // Fetch student data for each request
         const requestsWithStudentData = await Promise.all(
           requests.map(async (request) => {
             try {
-              const studentDoc = await getDocs(
-                query(collection(db, 'students'), where('enrollmentId', '==', request.enrollmentId), limit(1))
-              );
-              if (!studentDoc.empty) {
-                const studentData = studentDoc.docs[0].data() as StudentData;
-                return { ...request, studentData };
+              const token = await currentUser!.getIdToken();
+              const res = await fetch(`/api/students?enrollmentId=${encodeURIComponent(request.enrollmentId)}`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+              });
+              if (res.ok) {
+                const students = await res.json();
+                if (Array.isArray(students) && students.length > 0) {
+                  return { ...request, studentData: students[0] as StudentData };
+                }
               }
               return request;
             } catch (error) {
@@ -430,17 +459,20 @@ export default function AdminRenewalServicePage() {
           const enriched = await Promise.all(
             rawTransactions.map(async (transaction: any) => {
               try {
-                const studentsRef = collection(db, 'students');
-                const q = query(studentsRef, where('enrollmentId', '==', transaction.studentId), limit(1));
-                const snapshot = await getDocs(q);
+                if (transaction.studentId && typeof transaction.studentId === 'string' && transaction.studentId.trim() && transaction.studentId !== 'N/A') {
+                  const res = await fetch(`/api/students?enrollmentId=${encodeURIComponent(transaction.studentId.trim())}`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                  });
 
-                if (!snapshot.empty) {
-                  const studentDoc = snapshot.docs[0];
-                  // We only need the ID for navigation
-                  return {
-                    ...transaction,
-                    userId: studentDoc.id
-                  };
+                  if (res.ok) {
+                    const students = await res.json();
+                    if (Array.isArray(students) && students.length > 0) {
+                      return {
+                        ...transaction,
+                        userId: students[0].id || students[0].uid
+                      };
+                    }
+                  }
                 }
                 return transaction;
               } catch (error) {
@@ -462,17 +494,17 @@ export default function AdminRenewalServicePage() {
     fetchTransactions();
   }, [currentUser, activeTab, currentPage, searchTrigger]);
 
-  // Fetch buses data
+  // Fetch buses data via API (PostgreSQL)
   useEffect(() => {
     const fetchBuses = async () => {
       if (!currentUser) return;
 
       try {
-        const busesRef = collection(db, 'buses');
-        const snapshot = await getDocs(busesRef);
-        const busesData = snapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
+        const res = await fetch('/api/buses');
+        const json = await res.json();
+        const busesData = (json.buses || []).map((b: any) => ({
+          id: b.busId || b.id,
+          ...b
         }));
         setBuses(busesData);
       } catch (error) {
@@ -1332,7 +1364,7 @@ export default function AdminRenewalServicePage() {
                             {/* Approved By */}
                             <div className="col-span-4 text-left pl-2 ml-1">
                               <p className="text-[10px] font-bold text-gray-700 dark:text-gray-300 truncate" title={transaction.approvedBy}>
-                                {transaction.paymentMethod === 'online' ? 'AdtU ITMS System' : (transaction.approvedBy || '-')}
+                                {transaction.paymentMethod === 'online' || transaction.approvedBy === 'AdtU ITMS System' || transaction.approvedBy === 'System Verified' ? 'System-Approved' : (transaction.approvedBy || 'System-Approved')}
                               </p>
                             </div>
 
@@ -1361,10 +1393,14 @@ export default function AdminRenewalServicePage() {
                                 size="sm"
                                 variant="ghost"
                                 onClick={() => {
-                                  if (transaction.userId) {
-                                    const baseRoute = userData?.role === 'moderator' ? '/moderator' : '/admin';
-                                    router.push(`${baseRoute}/students/view/${transaction.userId}`);
-                                  }
+                                   const tx = transaction as any;
+                                   const targetUid = tx.student_uid || tx.studentUid || tx.userId || tx.student_id || tx.studentId;
+                                   if (targetUid) {
+                                     const baseRoute = userData?.role === 'moderator' ? '/moderator' : '/admin';
+                                     router.push(`${baseRoute}/students/view/${encodeURIComponent(targetUid)}`);
+                                   } else {
+                                     toast.error('Student profile unavailable');
+                                   }
                                 }}
                                 className="h-5 text-[9px] font-bold w-full text-zinc-500 dark:text-zinc-400 hover:text-purple-600 dark:hover:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/20"
                               >

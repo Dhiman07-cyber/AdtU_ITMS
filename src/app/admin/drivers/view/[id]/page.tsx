@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState, useEffect } from "react";
 import { use } from "react";
@@ -291,7 +291,7 @@ export default function ViewDriverPage({ params }: { params: Promise<{ id: strin
                   <Bus className="w-3 h-3 flex-shrink-0 text-amber-600 dark:text-amber-400" />
                   <div className="flex-1 min-w-0">
                     <p className="text-[9px] text-muted-foreground">Assigned Bus</p>
-                    <p className="font-bold truncate text-[10px] text-foreground">{formatId(driver.assignedBusId || driver.busId)}</p>
+                    <p className="font-bold truncate text-[10px] text-foreground">{formatId(driver.busId || driver.busId)}</p>
                   </div>
                 </div>
                 <StatusBadge status={driver.status || 'active'} />
@@ -342,7 +342,7 @@ export default function ViewDriverPage({ params }: { params: Promise<{ id: strin
               </div>
               <div className="text-center p-2 rounded-lg border border-amber-200/50 dark:border-amber-800/50 bg-gradient-to-br from-amber-50/50 to-amber-100/30 dark:from-amber-950/20 dark:to-amber-900/30 hover:shadow-md transition-all">
                 <Bus className="w-3.5 h-3.5 mx-auto mb-1 text-amber-600 dark:text-amber-400" />
-                <p className="text-sm font-bold text-foreground mb-0">{formatId(driver.assignedBusId || driver.busId)}</p>
+                <p className="text-sm font-bold text-foreground mb-0">{formatId(driver.busId || driver.busId)}</p>
                 <p className="text-[9px] text-muted-foreground uppercase tracking-wide font-medium">Bus</p>
               </div>
             </div>
@@ -476,11 +476,11 @@ export default function ViewDriverPage({ params }: { params: Promise<{ id: strin
               <div className="space-y-1.5">
                 <div className="flex justify-between">
                   <span className="text-xs text-muted-foreground">Assigned Bus</span>
-                  <span className="text-xs font-bold text-foreground">{formatId(driver.assignedBusId || driver.busId)}</span>
+                  <span className="text-xs font-bold text-foreground">{formatId(driver.busId || driver.busId)}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-xs text-muted-foreground">Route</span>
-                  <span className="text-xs font-bold text-foreground">{formatId(driver.assignedRouteId || driver.routeId)}</span>
+                  <span className="text-xs font-bold text-foreground">{formatId(driver.routeId || driver.routeId)}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-xs text-muted-foreground">Shift</span>

@@ -12,12 +12,12 @@
  */
 
 import { NextResponse } from 'next/server';
-import { adminDb } from '@/lib/firebase-admin';
 import { rejectOfflinePayment } from '@/lib/payment/payment.service';
 import { withSecurity } from '@/lib/security/api-security';
 import { RejectPaymentSchema } from '@/lib/security/validation-schemas';
 import { RateLimits } from '@/lib/security/rate-limiter';
 import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
+import { getUserById } from '@/domains/identity';
 
 export const POST = withSecurity(
     async (request, { auth, body, requestId }) => {
@@ -32,24 +32,15 @@ export const POST = withSecurity(
         );
         if (permissionDenied) return permissionDenied;
 
-        // Get rejector details from role-specific collection
+        // Get rejector details via Identity domain API
         let rejectorEmpId = '';
         let rejectorName = auth.name || '';
 
-        if (auth.role === 'moderator') {
-            const modDoc = await adminDb.collection('moderators').doc(userId).get();
-            if (modDoc.exists) {
-                const modData = modDoc.data();
-                rejectorEmpId = modData?.empId || '';
-                rejectorName = modData?.name || modData?.fullName || rejectorName;
-            }
-        } else if (auth.role === 'admin') {
-            const adminDoc = await adminDb.collection('admins').doc(userId).get();
-            if (adminDoc.exists) {
-                const adminData = adminDoc.data();
-                rejectorEmpId = adminData?.empId || '';
-                rejectorName = adminData?.name || adminData?.fullName || rejectorName;
-            }
+        const user = await getUserById(userId);
+        if (user) {
+            const userData = user as any;
+            rejectorEmpId = userData.empId || '';
+            rejectorName = userData.name || userData.fullName || rejectorName;
         }
 
         // Reject the payment (ATOMIC + IDEMPOTENT)

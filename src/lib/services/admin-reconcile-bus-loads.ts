@@ -1,19 +1,11 @@
-/**
+﻿/**
  * ─────────────────────────────────────────────────────────────────────────────
- * CANONICAL BUS-LOAD RECONCILIATION (admin SDK, server-safe)
+ * CANONICAL BUS-LOAD RECONCILIATION (PostgreSQL-backed, server-safe)
  * ─────────────────────────────────────────────────────────────────────────────
  *
  * The single authoritative reconciliation for bus capacity counters. Recounts the
- * actual seat-owning students per bus and rewrites ALL FOUR counters consistently:
- *   currentMembers, load.morningCount, load.eveningCount.
- *
- * WHY THIS EXISTS (vs. the older `reconcile-bus-loads.ts`):
- *   - That file uses the CLIENT SDK (`@/lib/firebase`) and cannot run inside a
- *     server cron / admin route. This one uses the admin SDK (`adminDb`).
- *   - It also matched shift with exact case (`=== 'Morning'`), dropping any
- *     lowercase / non-canonical shift. This module normalizes shift IDENTICALLY to
- *     the writer (`buildCapacityDelta`): `shift.toLowerCase().includes('morning'|'evening')`,
- *     so the recount can never disagree with the live increment/decrement math.
+ * actual seat-owning students per bus and rewrites ALL FOUR counters consistently in PG:
+ *   currentMembers, morningLoad, eveningLoad.
  *
  * SEAT-OWNERSHIP DEFINITION (marker-aware, mode-independent):
  *   A student occupies a seat iff their seat has NOT been released:
@@ -23,16 +15,12 @@
  *     - anything with a `seatReleasedAt` marker           → released, does NOT occupy
  *   This matches the live counters in BOTH flag modes because the marker is the
  *   single source of "seat was released" (see capacity-flags.ts).
- *
- * CORRECTION POLICY:
- *   The recount IS the source of truth. We ALWAYS correct to the recounted value;
- *   correctness does not depend on the size of the delta. A LARGE delta is a signal
- *   of a systemic bug — so we additionally ALERT loudly — but we never withhold the
- *   correction (the architecture's "only auto-correct if delta ≤ 5" rule is rejected).
  */
 
-import { adminDb } from '../firebase-admin';
+import { pgInsertNotification } from '@/domains/notification/repositories/notification.repository.pg';
 import { getShiftDeltas } from '@/lib/utils/shift-utils';
+import { getAllBuses, updateBus } from '@/domains/fleet';
+import { getAllStudents, getUsersByRole } from '@/domains/identity';
 
 export interface BusCounterSnapshot {
   currentMembers: number;
@@ -100,41 +88,36 @@ export async function adminReconcileBusLoads(options: ReconcileOptions = {}): Pr
   const startedAtMs = Date.now();
   const { busIds, dryRun = false, alertOnLargeDelta = false, largeDeltaThreshold = 5 } = options;
 
-  // 1. Resolve target buses.
-  let busDocs: FirebaseFirestore.QueryDocumentSnapshot[] | FirebaseFirestore.DocumentSnapshot[];
+  // 1. Resolve target buses from PostgreSQL.
+  const allBuses = await getAllBuses();
+  let targetBuses = allBuses;
   if (busIds && busIds.length > 0) {
-    busDocs = await Promise.all(busIds.map((id) => adminDb.collection('buses').doc(id).get()));
-    busDocs = busDocs.filter((d) => d.exists);
-  } else {
-    const snap = await adminDb.collection('buses').get();
-    busDocs = snap.docs;
+    const filterSet = new Set(busIds);
+    targetBuses = allBuses.filter((b) => filterSet.has(b.id || b.busId));
   }
-  const targetBusIds = new Set(busDocs.map((d) => d.id));
+  const targetBusIds = new Set(targetBuses.map((b) => b.id || b.busId));
 
-  // 2. Recount seat-owning students per bus (single read of candidate statuses).
-  //    `in` covers every status that can own a seat; released/expired/suspended are
-  //    excluded up front (and occupiesSeat double-checks the marker).
-  const studentsSnap = await adminDb
-    .collection('students')
-    .where('status', 'in', ['active', 'soft_blocked', 'pending_deletion'])
-    .get();
+  // 2. Recount seat-owning students per bus from PostgreSQL.
+  const allStudents = await getAllStudents();
+  const candidateStudents = allStudents.filter((s) =>
+    ['active', 'soft_blocked', 'pending_deletion'].includes(s.status || '')
+  );
 
   type Counts = { currentMembers: number; morningCount: number; eveningCount: number; invalidShift: number };
   const counts = new Map<string, Counts>();
   for (const id of targetBusIds) counts.set(id, { currentMembers: 0, morningCount: 0, eveningCount: 0, invalidShift: 0 });
 
-  studentsSnap.forEach((doc) => {
-    const s = doc.data();
-    if (!occupiesSeat(s)) return;
-    const busId = s.busId || s.currentBusId || s.assignedBusId;
-    if (!busId || !targetBusIds.has(busId)) return; // orphan / other bus — not in scope of this run
+  for (const s of candidateStudents) {
+    if (!occupiesSeat(s)) continue;
+    const busId = s.busId || s.currentBusId || s.busId;
+    if (!busId || !targetBusIds.has(busId)) continue; // orphan / other bus — not in scope of this run
     const c = counts.get(busId)!;
     c.currentMembers += 1; // every occupying student counts toward the canonical total
     const contrib = shiftContribution(s.shift);
     if (contrib.morning) c.morningCount += 1;
     if (contrib.evening) c.eveningCount += 1;
     if (!contrib.valid) c.invalidShift += 1;
-  });
+  }
 
   // 3. Per-bus transactional correction.
   const reports: BusReconcileReport[] = [];
@@ -142,17 +125,17 @@ export async function adminReconcileBusLoads(options: ReconcileOptions = {}): Pr
   let totalSeatsCounted = 0;
   let invalidShiftTotal = 0;
 
-  for (const busDoc of busDocs) {
-    const busId = busDoc.id;
-    const busData = busDoc.data() || {};
+  // ponytail: Process reconciliation updates concurrently to eliminate N+1 roundtrips
+  await Promise.all(targetBuses.map(async (busData) => {
+    const busId = busData.id || busData.busId;
     const c = counts.get(busId) || { currentMembers: 0, morningCount: 0, eveningCount: 0, invalidShift: 0 };
     totalSeatsCounted += c.currentMembers;
     invalidShiftTotal += c.invalidShift;
 
     const before: BusCounterSnapshot = {
       currentMembers: busData.currentMembers || 0,
-      morningCount: busData.load?.morningCount || 0,
-      eveningCount: busData.load?.eveningCount || 0,
+      morningCount: busData.morningLoad || 0,
+      eveningCount: busData.eveningLoad || 0,
     };
     const after: BusCounterSnapshot = {
       currentMembers: c.currentMembers,
@@ -170,17 +153,14 @@ export async function adminReconcileBusLoads(options: ReconcileOptions = {}): Pr
     let error: string | undefined;
     if (hadDiscrepancy && !dryRun) {
       try {
-        const busRef = adminDb.collection('buses').doc(busId);
-        await adminDb.runTransaction(async (txn) => {
-          const busSnap = await txn.get(busRef);
-          if (!busSnap.exists) return;
-          txn.update(busRef, {
-            currentMembers: after.currentMembers,
-            'load.morningCount': after.morningCount,
-            'load.eveningCount': after.eveningCount,
-            updatedAt: new Date().toISOString(),
-          });
+        // Correct in PostgreSQL
+        await updateBus(busId, {
+          // currentMembers removed: current_members is now GENERATED ALWAYS AS (morning_load + evening_load) STORED.
+          // PostgreSQL enforces the invariant atomically. Only the source columns need to be corrected.
+          morningLoad: after.morningCount,
+          eveningLoad: after.eveningCount,
         });
+
         corrected = true;
       } catch (e: any) {
         error = e?.message || String(e);
@@ -200,17 +180,15 @@ export async function adminReconcileBusLoads(options: ReconcileOptions = {}): Pr
       invalidShiftStudents: c.invalidShift,
       error,
     });
-  }
+  }));
 
   // 4. Alert loudly on large (systemic) deltas — correction already applied above.
   if (alertOnLargeDelta && largeDeltaBuses.length > 0 && !dryRun) {
     try {
-      const adminsSnap = await adminDb.collection('admins').get();
-      const batch = adminDb.batch();
+      const admins = await getUsersByRole('admin');
       const content = `Bus load reconciliation found large discrepancies on ${largeDeltaBuses.length} bus(es): ${largeDeltaBuses.join(', ')}. Counts were corrected to the recounted values; investigate the systemic cause.`;
-      adminsSnap.docs.forEach((adminDoc) => {
-        const ref = adminDb.collection('notifications').doc();
-        batch.set(ref, {
+      await Promise.all(admins.map(admin =>
+        pgInsertNotification({
           title: 'Bus Load Reconciliation — Large Delta',
           content,
           type: 'emergency',
@@ -221,28 +199,23 @@ export async function adminReconcileBusLoads(options: ReconcileOptions = {}): Pr
           },
           target: {
             type: 'specific_users',
-            specificUserIds: [adminDoc.id]
+            specificUserIds: [admin.uid]
           },
-          recipientIds: [adminDoc.id],
+          recipientIds: [admin.uid],
           autoInjectedRecipientIds: [],
           readByUserIds: [],
-          isEdited: false,
-          isDeletedGlobally: false,
-          hiddenForUserIds: [],
-          createdAt: new Date().toISOString(),
           metadata: {
             priority: 'high'
           }
-        });
-      });
-      await batch.commit();
+        })
+      ));
     } catch (e) {
       console.error('Reconciliation large-delta alert failed:', e);
     }
   }
 
   return {
-    totalBuses: busDocs.length,
+    totalBuses: targetBuses.length,
     busesWithDiscrepancies: reports.filter((r) => r.hadDiscrepancy).length,
     busesCorrected: reports.filter((r) => r.corrected).length,
     totalSeatsCounted,

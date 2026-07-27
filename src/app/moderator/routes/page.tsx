@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState, useEffect, useMemo } from "react";
 import { useRouter } from 'next/navigation';
@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { exportToExcel } from '@/lib/export-helpers';
 import { ExportButton } from '@/components/ExportButton';
+import { cn } from "@/lib/utils";
+import { supabase } from '@/lib/supabase-client';
 import { useToast } from '@/contexts/toast-context';
 import { normalizeRouteStatus } from '@/lib/formatters';
 import {
@@ -51,7 +53,8 @@ import {
   User,
   Filter,
   Activity,
-  Bus as BusIcon
+  Bus as BusIcon,
+  RefreshCw
 } from "lucide-react";
 import {
   Dialog,
@@ -62,8 +65,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { deleteRoute } from "@/lib/dataService";
-// SPARK PLAN SAFETY: Migrated to usePaginatedCollection
-import { usePaginatedCollection, invalidateCollectionCache } from '@/hooks/usePaginatedCollection';
+// Migrated: Server-side API → PostgreSQL (no Firestore client reads)
+import { useApiCollection, invalidateCollectionCache } from '@/hooks/useApiCollection';
 import { useEventDrivenRefresh } from '@/hooks/useEventDrivenRefresh';
 import { useModeratorPermissions } from '@/hooks/useModeratorPermissions';
 import { PermissionDeniedCard } from '@/components/PermissionDeniedCard';
@@ -104,8 +107,6 @@ interface DriverItem {
   phone?: string;
   alternatePhone?: string;
   licenseNumber?: string;
-  assignedBusId?: string;
-  assignedRouteId?: string;
   busId?: string;
   routeId?: string;
   employeeId?: string;
@@ -118,16 +119,15 @@ export default function RoutesPage() {
   const { addToast } = useToast();
   const { canRouteView, canRouteAdd, canRouteEdit, canRouteDelete, loading: permsLoading } = useModeratorPermissions();
 
-  // Real-time data listeners
-  // Fetch routes from the canonical 'routes' collection
-  const { data: routesData, loading: loadingRoutes, refresh: refreshRoutesData } = usePaginatedCollection('routes', {
+  // Server-side API reads from PostgreSQL — no Firestore client reads
+  const { data: routesData, loading: loadingRoutes, refresh: refreshRoutesData } = useApiCollection('routes', {
     pageSize: 50, orderByField: 'routeName', orderDirection: 'asc', autoRefresh: false,
   });
   // Fetch buses to determine assignments
-  const { data: buses, loading: loadingBuses, refresh: refreshBuses } = usePaginatedCollection('buses', {
+  const { data: buses, loading: loadingBuses, refresh: refreshBuses } = useApiCollection('buses', {
     pageSize: 50, orderByField: 'busNumber', orderDirection: 'asc', autoRefresh: false,
   });
-  const { data: drivers, loading: loadingDrivers, refresh: refreshDrivers } = usePaginatedCollection('drivers', {
+  const { data: drivers, loading: loadingDrivers, refresh: refreshDrivers } = useApiCollection('drivers', {
     pageSize: 50, orderByField: 'updatedAt', orderDirection: 'desc', autoRefresh: false,
   });
 
@@ -167,6 +167,21 @@ export default function RoutesPage() {
   const [deleteItem, setDeleteItem] = useState<{ id: string; name: string } | null>(null);
 
   const isLoading = loadingRoutes || loadingBuses || loadingDrivers;
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      invalidateCollectionCache('routes');
+      await Promise.all([refreshRoutesData(), refreshBuses(), refreshDrivers()]);
+      addToast('Data refreshed', 'success');
+    } catch (error) {
+      console.error('Error refreshing routes:', error);
+      addToast('Failed to refresh data', 'error');
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
 
   // Helper function to extract number from route name
   const extractRouteNumber = (str: string): number => {
@@ -191,64 +206,78 @@ export default function RoutesPage() {
     return numA - numB;
   }), [routes, searchTerm, shiftFilter]);
 
-  // Export routes data
+  // Export routes data from Supabase
   const handleExportRoutes = async () => {
     try {
       const currentDate = new Date();
       const dateStr = currentDate.toISOString().split('T')[0].replace(/-/g, '-');
 
-      // Sort routes by number in ascending order (Route-1, Route-2, ..., Route-11)
-      const sortedRoutes = [...routes].sort((a, b) => {
-        const getRouteNum = (route: any) => {
-          const name = route.routeName || route.route || '';
-          const match = name.match(/Route-?(\d+)/i);
-          return match ? parseInt(match[1]) : 999;
-        };
-        return getRouteNum(a) - getRouteNum(b);
+      // Fetch all routes directly from Supabase PostgreSQL table 'routes'
+      const { data: rawRoutes, error: routesError } = await supabase
+        .from('routes')
+        .select('*')
+        .order('route_name', { ascending: true });
+
+      if (routesError) throw routesError;
+
+      // Fetch buses to resolve assigned buses per route
+      const { data: rawBuses } = await supabase
+        .from('buses')
+        .select('id, bus_number, route_id');
+
+      const busRouteMap = new Map<string, string[]>();
+      (rawBuses || []).forEach((b: any) => {
+        if (b.route_id) {
+          const existing = busRouteMap.get(b.route_id) || [];
+          existing.push(b.bus_number);
+          busRouteMap.set(b.route_id, existing);
+        }
       });
 
-      // Generate routes data in the same format as the comprehensive report
-      const routesData = sortedRoutes.map((route, index) => {
-        const stops = route.stops
-          ? Array.isArray(route.stops)
-            ? route.stops.map((s: any) => s.stopName || s.name || s).join(', ')
-            : route.stops
-          : 'N/A';
+      const exportData = (rawRoutes || []).map((route: any, index: number) => {
+        const stopsList = Array.isArray(route.stops) ? route.stops : [];
+        const stopsSummary = stopsList.length > 0
+          ? stopsList.map((s: any) => s.stop_name || s.name || s).join(', ')
+          : (route.start_location ? `${route.start_location} - ADTU Campus` : 'No stops defined');
 
-
+        const assignedBusesList = busRouteMap.get(route.id) || [];
+        const busesStr = assignedBusesList.length > 0 ? assignedBusesList.join(', ') : 'None';
+        const status = route.status || 'Active';
 
         return [
           (index + 1).toString(),
-          route.routeName || 'N/A',
-          stops,
-          route.totalStops || (Array.isArray(route.stops) ? route.stops.length : 0),
-          route.status || 'Active'
+          route.route_name || route.route_number || 'N/A',
+          stopsSummary,
+          route.total_stops || stopsList.length || 0,
+          busesStr,
+          status.charAt(0).toUpperCase() + status.slice(1)
         ];
       });
 
       // Add headers
-      routesData.unshift([
-        'Sl No', 'Route Number', 'Stops', 'Total Stops', 'Status'
+      exportData.unshift([
+        'Sl No', 'Route Name', 'Stops Summary', 'Total Stops', 'Buses Assigned', 'Status'
       ]);
 
       // Add section header
-      routesData.unshift(['ALL ROUTES'], ['']);
+      exportData.unshift(['ALL ROUTES REPORT (SUPABASE)'], ['']);
 
-      // Export to Excel
-      await exportToExcel(routesData, `ADTU_Routes_Report_${dateStr}`, 'Routes');
+      await exportToExcel(exportData, `ADTU_Routes_Report_${dateStr}`, 'Routes');
 
       addToast(
-        `Routes data exported to ADTU_Routes_Report_${dateStr}.xlsx`,
+        `Exported ${(rawRoutes || []).length} routes to ADTU_Routes_Report_${dateStr}.xlsx`,
         'success'
       );
     } catch (error) {
-      console.error('❌ Error exporting routes:', error);
+      console.error('❌ Error exporting routes from Supabase:', error);
       addToast(
         'Failed to export routes data. Please try again.',
         'error'
       );
     }
   };
+
+  const commonBtnClass = "group h-8 px-4 bg-white hover:bg-gray-50 text-gray-700 hover:text-purple-600 border border-gray-200 hover:border-purple-200 shadow-sm hover:shadow-lg hover:shadow-purple-500/10 font-bold text-[10px] uppercase tracking-widest rounded-lg transition-all duration-300 active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer";
 
   const handleDelete = (id: string, name: string) => {
     setDeleteItem({ id, name });
@@ -308,14 +337,23 @@ export default function RoutesPage() {
           )}
           <ExportButton
             onClick={() => handleExportRoutes()}
-            label="Export Routes"
-            className="bg-white hover:bg-gray-100 !text-black border border-gray-300 transition-all duration-200 hover:scale-105 hover:shadow-lg rounded-md px-2.5 py-1.5 text-xs h-8"
+            label="EXPORT"
+            className={commonBtnClass}
           />
+          <Button
+            size="sm"
+            onClick={handleRefresh}
+            disabled={isRefreshing}
+            className={commonBtnClass}
+          >
+            <RefreshCw className={cn("h-3.5 w-3.5 transition-transform duration-500", isRefreshing ? "animate-spin" : "group-hover:rotate-180")} />
+            REFRESH
+          </Button>
         </div>
       </div>
 
-      <Card className="bg-gray-50 dark:bg-gray-900 border-border">
-        <CardContent className="pt-3">
+      <Card className="bg-gray-50 dark:bg-gray-900 border-border min-h-[480px] flex flex-col">
+        <CardContent className="pt-3 flex-1 flex flex-col min-h-0 pb-4">
           <div className="mb-3">
             {/* Search Bar and Filters */}
             <div className="flex flex-col md:flex-row gap-3">
@@ -359,8 +397,8 @@ export default function RoutesPage() {
               </div>
             </div>
           </div>
-          <div className="students-section">
-            <div className="students-scroll-wrapper rounded-md border" role="region" aria-label="Routes list">
+          <div className="students-section md:mt-5 flex-1 flex flex-col min-h-0">
+            <div className="students-scroll-wrapper rounded-md border overflow-x-auto flex-1 flex flex-col min-h-0" role="region" aria-label="Routes list">
               <Table>
                 <TableHeader>
                   <TableRow className="h-10">
@@ -372,96 +410,103 @@ export default function RoutesPage() {
                     <TableHead className="text-xs font-semibold text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
-                <TableBody>
-                  {filteredRoutes.map((route: any) => (
-                    <TableRow key={route.id}>
-                      <TableCell>
-                        <div className="flex items-center">
-                          <MapPin className="mr-2 h-4 w-4 text-muted-foreground" />
-                          <span className="font-medium text-sm">{route.routeName}</span>
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-sm">
-                        {route.stops && route.stops.length > 0
-                          ? `${route.stops[0]?.name || ''} - ADTU Campus`
-                          : 'No stops defined'}
-                      </TableCell>
-                      <TableCell className="text-sm">{route.totalStops}</TableCell>
-                      <TableCell>
-                        <div className="flex flex-col gap-1">
-                          {route.assignedBuses && route.assignedBuses.length > 0 ? (
-                            route.assignedBuses.map((bus: any) => (
-                              <div key={bus.id} className="flex items-center text-xs text-blue-400">
-                                <BusIcon className="mr-1.5 h-3 w-3" />
-                                <span>{bus.busNumber}</span>
-                              </div>
-                            ))
-                          ) : (
-                            <span className="text-muted-foreground text-xs italic">No buses assigned</span>
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        {(() => {
-                          const statusInfo = normalizeRouteStatus(route.status);
-                          const badgeVariant = statusInfo.variant === 'default' ? 'default' : statusInfo.variant as "default" | "destructive" | "outline" | "secondary";
-                          return (
-                            <Badge
-                              variant={badgeVariant}
-                              className={statusInfo.variant === 'default' ? 'bg-green-600 text-white' : ''}
-                              title={statusInfo.tooltip}
-                            >
-                              {statusInfo.label}
-                            </Badge>
-                          );
-                        })()}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" className="h-8 w-8 p-0 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700">
-                              <span className="sr-only">Open menu</span>
-                              <MoreHorizontal className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end" className="bg-gray-800 dark:bg-gray-900 border-gray-700 dark:border-gray-600 shadow-xl rounded-lg w-44">
-                            <DropdownMenuLabel className="text-white font-semibold px-2 py-1.5 text-sm">Actions</DropdownMenuLabel>
-                            <DropdownMenuSeparator className="bg-gray-600" />
-                            <DropdownMenuItem
-                              className="text-white hover:bg-gray-700 dark:hover:bg-gray-800 focus:bg-gray-700 dark:focus:bg-gray-800 px-2 py-1.5 text-sm !text-white cursor-pointer"
-                              onClick={() => router.push(`/moderator/routes/view/${route.id}`)}
-                            >
-                              <Eye className="mr-2 h-3.5 w-3.5 text-blue-400" />
-                              View Details
-                            </DropdownMenuItem>
-                            {canRouteEdit && (
+                {filteredRoutes.length > 0 && (
+                  <TableBody>
+                    {filteredRoutes.map((route: any) => (
+                      <TableRow key={route.id}>
+                        <TableCell>
+                          <div className="flex items-center">
+                            <MapPin className="mr-2 h-4 w-4 text-muted-foreground" />
+                            <span className="font-medium text-sm">{route.routeName}</span>
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-sm">
+                          {route.stops && route.stops.length > 0
+                            ? `${route.stops[0]?.name || ''} - ADTU Campus`
+                            : 'No stops defined'}
+                        </TableCell>
+                        <TableCell className="text-sm">{route.totalStops}</TableCell>
+                        <TableCell>
+                          <div className="flex flex-col gap-1">
+                            {route.assignedBuses && route.assignedBuses.length > 0 ? (
+                              route.assignedBuses.map((bus: any) => (
+                                <div key={bus.id} className="flex items-center text-xs text-blue-400">
+                                  <BusIcon className="mr-1.5 h-3 w-3" />
+                                  <span>{bus.busNumber}</span>
+                                </div>
+                              ))
+                            ) : (
+                              <span className="text-muted-foreground text-xs italic">No buses assigned</span>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          {(() => {
+                            const statusInfo = normalizeRouteStatus(route.status);
+                            const badgeVariant = statusInfo.variant === 'default' ? 'default' : statusInfo.variant as "default" | "destructive" | "outline" | "secondary";
+                            return (
+                              <Badge
+                                variant={badgeVariant}
+                                className={statusInfo.variant === 'default' ? 'bg-green-600 text-white' : ''}
+                                title={statusInfo.tooltip}
+                              >
+                                {statusInfo.label}
+                              </Badge>
+                            );
+                          })()}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" className="h-8 w-8 p-0 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700">
+                                <span className="sr-only">Open menu</span>
+                                <MoreHorizontal className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="bg-gray-800 dark:bg-gray-900 border-gray-700 dark:border-gray-600 shadow-xl rounded-lg w-44">
+                              <DropdownMenuLabel className="text-white font-semibold px-2 py-1.5 text-sm">Actions</DropdownMenuLabel>
+                              <DropdownMenuSeparator className="bg-gray-600" />
                               <DropdownMenuItem
                                 className="text-white hover:bg-gray-700 dark:hover:bg-gray-800 focus:bg-gray-700 dark:focus:bg-gray-800 px-2 py-1.5 text-sm !text-white cursor-pointer"
-                                onClick={() => router.push(`/moderator/routes/edit/${route.id}`)}
+                                onClick={() => router.push(`/moderator/routes/view/${route.id}`)}
                               >
-                                <Edit className="mr-2 h-3.5 w-3.5 text-yellow-400" />
-                                Edit Route
+                                <Eye className="mr-2 h-3.5 w-3.5 text-blue-400" />
+                                View Details
                               </DropdownMenuItem>
-                            )}
-                            {canRouteDelete && (
-                              <>
-                                <DropdownMenuSeparator className="bg-gray-600" />
+                              {canRouteEdit && (
                                 <DropdownMenuItem
-                                  className="text-white hover:!bg-red-600 focus:!bg-red-600 px-2 py-1.5 text-sm !text-white cursor-pointer transition-colors"
-                                  onClick={() => handleDelete(route.id, route.routeName)}
+                                  className="text-white hover:bg-gray-700 dark:hover:bg-gray-800 focus:bg-gray-700 dark:focus:bg-gray-800 px-2 py-1.5 text-sm !text-white cursor-pointer"
+                                  onClick={() => router.push(`/moderator/routes/edit/${route.id}`)}
                                 >
-                                  <Trash2 className="mr-2 h-3.5 w-3.5" />
-                                  Delete Route
+                                  <Edit className="mr-2 h-3.5 w-3.5 text-yellow-400" />
+                                  Edit Route
                                 </DropdownMenuItem>
-                              </>
-                            )}
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
+                              )}
+                              {canRouteDelete && (
+                                <>
+                                  <DropdownMenuSeparator className="bg-gray-600" />
+                                  <DropdownMenuItem
+                                    className="text-white hover:!bg-red-600 focus:!bg-red-600 px-2 py-1.5 text-sm !text-white cursor-pointer transition-colors"
+                                    onClick={() => handleDelete(route.id, route.routeName)}
+                                  >
+                                    <Trash2 className="mr-2 h-3.5 w-3.5" />
+                                    Delete Route
+                                  </DropdownMenuItem>
+                                </>
+                              )}
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                )}
               </Table>
+              {filteredRoutes.length === 0 && (
+                <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-xs text-muted-foreground min-h-[220px]">
+                  No routes found.
+                </div>
+              )}
             </div>
           </div>
         </CardContent>

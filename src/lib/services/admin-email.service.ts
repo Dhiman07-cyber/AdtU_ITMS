@@ -10,7 +10,7 @@
  */
 
 import { Resend, type Attachment } from 'resend';
-import { adminDb } from '@/lib/firebase-admin';
+import { getUsersByRole } from '@/domains/identity';
 
 // Environment variables
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL;
@@ -142,41 +142,19 @@ export interface ApplicationApprovedEmailData {
 }
 
 /**
- * Get all admin emails from Firestore
- * Optimized to fetch from both 'admins' collection and 'users' collection where role is admin
+ * Get all admin emails from PostgreSQL
  */
 export async function getAdminEmailRecipients(): Promise<AdminEmailRecipient[]> {
   try {
-    const adminRecipients: AdminEmailRecipient[] = [];
+    const adminUsers = await getUsersByRole('admin');
+    const adminRecipients: AdminEmailRecipient[] = adminUsers
+      .filter((u: any) => u.email)
+      .map((u: any) => ({
+        email: u.email,
+        name: u.name || u.fullName || 'Admin'
+      }));
 
-    // 1. Check 'admins' collection
-    const adminsSnapshot = await adminDb.collection('admins').get();
-    adminsSnapshot.forEach((doc: any) => {
-      const data = doc.data();
-      if (data?.email) {
-        adminRecipients.push({
-          email: data.email,
-          name: data.name || data.fullName || 'Admin'
-        });
-      }
-    });
-
-    // 2. Check 'users' collection for admins
-    const usersSnapshot = await adminDb.collection('users').where('role', '==', 'admin').get();
-    usersSnapshot.forEach((doc: any) => {
-      const data = doc.data();
-      if (data?.email) {
-        // Avoid duplicates if already in admins collection
-        if (!adminRecipients.some(a => a.email === data.email)) {
-          adminRecipients.push({
-            email: data.email,
-            name: data.name || data.fullName || 'Admin'
-          });
-        }
-      }
-    });
-
-    // 3. Fallback to ADMIN_EMAIL from env if no admins found
+    // Fallback to ADMIN_EMAIL from env if no admins found
     if (adminRecipients.length === 0 && ADMIN_EMAIL) {
       adminRecipients.push({
         email: ADMIN_EMAIL,

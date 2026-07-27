@@ -1,16 +1,25 @@
 /**
  * FCM Token Service
- * 
- * Manages FCM tokens using a subcollection model:
- *   students/{studentId}/tokens/{tokenHash}
- *   drivers/{driverId}/tokens/{tokenHash}
- * 
- * Supports multi-device per user, idempotent writes, 
+ *
+ * Manages FCM tokens using PostgreSQL (fcm_tokens table).
+ * Replaces the Firestore subcollection model:
+ *   students/{studentId}/tokens/{tokenHash}  →  fcm_tokens
+ *
+ * Supports multi-device per user, idempotent writes,
  * token validation, and stale token cleanup.
  */
 
-import { db as adminDb, FieldValue, messaging } from '@/lib/firebase-admin';
-import * as crypto from 'crypto';
+import { messaging } from '@/lib/firebase-admin';
+import {
+  getStudentsByRouteIds,
+  getStudentsByBusIds,
+  getAllStudents,
+  saveFcmToken,
+  deleteFcmToken,
+  getValidFcmTokensForUsers,
+  cleanupStaleFcmTokens,
+  hashFcmToken,
+} from '@/domains/identity';
 
 // Minimum token length for basic validation
 const MIN_TOKEN_LENGTH = 100;
@@ -20,7 +29,7 @@ const MAX_TOKEN_LENGTH = 4096;
  * Hash a token string to use as a document ID (deterministic, deduplicating)
  */
 export function hashToken(token: string): string {
-  return crypto.createHash('sha256').update(token).digest('hex').slice(0, 40);
+  return hashFcmToken(token);
 }
 
 /**
@@ -37,7 +46,7 @@ export function isValidTokenFormat(token: string): boolean {
 export interface TokenRecord {
   token: string;
   platform: 'android' | 'ios' | 'web';
-  lastSeen: FirebaseFirestore.Timestamp | string;
+  lastSeen: string;
   valid: boolean;
 }
 
@@ -45,62 +54,23 @@ export interface TokenWithMeta {
   token: string;
   platform: string;
   studentId: string;
-  tokenDocPath: string;
 }
 
 /**
  * Save (or refresh) an FCM token for a user.
- * Uses set/update for idempotent writes — never creates duplicates.
+ * Uses upsert for idempotent writes — never creates duplicates.
  */
 export async function saveToken(
   userId: string,
-  collectionName: string,
+  _collectionName: string, // kept for API compatibility, ignored
   token: string,
   platform: string = 'web'
 ): Promise<{ success: boolean; error?: string }> {
-  if (!adminDb) {
-    return { success: false, error: 'Firebase Admin not initialized' };
-  }
-
   if (!isValidTokenFormat(token)) {
     return { success: false, error: `Invalid token format (length: ${token?.length || 0})` };
   }
 
-  // Additional validation: Only allow saving to students collection
-  if (collectionName !== 'students') {
-    console.warn(`FCM tokens are only supported for students collection, not ${collectionName}`);
-    return { success: false, error: 'FCM tokens are only supported for student accounts' };
-  }
-
-  const tokenHash = hashToken(token);
-  const tokenDocRef = adminDb
-    .collection(collectionName)
-    .doc(userId)
-    .collection('tokens')
-    .doc(tokenHash);
-
-  try {
-    const existing = await tokenDocRef.get();
-
-    if (!existing.exists) {
-      await tokenDocRef.set({
-        token,
-        platform: platform as 'android' | 'ios' | 'web',
-        lastSeen: FieldValue.serverTimestamp(),
-        valid: true,
-      });
-    } else {
-      await tokenDocRef.update({
-        lastSeen: FieldValue.serverTimestamp(),
-        valid: true,
-      });
-    }
-
-    return { success: true };
-  } catch (error: any) {
-    console.error(`Error saving token for ${collectionName}/${userId}:`, error.message);
-    return { success: false, error: error.message };
-  }
+  return saveFcmToken(userId, token, platform);
 }
 
 /**
@@ -108,46 +78,25 @@ export async function saveToken(
  */
 export async function invalidateToken(
   userId: string,
-  collectionName: string,
+  _collectionName: string, // kept for API compatibility, ignored
   tokenHash: string
 ): Promise<void> {
-  if (!adminDb) return;
-
-  try {
-    const tokenDocRef = adminDb
-      .collection(collectionName)
-      .doc(userId)
-      .collection('tokens')
-      .doc(tokenHash);
-
-    await tokenDocRef.delete();
-  } catch (error: any) {
-    console.error(`Error invalidating token ${tokenHash?.substring(0,8)}... for ${userId?.substring(0,8)}...:`, error.message);
-  }
+  await deleteFcmToken(userId, tokenHash);
 }
 
 /**
  * Delete a token doc by its full path or clear legacy field.
+ * Kept for backward compatibility — parses path and calls deleteFcmToken.
  */
 export async function deleteTokenByPath(docPath: string): Promise<void> {
-  if (!adminDb) return;
-  try {
-    // SECURITY: If the path is a student document (legacy token), do NOT delete it.
-    // Instead, clear the fcmToken field.
-    if (docPath.startsWith('students/') && !docPath.includes('/tokens/')) {
-      console.log(`🧹 Clearing legacy FCM token on student doc instead of deleting: ${docPath}`);
-      await adminDb.doc(docPath).update({
-        fcmToken: FieldValue.delete(),
-        fcmPlatform: FieldValue.delete(),
-        updatedAt: FieldValue.serverTimestamp()
-      });
-      return;
+  // Parse path format: fcm_tokens/{userId}/{tokenHash} or legacy students/{id}/tokens/{hash}
+  const parts = docPath.split('/');
+  if (parts.length >= 3) {
+    const userId = parts[1];
+    const tokenHash = parts[2];
+    if (userId && tokenHash) {
+      await deleteFcmToken(userId, tokenHash);
     }
-
-    // Standard subcollection token: safe to delete the specific token doc
-    await adminDb.doc(docPath).delete();
-  } catch (error: any) {
-    console.error(`Error deleting token doc at ${docPath}:`, error.message);
   }
 }
 
@@ -159,12 +108,12 @@ export async function subscribeToTopic(token: string, topic: string): Promise<bo
   try {
     const response = await messaging.subscribeToTopic(token, topic);
     if (response.failureCount > 0) {
-      console.warn(`⚠️ Failed to subscribe token to topic ${topic}:`, response.errors[0]?.error);
+      console.warn(`Failed to subscribe token to topic ${topic}:`, response.errors[0]?.error);
       return false;
     }
     return true;
   } catch (err) {
-    console.error(`❌ Error subscribing to topic ${topic}:`, err);
+    console.error(`Error subscribing to topic ${topic}:`, err);
     return false;
   }
 }
@@ -178,168 +127,57 @@ export async function unsubscribeFromTopic(token: string, topic: string): Promis
     const response = await messaging.unsubscribeFromTopic(token, topic);
     return response.failureCount === 0;
   } catch (err) {
-    console.error(`❌ Error unsubscribing from topic ${topic}:`, err);
+    console.error(`Error unsubscribing from topic ${topic}:`, err);
     return false;
   }
 }
 
 /**
  * Get all valid tokens for students on a given route.
- * Queries students by routeId, then expands the tokens subcollection.
+ * Queries students by routeId, then fetches tokens from PostgreSQL.
  * Returns deduplicated tokens.
  */
 export async function getValidTokensForRoute(routeId: string): Promise<TokenWithMeta[]> {
-  if (!adminDb) return [];
-
-  // Query students by routeId (try multiple field names for compatibility)
-  let studentsSnap = await adminDb
-    .collection('students')
-    .where('routeId', '==', routeId)
-    .get();
-
-  // Fallback alternatives
-  if (studentsSnap.empty) {
-    const alt1 = await adminDb.collection('students').where('route_id', '==', routeId).get();
-    const alt2 = await adminDb.collection('students').where('assignedRouteId', '==', routeId).get();
-    if (!alt1.empty) studentsSnap = alt1;
-    else if (!alt2.empty) studentsSnap = alt2;
-  }
-
-  if (studentsSnap.empty) {
-    console.log(`📭 No students found for route ${routeId}`);
+  const students = await getStudentsByRouteIds([routeId]);
+  if (students.length === 0) {
     return [];
   }
 
-  const tokens: TokenWithMeta[] = [];
-
-  for (const studentDoc of studentsSnap.docs) {
-    const tokensSnap = await studentDoc.ref
-      .collection('tokens')
-      .where('valid', '==', true)
-      .get();
-
-    for (const tokenDoc of tokensSnap.docs) {
-      const data = tokenDoc.data();
-      if (data?.token && isValidTokenFormat(data.token)) {
-        tokens.push({
-          token: data.token,
-          platform: data.platform || 'web',
-          studentId: studentDoc.id,
-          tokenDocPath: tokenDoc.ref.path,
-        });
-      }
-    }
-  }
-
-  // Deduplicate by token value (same physical device registered under multiple students)
-  const seen = new Set<string>();
-  const uniqueTokens: TokenWithMeta[] = [];
-  for (const t of tokens) {
-    if (!seen.has(t.token)) {
-      seen.add(t.token);
-      uniqueTokens.push(t);
-    }
-  }
-
-  return uniqueTokens;
+  const userIds = students.map(s => s.uid);
+  return getValidFcmTokensForUsers(userIds);
 }
 
 /**
  * Get all valid tokens for students assigned to a specific bus.
- * Tries assignedBusId, busId, bus_id field names.
  */
 export async function getValidTokensForBus(busId: string): Promise<TokenWithMeta[]> {
-  if (!adminDb) return [];
-
-  let studentsSnap = await adminDb
-    .collection('students')
-    .where('assignedBusId', '==', busId)
-    .get();
-
-  if (studentsSnap.empty) {
-    const alt1 = await adminDb.collection('students').where('busId', '==', busId).get();
-    const alt2 = await adminDb.collection('students').where('bus_id', '==', busId).get();
-    if (!alt1.empty) studentsSnap = alt1;
-    else if (!alt2.empty) studentsSnap = alt2;
-  }
-
-  if (studentsSnap.empty) {
-    console.log(`📭 No students found for bus ${busId}`);
+  const students = await getStudentsByBusIds([busId]);
+  if (students.length === 0) {
     return [];
   }
 
-  const tokens: TokenWithMeta[] = [];
-
-  for (const studentDoc of studentsSnap.docs) {
-    const tokensSnap = await studentDoc.ref
-      .collection('tokens')
-      .where('valid', '==', true)
-      .get();
-
-    for (const tokenDoc of tokensSnap.docs) {
-      const data = tokenDoc.data();
-      if (data?.token && isValidTokenFormat(data.token)) {
-        tokens.push({
-          token: data.token,
-          platform: data.platform || 'web',
-          studentId: studentDoc.id,
-          tokenDocPath: tokenDoc.ref.path,
-        });
-      }
-    }
-  }
-
-  // Deduplicate
-  const seen = new Set<string>();
-  const uniqueTokens: TokenWithMeta[] = [];
-  for (const t of tokens) {
-    if (!seen.has(t.token)) {
-      seen.add(t.token);
-      uniqueTokens.push(t);
-    }
-  }
-
-  return uniqueTokens;
+  const userIds = students.map(s => s.uid);
+  return getValidFcmTokensForUsers(userIds);
 }
 
 /**
- * Cleanup stale tokens across all students.
- * Deletes token docs where lastSeen is older than maxAgeDays.
+ * Cleanup stale tokens across all users.
  */
 export async function cleanupStaleTokens(maxAgeDays: number = 30): Promise<{
   scanned: number;
   deleted: number;
 }> {
-  if (!adminDb) return { scanned: 0, deleted: 0 };
+  return cleanupStaleFcmTokens(maxAgeDays);
+}
 
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - maxAgeDays);
-
-  const studentsSnap = await adminDb.collection('students').get();
-  let scanned = 0;
-  let deleted = 0;
-
-  for (const studentDoc of studentsSnap.docs) {
-    const tokensSnap = await studentDoc.ref.collection('tokens').get();
-
-    for (const tokenDoc of tokensSnap.docs) {
-      scanned++;
-      const data = tokenDoc.data();
-      const lastSeen = data?.lastSeen;
-
-      let lastSeenDate: Date | null = null;
-      if (lastSeen && typeof lastSeen.toDate === 'function') {
-        lastSeenDate = lastSeen.toDate();
-      } else if (lastSeen && typeof lastSeen === 'string') {
-        lastSeenDate = new Date(lastSeen);
-      }
-
-      if (lastSeenDate && lastSeenDate < cutoff) {
-        await tokenDoc.ref.delete();
-        deleted++;
-      }
-    }
+/**
+ * Delete all FCM tokens for a specific user.
+ */
+export async function deleteUserTokens(userId: string): Promise<void> {
+  // Delete all tokens by getting them first
+  const tokens = await getValidFcmTokensForUsers([userId]);
+  for (const t of tokens) {
+    const tokenHash = hashFcmToken(t.token);
+    await deleteFcmToken(userId, tokenHash);
   }
-
-  return { scanned, deleted };
 }

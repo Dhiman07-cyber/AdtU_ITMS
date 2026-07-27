@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { auth } from '@/lib/firebase-admin';
+import { auth, adminDb } from '@/lib/firebase-admin';
 import { readFeedback, updateFeedback } from '@/lib/feedback-utils';
+import { resolveUserRole } from '@/lib/security/role-cache';
+import { getUpdaterInfo } from '@/lib/utils/updatedBy';
 
 /**
  * PATCH /api/feedback/:id/mark-read
@@ -39,12 +41,10 @@ export async function PATCH(
 
     const userId = decodedToken.uid;
 
-    // Get user role from Firestore
-    const { db } = await import('@/lib/firebase-admin');
-    const adminDoc = await db.collection('admins').doc(userId).get();
-    const moderatorDoc = await db.collection('moderators').doc(userId).get();
+    // Get user role from PostgreSQL
+    const userRole = await resolveUserRole(userId);
 
-    if (!adminDoc.exists && !moderatorDoc.exists) {
+    if (!userRole.role || (userRole.role !== 'admin' && userRole.role !== 'moderator')) {
       return NextResponse.json(
         { error: 'Access denied. Admin or Moderator role required.' },
         { status: 403 }
@@ -52,16 +52,12 @@ export async function PATCH(
     }
 
     // Determine read_by string
-    let readByString = userId; // Default fallback
-    if (adminDoc.exists) {
-      const adminData = adminDoc.data();
-      const adminName = adminData?.fullName || adminData?.name || 'Admin';
-      readByString = `${adminName} (Admin)`;
-    } else if (moderatorDoc.exists) {
-      const modData = moderatorDoc.data();
-      const modName = modData?.fullName || modData?.name || 'Moderator';
-      const modId = modData?.employeeId || modData?.empId || 'ID';
-      readByString = `${modName} ( ${modId} )`;
+    const updaterInfo = await getUpdaterInfo(adminDb, userId);
+    let readByString = userId;
+    if (userRole.role === 'admin') {
+      readByString = `${updaterInfo.name} (Admin)`;
+    } else {
+      readByString = `${updaterInfo.name} ( ${updaterInfo.roleOrEmployeeId} )`;
     }
 
     // Read feedback

@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState, useEffect } from "react";
 import { useAuth } from "@/contexts/auth-context";
@@ -145,7 +145,7 @@ export default function DriverStudentsPage() {
   const [shiftFilter, setShiftFilter] = useState<string>("all");
 
   // Use Supabase hook for waiting flags - hook expects routeId
-  const { flags: waitingFlags, loading: waitingFlagsLoading, error: waitingFlagsError } = useWaitingFlags(driverData?.assignedRouteId || driverData?.routeId || '');
+  const { flags: waitingFlags, loading: waitingFlagsLoading, error: waitingFlagsError } = useWaitingFlags(driverData?.routeId || driverData?.routeId || '');
 
   // Fetch driver data and students on assigned bus
   useEffect(() => {
@@ -161,9 +161,9 @@ export default function DriverStudentsPage() {
           setDriverData(driver);
 
           // Fetch students on assigned bus
-          if (driver.assignedBusId) {
-            console.log('🚌 Fetching students for bus ID:', driver.assignedBusId);
-            const busStudents = await getStudentsByBusId(driver.assignedBusId);
+          if (driver.busId) {
+            console.log('🚌 Fetching students for bus ID:', driver.busId);
+            const busStudents = await getStudentsByBusId(driver.busId);
             console.log('👥 Fetched students with profile pictures:', busStudents.map(s => ({
               name: s.fullName || s.name,
               profilePicture: s.profilePicture,
@@ -277,7 +277,7 @@ export default function DriverStudentsPage() {
           <div className="flex items-center justify-between">
             <div className="flex-1 min-w-0 pr-4">
               <h1 className="text-sm md:text-lg font-bold text-foreground truncate">
-                Bus-{driverData?.assignedBusId?.replace('bus_', '').replace('_', '-') || 'N/A'} <span className="text-muted-foreground font-medium ml-1">Directory</span>
+                Bus-{driverData?.busId?.replace('bus_', '').replace('_', '-') || 'N/A'} <span className="text-muted-foreground font-medium ml-1">Directory</span>
               </h1>
             </div>
             <div className="flex items-center gap-3">
@@ -341,7 +341,7 @@ export default function DriverStudentsPage() {
                           <div className="flex flex-col sm:flex-row sm:flex-wrap gap-1 sm:gap-3 mt-1">
                             <div className="flex items-center text-xs sm:text-sm text-gray-600 dark:text-gray-400">
                               <MapPin className="h-3 w-3 sm:h-4 sm:w-4 mr-1 text-orange-500 flex-shrink-0" />
-                              <span className="truncate">{flag.stopName || "Waiting"}</span>
+                              <span className="truncate">{flag.stop_name || "Waiting"}</span>
                             </div>
                             <div className="flex items-center text-xs sm:text-sm text-gray-600 dark:text-gray-400">
                               <Clock className="h-3 w-3 sm:h-4 sm:w-4 mr-1 text-blue-500 flex-shrink-0" />

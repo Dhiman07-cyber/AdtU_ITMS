@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { adminAuth, adminDb } from '@/lib/firebase-admin';
+import { adminAuth } from '@/lib/firebase-admin';
+import { resolveUserRole } from '@/lib/security/role-cache';
+import { getUnauthUserById } from '@/domains/identity';
 
 export async function GET(
   request: NextRequest,
@@ -16,24 +18,20 @@ export async function GET(
     const uid = decodedToken.uid;
 
     // Verify user is admin or moderator
-    const moderatorDoc = await adminDb.collection('moderators').doc(uid).get();
-    const adminDoc = await adminDb.collection('admins').doc(uid).get();
-    
-    if (!moderatorDoc.exists && !adminDoc.exists) {
+    const userRole = await resolveUserRole(uid);
+    if (userRole.role !== 'admin' && userRole.role !== 'moderator') {
       return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 });
     }
 
     // Await params before accessing its properties (Next.js 15 requirement)
     const { id: studentUid } = await params;
 
-    // Get unauth user data
-    const unauthUserDoc = await adminDb.collection('UnauthUsers').doc(studentUid).get();
+    // Get unauth user data from PostgreSQL
+    const applicationData = await getUnauthUserById(studentUid);
 
-    if (!unauthUserDoc.exists) {
+    if (!applicationData) {
       return NextResponse.json({ error: 'Application not found' }, { status: 404 });
     }
-
-    const applicationData = unauthUserDoc.data();
 
     return NextResponse.json({
       success: true,

@@ -1,5 +1,5 @@
-import { adminDb } from '@/lib/firebase-admin';
 import { paymentsSupabaseService, type CreatePaymentInput } from '@/lib/services/payments-supabase';
+import { createAuditEvent } from '@/domains/audit';
 
 export interface PaymentTransaction {
   // Core Fields (Required)
@@ -200,7 +200,7 @@ export class PaymentTransactionService {
 
   /**
    * Check if a payment has already been processed
-   * Checks Supabase first, then Firestore for legacy data
+   * Checks Supabase (single source of truth)
    */
   static async isPaymentProcessed(paymentId: string): Promise<boolean> {
     try {
@@ -211,11 +211,7 @@ export class PaymentTransactionService {
         return supabasePayment.status === 'Completed';
       }
 
-      // Fall back to Firestore for legacy data
-      const doc = await adminDb.collection('payments').doc(paymentId).get();
-      if (!doc.exists) return false;
-      const data = doc.data();
-      return data?.status?.toLowerCase() === 'completed';
+      return false;
     } catch {
       return false;
     }
@@ -354,21 +350,31 @@ export class PaymentTransactionService {
 
   /**
    * Mark a transaction as pending for manual reconciliation.
-   * Writes a detectable outbox record in Firestore `audit_failures` so the next
+   * Writes a detectable outbox record in PostgreSQL `audit_events` so the next
    * cron, admin scan, or reconciliation pass can identify and repair the state.
    */
   static async markTransactionPending(paymentId: string): Promise<void> {
     try {
-      await adminDb.collection('audit_failures').add({
-        kind: 'webhook_payment_sync_pending',
-        paymentId,
-        error: 'saveTransaction failed after Firestore commit; payment needs Supabase ledger entry',
-        recovered: false,
-        createdAtISO: new Date().toISOString(),
+      await createAuditEvent({
+        action: 'WEBHOOK_PAYMENT_SYNC_PENDING',
+        category: 'payment',
+        severity: 'high',
+        summary: `saveTransaction failed after Firestore commit for payment ${paymentId}; payment needs Supabase ledger entry.`,
+        actor_id: 'system',
+        actor_name: 'System',
+        actor_role: 'admin',
+        target_type: 'payment',
+        target_id: paymentId,
+        target_name: paymentId,
+        metadata: {
+          paymentId,
+          error: 'saveTransaction failed after Firestore commit; payment needs Supabase ledger entry',
+          recovered: false,
+        }
       });
-      console.warn(`[PaymentTransaction] Marked ${paymentId} as pending for reconciliation (outbox record written).`);
+      console.warn(`[PaymentTransaction] Marked ${paymentId} as pending for reconciliation (PG audit event written).`);
     } catch (outboxErr) {
-      console.error(`[PaymentTransaction] CRITICAL: Could not write outbox for ${paymentId}:`, outboxErr);
+      console.error(`[PaymentTransaction] CRITICAL: Could not write audit event outbox for ${paymentId}:`, outboxErr);
     }
   }
 }

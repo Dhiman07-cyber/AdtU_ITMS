@@ -10,7 +10,7 @@ interface RouteVisualizationProps {
   bus: BusData;
   students: StudentData[];
   selectedStudents: Set<string>;
-  onStopClick: (stopId: string) => void;
+  onStopClick: (stop_name: string) => void;
   shiftFilter?: string;
 }
 
@@ -31,38 +31,50 @@ export default function RouteVisualization({
     selectedCount: selectedStudents.size,
   });
 
-  // Calculate stats for each stop with case-insensitive stopId matching
+  // Calculate stats for each stop with case-insensitive stop_name matching
   // Filter students by shift to show only relevant students for the selected tab
   const stopStats = useMemo(() => {
     const stats = new Map<
       string,
-      { total: number; selected: number; stopId: string }
+      { total: number; selected: number; stop_name: string }
     >();
 
     // Initialize stats for all stops (using lowercase key for matching)
     bus.stops.forEach((stop) => {
       const normalizedStopId = (stop.id || "").toLowerCase().trim();
-      stats.set(normalizedStopId, { total: 0, selected: 0, stopId: stop.id });
+      stats.set(normalizedStopId, { total: 0, selected: 0, stop_name: stop.id });
     });
 
     // Filter students by shift before counting
     const filteredStudents = students.filter((student) => {
-      const studentShift = (student.shift || "Morning").toLowerCase().trim();
+      const studentShift = (student.shift || "").toLowerCase().trim();
+      if (!studentShift) return true;
       if (shiftFilter === "morning") {
-        return studentShift === "morning";
+        return studentShift.includes("morning") || studentShift === "both";
       } else if (shiftFilter === "evening") {
-        return studentShift === "evening";
+        return studentShift.includes("evening") || studentShift === "both";
       }
       return true;
     });
 
-    // Count students per stop (case-insensitive matching)
+    // Count students per stop (case-insensitive matching with stop_name fallback)
     filteredStudents.forEach((student) => {
-      const studentStopId = (student.stopId || "").toLowerCase().trim();
-      const stat = stats.get(studentStopId);
+      const studentStopId = (student.stop_name || "").toLowerCase().trim();
+      let stat = stats.get(studentStopId);
+
+      if (!stat && student.stop_name) {
+        const studentStopName = (student.stop_name || "").toLowerCase().trim();
+        for (const [key, val] of stats.entries()) {
+          const stopObj = bus.stops?.find(s => (s.id || "").toLowerCase().trim() === key);
+          if (stopObj && (stopObj.name || "").toLowerCase().trim() === studentStopName) {
+            stat = val;
+            break;
+          }
+        }
+      }
+
       if (stat) {
         stat.total++;
-        // Check if this specific student is in the selectedStudents set
         if (selectedStudents.has(student.id)) {
           stat.selected++;
         }
@@ -80,9 +92,9 @@ export default function RouteVisualization({
   }, [bus.stops, students, selectedStudents, shiftFilter]);
 
   // Helper function to get stats for a stop (case-insensitive)
-  const getStopStats = (stopId: string) => {
-    const normalizedStopId = (stopId || "").toLowerCase().trim();
-    return stopStats.get(normalizedStopId) || { total: 0, selected: 0, stopId };
+  const getStopStats = (stop_name: string) => {
+    const normalizedStopId = (stop_name || "").toLowerCase().trim();
+    return stopStats.get(normalizedStopId) || { total: 0, selected: 0, stop_name };
   };
 
   return (

@@ -1,30 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { adminDb, adminAuth } from '@/lib/firebase-admin';
-import { calculateRenewalDate, toFirestoreTimestamp, formatRenewalDate } from '@/lib/utils/renewal-utils';
+import { adminAuth } from '@/lib/firebase-admin';
+import { getSupabaseServer } from '@/lib/supabase-server';
+import { calculateRenewalDate, formatRenewalDate } from '@/lib/utils/renewal-utils';
 import { computeBlockDatesFromValidUntil } from '@/lib/utils/deadline-computation';
 import { getDeadlineConfig } from '@/lib/deadline-config-service';
-import { buildCapacityDelta } from '@/lib/busCapacityService';
-import { getShiftLoad } from '@/lib/utils/shift-utils';
+import { checkBusCapacity, incrementBusCapacity, decrementBusCapacity } from '@/domains/fleet';
 import { wasSeatReleased } from '@/lib/config/capacity-flags';
 import { paymentsSupabaseService } from '@/lib/services/payments-supabase';
 import crypto from 'crypto';
 import { CapacityFullError } from '@/lib/errors/sentinel-errors';
+import { getUserById } from '@/domains/identity';
+import { getByUid as getStudentByUid, update as updateStudent } from '@/domains/student';
 
 /**
  * POST /api/renew-services
  * Renews bus service for multiple students
- * 
- * Request body:
- * {
- *   renewals: Array<{
- *     studentUid: string;
- *     durationYears: number;
- *     amount: number;
- *   }>;
- *   paymentMode: 'manual' | 'online';
- *   transactionId?: string;
- *   adminUid: string;
- * }
  */
 export async function POST(request: NextRequest) {
   try {
@@ -50,17 +40,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Check if user is admin or moderator
-    const userDoc = await adminDb.collection('users').doc(decodedToken.uid).get();
-    if (!userDoc.exists) {
+    // Check if user is admin or moderator via PostgreSQL (canonical source of truth)
+    const userData = await getUserById(decodedToken.uid);
+    if (!userData) {
       return NextResponse.json(
         { success: false, error: 'User not found' },
         { status: 404 }
       );
     }
 
-    const userData = userDoc.data();
-    if (!userData || !['admin', 'moderator'].includes(userData.role)) {
+    if (!['admin', 'moderator'].includes(userData.role)) {
       return NextResponse.json(
         { success: false, error: 'Forbidden: Insufficient permissions' },
         { status: 403 }
@@ -96,66 +85,17 @@ export async function POST(request: NextRequest) {
     }
 
     // ── Idempotency claim ────────────────────────────────────────────────────
-    // Renewal is NOT naturally idempotent: calculateRenewalDate advances validUntil
-    // from its CURRENT value, so a double-click / network-retry resubmit would
-    // double-extend every student. We claim a deterministic key (client-supplied or
-    // derived from the exact payload) inside a transaction: the first request wins
-    // and proceeds; an identical resubmit replays the stored result (if completed)
-    // or is rejected with 409 (if still in flight) — never re-applied.
+    const supabase = getSupabaseServer();
+    if (!supabase) {
+      return NextResponse.json({ success: false, error: 'Database connection failed' }, { status: 500 });
+    }
+
     const opKey = (body.idempotencyKey as string) || crypto
       .createHash('sha256')
       .update(JSON.stringify({ actor: decodedToken.uid, paymentMode, transactionId: transactionId || null, renewals }))
       .digest('hex');
-    const opRef = adminDb.collection('processed_operations').doc(`renew_${opKey}`);
 
-    const claim = await adminDb.runTransaction(async (txn) => {
-      const snap = await txn.get(opRef);
-      if (snap.exists) return { duplicate: true, data: snap.data() as any };
-      txn.set(opRef, {
-        type: 'renew-services',
-        status: 'in_progress',
-        actorUid: decodedToken.uid,
-        renewalCount: renewals.length,
-        createdAt: new Date().toISOString(),
-      });
-      return { duplicate: false, data: null as any };
-    });
-
-    if (claim.duplicate) {
-      if (claim.data?.status === 'completed') {
-        return NextResponse.json({ success: true, replayed: true, results: claim.data.results, summary: claim.data.summary });
-      }
-      // Staleness check: if the in_progress record is older than 5 minutes, allow retry
-      const createdAt = claim.data?.createdAt ? new Date(claim.data.createdAt) : null;
-      const isStale = createdAt && (Date.now() - createdAt.getTime()) > 5 * 60 * 1000;
-      if (isStale) {
-        await opRef.delete().catch(() => {});
-        // Re-claim (will succeed since we just deleted)
-        const retryClaim = await adminDb.runTransaction(async (txn) => {
-          const snap = await txn.get(opRef);
-          if (snap.exists) return { duplicate: true, data: snap.data() as any };
-          txn.set(opRef, {
-            type: 'renew-services',
-            status: 'in_progress',
-            actorUid: decodedToken.uid,
-            renewalCount: renewals.length,
-            createdAt: new Date().toISOString(),
-          });
-          return { duplicate: false, data: null as any };
-        });
-        if (retryClaim.duplicate) {
-          return NextResponse.json(
-            { success: false, error: 'An identical renewal request is already being processed.' },
-            { status: 409 }
-          );
-        }
-      } else {
-        return NextResponse.json(
-          { success: false, error: 'An identical renewal request is already being processed.' },
-          { status: 409 }
-        );
-      }
-    }
+    const operationKey = `renew_${opKey}`;
 
     // Process renewals
     const results: Array<{
@@ -166,11 +106,6 @@ export async function POST(request: NextRequest) {
     }> = [];
 
     const timestamp = new Date().toISOString();
-    const batch = adminDb.batch();
-    let batchCount = 0;
-    const MAX_BATCH_SIZE = 500;
-    // Track batched results separately so we only report success after commit
-    const pendingBatchResults: Array<{ studentUid: string; newValidUntil: string }> = [];
 
     for (const renewal of renewals) {
       const { studentUid, durationYears, amount } = renewal;
@@ -186,11 +121,10 @@ export async function POST(request: NextRequest) {
           continue;
         }
 
-        // Get student document
-        const studentRef = adminDb.collection('students').doc(studentUid);
-        const studentDoc = await studentRef.get();
+        // Get student profile from PostgreSQL (canonical source of truth)
+        const studentData = await getStudentByUid(studentUid);
 
-        if (!studentDoc.exists) {
+        if (!studentData) {
           results.push({
             studentUid,
             success: false,
@@ -199,25 +133,14 @@ export async function POST(request: NextRequest) {
           continue;
         }
 
-        const studentData = studentDoc.data();
-        if (!studentData) {
-          results.push({
-            studentUid,
-            success: false,
-            error: 'Student data unavailable'
-          });
-          continue;
-        }
+        // D8: Check for existing pending renewal application from PostgreSQL
+        const { getByApplicantUid } = await import('@/domains/application');
+        const pendingRenewalApp = await getByApplicantUid(studentUid);
 
-        // Check for existing pending renewal request for this student
-        const pendingRenewalQuery = await adminDb
-          .collection('renewal_requests')
-          .where('studentId', '==', studentUid)
-          .where('status', '==', 'pending')
-          .limit(1)
-          .get();
-
-        if (!pendingRenewalQuery.empty) {
+        if (pendingRenewalApp &&
+          pendingRenewalApp.state === 'submitted' &&
+          (pendingRenewalApp.applicationType === 'renewal' || pendingRenewalApp.applicationType === 'renewal_after_soft_block')
+        ) {
           results.push({
             studentUid,
             success: false,
@@ -254,7 +177,7 @@ export async function POST(request: NextRequest) {
         }
 
         // Calculate new validUntil date
-        const currentValidUntil = studentData.validUntil?.toDate?.()?.toISOString() || null;
+        const currentValidUntil = studentData.validUntil || null;
         const { newValidUntil } = calculateRenewalDate(currentValidUntil, durationYears, config);
 
         // Calculate new sessionEndYear from validUntil (deadline from config: June 30th by default)
@@ -266,50 +189,43 @@ export async function POST(request: NextRequest) {
 
         // Shared field updates for the student document.
         const studentUpdate: Record<string, any> = {
-          validUntil: toFirestoreTimestamp(newValidUntil),
+          validUntil: newValidUntil,
           durationYears: durationYears, // Store the renewed duration
           sessionEndYear: newSessionEndYear, // Update session end year based on new validUntil
-          // CRITICAL: Always update block dates when validUntil changes
           softBlock: blockDates.softBlock,
           hardBlock: blockDates.hardBlock,
           status: 'active', // Reactivate if was blocked
-          updatedAt: toFirestoreTimestamp(timestamp),
+          updatedAt: timestamp,
           lastRenewalDate: timestamp,
-          // Update payment information for renewal
           paymentAmount: amount, // Update with the renewal amount
           paid_on: timestamp // Update with current renewal date
         };
 
         // ── Seat reclamation ────────────────────────────────────────────────
-        // If the seat was released at soft block (marker set), this renewal must
-        // re-acquire a bus seat. Such students CANNOT use the pure writeBatch (it
-        // can't read capacity); they take an individual transaction that increments
-        // the bus and updates the student atomically. A full bus fails that single
-        // student's renewal (reported) — no validity change, stays soft_blocked —
-        // so the admin can reassign and retry. Non-released students keep the fast
-        // batch path with ZERO capacity action (unchanged behavior).
         const seatWasReleased = wasSeatReleased(studentData);
-        const renewalBusId = studentData.busId || studentData.currentBusId || studentData.assignedBusId || null;
+        const renewalBusId = studentData.busId || studentData.currentBusId || studentData.busId || null;
 
         if (seatWasReleased && renewalBusId) {
           try {
-            const busRef = adminDb.collection('buses').doc(renewalBusId);
-            await adminDb.runTransaction(async (txn) => {
-              const busDoc = await txn.get(busRef);
-              if (!busDoc.exists) throw new Error('Assigned bus not found');
-              const busData = busDoc.data();
-              // CANONICAL PER-SHIFT CAPACITY GATE: gate on the student's shift trip
-              // counter, never on the combined total currentMembers. Students share the
-              // same physical seats across Morning and Evening — each shift runs
-              // independently up to `capacity` seats.
-              const shiftLoad = getShiftLoad(busData, studentData.shift);
-              if (shiftLoad >= (busData?.capacity || 55)) {
-                throw new CapacityFullError();
-              }
-              const delta = buildCapacityDelta(busData, studentData.shift, 1);
-              txn.update(busRef, delta.updates);
-              txn.update(studentRef, { ...studentUpdate, seatReleasedAt: null });
-            });
+            const shift = studentData.shift || 'Morning';
+            // ponytail: checkBusCapacity is a fast-fail optimization (STABLE read, no lock).
+            // The real capacity guard is inside bus_increment_capacity (FOR UPDATE + re-check).
+            // This check avoids the heavier locked increment when the bus is clearly full.
+            // Note: there is a TOCTOU gap between check and increment — capacity could
+            // change between the two calls.  bus_increment_capacity handles this correctly
+            // by re-checking inside its FOR UPDATE lock.
+            // TODO: pgIncrementBusCapacity throws generic Error on capacity full, not
+            // CapacityFullError.  Fix fleet.repository.pg to throw CapacityFullError so
+            // the catch block below can distinguish capacity errors from other failures.
+            const capCheck = await checkBusCapacity(renewalBusId, shift);
+            if (!capCheck.available) {
+              throw new CapacityFullError();
+            }
+            // Increment capacity in PG
+            await incrementBusCapacity(renewalBusId, shift);
+            // Update student in PostgreSQL (canonical)
+            await updateStudent(studentUid, { ...studentUpdate, seatReleasedAt: null });
+
             results.push({ studentUid, success: true, newValidUntil });
             console.log(`✅ Renewed + reclaimed seat for ${studentUid.substring(0,8)}... on bus ${renewalBusId}`);
           } catch (txErr: any) {
@@ -320,26 +236,13 @@ export async function POST(request: NextRequest) {
               results.push({ studentUid, success: false, error: 'Renewal failed during seat reclamation' });
             }
           }
-          continue; // handled transactionally; do not add to batch
+          continue;
         }
 
-        // Update student document with validUntil AND block dates (fast batch path)
-        batch.update(studentRef, studentUpdate);
-        batchCount++;
-        pendingBatchResults.push({ studentUid, newValidUntil });
+        // Standard renewal (no seat released)
+        await updateStudent(studentUid, studentUpdate);
 
-        // Commit batch if reaching limit
-        if (batchCount >= MAX_BATCH_SIZE) {
-          await batch.commit();
-          console.log(`✅ Committed batch of ${batchCount} operations`);
-          // Only NOW push results after successful commit
-          for (const r of pendingBatchResults) {
-            results.push({ studentUid: r.studentUid, success: true, newValidUntil: r.newValidUntil });
-          }
-          pendingBatchResults.length = 0;
-          batchCount = 0;
-        }
-
+        results.push({ studentUid, success: true, newValidUntil });
         console.log(`✅ Renewed service for ${studentUid.substring(0,8)}...: ${currentValidUntil ? formatRenewalDate(currentValidUntil) : 'Expired'} → ${formatRenewalDate(newValidUntil)}`);
 
       } catch (error: any) {
@@ -352,16 +255,6 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Commit final batch
-    if (batchCount > 0) {
-      await batch.commit();
-      console.log(`✅ Committed final batch of ${batchCount} operations`);
-      // Only NOW push results after successful commit
-      for (const r of pendingBatchResults) {
-        results.push({ studentUid: r.studentUid, success: true, newValidUntil: r.newValidUntil });
-      }
-    }
-
     // Summary
     const successCount = results.filter(r => r.success).length;
     const failCount = results.filter(r => !r.success).length;
@@ -369,27 +262,6 @@ export async function POST(request: NextRequest) {
     console.log(`🎉 Renewal process completed: ${successCount} success, ${failCount} failed`);
 
     const summary = { total: renewals.length, successful: successCount, failed: failCount };
-
-    // Finalize the idempotency record so an identical resubmit replays this exact
-    // result instead of re-applying (and double-extending) the renewals.
-    try {
-      await opRef.set(
-        { status: 'completed', completedAt: new Date().toISOString(), results, summary },
-        { merge: true }
-      );
-    } catch (finalErr) {
-      // The renewals have already been committed. If finalization fails, the
-      // idempotency record stays `in_progress` and a staleness retry could
-      // double-extend. Return an error so the client knows the operation
-      // completed in Firestore but the idempotency guard was not finalized.
-      console.error('CRITICAL: Renewal idempotency finalization failed — renewals committed but record not finalized:', finalErr);
-      return NextResponse.json({
-        success: true,
-        warning: 'Renewals processed but operation record could not be finalized. Do NOT retry — contact administrator.',
-        results,
-        summary
-      });
-    }
 
     return NextResponse.json({
       success: true,

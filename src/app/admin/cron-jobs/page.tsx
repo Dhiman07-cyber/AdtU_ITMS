@@ -45,7 +45,7 @@ const CRON_JOBS = [
         method: 'GET',
         schedule: 'Daily at 00:00 UTC',
         category: 'Maintenance',
-        description: 'Deletes expired notifications and their read receipts from Firestore. Notifications with a cleanup period (1-7 days) are automatically removed after their expiry date.',
+        description: 'Deletes expired notifications from PostgreSQL. Notifications with a cleanup period (1-7 days) are automatically removed after their expiry date.',
         details: [
             'Queries notifications where expiresAt < current midnight',
             'Deletes notification documents and associated read receipts',
@@ -53,23 +53,6 @@ const CRON_JOBS = [
         ],
         icon: Bell,
         color: 'blue',
-        safe: true,
-    },
-    {
-        id: 'cleanup-swaps',
-        name: 'Driver Swap Cleanup',
-        endpoint: '/api/cron/cleanup-swaps',
-        method: 'GET',
-        schedule: 'Daily at 00:00 UTC',
-        category: 'Maintenance',
-        description: 'Manages driver swap request lifecycle - expires pending requests, ends accepted swaps, and cleans up old documents.',
-        details: [
-            'Expires pending requests past acceptance window',
-            'Reverts accepted swaps that have passed their time period',
-            'Deletes swap documents older than 7 days',
-        ],
-        icon: RefreshCw,
-        color: 'purple',
         safe: true,
     },
     {

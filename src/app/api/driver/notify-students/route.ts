@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server';
-import { adminDb } from '@/lib/firebase-admin';
 import { notifyRouteTopic, verifyDriverRouteBinding } from '@/lib/services/fcm-notification-service';
 import { withSecurity } from '@/lib/security/api-security';
 import { NotifyStudentsSchema } from '@/lib/security/validation-schemas';
 import { RateLimits } from '@/lib/security/rate-limiter';
+import * as routeService from '@/domains/route';
 
 /**
  * POST /api/driver/notify-students
@@ -16,17 +16,16 @@ export const POST = withSecurity(
     const { busId, routeId, tripId } = body as any;
     const driverUid = auth.uid;
 
-    // 1. Parallelize Binding Check and Route Name Fetching
-    const [authCheck, routeSnap] = await Promise.all([
+    // 1. Parallelize Binding Check and Route Fetching from PostgreSQL
+    const [authCheck, routeData] = await Promise.all([
       verifyDriverRouteBinding(driverUid, routeId, busId),
-      adminDb.collection('routes').doc(routeId).get()
+      routeService.getById(routeId)
     ]);
 
     if (!authCheck.authorized) {
       return NextResponse.json({ error: authCheck.reason || 'Driver not authorized' }, { status: 403 });
     }
 
-    const routeData = routeSnap.data();
     const routeName = routeData?.name || routeData?.routeName || 'your route';
 
     // 2. Optimized Topic-Based Notification

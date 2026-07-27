@@ -6,6 +6,8 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { exportToExcel } from '@/lib/export-helpers';
 import { ExportButton } from '@/components/ExportButton';
+import { cn } from '@/lib/utils';
+import { supabase } from '@/lib/supabase-client';
 import { useToast } from '@/contexts/toast-context';
 import {
   Dialog,
@@ -50,7 +52,8 @@ import {
 import { PremiumPageLoader } from '@/components/LoadingSpinner';
 import { MoreHorizontal, Eye, Edit, Trash2, Search, Plus, Filter, RefreshCw, Shield } from "lucide-react";
 import { deleteModerator } from '@/lib/dataService';
-import { usePaginatedCollection, invalidateCollectionCache } from '@/hooks/usePaginatedCollection';
+// Migrated: Server-side API → PostgreSQL (no Firestore client reads)
+import { useApiCollection, invalidateCollectionCache } from '@/hooks/useApiCollection';
 import { safeImageSrc } from "@/lib/security/url-sanitizer";
 import { useEventDrivenRefresh } from '@/hooks/useEventDrivenRefresh';
 import Avatar from '@/components/Avatar';
@@ -177,8 +180,8 @@ export default function AdminModerators() {
   const { addToast } = useToast();
   const router = useRouter();
 
-  // Real-time data listeners
-  const { data: moderators, loading: loadingModerators, refresh: refreshModerators } = usePaginatedCollection('moderators', {
+  // Server-side API reads from PostgreSQL — no Firestore client reads
+  const { data: moderators, loading: loadingModerators, refresh: refreshModerators } = useApiCollection('moderators', {
     pageSize: 50, orderByField: 'updatedAt', orderDirection: 'desc', autoRefresh: false,
   });
 
@@ -269,44 +272,58 @@ export default function AdminModerators() {
     });
   }, [moderators, searchTerm, statusFilter, experienceFilter]);
 
-  // Export moderators data
+  // Export moderators data from Supabase
   const handleExportModerators = async () => {
     try {
       const currentDate = new Date();
       const dateStr = currentDate.toISOString().split('T')[0].replace(/-/g, '-');
 
-      // Generate moderators data in the same format as the comprehensive report
-      const moderatorsData = moderators.map((moderator, index) => {
+      // Fetch moderators from Supabase moderator_profiles or users table where role='moderator'
+      let rawModerators: any[] = [];
+      const { data: modProfiles, error: modError } = await supabase
+        .from('moderator_profiles')
+        .select('*');
+
+      if (!modError && modProfiles && modProfiles.length > 0) {
+        rawModerators = modProfiles;
+      } else {
+        const { data: userMods } = await supabase
+          .from('users')
+          .select('*')
+          .eq('role', 'moderator');
+        rawModerators = userMods || [];
+      }
+
+      const moderatorsData = rawModerators.map((moderator: any, index: number) => {
         return [
           (index + 1).toString(),
-          moderator.fullName || moderator.name || 'N/A',
+          moderator.full_name || moderator.name || 'N/A',
           moderator.email || 'N/A',
-          moderator.phoneNumber || moderator.phone || 'N/A',
-          moderator.employeeId || moderator.empId || 'N/A',
-          moderator.aadharNumber || 'N/A',
-          moderator.approvedBy || 'N/A',
+          moderator.phone || moderator.phoneNumber || 'N/A',
+          moderator.employee_id || moderator.emp_id || 'N/A',
+          moderator.faculty || moderator.assigned_faculty || 'N/A',
+          moderator.approved_by || 'Admin',
           (moderator.status || 'active').charAt(0).toUpperCase() + (moderator.status || 'active').slice(1),
-          moderator.joiningDate || moderator.createdAt ? formatDate(moderator.joiningDate || moderator.createdAt) : 'N/A'
+          moderator.joining_date || moderator.created_at ? formatDateDDMMYYYY(moderator.joining_date || moderator.created_at) : 'N/A'
         ];
       });
 
       // Add headers
       moderatorsData.unshift([
-        'Sl No', 'Name', 'Email', 'Phone', 'Employee ID', 'AADHAR', 'Approved By', 'Status', 'Joining Date'
+        'Sl No', 'Name', 'Email', 'Phone', 'Employee ID', 'Faculty', 'Approved By', 'Status', 'Joining Date'
       ]);
 
       // Add section header
-      moderatorsData.unshift(['ALL MODERATORS'], ['']);
+      moderatorsData.unshift(['ALL MODERATORS REPORT (SUPABASE)'], ['']);
 
-      // Export to Excel
       await exportToExcel(moderatorsData, `ADTU_Moderators_Report_${dateStr}`, 'Moderators');
 
       addToast(
-        `Moderators data exported to ADTU_Moderators_Report_${dateStr}.xlsx`,
+        `Exported ${rawModerators.length} moderators to ADTU_Moderators_Report_${dateStr}.xlsx`,
         'success'
       );
     } catch (error) {
-      console.error('❌ Error exporting moderators:', error);
+      console.error('❌ Error exporting moderators from Supabase:', error);
       addToast(
         'Failed to export moderators data. Please try again.',
         'error'
@@ -358,6 +375,8 @@ export default function AdminModerators() {
     }
   };
 
+  const commonBtnClass = "group h-8 px-4 bg-white hover:bg-gray-50 text-gray-700 hover:text-purple-600 border border-gray-200 hover:border-purple-200 shadow-sm hover:shadow-lg hover:shadow-purple-500/10 font-bold text-[10px] uppercase tracking-widest rounded-lg transition-all duration-300 active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer";
+
   return (
     <div className="mt-12 space-y-6">
       {/* Page Header */}
@@ -375,23 +394,23 @@ export default function AdminModerators() {
           </Link>
           <ExportButton
             onClick={() => handleExportModerators()}
-            label="Export Moderators"
-            className="bg-white hover:bg-gray-100 !text-black border border-gray-300 transition-all duration-200 hover:scale-105 hover:shadow-lg rounded-md px-2.5 py-1.5 text-xs h-8"
+            label="EXPORT"
+            className={commonBtnClass}
           />
           <Button
             size="sm"
             onClick={handleRefresh}
             disabled={isRefreshing}
-            className="group h-8 px-4 bg-white hover:bg-gray-50 text-black hover:text-purple-600 border border-gray-200 hover:border-purple-200 shadow-sm hover:shadow-lg hover:shadow-purple-500/10 font-bold text-[10px] uppercase tracking-widest rounded-lg transition-all duration-300 active:scale-95"
+            className={commonBtnClass}
           >
-            <RefreshCw className={`mr-2 h-3.5 w-3.5 transition-transform duration-500 ${isRefreshing ? 'animate-spin' : 'group-hover:rotate-180'}`} />
-            Refresh
+            <RefreshCw className={cn("h-3.5 w-3.5 transition-transform duration-500", isRefreshing ? "animate-spin" : "group-hover:rotate-180")} />
+            REFRESH
           </Button>
         </div>
       </div>
 
-      <Card className="bg-gray-50 dark:bg-gray-900 border-border min-h-[480px]">
-        <CardContent className="pt-3">
+      <Card className="bg-gray-50 dark:bg-gray-900 border-border min-h-[480px] flex flex-col">
+        <CardContent className="pt-3 flex-1 flex flex-col min-h-0 pb-4">
           <div className="mb-3">
             {/* Search Bar and Filters */}
             <div className="flex flex-col md:flex-row gap-3">
@@ -450,8 +469,8 @@ export default function AdminModerators() {
               </div>
             </div>
           </div>
-          <div className="students-section">
-            <div className="students-scroll-wrapper rounded-md border" role="region" aria-label="Moderators list">
+          <div className="students-section md:mt-5 flex-1 flex flex-col min-h-0">
+            <div className="students-scroll-wrapper rounded-md border overflow-x-auto flex-1 flex flex-col min-h-0" role="region" aria-label="Moderators list">
               <Table>
                 <TableHeader>
                   <TableRow className="h-8">
@@ -464,24 +483,23 @@ export default function AdminModerators() {
                     <TableHead className="text-[11px] py-1.5 text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
-                <TableBody>
-                  {filteredModerators.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={7} className="text-center py-6 text-[11px] text-gray-500">
-                        No moderators found
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    filteredModerators.map((moderator) => (
+                {filteredModerators.length > 0 && (
+                  <TableBody>
+                    {filteredModerators.map((moderator, index) => (
                       <ModeratorRow
-                        key={moderator.id}
+                        key={moderator.uid || moderator.id || `moderator-${index}`}
                         moderator={moderator}
                         onDelete={handleDeleteClick}
                       />
-                    ))
-                  )}
-                </TableBody>
+                    ))}
+                  </TableBody>
+                )}
               </Table>
+              {filteredModerators.length === 0 && (
+                <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-[11px] text-gray-500 min-h-[220px]">
+                  No moderators found
+                </div>
+              )}
             </div>
           </div>
         </CardContent>

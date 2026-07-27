@@ -1,6 +1,8 @@
-import { adminDb } from './firebase-admin';
+import { pgInsertNotification } from '@/domains/notification/repositories/notification.repository.pg';
 import { getDeadlineConfig } from '@/lib/deadline-config-service';
 import { deriveAcademicLifecycle } from './utils/deadline-computation';
+import { getSupabaseServer } from '@/lib/supabase-server';
+import { getStudentById, updateStudent, getUsersByRole } from '@/domains/identity';
 
 interface ExpiryCheckResult {
   totalChecked: number;
@@ -50,19 +52,34 @@ export async function checkAndNotifyExpiringStudents(force: boolean = false): Pr
 
     console.log(`🔍 Checking for students expiring on: ${deadlineFirst.toDateString()}`);
 
-    const studentsQuery = await adminDb.collection('students')
-      .where('status', '==', 'active')
-      .where('validUntil', '>=', deadlineFirst.toISOString())
-      .where('validUntil', '<', deadlineNext.toISOString())
-      .get();
+    // Query active students expiring in target date range from PostgreSQL
+    const supabase = getSupabaseServer();
+    const { data: students, error: pgErr } = await supabase
+      .from('student_profiles')
+      .select('*')
+      .eq('status', 'active')
+      .gte('valid_until', deadlineFirst.toISOString())
+      .lt('valid_until', deadlineNext.toISOString());
 
-    result.totalChecked = studentsQuery.size;
+    if (pgErr) {
+      throw new Error(`Failed to query expiring students: ${pgErr.message}`);
+    }
+
+    const mappedStudents = (students || []).map(row => ({
+      uid: row.uid,
+      status: row.status,
+      validUntil: row.valid_until,
+      sessionStartYear: row.session_start_year,
+      sessionEndYear: row.session_end_year,
+      expiryReminderCount: row.expiry_reminder_count || 0,
+    }));
+
+    result.totalChecked = mappedStudents.length;
     console.log(`📊 Found ${result.totalChecked} students expiring on ${deadlineFirst.toDateString()}`);
 
-    for (const studentDoc of studentsQuery.docs) {
+    for (const studentData of mappedStudents) {
+      const studentUid = studentData.uid;
       try {
-        const studentData = studentDoc.data();
-        const studentUid = studentDoc.id;
         const currentCount = studentData.expiryReminderCount || 0;
 
         let shouldSend = false;
@@ -83,53 +100,46 @@ export async function checkAndNotifyExpiringStudents(force: boolean = false): Pr
 
         if (!shouldSend) continue;
 
-        const notifRef = adminDb.collection('notifications').doc();
         const nowIso = new Date().toISOString();
 
-        await adminDb.runTransaction(async (transaction) => {
-          const studentSnap = await transaction.get(studentDoc.ref);
-          const freshData = studentSnap.data();
-          const freshCount = freshData?.expiryReminderCount || 0;
+        // 1. Write notification to PostgreSQL
+        await pgInsertNotification({
+          title,
+          content: body,
+          type: 'info',
+          sender: {
+            userId: 'system',
+            userName: 'System',
+            userRole: 'admin'
+          },
+          target: {
+            type: 'specific_users',
+            specificUserIds: [studentUid]
+          },
+          recipientIds: [studentUid],
+          readByUserIds: [],
+          metadata: {
+            sessionStartYear: studentData.sessionStartYear,
+            sessionEndYear: studentData.sessionEndYear,
+            validUntil: studentData.validUntil,
+            profile: '/student/profile',
+            renewPage: '/apply'
+          }
+        });
 
-          transaction.set(notifRef, {
-            title,
-            content: body,
-            type: 'info',
-            sender: {
-              userId: 'system',
-              userName: 'System',
-              userRole: 'admin'
-            },
-            target: {
-              type: 'specific_users',
-              specificUserIds: [studentUid]
-            },
-            recipientIds: [studentUid],
-            autoInjectedRecipientIds: [],
-            readByUserIds: [],
-            isEdited: false,
-            isDeletedGlobally: false,
-            hiddenForUserIds: [],
-            createdAt: nowIso,
-            metadata: {
-              sessionStartYear: studentData.sessionStartYear,
-              sessionEndYear: studentData.sessionEndYear,
-              validUntil: studentData.validUntil,
-              profile: '/student/profile',
-              renewPage: '/apply'
-            }
-          });
+        // 2. Fetch fresh student details to count reminders and update in PostgreSQL (non-transactional, low-risk)
+        const freshStudent = await getStudentById(studentUid);
+        const freshCount = freshStudent?.expiryReminderCount || 0;
 
-          transaction.update(studentDoc.ref, {
-            lastExpiryReminderSentAt: nowIso,
-            expiryReminderCount: freshCount + 1
-          });
+        await updateStudent(studentUid, {
+          lastExpiryReminderSentAt: nowIso,
+          expiryReminderCount: freshCount + 1
         });
 
         result.remindersSent++;
-        console.log(`✅ Sent reminder to ${studentDoc.id} (count: ${currentCount + 1})`);
+        console.log(`%c✅ Sent reminder to ${studentUid} (count: ${freshCount + 1})`, 'color: green');
       } catch (error: any) {
-        result.errors.push(`Failed to process student ${studentDoc.id}: ${error.message}`);
+        result.errors.push(`Failed to process student ${studentUid}: ${error.message}`);
       }
     }
 
@@ -154,42 +164,31 @@ export async function sendMidJuneReminder(force: boolean = false): Promise<Expir
 }
 
 async function sendAdminSummary(result: ExpiryCheckResult, title: string, expiryDate: Date) {
-  const currentYear = new Date().getFullYear();
-  const adminsQuery = await adminDb.collection('admins').get();
+  const admins = await getUsersByRole('admin');
+  const adminIds = admins.map(a => a.uid).filter(Boolean);
+  if (adminIds.length === 0) return;
 
-  const batch = adminDb.batch();
-
-  for (const adminDoc of adminsQuery.docs) {
-    const notifRef = adminDb.collection('notifications').doc();
-    batch.set(notifRef, {
-      title,
-      content: `${result.remindersSent} students were notified about their expiring bus service (${expiryDate.toLocaleDateString()}). Please ensure the Bus Office is prepared for renewals.`,
-      type: 'info',
-      sender: {
-        userId: 'system',
-        userName: 'System',
-        userRole: 'admin'
-      },
-      target: {
-        type: 'specific_users',
-        specificUserIds: [adminDoc.id]
-      },
-      recipientIds: [adminDoc.id],
-      autoInjectedRecipientIds: [],
-      readByUserIds: [],
-      isEdited: false,
-      isDeletedGlobally: false,
-      hiddenForUserIds: [],
-      createdAt: new Date().toISOString(),
-      metadata: {
-        totalChecked: result.totalChecked,
-        remindersSent: result.remindersSent,
-        errors: result.errors.length
-      }
-    });
-  }
-
-  await batch.commit();
+  await pgInsertNotification({
+    title,
+    content: `${result.remindersSent} students were notified about their expiring bus service (${expiryDate.toLocaleDateString()}). Please ensure the Bus Office is prepared for renewals.`,
+    type: 'info',
+    sender: {
+      userId: 'system',
+      userName: 'System',
+      userRole: 'admin'
+    },
+    target: {
+      type: 'specific_users',
+      specificUserIds: adminIds
+    },
+    recipientIds: adminIds,
+    readByUserIds: [],
+    metadata: {
+      totalChecked: result.totalChecked,
+      remindersSent: result.remindersSent,
+      errors: result.errors.length
+    }
+  });
 }
 
 /**

@@ -520,8 +520,7 @@ export function decryptData(encryptedText: string): string | null {
 
         return decrypted.toString('utf8');
     } catch (error) {
-        // Versioned encrypted values must never return raw ciphertext on decrypt failure
-        console.error('Decryption failed for enc:v1: data:', error);
+        // Mismatched encryption key or corrupted payload: return null so caller falls back gracefully
         return null;
     }
 }

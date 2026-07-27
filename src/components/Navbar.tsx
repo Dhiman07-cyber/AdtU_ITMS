@@ -108,7 +108,6 @@ const Navbar = React.memo(function Navbar({ onMenuToggle, isSidebarOpen = false 
         { label: 'Live Tracking', href: '/driver/live-tracking', icon: MapPin, color: 'text-emerald-500' },
         { label: 'Scan Pass', href: '/driver/scan-pass', icon: QrCode, color: 'text-purple-500' },
         { label: 'My Students', href: '/driver/students', icon: GraduationCap, color: 'text-indigo-500' },
-        { label: 'Driver Swap', href: '/driver/swap-request', icon: RefreshCcw, color: 'text-amber-500' },
         { label: 'Notifications', href: '/driver/notifications', icon: Bell, color: 'text-red-500' },
       ];
     }

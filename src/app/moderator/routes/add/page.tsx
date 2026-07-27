@@ -18,7 +18,7 @@ import { signalCollectionRefresh } from "@/hooks/useEventDrivenRefresh";
 type Stop = {
   name: string;
   sequence: number;
-  stopId: string;
+  stop_name: string;
 };
 
 // Route form data type
@@ -40,7 +40,7 @@ export default function AddRoutePage() {
   const [routeData, setRouteData] = useState<RouteFormData>({
     routeId: "",
     routeName: "",
-    status: "Active"
+    status: "active"
   });
 
   const [stops, setStops] = useState<Stop[]>([]);
@@ -105,22 +105,22 @@ export default function AddRoutePage() {
     }
   }, [currentStopInput, stops]);
 
-  // Generate stopId from stop name
-  const generateStopId = (stopName: string): string => {
-    return stopName
+  // Generate stop_name from stop name
+  const generateStopId = (stop_name: string): string => {
+    return stop_name
       .toLowerCase()
       .replace(/\s+/g, '_')
       .replace(/[^a-z0-9_]/g, '');
   };
 
   // Add stop to the list
-  const addStop = (stopName: string) => {
-    if (!stopName.trim()) return;
+  const addStop = (stop_name: string) => {
+    if (!stop_name.trim()) return;
 
     const newStop: Stop = {
-      name: stopName,
+      name: stop_name,
       sequence: stops.length + 1,
-      stopId: generateStopId(stopName)
+      stop_name: generateStopId(stop_name)
     };
 
     setStops([...stops, newStop]);
@@ -204,7 +204,7 @@ export default function AddRoutePage() {
     try {
       const idToken = await currentUser.getIdToken();
 
-      const response = await fetch('/api/routes/create', {
+      const response = await fetch('/api/routes', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -220,11 +220,11 @@ export default function AddRoutePage() {
 
       const result = await response.json();
 
-      if (!response.ok || !result.success) {
+      if (!response.ok) {
         throw new Error(result.error || 'Failed to create route');
       }
 
-      addToast(result.message || "Route created successfully!", 'success');
+      addToast("Route created successfully!", 'success');
       signalCollectionRefresh('routes');
 
       setTimeout(() => {
@@ -243,7 +243,7 @@ export default function AddRoutePage() {
     setRouteData({
       routeId: "",
       routeName: "",
-      status: "Active"
+      status: "active"
     });
     setStops([]);
     setCurrentStopInput("");
@@ -356,9 +356,8 @@ export default function AddRoutePage() {
                     <SelectValue placeholder="Select status" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="Active">Active</SelectItem>
-                    <SelectItem value="Inactive">Inactive</SelectItem>
-                    <SelectItem value="Under Maintenance">Under Maintenance</SelectItem>
+                    <SelectItem value="active">Active</SelectItem>
+                    <SelectItem value="inactive">Inactive</SelectItem>
                   </SelectContent>
                 </Select>
                 {errors.status && <p className="text-red-400 text-sm mt-1">{errors.status}</p>}
@@ -462,7 +461,7 @@ export default function AddRoutePage() {
 
                       <div className="flex-1">
                         <p className="text-gray-200 font-medium">{stop.name}</p>
-                        <p className="text-xs text-gray-500">ID: {stop.stopId}</p>
+                        <p className="text-xs text-gray-500">ID: {stop.stop_name}</p>
                       </div>
 
                       <button

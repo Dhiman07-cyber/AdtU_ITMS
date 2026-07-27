@@ -69,30 +69,54 @@ export async function createRazorpayOrder(
   receipt: string,
   notes?: Record<string, any>
 ): Promise<RazorpayOrder> {
-  try {
-    const razorpay = await initializeRazorpay();
-    
-    // Validate amount
-    if (!amount || amount <= 0) {
-      throw new Error('Invalid amount. Amount must be greater than 0');
-    }
-
-    // Create order options
-    const options = {
-      amount: Math.round(amount * 100), // Convert to paise
-      currency: 'INR',
-      receipt: receipt || `rcpt_${Date.now()}`,
-      notes: notes || {},
-    };
-
-    // Create order using Razorpay API
-    const order = await razorpay.orders.create(options);
-    
-    return order;
-  } catch (error: any) {
-    console.error('❌ Razorpay order creation error details:', error);
-    throw new Error(error.message || 'Failed to create payment order');
+  const razorpay = await initializeRazorpay();
+  
+  if (!amount || amount <= 0) {
+    throw new Error('Invalid amount. Amount must be greater than 0');
   }
+
+  const options = {
+    amount: Math.round(amount * 100), // Convert to paise
+    currency: 'INR',
+    receipt: receipt || `rcpt_${Date.now()}`,
+    notes: notes || {},
+  };
+
+  let lastError: any = null;
+  const maxRetries = 2;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      if (attempt > 0) {
+        console.log(`[Razorpay] Retrying order creation (attempt ${attempt + 1}/${maxRetries + 1})...`);
+        await new Promise((res) => setTimeout(res, 1000 * attempt));
+      }
+      const order = await razorpay.orders.create(options);
+      return order;
+    } catch (error: any) {
+      lastError = error;
+      const statusCode = error?.statusCode || error?.status;
+      const isGatewayError = statusCode === 503 || statusCode === 502 || statusCode === 504;
+      if (!isGatewayError) {
+        break; // Do not retry non-gateway errors (e.g. 400 bad auth/request)
+      }
+    }
+  }
+
+  console.error('❌ Razorpay order creation error details:', lastError);
+
+  const statusCode = lastError?.statusCode || lastError?.status;
+  if (statusCode === 503 || statusCode === 502 || statusCode === 504) {
+    const customErr: any = new Error(
+      'Razorpay payment gateway is currently undergoing maintenance (503 Service Unavailable). Please try again shortly or use offline payment.'
+    );
+    customErr.statusCode = statusCode;
+    throw customErr;
+  }
+
+  const err: any = new Error(lastError?.message || lastError?.error?.description || 'Failed to create payment order');
+  err.statusCode = statusCode || 500;
+  throw err;
 }
 
 /**
@@ -180,6 +204,21 @@ export async function fetchOrderDetails(orderId: string) {
     throw new Error('Failed to fetch order details');
   }
 }
+
+/**
+ * Fetch payments for a specific order from Razorpay
+ * @param orderId - Razorpay order ID
+ */
+export async function fetchOrderPayments(orderId: string) {
+  try {
+    const razorpay = await initializeRazorpay();
+    const payments = await razorpay.orders.fetchPayments(orderId);
+    return payments;
+  } catch (error: any) {
+    throw new Error('Failed to fetch order payments');
+  }
+}
+
 
 /**
  * Generate a unique receipt ID

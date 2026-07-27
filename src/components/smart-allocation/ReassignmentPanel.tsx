@@ -52,9 +52,8 @@ export interface StudentData {
   id: string;
   fullName: string;
   enrollmentId?: string;
-  stopId: string;
-  stopName?: string;
-  assignedBusId: string;
+  stop_name: string;
+  busId: string;
   shift?: string;
   semester?: string;
   phone?: string;
@@ -62,7 +61,7 @@ export interface StudentData {
 }
 
 interface BusStop {
-  stopId: string;
+  stop_name: string;
   name: string;
   sequence: number;
 }
@@ -103,7 +102,7 @@ export interface ReassignmentAssignment {
   studentName: string;
   targetBusId: string;
   targetBusNumber: string;
-  stopName: string;
+  stop_name: string;
   shift: CanonicalShift;
 }
 
@@ -113,13 +112,13 @@ export interface ReassignmentResult {
   fromBusId: string;
   fromBusNumber: string;
   assignments: ReassignmentAssignment[];
+  operationId: string;
 }
 
 // Internal types for the algorithm
 interface AssignmentDetails {
   busId: string;
-  stopId: string;
-  stopName: string;
+  stop_name: string;
   shift?: CanonicalShift;
 }
 
@@ -154,20 +153,20 @@ function normalizeStopIdForComparison(value: string): string {
     .replace(/[^a-z0-9]/g, ""); // Keep only alphanumeric
 }
 
-function busCoversStop(bus: BusData, stopId: string): boolean {
-  if (!stopId) return false;
-  const normalizedStopId = normalizeStopIdForComparison(stopId);
+function busCoversStop(bus: BusData, stop_name: string): boolean {
+  if (!stop_name) return false;
+  const normalizedStopId = normalizeStopIdForComparison(stop_name);
 
-  console.log(`🔍 busCoversStop: Checking if bus ${bus.busNumber} covers stop "${stopId}" (normalized: "${normalizedStopId}")`);
+  console.log(`🔍 busCoversStop: Checking if bus ${bus.busNumber} covers stop "${stop_name}" (normalized: "${normalizedStopId}")`);
 
   // Check route.stops (primary source)
-  const routeStops = bus.route?.stops || [];
-  const foundInRoute = routeStops.some((stop) => {
-    const busStopId = normalizeStopIdForComparison(stop.stopId || "");
+  const route_stops = bus.route?.stops || [];
+  const foundInRoute = route_stops.some((stop) => {
+    const busStopId = normalizeStopIdForComparison(stop.stop_name || "");
     const busStopName = normalizeStopIdForComparison(stop.name || "");
     const matches = busStopId === normalizedStopId || busStopName === normalizedStopId;
     if (matches) {
-      console.log(`   ✅ Match found in route.stops: stopId="${stop.stopId}", name="${stop.name}"`);
+      console.log(`   ✅ Match found in route.stops: stop_name="${stop.stop_name}", name="${stop.name}"`);
     }
     return matches;
   });
@@ -186,16 +185,18 @@ function busCoversStop(bus: BusData, stopId: string): boolean {
   });
 
   if (!foundInRoute && !foundInUI) {
-    console.log(`   ❌ No match found for stop "${stopId}" in bus ${bus.busNumber}`);
-    console.log(`      Route stops: ${routeStops.map(s => s.stopId || s.name).join(", ")}`);
+    console.log(`   ❌ No match found for stop "${stop_name}" in bus ${bus.busNumber}`);
+    console.log(`      Route stops: ${route_stops.map(s => s.stop_name || s.name).join(", ")}`);
   }
 
   return foundInUI;
 }
 
 function getShiftLoad(bus: BusData, shift: "Morning" | "Evening"): number {
-  const load = bus.load || { morningCount: 0, eveningCount: 0 };
-  return shift === "Morning" ? load.morningCount || 0 : load.eveningCount || 0;
+  const load = bus.load || {};
+  const morning = Number((bus as any).morningLoad ?? (bus as any).morning_load ?? load.morningCount ?? 0);
+  const evening = Number((bus as any).eveningLoad ?? (bus as any).evening_load ?? load.eveningCount ?? 0);
+  return shift === "Morning" ? morning : evening;
 }
 
 // =============================================================================
@@ -242,19 +243,19 @@ export default function ReassignmentPanel({
 
     selectedStudents.forEach((student) => {
       const shift = normalizeShift(student.shift);
-      const stopId = (student.stopId || "").toLowerCase().trim();
+      const stop_name = (student.stop_name || "").toLowerCase().trim();
 
       // Find compatible buses (Strict Constraints Only: Stop & Shift)
       const eligible = allBuses.filter((bus) => {
         if (bus.id === currentBus.id) return false;
         if (!isShiftCompatible(shift, bus.shift)) return false;
-        if (!busCoversStop(bus, stopId)) return false;
+        if (!busCoversStop(bus, stop_name)) return false;
         return true;
       });
 
       if (eligible.length === 0) {
         let reason = "No alternative buses available";
-        const coversStop = allBuses.some(b => b.id !== currentBus.id && busCoversStop(b, stopId));
+        const coversStop = allBuses.some(b => b.id !== currentBus.id && busCoversStop(b, stop_name));
         const compatibleShift = allBuses.some(b => b.id !== currentBus.id && isShiftCompatible(shift, b.shift));
 
         if (!coversStop) reason = `Only current bus serves this stop`;
@@ -313,8 +314,7 @@ export default function ReassignmentPanel({
         if (currentLoad < state.capacity) {
           initialMap[pStudent.student.id] = {
             busId: candidate.id,
-            stopId: pStudent.student.stopId,
-            stopName: pStudent.student.stopName || "",
+            stop_name: pStudent.student.stop_name || "",
             shift: shift
           };
 
@@ -354,8 +354,8 @@ export default function ReassignmentPanel({
         }
         planMap.get(details.busId)!.students.push({
           ...student,
-          overrideStopId: details.stopId,
-          overrideStopName: details.stopName,
+          overrideStopId: details.stop_name,
+          overrideStopName: details.stop_name,
           overrideShift: details.shift
         });
 
@@ -415,8 +415,7 @@ export default function ReassignmentPanel({
         toBusId: string;
         toBusNumber: string;
         shift: CanonicalShift;
-        stopId: string;
-        stopName?: string;
+        stop_name: string;
         studentShift?: string; // Add this
       }> = [];
 
@@ -430,8 +429,7 @@ export default function ReassignmentPanel({
             toBusId: item.bus.id,
             toBusNumber: item.bus.busNumber,
             shift: shift,
-            stopId: student.overrideStopId || student.stopId,
-            stopName: student.overrideStopName || student.stopName || student.stopId,
+            stop_name: student.overrideStopName || student.overrideStopId || student.stop_name,
             studentShift: shift, // Pass the shift here
           });
         }
@@ -469,7 +467,7 @@ export default function ReassignmentPanel({
         studentName: a.studentName,
         targetBusId: a.toBusId,
         targetBusNumber: a.toBusNumber,
-        stopName: a.stopName || "",
+        stop_name: a.stop_name || "",
         shift: a.shift,
       }));
 
@@ -479,6 +477,7 @@ export default function ReassignmentPanel({
         fromBusId: currentBus.id,
         fromBusNumber: currentBus.busNumber,
         assignments: finalAssignments,
+        operationId: result.operationId,
       });
       onClose();
 
@@ -508,7 +507,11 @@ export default function ReassignmentPanel({
 
   return (
     <Dialog open={true} onOpenChange={onClose}>
-      <DialogContent className="max-w-2xl bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 p-0 shadow-2xl flex flex-col h-[90vh] overflow-hidden sm:max-h-[90vh] mt-5">
+      <DialogContent 
+        onPointerDownOutside={(e) => e.preventDefault()}
+        onInteractOutside={(e) => e.preventDefault()}
+        className="max-w-2xl bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 p-0 shadow-2xl flex flex-col h-[90vh] overflow-hidden sm:max-h-[90vh] mt-5"
+      >
         {/* Header */}
         <DialogHeader className="px-5 py-4 border-b border-zinc-200 dark:border-zinc-800 bg-gradient-to-r from-purple-50 via-pink-50 to-purple-50 dark:from-purple-950/30 dark:via-pink-950/30 dark:to-purple-950/30 flex-shrink-0">
           <div className="flex items-center justify-between w-full">
@@ -585,7 +588,7 @@ export default function ReassignmentPanel({
                                     {students.map(s => (
                                       <Badge key={s.id} variant="outline" className="bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-300 text-[10px] border-red-100 dark:border-red-800/50 py-0 h-4 font-normal">
                                         {s.fullName}
-                                        <span className="opacity-70 ml-1">({s.stopName})</span>
+                                        <span className="opacity-70 ml-1">({s.stop_name})</span>
                                       </Badge>
                                     ))}
                                   </div>
@@ -704,7 +707,7 @@ export default function ReassignmentPanel({
                                         setActiveStudentId(s.id);
                                         setBusStopSelections({});
                                       }}
-                                      className="py-1 px-2.5 bg-zinc-800/80 hover:bg-zinc-700 border-zinc-700 text-zinc-200 text-[11px] font-bold shadow-sm transition-all cursor-pointer hover:scale-105 active:scale-95"
+                                      className="py-1 px-2.5 bg-zinc-800/80 hover:bg-zinc-700 border-zinc-700 text-zinc-200 text-[11px] font-bold shadow-sm transition-all duration-200 cursor-pointer hover:scale-[1.02] active:scale-100"
                                     >
                                       {s.fullName}
                                       {s.overrideStopName && (
@@ -805,9 +808,9 @@ export default function ReassignmentPanel({
                       .filter(bus => bus.id !== currentBus.id)
                       .filter(bus => {
                         if (assignmentTab === "current") {
-                          const stopId = activeStudent?.stopId || "";
+                          const stop_name = activeStudent?.stop_name || "";
                           return normalizeShift(activeStudent?.shift) === normalizeShift(bus.shift) || bus.shift === "both"
-                            ? busCoversStop(bus, stopId)
+                            ? busCoversStop(bus, stop_name)
                             : false;
                         } else {
                           // Filter for "Other Buses" using otherShiftTab
@@ -836,7 +839,7 @@ export default function ReassignmentPanel({
 
                         // Combined stops for the bus, normalized properties
                         const busStops = (bus.route?.stops || bus.stops || []).map((s: any) => ({
-                          id: s.stopId || s.id,
+                          id: s.stop_name || s.id,
                           name: s.name as string
                         }));
 
@@ -910,10 +913,17 @@ export default function ReassignmentPanel({
                                       value={busShiftSelections[bus.id] || "Morning"}
                                       onValueChange={(val: "Morning"|"Evening") => setBusShiftSelections(prev => ({ ...prev, [bus.id]: val }))}
                                     >
-                                      <SelectTrigger className="w-full h-9 bg-zinc-800 border-zinc-700 text-zinc-200">
+                                      <SelectTrigger 
+                                        onDoubleClick={(e) => e.stopPropagation()}
+                                        onPointerDown={(e) => e.stopPropagation()}
+                                        className="w-full h-9 bg-zinc-800 border-zinc-700 text-zinc-200 cursor-pointer"
+                                      >
                                         <SelectValue />
                                       </SelectTrigger>
-                                      <SelectContent className="bg-zinc-900 border-zinc-800 text-zinc-100">
+                                      <SelectContent 
+                                        onDoubleClick={(e) => e.stopPropagation()}
+                                        className="bg-zinc-900 border-zinc-800 text-zinc-100"
+                                      >
                                         <SelectItem value="Morning">Morning</SelectItem>
                                         <SelectItem value="Evening">Evening</SelectItem>
                                       </SelectContent>
@@ -939,10 +949,17 @@ export default function ReassignmentPanel({
                                       value={busStopSelections[bus.id] || ""}
                                       onValueChange={(value) => setBusStopSelections({ [bus.id]: value })}
                                     >
-                                      <SelectTrigger className="w-full h-9 bg-zinc-800 border-zinc-700 text-zinc-200 focus:ring-purple-500 transition-all">
+                                      <SelectTrigger 
+                                        onDoubleClick={(e) => e.stopPropagation()}
+                                        onPointerDown={(e) => e.stopPropagation()}
+                                        className="w-full h-9 bg-zinc-800 border-zinc-700 text-zinc-200 focus:ring-purple-500 transition-all cursor-pointer"
+                                      >
                                         <SelectValue placeholder="Choose a destination stop..." />
                                       </SelectTrigger>
-                                      <SelectContent className="bg-zinc-900 border-zinc-800 text-zinc-100">
+                                      <SelectContent 
+                                        onDoubleClick={(e) => e.stopPropagation()}
+                                        className="bg-zinc-900 border-zinc-800 text-zinc-100"
+                                      >
                                         {busStops.map(stop => (
                                           <SelectItem key={stop.id} value={stop.id} className="focus:bg-zinc-800 focus:text-white cursor-pointer">
                                             {stop.name}
@@ -954,14 +971,13 @@ export default function ReassignmentPanel({
                                   <Button
                                     disabled={isFull || !busStopSelections[bus.id]}
                                     onClick={() => {
-                                      const selectedStopId = busStopSelections[bus.id];
-                                      const selectedStop = busStops.find(s => s.id === selectedStopId);
+                                      const selected_stop_name = busStopSelections[bus.id];
+                                      const selectedStop = busStops.find(s => s.id === selected_stop_name);
                                       setDraftAssignments(prev => ({
                                         ...prev,
                                         [activeStudent!.id]: {
                                           busId: bus.id,
-                                          stopId: selectedStopId,
-                                          stopName: selectedStop?.name || "",
+                                          stop_name: selectedStop?.name || selected_stop_name || "",
                                           shift: otherShiftTab
                                         }
                                       }));
@@ -982,8 +998,7 @@ export default function ReassignmentPanel({
                                       ...prev,
                                       [activeStudent!.id]: {
                                         busId: bus.id,
-                                        stopId: activeStudent!.stopId,
-                                        stopName: activeStudent!.stopName || "",
+                                        stop_name: activeStudent!.stop_name || "",
                                         shift: bus.shift?.toLowerCase() === "both" ? (busShiftSelections[bus.id] || "Morning") : (bus.shift?.toLowerCase() === "evening" ? "Evening" : "Morning")
                                       }
                                     }));

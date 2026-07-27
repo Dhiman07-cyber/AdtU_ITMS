@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '@/contexts/auth-context';
@@ -216,7 +216,7 @@ export default function AddDriver() {
     }
 
     const existingDriver = driversList.find(d => 
-      (d.busId === formData.busId || d.assignedBusId === formData.busId) && !d.isReserved
+      (d.busId === formData.busId || d.busId === formData.busId) && !d.isReserved
     );
 
       if (existingDriver) {
@@ -452,7 +452,7 @@ export default function AddDriver() {
 
     if (e) {
       const existingDriver = driversList.find(d => 
-        (d.busId === formData.busId || d.assignedBusId === formData.busId) && !d.isReserved
+        (d.busId === formData.busId || d.busId === formData.busId) && !d.isReserved
       );
       
       if (existingDriver) {
@@ -491,16 +491,16 @@ export default function AddDriver() {
       const idToken = await currentUser?.getIdToken();
 
       // Handle Reserved drivers vs regular route assignments
-      let assignedBusId = null;
-      let assignedRouteId = null;
+      let busId = null;
+      let routeId = null;
 
       if (formData.routeId === 'reserved') {
         // Reserved driver - no bus or route assignment
         console.log('Creating Reserved driver - no bus/route assignment');
       } else if (formData.routeId) {
         // Use selected bus ID
-        assignedBusId = formData.busId || null;
-        assignedRouteId = formData.routeId;
+        busId = formData.busId || null;
+        routeId = formData.routeId;
 
         // If legacy fallback needed (e.g. if busId empty but only 1 bus exists?) 
         // Logic in handleRouteChange should have handled it.
@@ -525,8 +525,8 @@ export default function AddDriver() {
           joiningDate: formData.joiningDate,
           driverId: formData.driverId,
           address: formData.address,
-          assignedBusId: assignedBusId,
-          assignedRouteId: assignedRouteId,
+          busId: busId,
+          routeId: routeId,
           approvedBy: formData.approvedBy,
           shift: formData.shift
         }),

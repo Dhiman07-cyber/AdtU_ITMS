@@ -225,7 +225,7 @@ export default function BusPassScannerModal({ isOpen, onClose, onScanSuccess }: 
 
             // Get driver info for bus ID assignment
             const driverInfo = await getUserProfile(currentUser.uid, 'driver') as any;
-            const scannerBusId = driverInfo?.assignedBusIds?.[0] || driverInfo?.busId || driverInfo?.assignedBusId;
+            const scannerBusId = driverInfo?.busIds?.[0] || driverInfo?.busId || driverInfo?.busId;
 
             if (!scannerBusId) throw new Error('No bus assigned to driver');
 
@@ -429,7 +429,7 @@ export default function BusPassScannerModal({ isOpen, onClose, onScanSuccess }: 
                         {/* Header with Logo - matching scan-pass page */}
                         <div className="w-full px-4 py-3 flex items-center justify-center border-b border-white/5 bg-gradient-to-r from-[#1a1b2e] to-[#0f1019] relative">
                             <div className="flex items-center gap-2">
-                                <Image src="/adtu-new-logo.svg" alt="AdtU" width={96} height={24} className="h-6 w-auto flex-shrink-0" />
+                                <Image src="/adtu-new-logo.svg" alt="AdtU" width={96} height={24} className="h-6 w-auto flex-shrink-0" style={{ width: 'auto', height: 'auto' }} />
                                 <span className="text-[10px] font-bold text-white/70 tracking-wider">Assam down town University</span>
                             </div>
                             <div className={`absolute right-4 w-2.5 h-2.5 rounded-full flex-shrink-0 ${getStudentStatus().status === 'ACTIVE' ? 'bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.6)]' : 'bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.6)]'}`} />

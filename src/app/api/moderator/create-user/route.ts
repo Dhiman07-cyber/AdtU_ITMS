@@ -8,7 +8,11 @@ import { cert } from 'firebase-admin/app';
 import { computeBlockDatesFromValidUntil } from '@/lib/utils/deadline-computation';
 import { calculateValidUntilDate } from '@/lib/utils/date-utils';
 import { getDeadlineConfig } from '@/lib/deadline-config-service';
-import { buildCapacityDelta } from '@/lib/busCapacityService';
+import { incrementBusCapacity } from '@/domains/fleet';
+import { createUser, createStudent, createDriver, getStudentById } from '@/domains/identity';
+import { resolveUserRole } from '@/lib/security/role-cache';
+import { getUpdaterInfo } from '@/lib/utils/updatedBy';
+import { assignDriverToBus } from '@/domains/fleet/repositories/driver-assignment.repository';
 
 let adminApp: any;
 let auth: any;
@@ -71,36 +75,22 @@ export async function POST(request: Request) {
         const decodedToken = await auth.verifyIdToken(token);
         const currentUserUid = decodedToken.uid;
 
-        // Check if the user is admin first
-        const adminDoc = await db.collection('admins').doc(currentUserUid).get();
-        if (adminDoc.exists) {
-          currentUserRole = 'admin';
-          currentUserName = adminDoc.data()?.name || adminDoc.data()?.fullName || 'Admin';
-          currentUserEmployeeId = 'Admin';
-        } else {
-          // Check if user is moderator
-          const modDoc = await db.collection('moderators').doc(currentUserUid).get();
-          if (modDoc.exists) {
-            currentUserRole = 'moderator';
-            currentUserName = modDoc.data()?.fullName || modDoc.data()?.name || 'Moderator';
-            currentUserEmployeeId = modDoc.data()?.employeeId || modDoc.data()?.staffId || 'MOD';
-          } else {
-            // Fallback to users collection
-            const userDoc = await db.collection('users').doc(currentUserUid).get();
-            if (!userDoc.exists || (userDoc.data().role !== 'moderator' && userDoc.data().role !== 'admin')) {
-              return new Response(JSON.stringify({
-                success: false,
-                error: 'Forbidden: User is not a moderator or admin'
-              }), {
-                status: 403,
-                headers: { 'Content-Type': 'application/json' },
-              });
-            }
-            currentUserRole = userDoc.data().role;
-            currentUserName = userDoc.data()?.fullName || userDoc.data()?.name || 'System';
-            currentUserEmployeeId = userDoc.data().role === 'admin' ? 'Admin' : (userDoc.data()?.employeeId || 'MOD');
-          }
+        const roleData = await resolveUserRole(currentUserUid);
+        currentUserRole = roleData.role;
+
+        if (currentUserRole !== 'admin' && currentUserRole !== 'moderator') {
+          return new Response(JSON.stringify({
+            success: false,
+            error: 'Forbidden: User is not a moderator or admin'
+          }), {
+            status: 403,
+            headers: { 'Content-Type': 'application/json' },
+          });
         }
+
+        const updaterInfo = await getUpdaterInfo(db, currentUserUid);
+        currentUserName = updaterInfo.name;
+        currentUserEmployeeId = currentUserRole === 'admin' ? 'Admin' : updaterInfo.roleOrEmployeeId;
       } catch (error) {
         console.error('Error verifying token:', error);
         return new Response(JSON.stringify({
@@ -137,10 +127,7 @@ export async function POST(request: Request) {
       aadharNumber,
       staffId,
       employeeId,
-      driverId,
-      assignedRouteId,
       routeId,
-      assignedBusId,
       busId,
       address,
       bloodGroup,
@@ -169,19 +156,9 @@ export async function POST(request: Request) {
     if (useAdminSDK && auth) {
       try {
         const decodedToken = await auth.verifyIdToken(token);
-        const userDoc = await db.collection('users').doc(decodedToken.uid).get();
-        if (!userDoc.exists) {
-          return new Response(JSON.stringify({
-            success: false,
-            error: 'Forbidden: User profile not found'
-          }), {
-            status: 403,
-            headers: { 'Content-Type': 'application/json' },
-          });
-        }
-        const userRole = userDoc.data()!.role;
+        const callerRole = await resolveUserRole(decodedToken.uid);
 
-        if (userRole === 'moderator' && (role === 'moderator' || role === 'admin')) {
+        if (callerRole.role === 'moderator' && (role === 'moderator' || role === 'admin')) {
           return new Response(JSON.stringify({
             success: false,
             error: 'Forbidden: Moderators cannot create other moderators or admins'
@@ -229,7 +206,14 @@ export async function POST(request: Request) {
           createdAt: new Date().toISOString()
         };
 
-        await db.collection('users').doc(uid).set(userDocData);
+        // Write user to PostgreSQL (canonical source of truth) — before transaction
+        await createUser({
+          uid,
+          email,
+          name,
+          role,
+          createdAt: userDocData.createdAt,
+        });
 
         // Create role-specific document
         if (role === 'student') {
@@ -245,7 +229,9 @@ export async function POST(request: Request) {
             gender: gender || '',
             dob: dob || '',
             phone: phone || '',
+            phoneNumber: phone || '',
             altPhone: alternatePhone || '',
+            alternatePhone: alternatePhone || '',
             parentName: parentName || '',
             parentPhone: parentPhone || '',
             enrollmentId: enrollmentId || '',
@@ -253,9 +239,7 @@ export async function POST(request: Request) {
             address: address || '',
             profilePhotoUrl: profilePhotoUrl || '',
             routeId: routeId || null,
-            assignedRouteId: routeId || null,
             busId: busId || null,
-            assignedBusId: busId || null,
             shift: shift || 'Morning',
             approvedBy: approvedBy || 'System (AUTO_MIGRATION)',
             sessionDuration: sessionDuration || '1',
@@ -272,33 +256,32 @@ export async function POST(request: Request) {
             updatedAt: new Date().toISOString(),
           };
 
-          // Atomic student + user creation with bus capacity increment.
+          // Atomic student creation with bus capacity increment.
           // Without a transaction, a concurrent create-user on the same bus
           // could overfill beyond capacity, or a failure after user creation
-          // leaves an orphan user doc with no student.
-          const studentRef = db.collection('students').doc(uid);
-          const userRef = db.collection('users').doc(uid);
-          const assignedBusId = studentDocData.busId;
+          // leaves an orphan student doc.
+          const studentBusId = studentDocData.busId;
 
-          await db.runTransaction(async (transaction) => {
-            const studentSnap = await transaction.get(studentRef);
-            const alreadyExisted = studentSnap.exists;
+          // ponytail: idempotency check MUST happen BEFORE createStudent, not after.
+          const existingStudent = await getStudentById(uid);
+          const alreadyExisted = !!existingStudent;
 
-            let busSnap: FirebaseFirestore.DocumentSnapshot | null = null;
-            if (assignedBusId && !alreadyExisted) {
-              busSnap = await transaction.get(db.collection('buses').doc(assignedBusId));
-            }
-
-            transaction.set(userRef, userDocData);
-            transaction.set(studentRef, studentDocData);
-
-            // Increment bus capacity only if student is new and bus exists
-            if (assignedBusId && !alreadyExisted && busSnap?.exists) {
-              const busData = busSnap.data();
-              const delta = buildCapacityDelta(busData, studentDocData.shift, 1);
-              transaction.update(busSnap.ref, delta.updates);
-            }
+          // Write student to PostgreSQL (canonical source of truth)
+          await createStudent({
+            ...studentDocData,
+            uid,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
           });
+
+          // Increment capacity in PG (source of truth) only if student is new and bus assigned
+          if (studentBusId && !alreadyExisted) {
+            try {
+              await incrementBusCapacity(studentBusId, studentDocData.shift);
+            } catch (pgErr) {
+              console.warn(`⚠️ moderator/create-user: PG capacity increment failed for bus ${studentBusId}:`, pgErr);
+            }
+          }
         } else if (role === 'driver') {
           const driverDocData: any = {
             uid, // Set the actual Firebase Auth UID
@@ -309,11 +292,10 @@ export async function POST(request: Request) {
             phone: phone || '',
             altPhone: alternatePhone || '',
             joiningDate: joiningDate || '',
-            driverId: driverId || employeeId || '',
             address: address || '',
             profilePhotoUrl: profilePhotoUrl || '',
-            assignedRouteId: assignedRouteId || routeId || null,
-            assignedBusId: assignedBusId || busId || null,
+            routeId: routeId || null,
+            busId: busId || null,
             shift: shift || 'Both', // Default to Both Shifts if not provided
             approvedBy: approvedBy || 'System (AUTO_MIGRATION)',
             dob: dob || '',
@@ -323,24 +305,24 @@ export async function POST(request: Request) {
             // Audit trail - who created/updated this document
           };
 
-          await db.collection('drivers').doc(uid).set(driverDocData);
+          // Write driver to PostgreSQL (canonical source of truth) — before Firestore write
+          await createDriver({
+            ...driverDocData,
+            uid,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          });
 
-          // Update bus document with driver assignments (Parity with Admin API)
+          // Update bus driver assignment via canonical repository
           if (busId) {
-            console.log(`🚌 Updating bus ${busId} with driver ${uid}`);
-            const busRef = db.collection('buses').doc(busId);
-            const busDoc = await busRef.get();
-
-            if (busDoc.exists) {
-              await busRef.update({
-                activeDriverId: uid,
-                assignedDriverId: uid,
-                activeTripId: null, // Clear any stale trip data
-                updatedAt: new Date().toISOString()
+            console.log(`🚌 Assigning driver ${uid} to bus ${busId}`);
+            try {
+              await assignDriverToBus(uid, busId, {
+                assignedBy: 'moderator',
+                reason: 'assignment',
               });
-              console.log(`   ✅ Bus ${busId} updated successfully`);
-            } else {
-              console.warn(`   ⚠️  Bus ${busId} does not exist - skipping bus update`);
+            } catch (err) {
+              console.warn(`   ⚠️  driver_assignments write failed for ${uid}:`, err);
             }
           }
         }
@@ -364,8 +346,7 @@ export async function POST(request: Request) {
       }
     } else {
       // Fallback to client SDK (existing implementation)
-      const { db } = await import('@/lib/firebase');
-      const { doc, setDoc, Timestamp } = await import('firebase/firestore');
+      const { Timestamp } = await import('firebase/firestore');
 
       // For the fallback implementation, we need to handle the case where we don't have
       // the Firebase Auth UID yet. In a real implementation, the user would sign in
@@ -383,8 +364,14 @@ export async function POST(request: Request) {
         createdAt: Timestamp.now()
       };
 
-      const userDocRef = doc(db, 'users', userDocId);
-      await setDoc(userDocRef, userDocData);
+      // Write user to PostgreSQL (canonical source of truth)
+      await createUser({
+        uid: userDocId,
+        email,
+        name,
+        role,
+        createdAt: new Date().toISOString(),
+      });
 
       // Create role-specific document
       if (role === 'student') {
@@ -422,8 +409,26 @@ export async function POST(request: Request) {
           // Audit trail - who created/updated this document
         };
 
-        const studentDocRef = doc(db, 'students', userDocId);
-        await setDoc(studentDocRef, studentDocData);
+        // ponytail: idempotency check BEFORE createStudent for fallback path
+        const existingStudentFallback = await getStudentById(userDocId);
+        const alreadyExistedFallback = !!existingStudentFallback;
+
+        // Create role-specific document via PG
+        await createStudent({
+          ...studentDocData,
+          uid: userDocId,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        });
+
+        // Increment capacity in PG only if student is new and bus assigned
+        if (busId && !alreadyExistedFallback) {
+          try {
+            await incrementBusCapacity(busId, studentDocData.shift);
+          } catch (pgErr) {
+            console.warn(`⚠️ moderator/create-user (fallback): PG capacity increment failed for bus ${busId}:`, pgErr);
+          }
+        }
       } else if (role === 'driver') {
         const driverDocData: any = {
           uid: userDocId, // Temporary ID, will be updated when user signs in
@@ -434,11 +439,10 @@ export async function POST(request: Request) {
           phone: phone || '',
           altPhone: alternatePhone || '',
           joiningDate: joiningDate || '',
-          driverId: driverId || employeeId || '',
           address: address || '',
           profilePhotoUrl: profilePhotoUrl || '',
-          assignedRouteId: assignedRouteId || routeId || undefined,
-          assignedBusId: assignedBusId || busId || undefined,
+          routeId: routeId || undefined,
+          busId: busId || undefined,
           shift: shift || 'Both',
           approvedBy: approvedBy || 'System (AUTO_MIGRATION)',
           dob: dob || '',
@@ -447,26 +451,23 @@ export async function POST(request: Request) {
           // Audit trail - who created/updated this document
         };
 
-        const driverDocRef = doc(db, 'drivers', userDocId);
-        await setDoc(driverDocRef, driverDocData);
+        // Create driver via PG (canonical source of truth)
+        await createDriver({
+          ...driverDocData,
+          uid: userDocId,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        });
 
-        // Update bus document with driver assignments (Fallback implementation)
+        // Update bus driver assignment via canonical repository
         if (busId) {
           try {
-            const { doc: busDocRef, updateDoc, getDoc: getBusDoc } = await import('firebase/firestore');
-            const busRef = busDocRef(db, 'buses', busId);
-            const busSnapshot = await getBusDoc(busRef);
-
-            if (busSnapshot.exists()) {
-              await updateDoc(busRef, {
-                activeDriverId: userDocId,
-                assignedDriverId: userDocId,
-                activeTripId: null,
-                updatedAt: Timestamp.now()
-              });
-            }
+            await assignDriverToBus(userDocId, busId, {
+              assignedBy: 'moderator',
+              reason: 'assignment',
+            });
           } catch (err) {
-            console.warn('Failed to update bus in fallback mode', err);
+            console.warn('Failed to write driver_assignments in fallback mode', err);
           }
         }
       }

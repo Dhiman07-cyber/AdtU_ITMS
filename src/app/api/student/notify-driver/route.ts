@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server';
-import { db as adminDb } from '@/lib/firebase-admin';
 import { withSecurity } from '@/lib/security/api-security';
 import { NotifyDriverSchema } from '@/lib/security/validation-schemas';
 import { RateLimits } from '@/lib/security/rate-limiter';
 import { requireTransportEntitlement } from '@/lib/entitlement/require-transport-entitlement';
+import { getDriversByBusId } from '@/domains/identity';
 
 /**
  * POST /api/student/notify-driver
@@ -19,33 +19,19 @@ export const POST = withSecurity(
     const gate = await requireTransportEntitlement(studentUid);
     if (!gate.ok) return (gate as any).response;
 
-    console.log('🔔 Student notifying driver:', { studentUid: studentUid.substring(0,8)+'...', busId });
+    console.log('🔔 Student notifying driver:', { studentUid: studentUid.substring(0, 8) + '...', busId });
 
-    // Find the driver assigned to this bus
-    let driversSnapshot = await adminDb
-      .collection('drivers')
-      .where('assignedBusId', '==', busId)
-      .limit(1)
-      .get();
+    // Find the driver assigned to this bus in PostgreSQL
+    const drivers = await getDriversByBusId(busId);
 
-    if (driversSnapshot.empty) {
-      // Try alternative field name
-      driversSnapshot = await adminDb
-        .collection('drivers')
-        .where('busId', '==', busId)
-        .limit(1)
-        .get();
-
-      if (driversSnapshot.empty) {
-        console.warn('⚠️ No driver found for bus:', busId);
-        return NextResponse.json({
-          success: false,
-          message: 'No driver found for this bus'
-        });
-      }
+    if (drivers.length === 0) {
+      console.warn('⚠️ No driver found for bus:', busId);
+      return NextResponse.json({
+        success: false,
+        message: 'No driver found for this bus'
+      });
     }
 
-    const drivers = driversSnapshot.docs;
     console.log(`📱 Found ${drivers.length} driver(s) for bus ${busId}`);
 
     // Note: FCM notification to driver would go here
@@ -64,10 +50,3 @@ export const POST = withSecurity(
     allowBodyToken: true
   }
 );
-
-
-
-
-
-
-

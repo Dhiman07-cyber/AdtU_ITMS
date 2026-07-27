@@ -64,7 +64,6 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/contexts/toast-context';
 import Image from 'next/image';
-import { notificationService } from '@/lib/notifications/NotificationService';
 import { formatDateTimeShort } from '@/lib/utils/date-utils';
 
 interface FeedbackEntry {
@@ -300,7 +299,7 @@ export default function ModeratorFeedbackPage() {
         loadDrivers();
     };
 
-    // Send forward notification using NotificationService (writes to correct 'notifications' collection)
+    // Send forward notification via API (writes to PostgreSQL)
     const handleSendForward = async () => {
         if (!currentUser || !forwardingFeedback || selectedRecipients.length === 0 || !userData) {
             addToast('Please select at least one driver', 'error');
@@ -326,24 +325,32 @@ export default function ModeratorFeedbackPage() {
                 specificUserIds: selectedRecipients
             };
 
-            // Use NotificationService to create notification (writes to 'notifications' collection)
-            await notificationService.createNotification(
-                sender,
-                target,
-                notificationContent,
-                `Feedback Forwarded: ${forwardingFeedback.role === 'student' ? 'Student' : 'Driver'} Issue`,
-                {
-                    feedbackId: forwardingFeedback.id,
-                    feedbackSenderName: forwardingFeedback.name,
-                    feedbackSenderRole: forwardingFeedback.role,
-                    feedbackBusId: forwardingFeedback.bus_id,
-                    feedbackBusPlate: forwardingFeedback.bus_plate,
-                    forwardedBy: currentUser.uid
-                }
-            );
+            // Use API route to create notification (writes to PostgreSQL)
+            const token = await currentUser.getIdToken();
+            await fetch('/api/notifications/create', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({
+                    title: `Feedback Forwarded: ${forwardingFeedback.role === 'student' ? 'Student' : 'Driver'} Issue`,
+                    content: notificationContent,
+                    type: 'notice',
+                    targetType: 'specific_users',
+                    targetUserIds: selectedRecipients,
+                    metadata: {
+                        feedbackId: forwardingFeedback.id,
+                        feedbackSenderName: forwardingFeedback.name,
+                        feedbackSenderRole: forwardingFeedback.role,
+                        feedbackBusId: forwardingFeedback.bus_id,
+                        feedbackBusPlate: forwardingFeedback.bus_plate,
+                        forwardedBy: currentUser.uid
+                    }
+                }),
+            });
 
             // Mark as forwarded in our feedback system
-            const token = await currentUser.getIdToken();
             const response = await fetch(`/api/feedback/${forwardingFeedback.id}/mark-forwarded`, {
                 method: 'PATCH',
                 headers: {

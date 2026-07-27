@@ -22,21 +22,18 @@ The system is built on **four core invariants**:
 
 1.  **State-Driven Lifecycle**: Features derive from a student's individual session state (e.g., "Active", "Expired") rather than global academic years.
 
-2.  **Dual-Database Architecture**:
-    *   **Supabase (PostgreSQL)**: The **primary operational database**. Holds ALL live data:
-        *   Real-time GPS tracking (`bus_locations`)
-        *   Active trips & driver status (`driver_status`)
-        *   Driver swap requests (`driver_swap_requests`, `temporary_assignments`)
-        *   Waiting flags (`waiting_flags`)
+2.  **Supabase PostgreSQL Single Primary Storehouse**:
+    *   **Supabase (PostgreSQL 17)**: The **authoritative single source of truth** for all system data:
+        *   Student, Driver, Moderator, and Admin Profiles (`student_profiles`, `driver_profiles`, etc.)
+        *   Bus & Route definitions (`buses`, `routes`, `stops`)
+        *   Real-time GPS tracking & trip state (`bus_locations`, `active_trips`, `driver_status`)
+        *   Student waiting & boarding flags (`waiting_flags`)
         *   **Financial ledger** (`payments` - immutable)
-        *   **Audit logs** (`reassignment_logs` - for rollback capability)
-    *   **Firestore**: Holds **static profile data only**:
-        *   Student/Driver/Admin/Moderator profiles
-        *   Route definitions
-        *   Bus definitions
-        *   In-app notifications
+        *   **Applications & Verification** (`applications`)
+        *   **Audit logs** (`reassignment_logs`, `audit_logs`)
+    *   **Firebase Auth**: Used **strictly for user authentication and ID token verification** (zero Firestore database dependencies).
 
-3.  **Real-Time Data Conservation**: Extensive `onSnapshot` listeners and auto-polling intervals have been replaced by a 24-hour Fetch-Once Caching approach supplemented by Event-Driven UI refresh triggers, rigorously adhering to free-tier (Spark Plan) quotas.
+3.  **Real-Time Data Conservation**: WebSockets via Supabase Realtime Channels (`supabase.channel()`) deliver instant sub-second GPS map updates and waiting flag changes without Firestore quota limits.
 
 4.  **Deterministic & Reversible**: Critical admin actions (like mass reassignment) are designed to be atomic with ready-to-use **Rollback** options.
 
@@ -57,19 +54,12 @@ The system is built on **four core invariants**:
 
 4.  **Daily Commute**: Tracks live bus location, sees ETA, and raises "Waiting" flags if the bus is late.
 
-5.  **Missed Bus Recovery**: If the assigned bus is missed, requests pickup from nearby candidate buses (subject to proximity and availability checks).
-
-6.  **Renewal**: System notifies before session expiry. Pays specifically for the next session cycle.
+5.  **Renewal**: System notifies before session expiry. Pays specifically for the next session cycle.
 
 ### 🚗 Driver Flow
 1.  **Trip Management**: "Start Trip" acquires an **exclusive system lock** preventing concurrent operations. Broadcasts live GPS to Supabase (5s intervals). "End Trip" archives the journey.
 
-2.  **Swap System (Mobile-Centric)**:
-    *   Request a swap with another driver for a specific time window.
-    *   Target driver accepts → System atomically swaps bus assignments.
-    *   Auto-reverts when the swap time expires or swap period manually ended.
-
-3.  **Passenger Management**: Views list of students picked up/waiting at stops.
+2.  **Passenger Management**: Views list of students picked up/waiting at stops.
 
 ### 🛡️ Moderator Flow
 1.  **Verification**: Reviews pending offline payment proofs, verifies and check payment status in record and then approves.
@@ -97,12 +87,12 @@ iii. Bus reassignment for route changes.
 
 | Component | Technology | Purpose |
 | :--- | :--- | :--- |
-| **Primary DB** | **Supabase (PostgreSQL)** | ALL live operational data: GPS tracking, trips, driver swaps, waiting flags, payments (immutable), reassignment logs |
-| **Profile DB** | **Firebase Firestore** | Static data only: Student/Driver/Admin profiles, Routes, Buses, Notifications, Config |
-| **Realtime** | **Supabase Realtime** | Live updates for GPS, driver swaps, waiting flags via PostgreSQL CDC (Change Data Capture) |
-| **Tracking** | **Geolocation API** | Broadcasts coordinates from Driver devices to Supabase |
+| **Primary DB** | **Supabase (PostgreSQL)** | ALL domain entities & operational data: Profiles, Buses, Routes, Trips, Waiting Flags, Payments, Applications, Audit Logs |
+| **Auth** | **Firebase Auth** | User authentication and ID token verification ONLY (zero Firestore DB calls) |
+| **Realtime** | **Supabase Realtime** | Sub-second WebSockets for GPS tracking and waiting flag updates |
+| **Push Notifications** | **FCM (Firebase Cloud Messaging)** | Topic-based route push alerts (`route_{routeId}`) |
+| **Tracking** | **Geolocation API** | Broadcasts driver device coordinates to Supabase |
 | **Storage** | **Supabase Storage** | Encrypted archives and payment proofs |
-| **Auth** | **Firebase Auth** | User authentication and role-based access control |
 
 ---
 
@@ -123,14 +113,7 @@ iii. Bus reassignment for route changes.
 *   **Hard Block**: Triggers a deletion sequence (Auth + Data) after a grace period.
 *   **Safety**: Destructive actions (deletions) require multi-stage checks and are never automatic without safety gates.
 
-### 4. Driver Swap System
-*   **Ephemeral**: Swaps are temporary states that auto-expire.
-*   **Atomic**: Updates both drivers and the bus document in a single transaction to prevent "driver-less" buses.
 
-### 5. Missed Bus Recovery
-*   **Proximity-Aware**: Intelligently distinguishes between "waiting for approaching bus" vs "genuinely missed bus" (100m threshold).
-*   **Driver-Driven**: Requests are broadcast to nearby candidate buses on the same route; first driver to accept wins.
-*   **Lightweight**: Uses ephemeral location sharing and minimal DB state (single table, server-only writes) without expensive administrative overrides.
 
 ### 6. Multi-Driver Lock System
 *   **Exclusive Operation**: Distributed Firestore locks ensure only one driver operates a bus at a specific time.
@@ -199,7 +182,7 @@ CRON_SECRET=...
 ```
 
 ### Runbook Highlights
-1.  **Minutely & Hourly**: Cron jobs release orphaned hardware locks (`api/cron/cleanup-stale-locks`) and clear expired driver assignments & missed bus alerts (`api/cron/cleanup-swaps`, `api/cron/cleanup-missed-bus`).
+1.  **Minutely & Hourly**: Cron jobs release orphaned hardware locks (`api/cron/cleanup-stale-locks`).
 2.  **Daily**: Automated lifecycle sweeps enforce session downgrades (`api/cron/expiry-check`), prune outdated users (`api/cron/cleanup-expired-students`), and flush old notifications (`api/cron/cleanup-notifications`).
 4.  **Emergency**: If unexpected DB usage spikes, toggle `ENABLE_FIRESTORE_REALTIME` to `false` in the config.
 

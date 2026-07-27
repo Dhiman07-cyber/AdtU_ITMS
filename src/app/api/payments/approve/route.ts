@@ -11,12 +11,12 @@
  */
 
 import { NextResponse } from 'next/server';
-import { adminDb } from '@/lib/firebase-admin';
 import { approveOfflinePayment } from '@/lib/payment/payment.service';
 import { withSecurity } from '@/lib/security/api-security';
 import { ApprovePaymentSchema } from '@/lib/security/validation-schemas';
 import { RateLimits } from '@/lib/security/rate-limiter';
 import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
+import { getUserById } from '@/domains/identity';
 
 export const POST = withSecurity(
     async (request, { auth, body, requestId }) => {
@@ -31,24 +31,15 @@ export const POST = withSecurity(
         );
         if (permissionDenied) return permissionDenied;
 
-        // Get approver details from role-specific collection
+        // Get approver details via Identity domain API
         let approverEmpId = '';
         let approverName = auth.name || '';
 
-        if (auth.role === 'moderator') {
-            const modDoc = await adminDb.collection('moderators').doc(userId).get();
-            if (modDoc.exists) {
-                const modData = modDoc.data();
-                approverEmpId = modData?.empId || '';
-                approverName = modData?.name || modData?.fullName || approverName;
-            }
-        } else if (auth.role === 'admin') {
-            const adminDoc = await adminDb.collection('admins').doc(userId).get();
-            if (adminDoc.exists) {
-                const adminData = adminDoc.data();
-                approverEmpId = adminData?.empId || '';
-                approverName = adminData?.name || adminData?.fullName || approverName;
-            }
+        const user = await getUserById(userId);
+        if (user) {
+            const userData = user as any;
+            approverEmpId = userData.empId || '';
+            approverName = userData.name || userData.fullName || approverName;
         }
 
         // Approve the payment (ATOMIC + IDEMPOTENT)

@@ -1,18 +1,15 @@
 import { NextResponse } from 'next/server';
-import { db as adminDb } from '@/lib/firebase-admin';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import { withSecurity } from '@/lib/security/api-security';
 import { BusIdSchema } from '@/lib/security/validation-schemas';
 import { RateLimits } from '@/lib/security/rate-limiter';
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+import { getDriverUidByBusId } from '@/domains/fleet/repositories/driver-assignment.repository';
 
 /**
  * POST /api/driver/check-active-trip
- * 
+ *
  * Body: { busId }
- * 
+ *
  * Checks if there's an active trip for the driver and bus
  * Returns trip data if found, null if not
  */
@@ -23,16 +20,31 @@ export const POST = withSecurity(
 
     console.log(`🔄 Check active trip API called for bus ${busId}`);
 
-    // Verify driver is assigned to this bus
-    const driverDoc = await adminDb.collection('drivers').doc(driverUid).get();
-    if (!driverDoc.exists) {
-      return NextResponse.json({ error: 'Driver profile not found' }, { status: 404 });
+    const supabase = getSupabaseServer();
+
+    // Verify driver assignment across active_trips, driver_assignments, buses, and driver_profiles
+    const [busResult, assignedDriverUid, driverProfileResult] = await Promise.all([
+      supabase.from('buses').select('id, driver_uid').eq('id', busId).maybeSingle(),
+      getDriverUidByBusId(busId),
+      supabase.from('driver_profiles').select('bus_id').eq('uid', driverUid).maybeSingle()
+    ]);
+
+    if (!busResult.data) {
+      return NextResponse.json({ error: 'Bus not found' }, { status: 404 });
     }
 
-    const driverData = driverDoc.data();
+    const { data: activeTripCheck } = await supabase
+      .from('active_trips')
+      .select('driver_id, bus_id')
+      .eq('driver_id', driverUid)
+      .eq('status', 'active')
+      .maybeSingle();
+
     const driverClaimsBus =
-      driverData?.assignedBusId === busId ||
-      driverData?.busId === busId;
+      activeTripCheck?.bus_id === busId ||
+      assignedDriverUid === driverUid ||
+      busResult.data.driver_uid === driverUid ||
+      driverProfileResult.data?.bus_id === busId;
 
     if (!driverClaimsBus) {
       return NextResponse.json(
@@ -43,121 +55,66 @@ export const POST = withSecurity(
 
     // =====================================================
     // MULTI-DRIVER LOCK CHECK
-    // Check if bus is locked by another driver
+    // D9: Check active_trips instead of Firestore activeTripLock
     // =====================================================
-    const busDoc = await adminDb.collection('buses').doc(busId).get();
-    if (!busDoc.exists) {
-      return NextResponse.json({ error: 'Bus not found' }, { status: 404 });
-    }
+    const { data: activeTrip } = await supabase
+      .from('active_trips')
+      .select('trip_id, driver_id, status, start_time, expires_at')
+      .eq('bus_id', busId)
+      .eq('status', 'active')
+      .maybeSingle();
 
-    const busData = busDoc.data();
-    const lock = busData?.activeTripLock;
-
-    // Check if lock has expired (stale lock recovery)
-    let isLockExpired = false;
-    if (lock?.expiresAt) {
-      const expiryTime = lock.expiresAt._seconds
-        ? lock.expiresAt._seconds * 1000
-        : new Date(lock.expiresAt).getTime();
-      isLockExpired = Date.now() > expiryTime;
-
-      if (isLockExpired) {
-        console.log(`⏰ Lock for bus ${busId} has expired (was held by ${lock.driverId}), allowing new operations`);
-      }
-    }
-
-    // If another driver has an active, NON-EXPIRED lock on this bus
-    if (lock?.active && lock.driverId && lock.driverId !== driverUid && !isLockExpired) {
-      console.log(`🔒 Bus ${busId} is locked by driver ${lock.driverId}`);
-      return NextResponse.json({
-        hasActiveTrip: false,
-        tripData: null,
-        busLockedByOther: true,
-        lockInfo: {
-          lockedByDriver: lock.driverId,
-          tripId: lock.tripId,
-          since: lock.since?._seconds ? new Date(lock.since._seconds * 1000).toISOString() : null
-        },
-        reason: 'This bus is currently being operated by another driver. Please wait or try again later.'
-      });
-    }
-
-    // Check for active trip using Supabase
-    if (!supabaseUrl || !supabaseKey) {
-      console.error('❌ Missing Supabase credentials');
-      return NextResponse.json({
-        hasActiveTrip: false,
-        tripData: null,
-        error: 'Server configuration error'
-      });
-    }
-
-    const supabase = getSupabaseServer();
-
-    let statusData = null;
-    let retryCount = 0;
-    while (retryCount < 2) {
-      try {
-        const { data, error: statusError } = await supabase
-          .from('driver_status')
-          .select('id, status, driver_uid, bus_id, started_at, trip_id')
-          .eq('driver_uid', driverUid)
-          .order('last_updated_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
-
-        if (statusError) {
-          if (statusError.message?.includes('fetch failed') || statusError.details?.includes('ECONNRESET')) {
-            throw statusError;
-          }
-          console.error('❌ Error querying Supabase driver_status:', statusError);
-          return NextResponse.json({
-            hasActiveTrip: false,
-            tripData: null
-          });
+    if (activeTrip) {
+      // Check if lock has expired (stale lock recovery)
+      let isLockExpired = false;
+      if (activeTrip.expires_at) {
+        isLockExpired = Date.now() > new Date(activeTrip.expires_at).getTime();
+        if (isLockExpired) {
+          console.log(`⏰ Lock for bus ${busId} has expired (was held by ${activeTrip.driver_id}), allowing new operations`);
         }
-
-        statusData = data;
-        break;
-      } catch (queryError: any) {
-        console.error(`❌ Supabase query exception (attempt ${retryCount + 1}):`, queryError);
-        retryCount++;
-        if (retryCount >= 2) {
-          return NextResponse.json({
-            hasActiveTrip: false,
-            tripData: null
-          });
-        }
-        await new Promise(resolve => setTimeout(resolve, 500));
       }
-    }
 
-    if (statusData) {
-      if ((statusData.status === 'on_trip' || statusData.status === 'enroute') && 
-          statusData.driver_uid === driverUid && statusData.bus_id === busId) {
-        console.log('✅ Active trip found in Supabase');
-
-        const startTime = statusData.started_at ? new Date(statusData.started_at).getTime() : Date.now();
-        // Return the REAL trip_id persisted at trip start. The previous fabricated
-        // `trip_${busId}_${startTime}` id never matched active_trips.trip_id, which made
-        // /api/location/update reject DB saves ("Trip mismatch") and broke heartbeats
-        // after a page refresh. Fall back to the fabricated id only if trip_id is missing.
-        const tripId = statusData.trip_id || `trip_${busId}_${startTime}`;
-
+      // If another driver has an active, NON-EXPIRED lock on this bus
+      if (activeTrip.driver_id && activeTrip.driver_id !== driverUid && !isLockExpired) {
+        console.log(`🔒 Bus ${busId} is locked by driver ${activeTrip.driver_id}`);
         return NextResponse.json({
-          hasActiveTrip: true,
-          tripData: {
-            tripId: tripId,
-            startTime: startTime,
-            busId: busId,
-            driverUid: driverUid,
-            busStatus: 'enroute'
-          }
+          hasActiveTrip: false,
+          tripData: null,
+          busLockedByOther: true,
+          lockInfo: {
+            lockedByDriver: activeTrip.driver_id,
+            tripId: activeTrip.trip_id,
+            since: activeTrip.start_time
+          },
+          reason: 'This bus is currently being operated by another driver. Please wait or try again later.'
         });
       }
     }
 
-    console.log('ℹ️ No active trip found in Supabase');
+    const { data: myTrip } = await supabase
+      .from('active_trips')
+      .select('trip_id, driver_id, bus_id, start_time')
+      .eq('driver_id', driverUid)
+      .eq('bus_id', busId)
+      .eq('status', 'active')
+      .maybeSingle();
+
+    if (myTrip) {
+      console.log('✅ Active trip found in active_trips');
+      const startTime = myTrip.start_time ? new Date(myTrip.start_time).getTime() : Date.now();
+      return NextResponse.json({
+        hasActiveTrip: true,
+        tripData: {
+          tripId: myTrip.trip_id,
+          startTime: startTime,
+          busId: busId,
+          driverUid: driverUid,
+          busStatus: 'enroute'
+        }
+      });
+    }
+
+    console.log('ℹ️ No active trip found in active_trips');
     return NextResponse.json({
       hasActiveTrip: false,
       tripData: null,
@@ -170,4 +127,3 @@ export const POST = withSecurity(
     allowBodyToken: true
   }
 );
-

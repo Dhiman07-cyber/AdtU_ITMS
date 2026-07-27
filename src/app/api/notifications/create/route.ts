@@ -1,4 +1,4 @@
-/**
+﻿/**
  * POST /api/notifications/create
  * 
  * Create a notification and save it to the `notifications` collection.
@@ -23,11 +23,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withSecurity } from '@/lib/security/api-security';
 import { adminDb, adminMessaging } from '@/lib/firebase-admin';
-import { FieldValue, Timestamp } from 'firebase-admin/firestore';
+import { pgInsertNotification } from '@/domains/notification/repositories/notification.repository.pg';
+import { getValidFcmTokensForUsers } from '@/domains/identity';
 import { UserRole, TargetType, NotificationType } from '@/lib/notifications/types';
 import { safeErrorMessage } from '@/lib/security/safe-error';
 import { NotificationCreateSchema } from '@/lib/security/validation-schemas';
 import { z } from 'zod';
+import { getAllStudents, getAllDrivers, getUsersByRole, getStudentsByBusIds, getStudentsByRouteIds, getStudentsByShift } from '@/domains/identity';
 
 // ─── Recipient Resolution ────────────────────────────────────────────────────
 
@@ -41,74 +43,62 @@ async function resolveRecipientIds(
   sendToAllRoles?: boolean,
   senderRole?: UserRole
 ): Promise<string[]> {
-  if (!adminDb) throw new Error('Firebase Admin not initialized');
-
   const recipientIds: string[] = [];
 
   switch (targetType) {
     case 'all_users': {
-      // Get all users from all role collections
-      const promises: Promise<FirebaseFirestore.QuerySnapshot>[] = [
-        adminDb.collection('moderators').get(),
-        adminDb.collection('drivers').get(),
-        adminDb.collection('students').get(),
+      const promises = [
+        getUsersByRole('moderator'),
+        getAllDrivers(),
+        getAllStudents(),
       ];
-      
-      // Only include admins if the sender is an admin
       if (senderRole === 'admin') {
-        promises.push(adminDb.collection('admins').get());
+        promises.push(getUsersByRole('admin'));
       }
-      
-      const snapshots = await Promise.all(promises);
-      snapshots.forEach(snapshot => {
-        snapshot.docs.forEach(d => recipientIds.push(d.id));
+      const results = await Promise.all(promises);
+      results.forEach(items => {
+        items.forEach((item: any) => recipientIds.push(item.uid));
       });
       break;
     }
 
     case 'all_role': {
       if (sendToAllRoles) {
-        // For dropoff "all" target: both students and drivers
         const [drivers, students] = await Promise.all([
-          adminDb.collection('drivers').get(),
-          adminDb.collection('students').get(),
+          getAllDrivers(),
+          getAllStudents(),
         ]);
-        drivers.docs.forEach(d => recipientIds.push(d.id));
-        students.docs.forEach(d => recipientIds.push(d.id));
+        drivers.forEach(d => recipientIds.push(d.uid));
+        students.forEach(s => recipientIds.push(s.uid));
       } else if (targetRole) {
-        const colName = getCollectionForRole(targetRole);
-        const snapshot = await adminDb.collection(colName).get();
-        snapshot.docs.forEach(d => recipientIds.push(d.id));
+        const users = await getUsersByRole(targetRole);
+        users.forEach(u => recipientIds.push(u.uid));
       }
       break;
     }
 
     case 'shift_based': {
       if (targetShift) {
-        let studentsQuery: FirebaseFirestore.Query = adminDb.collection('students');
-        if (targetShift !== 'both') {
-          const shiftValue = targetShift.charAt(0).toUpperCase() + targetShift.slice(1); // 'Morning' or 'Evening'
-          studentsQuery = studentsQuery.where('shift', '==', shiftValue);
-        }
-        const snapshot = await studentsQuery.get();
-        snapshot.docs.forEach(d => recipientIds.push(d.id));
-
-        // Also include drivers assigned to matching shifts
-        let driversQuery: FirebaseFirestore.Query = adminDb.collection('drivers');
-        if (targetShift !== 'both') {
+        if (targetShift === 'both') {
+          const [students, drivers] = await Promise.all([
+            getAllStudents(),
+            getAllDrivers(),
+          ]);
+          students.forEach(s => recipientIds.push(s.uid));
+          drivers.forEach(d => recipientIds.push(d.uid));
+        } else {
           const shiftValue = targetShift.charAt(0).toUpperCase() + targetShift.slice(1);
-          // Drivers may have shift field -- try to include them
-          const driverSnap = await driversQuery.get();
-          driverSnap.docs.forEach(d => {
-            const data = d.data();
-            const driverShift = (data.shift || data.assignedShift || '').toLowerCase();
+          const [students, drivers] = await Promise.all([
+            getStudentsByShift(shiftValue),
+            getAllDrivers(),
+          ]);
+          students.forEach(s => recipientIds.push(s.uid));
+          drivers.forEach(d => {
+            const driverShift = (d.shift || d.assignedShift || '').toLowerCase();
             if (driverShift === targetShift || driverShift === 'both') {
-              recipientIds.push(d.id);
+              recipientIds.push(d.uid);
             }
           });
-        } else {
-          const driverSnap = await driversQuery.get();
-          driverSnap.docs.forEach(d => recipientIds.push(d.id));
         }
       }
       break;
@@ -116,27 +106,13 @@ async function resolveRecipientIds(
 
     case 'bus_based': {
       if (targetBusIds && targetBusIds.length > 0) {
-        // Firestore 'in' limited to 30 values
-        for (let i = 0; i < targetBusIds.length; i += 30) {
-          const chunk = targetBusIds.slice(i, i + 30);
-          
-          let q1: FirebaseFirestore.Query = adminDb.collection('students').where('busId', 'in', chunk);
-          let q2: FirebaseFirestore.Query = adminDb.collection('students').where('assignedBusId', 'in', chunk);
-          
+        const students = await getStudentsByBusIds(targetBusIds);
+        for (const student of students) {
           if (targetShift && targetShift !== 'both') {
             const shiftVal = targetShift.charAt(0).toUpperCase() + targetShift.slice(1);
-            q1 = q1.where('shift', '==', shiftVal);
-            q2 = q2.where('shift', '==', shiftVal);
+            if (student.shift !== shiftVal) continue;
           }
-
-          const snapshot = await q1.get();
-          snapshot.docs.forEach(d => recipientIds.push(d.id));
-
-          // Also check assignedBusId
-          const snapshot2 = await q2.get();
-          snapshot2.docs.forEach(d => {
-            if (!recipientIds.includes(d.id)) recipientIds.push(d.id);
-          });
+          if (!recipientIds.includes(student.uid)) recipientIds.push(student.uid);
         }
       }
       break;
@@ -144,31 +120,21 @@ async function resolveRecipientIds(
 
     case 'route_based': {
       if (targetRouteIds && targetRouteIds.length > 0) {
-        for (let i = 0; i < targetRouteIds.length; i += 30) {
-          const chunk = targetRouteIds.slice(i, i + 30);
-          
-          let q1: FirebaseFirestore.Query = adminDb.collection('students').where('routeId', 'in', chunk);
-          let q2: FirebaseFirestore.Query = adminDb.collection('students').where('assignedRouteId', 'in', chunk);
-          
+        const [students, drivers] = await Promise.all([
+          getStudentsByRouteIds(targetRouteIds),
+          getAllDrivers(),
+        ]);
+        for (const student of students) {
           if (targetShift && targetShift !== 'both') {
             const shiftVal = targetShift.charAt(0).toUpperCase() + targetShift.slice(1);
-            q1 = q1.where('shift', '==', shiftVal);
-            q2 = q2.where('shift', '==', shiftVal);
+            if (student.shift !== shiftVal) continue;
           }
-          
-          // 1. Get students on these routes
-          const studentSnapshots = await Promise.all([
-            q1.get(),
-            q2.get()
-          ]);
-          studentSnapshots.forEach(s => s.docs.forEach(d => recipientIds.push(d.id)));
-
-          // 2. Get drivers on these routes (Crucial for cross-communication)
-          const driverSnapshots = await Promise.all([
-            adminDb.collection('drivers').where('routeId', 'in', chunk).get(),
-            adminDb.collection('drivers').where('assignedRouteId', 'in', chunk).get()
-          ]);
-          driverSnapshots.forEach(s => s.docs.forEach(d => recipientIds.push(d.id)));
+          if (!recipientIds.includes(student.uid)) recipientIds.push(student.uid);
+        }
+        for (const driver of drivers) {
+          if (targetRouteIds.includes(driver.routeId) || targetRouteIds.includes(driver.routeId)) {
+            recipientIds.push(driver.uid);
+          }
         }
       }
       break;
@@ -186,43 +152,29 @@ async function resolveRecipientIds(
   return [...new Set(recipientIds)];
 }
 
-function getCollectionForRole(role: UserRole): string {
-  switch (role) {
-    case 'admin': return 'admins';
-    case 'moderator': return 'moderators';
-    case 'driver': return 'drivers';
-    case 'student': return 'students';
-    default: return 'users';
-  }
-}
-
 // ─── Auto-injection: Admin/Moderators always receive a copy ──────────────────
 
 async function getAutoInjectedRecipients(
   senderRole: UserRole,
   existingRecipients: string[]
 ): Promise<string[]> {
-  if (!adminDb) return [];
   const injected: string[] = [];
 
   try {
     if (senderRole === 'moderator' || senderRole === 'driver') {
-      // Admin always gets a copy (unless moderator or driver sent it specifically to admin, 
-      // which we handled in resolveRecipientIds for moderator)
-      const admins = await adminDb.collection('admins').get();
-      admins.docs.forEach(d => {
-        if (!existingRecipients.includes(d.id) && !injected.includes(d.id)) {
-          injected.push(d.id);
+      const admins = await getUsersByRole('admin');
+      admins.forEach(a => {
+        if (!existingRecipients.includes(a.uid) && !injected.includes(a.uid)) {
+          injected.push(a.uid);
         }
       });
     }
 
     if (senderRole === 'driver') {
-      // All moderators also get a copy
-      const moderators = await adminDb.collection('moderators').get();
-      moderators.docs.forEach(d => {
-        if (!existingRecipients.includes(d.id) && !injected.includes(d.id)) {
-          injected.push(d.id);
+      const moderators = await getUsersByRole('moderator');
+      moderators.forEach(m => {
+        if (!existingRecipients.includes(m.uid) && !injected.includes(m.uid)) {
+          injected.push(m.uid);
         }
       });
     }
@@ -241,38 +193,17 @@ async function sendFCMNotifications(
   content: string,
   notificationId: string
 ): Promise<{ sent: number; failed: number }> {
-  if (!adminDb || !adminMessaging) {
+  if (!adminMessaging) {
     return { sent: 0, failed: 0 };
   }
 
   try {
-    // Collect FCM tokens for all recipients from canonical subcollection
-    const fcmTokens: string[] = [];
-
-    // Read from students/{id}/tokens subcollection (canonical)
-    for (const uid of recipientIds) {
-      try {
-        const studentDoc = await adminDb.collection('students').doc(uid).get();
-        if (!studentDoc.exists) continue;
-        
-        const tokensSnapshot = await studentDoc.ref.collection('tokens')
-          .where('valid', '==', true)
-          .limit(3)
-          .get();
-        
-        tokensSnapshot.docs.forEach(doc => {
-          const token = doc.data().token;
-          if (token && typeof token === 'string' && token.length > 10 && !fcmTokens.includes(token)) {
-            fcmTokens.push(token);
-          }
-        });
-      } catch {
-        // Non-critical — skip
-      }
-    }
+    // Get FCM tokens from PostgreSQL
+    const tokenRecords = await getValidFcmTokensForUsers(recipientIds);
+    const fcmTokens = tokenRecords.map(t => t.token);
 
     if (fcmTokens.length === 0) {
-      console.log('📱 No FCM tokens found for notification recipients');
+      console.log('No FCM tokens found for notification recipients');
       return { sent: 0, failed: 0 };
     }
 
@@ -303,15 +234,15 @@ async function sendFCMNotifications(
         totalSent += result.successCount;
         totalFailed += result.failureCount;
       } catch (err) {
-        console.error('❌ FCM batch send error:', err);
+        console.error('FCM batch send error:', err);
         totalFailed += chunk.length;
       }
     }
 
-    console.log(`📱 FCM: ${totalSent} sent, ${totalFailed} failed (${fcmTokens.length} tokens)`);
+    console.log(`FCM: ${totalSent} sent, ${totalFailed} failed (${fcmTokens.length} tokens)`);
     return { sent: totalSent, failed: totalFailed };
   } catch (error) {
-    console.error('❌ Error sending FCM notifications:', error);
+    console.error('Error sending FCM notifications:', error);
     return { sent: 0, failed: 0 };
   }
 }
@@ -399,37 +330,39 @@ export const POST = withSecurity(
         userRole: senderRole,
       };
 
-      const notificationData: Record<string, any> = {
+      const notificationData = {
         title: title.trim(),
         content: content.trim(),
         type: type as NotificationType,
-        sender,
-        target,
+        sender: sender as any,
+        target: target as any,
         recipientIds: allRecipientIds,
         readByUserIds: [auth.uid],
         hiddenForUserIds: [],
-        isEdited: false,
-        isDeletedGlobally: false,
-        createdAt: FieldValue.serverTimestamp(),
+        expiresAt: (expiryAt && typeof expiryAt === 'number')
+          ? new Date(expiryAt).toISOString()
+          : undefined,
+        metadata: {
+          ...(((target as Record<string, any>).roleFilter) && { roleFilter: (target as Record<string, any>).roleFilter }),
+          ...(((target as Record<string, any>).shift) && { shift: (target as Record<string, any>).shift }),
+          ...(((target as Record<string, any>).busIds) && { busIds: (target as Record<string, any>).busIds }),
+          ...(((target as Record<string, any>).routeIds) && { routeIds: (target as Record<string, any>).routeIds }),
+        } as Record<string, any> | undefined,
       };
 
-      if (expiryAt && typeof expiryAt === 'number') {
-        notificationData.expiryAt = Timestamp.fromMillis(expiryAt);
-      }
-
-      const docRef = await adminDb.collection('notifications').add(notificationData);
+      const createdId = await pgInsertNotification(notificationData);
 
       // 11. Send FCM push notifications (non-blocking)
       const fcmResult = await sendFCMNotifications(
         allRecipientIds,
         title.trim(),
         content.trim(),
-        docRef.id
+        createdId
       );
 
       return NextResponse.json({
         success: true,
-        notificationId: docRef.id,
+        notificationId: createdId,
         recipientCount: filteredDirectRecipientIds.length,
         autoInjectedCount: filteredAutoInjectedIds.length,
         fcm: fcmResult,

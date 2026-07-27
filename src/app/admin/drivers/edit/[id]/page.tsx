@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState, useEffect, useRef } from 'react';
 import { use } from 'react';
@@ -126,9 +126,9 @@ export default function EditDriverPage({ params }: { params: Promise<{ id: strin
             dob: foundDriver.dob || '',
             joiningDate: foundDriver.joiningDate || foundDriver.joinDate || '',
             profilePhoto: null,
-            routeId: foundDriver.routeId || foundDriver.assignedRouteId || (foundDriver.isReserved ? 'Reserved' : ''),
-            busAssigned: foundDriver.busAssigned || foundDriver.assignedBusId || '',
-            busId: foundDriver.busId || (foundDriver.assignedBusId && !foundDriver.assignedBusId.includes('Bus-') ? foundDriver.assignedBusId : '') || '',
+            routeId: foundDriver.routeId || foundDriver.routeId || (foundDriver.isReserved ? 'Reserved' : ''),
+            busAssigned: foundDriver.busAssigned || foundDriver.busId || '',
+            busId: foundDriver.busId || (foundDriver.busId && !foundDriver.busId.includes('Bus-') ? foundDriver.busId : '') || '',
             employeeId: foundDriver.employeeId || foundDriver.driverId || '',
             address: foundDriver.address || foundDriver.location || '',
             approvedBy: foundDriver.approvedBy || '',
@@ -193,8 +193,8 @@ export default function EditDriverPage({ params }: { params: Promise<{ id: strin
           dob: foundDriver.dob || '',
           joiningDate: foundDriver.joiningDate || foundDriver.joinDate || '',
           profilePhoto: null,
-          routeId: foundDriver.routeId || foundDriver.assignedRouteId || (foundDriver.isReserved ? 'Reserved' : ''),
-          busAssigned: foundDriver.busAssigned || foundDriver.assignedBusId || '',
+          routeId: foundDriver.routeId || foundDriver.routeId || (foundDriver.isReserved ? 'Reserved' : ''),
+          busAssigned: foundDriver.busAssigned || foundDriver.busId || '',
           employeeId: foundDriver.employeeId || foundDriver.driverId || '',
           address: foundDriver.address || foundDriver.location || '',
           approvedBy: foundDriver.approvedBy || '',
@@ -235,7 +235,7 @@ export default function EditDriverPage({ params }: { params: Promise<{ id: strin
     }
 
     const existingDriver = driversList.find(d => 
-      (d.busId === formData.busId || d.assignedBusId === formData.busId) && 
+      (d.busId === formData.busId || d.busId === formData.busId) && 
       !d.isReserved && 
       (d.driverId || d.id) !== driverId
     );
@@ -417,7 +417,7 @@ export default function EditDriverPage({ params }: { params: Promise<{ id: strin
 
     if (e) {
       const existingDriver = driversList.find(d => 
-        (d.busId === formData.busId || d.assignedBusId === formData.busId) && 
+        (d.busId === formData.busId || d.busId === formData.busId) && 
         !d.isReserved && 
         (d.driverId || d.id) !== driverId
       );
@@ -485,15 +485,15 @@ export default function EditDriverPage({ params }: { params: Promise<{ id: strin
       }
 
       // Handle Reserved drivers vs regular route assignments
-      let assignedBusId = null;
-      let assignedRouteId = null;
+      let busId = null;
+      let routeId = null;
 
       if (formData.routeId === 'Reserved') {
         // Reserved driver - no bus or route assignment
       } else if (formData.routeId) {
         // Use selected bus ID
-        assignedBusId = formData.busId || null;
-        assignedRouteId = formData.routeId;
+        busId = formData.busId || null;
+        routeId = formData.routeId;
       }
 
       // Prepare data for update
@@ -509,8 +509,8 @@ export default function EditDriverPage({ params }: { params: Promise<{ id: strin
         joiningDate: formData.joiningDate,
         employeeId: formData.employeeId,
         address: formData.address,
-        assignedBusId: assignedBusId,
-        assignedRouteId: assignedRouteId,
+        busId: busId,
+        routeId: routeId,
         approvedBy: formData.approvedBy,
         shift: formData.shift,
         updatedAt: new Date().toISOString()

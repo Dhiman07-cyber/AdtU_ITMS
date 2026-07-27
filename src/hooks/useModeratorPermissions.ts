@@ -1,8 +1,6 @@
 "use client";
 
 import { useState, useEffect } from 'react';
-import { doc, onSnapshot } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
 import {
     ModeratorPermissions,
@@ -91,9 +89,9 @@ function setCachedPermissions(uid: string, perms: ModeratorPermissions) {
  * Hook to fetch moderator permissions.
  *
  * REALTIME:
- * - Uses onSnapshot for real-time updates when admin changes permissions.
+ * - Uses API polling (every 30s) for permission updates.
  * - Results cached in localStorage with 24h TTL to avoid flash on load.
- * - For admins: returns full permissions without any Firestore call.
+ * - For admins: returns full permissions without any API call.
  *
  * Security: This is client-side enforcement only. API routes ALSO
  * check permissions server-side for actual security.
@@ -115,7 +113,7 @@ export function useModeratorPermissions(): UseModeratorPermissionsReturn {
     const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
-        // Admins have full permissions — no Firestore call needed
+        // Admins have full permissions — no API call needed
         if (userData?.role === 'admin') {
             const { FULL_MODERATOR_PERMISSIONS } = require('@/lib/types/moderator-permissions');
             setPermissions(FULL_MODERATOR_PERMISSIONS);
@@ -139,34 +137,49 @@ export function useModeratorPermissions(): UseModeratorPermissionsReturn {
             setLoading(false);
         }
 
-        // 2. Real-time listener so MOD CONFIG changes from admin apply instantly
+        // 2. Fetch permissions from PostgreSQL via API
         let isMounted = true;
-        const modDocRef = doc(db, 'moderators', uid);
-        const unsubscribe = onSnapshot(modDocRef, (snap) => {
-            if (!isMounted) return;
-            if (snap.exists()) {
-                const data = snap.data();
-                const perms = data.permissions as ModeratorPermissions | undefined;
-                const merged = perms ? mergeWithDefaults(perms) : DEFAULT_MODERATOR_PERMISSIONS;
-                setPermissions(merged);
-                setCachedPermissions(uid, merged);
-            } else {
-                setPermissions(DEFAULT_MODERATOR_PERMISSIONS);
-                setCachedPermissions(uid, DEFAULT_MODERATOR_PERMISSIONS);
+        let pollInterval: NodeJS.Timeout | null = null;
+
+        const fetchPermissions = async () => {
+            try {
+                const token = await currentUser.getIdToken();
+                const response = await fetch(`/api/moderators/${uid}/permissions`, {
+                    headers: { 'Authorization': `Bearer ${token}` },
+                });
+
+                if (!isMounted) return;
+
+                if (response.ok) {
+                    const result = await response.json();
+                    const perms = result.permissions as ModeratorPermissions | undefined;
+                    const merged = perms ? mergeWithDefaults(perms) : DEFAULT_MODERATOR_PERMISSIONS;
+                    setPermissions(merged);
+                    setCachedPermissions(uid, merged);
+                } else {
+                    setPermissions(DEFAULT_MODERATOR_PERMISSIONS);
+                    setCachedPermissions(uid, DEFAULT_MODERATOR_PERMISSIONS);
+                }
+                setError(null);
+                setLoading(false);
+            } catch (err: any) {
+                if (!isMounted) return;
+                if (getSigningOutState()) return;
+                console.error('[useModeratorPermissions] Fetch error:', err);
+                setError('Failed to load permissions');
+                setLoading(false);
             }
-            setError(null);
-            setLoading(false);
-        }, (err: any) => {
-            if (!isMounted) return;
-            if (getSigningOutState()) return;
-            console.error('[useModeratorPermissions] Realtime listener error:', err);
-            setError('Failed to load permissions');
-            setLoading(false);
-        });
+        };
+
+        // Initial fetch
+        fetchPermissions();
+
+        // Poll every 30 seconds for permission changes
+        pollInterval = setInterval(fetchPermissions, 30 * 1000);
 
         return () => {
             isMounted = false;
-            unsubscribe();
+            if (pollInterval) clearInterval(pollInterval);
         };
     }, [currentUser?.uid, userData?.role]);
 

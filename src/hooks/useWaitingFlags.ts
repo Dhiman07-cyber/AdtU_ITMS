@@ -7,8 +7,7 @@ interface WaitingFlag {
   studentName: string;
   busId: string;
   routeId: string;
-  stopId: string;
-  stopName: string;
+  stop_name: string;
   stopLat: number;
   stopLng: number;
   status: 'raised' | 'acknowledged' | 'boarded' | 'expired';
@@ -47,8 +46,7 @@ export const useWaitingFlags = (routeId: string, getIdToken?: () => Promise<stri
           studentName: flagData.studentName || 'Unknown Student',
           busId: flagData.busId,
           routeId: flagData.routeId,
-          stopId: flagData.stopId,
-          stopName: flagData.stopName,
+          stop_name: flagData.stop_name,
           stopLat: flagData.stopLat,
           stopLng: flagData.stopLng,
           status: 'raised',
@@ -64,8 +62,7 @@ export const useWaitingFlags = (routeId: string, getIdToken?: () => Promise<stri
           studentName: flagData.studentName || 'Unknown Student',
           busId: flagData.busId,
           routeId: flagData.routeId,
-          stopId: flagData.stopId,
-          stopName: flagData.stopName,
+          stop_name: flagData.stop_name,
           stopLat: flagData.stopLat,
           stopLng: flagData.stopLng,
           status: 'raised',
@@ -162,8 +159,7 @@ export const useWaitingFlags = (routeId: string, getIdToken?: () => Promise<stri
             studentName: flagData.student_name,
             busId: flagData.bus_id,
             routeId: flagData.route_id,
-            stopId: flagData.stop_id,
-            stopName: flagData.stop_name,
+            stop_name: flagData.stop_name,
             stopLat: flagData.stop_lat,
             stopLng: flagData.stop_lng,
             createdAt: flagData.created_at,
@@ -269,8 +265,7 @@ export const useWaitingFlags = (routeId: string, getIdToken?: () => Promise<stri
           studentName: flag.student_name || 'Unknown Student',
           busId: flag.bus_id,
           routeId: flag.route_id,
-          stopId: flag.stop_id,
-          stopName: flag.stop_name,
+          stop_name: flag.stop_name,
           stopLat: flag.stop_lat,
           stopLng: flag.stop_lng,
           status: flag.status,

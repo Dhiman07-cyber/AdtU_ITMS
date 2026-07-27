@@ -11,7 +11,8 @@ import { RateLimits } from '@/lib/security/rate-limiter';
  */
 export const POST = withSecurity(
     async (request, { auth, body }) => {
-        const { busId, studentId, studentName, stopName } = body as any;
+        const { busId, studentId, studentName, stop_name } = body as any;
+        const resolved_stop_name = stop_name || (body as any).stop_name;
 
         // Security check: Student can only request wait for themselves
         if (auth.uid !== studentId) {
@@ -36,7 +37,7 @@ export const POST = withSecurity(
             payload: {
                 studentId,
                 studentName,
-                stopName,
+                stop_name: resolved_stop_name,
                 timestamp: Date.now()
             }
         });

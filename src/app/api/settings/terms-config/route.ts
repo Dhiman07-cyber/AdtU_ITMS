@@ -1,10 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { adminDb } from '@/lib/firebase-admin';
 import { verifyApiAuth } from '@/lib/security/api-auth';
-import { getSystemConfig } from '@/lib/system-config-service';
+import { getSystemConfig, getLegalConfig, updateLegalConfig } from '@/domains/admin';
 import { sanitizeLegalConfig } from '@/lib/security/object-safety';
-import { SETTINGS_COLLECTION } from '@/config/firestore-collections';
-const DOC_ID = 'terms';
 const FALLBACK_TITLE = 'Terms & Conditions';
 
 /**
@@ -13,30 +10,15 @@ const FALLBACK_TITLE = 'Terms & Conditions';
  */
 export async function GET(req: NextRequest) {
     try {
-        let config;
-        let source;
+        const termsConfigResult = await getLegalConfig('terms');
+        let config = termsConfigResult.data;
+        let source = 'firestore';
 
-        // 1. Try Firestore
-        const doc = await adminDb.collection(SETTINGS_COLLECTION).doc(DOC_ID).get();
-        if (doc.exists) {
-            config = doc.data();
-            source = 'firestore';
-        }
-
-        // 2. No Fallback allowed
-
-        if (!config) {
-            // Default structure
-            config = { title: FALLBACK_TITLE, lastUpdated: new Date().toISOString().split('T')[0], sections: [] };
-            source = 'default';
-        }
-
-        // 3. Inject App Name dynamically
+        // Inject App Name dynamically
         try {
-            const systemConfig = await getSystemConfig();
-            const appName = systemConfig?.appName || "AdtU Bus Services";
+            const systemConfigResult = await getSystemConfig();
+            const appName = systemConfigResult.data?.appName || "AdtU Bus Services";
             if (config && typeof config === 'object') {
-                // simple stringify replace for all occurrences
                 let configStr = JSON.stringify(config);
                 configStr = configStr.replace(/AdtU Bus Services/g, appName);
                 config = JSON.parse(configStr);
@@ -48,6 +30,7 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({
             success: true,
             config,
+            updatedAt: termsConfigResult.updatedAt,
             source
         });
 
@@ -59,7 +42,7 @@ export async function GET(req: NextRequest) {
 
 /**
  * POST /api/settings/terms-config
- * Updates the Terms configuration in Firestore
+ * Updates the Terms configuration in PostgreSQL
  */
 export async function POST(req: NextRequest) {
     try {
@@ -74,10 +57,8 @@ export async function POST(req: NextRequest) {
         }
 
         const safeConfig = sanitizeLegalConfig(config, FALLBACK_TITLE);
-        safeConfig.lastUpdated = new Date().toISOString().split('T')[0];
 
-        // Save to Firestore
-        await adminDb.collection(SETTINGS_COLLECTION).doc(DOC_ID).set(safeConfig);
+        await updateLegalConfig('terms', safeConfig, auth.uid!);
 
         return NextResponse.json({ success: true, message: 'Configuration saved successfully', config: safeConfig });
 

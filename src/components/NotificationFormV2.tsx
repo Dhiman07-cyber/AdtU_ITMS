@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import dynamic from 'next/dynamic';
@@ -28,8 +28,7 @@ import {
   TargetType,
   NotificationType
 } from '@/lib/notifications/types';
-import { collection, getDocs, query, where, getCountFromServer } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+
 import {
   calculateExpiry
 } from '@/lib/utils/enhancedDatePicker';
@@ -178,8 +177,8 @@ export default function NotificationFormV2({ open, onClose, onSuccess, mode = 'c
   useEffect(() => {
     if (open && currentUser) {
       if (userRole === 'driver') {
-        const driverRoute = userData?.routeId || userData?.assignedRouteId;
-        const driverBus = userData?.busId || userData?.assignedBusId;
+        const driverRoute = userData?.routeId || userData?.routeId;
+        const driverBus = userData?.busId || userData?.busId;
         if (driverRoute) {
           setTargetType('route_based');
           setSelectedRoutes([driverRoute]);
@@ -197,11 +196,16 @@ export default function NotificationFormV2({ open, onClose, onSuccess, mode = 'c
 
   const loadFullBuses = useCallback(async () => {
     try {
-      const snapshot = await getDocs(collection(db, 'buses'));
-      const busData = snapshot.docs.map(doc => ({
-        id: doc.id,
-        busId: doc.id,
-        ...doc.data()
+      const token = await currentUser?.getIdToken();
+      const res = await fetch('/api/buses', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (!res.ok) throw new Error('Failed to fetch buses');
+      const data = await res.json();
+      const busData = (data.buses || []).map((bus: any) => ({
+        id: bus.busId || bus.id,
+        busId: bus.busId || bus.id,
+        ...bus
       }));
       setFullBuses(busData.sort((a: any, b: any) => {
         const numA = parseInt((a.busId || a.id || '').replace(/\D/g, '') || '0');
@@ -211,7 +215,7 @@ export default function NotificationFormV2({ open, onClose, onSuccess, mode = 'c
     } catch (error) {
       console.error('Error loading full buses:', error);
     }
-  }, []);
+  }, [currentUser]);
 
   const loadFullRoutes = useCallback(async () => {
     try {
@@ -225,34 +229,44 @@ export default function NotificationFormV2({ open, onClose, onSuccess, mode = 'c
   const loadOptions = useCallback(async () => {
     setLoadingOptions(true);
     try {
+      const token = await currentUser?.getIdToken();
+      const headers = { 'Authorization': `Bearer ${token}` };
+
       if (targetType === 'bus_based') {
-        const snapshot = await getDocs(collection(db, 'buses'));
-        const busData = await Promise.all(snapshot.docs.map(async (doc) => {
-          const data = doc.data();
-          const studentsQuery = query(collection(db, 'students'), where('busId', '==', doc.id));
-          const countSnapshot = await getCountFromServer(studentsQuery);
-          return {
-            id: doc.id,
-            name: data.busNumber || data.plateNumber || doc.id,
-            studentCount: countSnapshot.data().count
-          };
+        const res = await fetch('/api/buses', { headers });
+        if (!res.ok) throw new Error('Failed to fetch buses');
+        const data = await res.json();
+        const busData = (data.buses || []).map((bus: any) => ({
+          id: bus.busId || bus.id,
+          name: bus.busNumber || bus.plateNumber || bus.busId || bus.id,
+          studentCount: bus.currentMembers ?? bus.currentPassengerCount ?? 0
         }));
-        setBuses(busData.sort((a, b) => a.name.localeCompare(b.name)));
+        setBuses(busData.sort((a: any, b: any) => a.name.localeCompare(b.name)));
       }
 
       if (targetType === 'route_based') {
-        const snapshot = await getDocs(collection(db, 'routes'));
-        const routesData = await Promise.all(snapshot.docs.map(async (doc) => {
-          const data = doc.data();
-          const studentsQuery = query(collection(db, 'students'), where('routeId', '==', doc.id));
-          const countSnapshot = await getCountFromServer(studentsQuery);
-          return {
-            id: doc.id,
-            name: data.routeName || data.name || doc.id,
-            studentCount: countSnapshot.data().count
-          };
+        const [routesRes, studentsRes] = await Promise.all([
+          fetch('/api/routes', { headers }),
+          fetch('/api/students', { headers })
+        ]);
+        if (!routesRes.ok) throw new Error('Failed to fetch routes');
+        const routesRaw = await routesRes.json();
+        const studentsRaw = studentsRes.ok ? await studentsRes.json() : [];
+
+        const routeCounts: Record<string, number> = {};
+        if (Array.isArray(studentsRaw)) {
+          studentsRaw.forEach((s: any) => {
+            const rid = s.routeId || s.routeId || '';
+            if (rid) routeCounts[rid] = (routeCounts[rid] || 0) + 1;
+          });
+        }
+
+        const routesData = (Array.isArray(routesRaw) ? routesRaw : []).map((r: any) => ({
+          id: r.routeId || r.id,
+          name: r.routeName || r.name || r.routeId || r.id,
+          studentCount: routeCounts[r.routeId || r.id] || 0
         }));
-        setRoutes(routesData.sort((a, b) => a.name.localeCompare(b.name)));
+        setRoutes(routesData.sort((a: any, b: any) => a.name.localeCompare(b.name)));
       }
 
       if (targetType === 'specific_users') {
@@ -260,28 +274,28 @@ export default function NotificationFormV2({ open, onClose, onSuccess, mode = 'c
           (userRole === 'driver' ? ['student'] : ['moderator', 'driver', 'student']) as UserRole[];
 
         const results = await Promise.all(rolesToLoad.map(async (role) => {
-          const colName = role === 'student' ? 'students' : role === 'driver' ? 'drivers' : 'moderators';
-          const snapshot = await getDocs(collection(db, colName));
-          return snapshot.docs.map(doc => {
-            const data = doc.data();
-            return {
-              id: doc.id,
-              name: data.name || data.fullName || 'Unknown',
-              role: role,
-              email: data.email,
-              enrollmentId: data.enrollmentId || data.employeeId || data.driverId || data.staffId
-            };
-          });
+          const endpoint = role === 'student' ? '/api/students' : role === 'driver' ? '/api/drivers' : '/api/moderators';
+          const res = await fetch(endpoint, { headers });
+          if (!res.ok) return [];
+          const data = await res.json();
+          const items = Array.isArray(data) ? data : [];
+          return items.map((item: any) => ({
+            id: item.id || item.uid,
+            name: item.name || item.fullName || 'Unknown',
+            role: role,
+            email: item.email,
+            enrollmentId: item.enrollmentId || item.employeeId || item.driverId || item.staffId
+          }));
         }));
         const usersData = results.flat();
-        setUsers(usersData.sort((a, b) => a.name.localeCompare(b.name)));
+        setUsers(usersData.sort((a: any, b: any) => a.name.localeCompare(b.name)));
       }
     } catch (error) {
       addToast('Error loading options', 'error');
     } finally {
       setLoadingOptions(false);
     }
-  }, [targetType, specificUserRoleFilter, userRole, addToast]);
+  }, [targetType, specificUserRoleFilter, userRole, addToast, currentUser]);
 
   // Update message when dropoff assignments change
   useEffect(() => {
@@ -315,8 +329,8 @@ export default function NotificationFormV2({ open, onClose, onSuccess, mode = 'c
     setDropoffShift('morning');
 
     if (userRole === 'driver') {
-      const driverRoute = userData?.routeId || userData?.assignedRouteId;
-      const driverBus = userData?.busId || userData?.assignedBusId;
+      const driverRoute = userData?.routeId || userData?.routeId;
+      const driverBus = userData?.busId || userData?.busId;
       if (driverRoute) {
         setTargetType('route_based');
         setSelectedRoutes([driverRoute]);

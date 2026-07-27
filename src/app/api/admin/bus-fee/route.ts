@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { adminDb } from '@/lib/firebase-admin';
+import { resolveUserRole } from '@/lib/security/role-cache';
 import { getCurrentBusFee, updateBusFee } from '@/lib/bus-fee-service';
 import { withSecurity } from '@/lib/security/api-security';
 import { BusFeeQuerySchema, BusFeeUpdateSchema } from '@/lib/security/validation-schemas';
@@ -40,34 +41,24 @@ export const POST = withSecurity(
             return NextResponse.json({ success: false, error: result.error }, { status: 500 });
         }
 
-        // Optimized Broadcast Notification (Non-blocking)
         (async () => {
             try {
-                const adminSnap = await adminDb.collection('users').doc(auth.uid).get();
-                const adminName = adminSnap.data()?.name || 'Admin';
+                const userRole = await resolveUserRole(auth.uid);
+                const adminName = userRole.name || 'Admin';
 
-                await notifyAllUsers({
+                const { pgInsertNotification } = await import('@/domains/notification/repositories/notification.repository.pg');
+                await pgInsertNotification({
                     title: '🚌 Bus Fee Updated',
-                    body: `Bus fee has been updated to ₹${amount.toLocaleString('en-IN')} by ${adminName}`,
-                    data: { 
-                        type: 'bus_fee_update', 
-                        newAmount: amount.toString(),
-                        previousAmount: result.previousAmount?.toString() || '0'
-                    }
+                    content: `Bus fee has been updated to ₹${amount.toLocaleString('en-IN')} by ${adminName}`,
+                    type: 'announcement',
+                    sender: { userId: auth.uid, userName: adminName, userRole: 'admin' },
+                    target: { type: 'all_users' },
+                    recipientIds: [],
+                    readByUserIds: [],
+                    metadata: { type: 'bus_fee_update', newAmount: amount, previousAmount: result.previousAmount }
                 });
-
-                // Instead of individual docs, we can log a single global announcement
-                await adminDb.collection('announcements').add({
-                    type: 'bus_fee_update',
-                    title: 'Bus Fee Update',
-                    content: `New bus fee: ₹${amount.toLocaleString('en-IN')}`,
-                    createdBy: auth.uid,
-                    createdAt: new Date().toISOString(),
-                    priority: 'high'
-                });
-
             } catch (err) {
-                console.error('Broadcast notification failed:', err);
+                console.error('Bus fee notification failed:', err);
             }
         })();
 

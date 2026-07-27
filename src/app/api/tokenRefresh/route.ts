@@ -10,8 +10,9 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { adminAuth, adminDb } from '@/lib/firebase-admin';
+import { adminAuth } from '@/lib/firebase-admin';
 import { saveToken, isValidTokenFormat } from '@/lib/services/fcm-token-service';
+import { resolveUserRole } from '@/lib/security/role-cache';
 
 export async function POST(request: NextRequest) {
   try {
@@ -27,7 +28,7 @@ export async function POST(request: NextRequest) {
     const idToken = authHeader.substring(7);
 
     // 2. Verify ID token
-    if (!adminAuth || !adminDb) {
+    if (!adminAuth) {
       return NextResponse.json(
         { success: false, error: 'Server not initialized' },
         { status: 500 }
@@ -63,19 +64,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 4. Determine user collection
-    const collectionsToCheck = ['students', 'drivers', 'moderators', 'admins'];
-    let targetCollection: string | null = null;
+    // 4. Determine user role
+    const roleData = await resolveUserRole(uid);
 
-    for (const col of collectionsToCheck) {
-      const doc = await adminDb.collection(col).doc(uid).get();
-      if (doc.exists) {
-        targetCollection = col;
-        break;
-      }
-    }
-
-    if (!targetCollection) {
+    if (!roleData.role) {
       return NextResponse.json(
         { success: false, error: 'User not found' },
         { status: 404 }
@@ -83,7 +75,7 @@ export async function POST(request: NextRequest) {
     }
 
     // 5. Save refreshed token
-    const result = await saveToken(uid, targetCollection, token, platform || 'web');
+    const result = await saveToken(uid, 'students', token, platform || 'web');
 
     if (!result.success) {
       return NextResponse.json(
@@ -92,14 +84,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 6. Also update legacy field
-    await adminDb.collection(targetCollection).doc(uid).set({
-      fcmToken: token,
-      fcmPlatform: platform || 'web',
-      fcmUpdatedAt: new Date().toISOString(),
-    }, { merge: true });
-
-    console.log(`🔄 FCM token refreshed for ${targetCollection}/${uid}`);
+    console.log(`FCM token refreshed for ${uid}`);
     return NextResponse.json({ success: true });
 
   } catch (error: any) {

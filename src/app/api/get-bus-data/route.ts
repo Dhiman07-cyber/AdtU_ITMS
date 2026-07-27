@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { adminDb } from '@/lib/firebase-admin';
 import { verifyApiAuth } from '@/lib/security/api-auth';
 import { applyRateLimit, createRateLimitId, RateLimits } from '@/lib/security/rate-limiter';
 import { handleApiError } from '@/lib/security/safe-error';
+import { getBusById } from '@/domains/fleet';
 
 export async function GET(request: NextRequest) {
   try {
@@ -23,21 +23,15 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Valid Bus ID is required' }, { status: 400 });
     }
 
-    if (!adminDb) {
-      return NextResponse.json({ error: 'Database unavailable' }, { status: 503 });
-    }
+    const bus = await getBusById(busId);
 
-    const busDoc = await adminDb.collection('buses').doc(busId).get();
-
-    if (!busDoc.exists) {
+    if (!bus) {
       return NextResponse.json({ error: 'Bus not found' }, { status: 404 });
     }
 
-    const busData = busDoc.data();
-
     return NextResponse.json({
       success: true,
-      data: { busId: busDoc.id, ...busData }
+      data: bus
     }, { headers: rl.headers });
   } catch (error: any) {
     console.error('Error fetching bus data:', error);

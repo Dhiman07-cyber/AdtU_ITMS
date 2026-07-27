@@ -166,9 +166,9 @@ export default function SystemLifecycleIntelligence({ stats }: SystemLifecycleIn
 
                   {/* Desktop Horizontal Timeline */}
                   <TooltipProvider>
-                     <div className="relative hidden md:flex justify-between items-start pt-2">
+                     <div className="relative hidden md:grid grid-cols-7 gap-x-2 items-start pt-2">
                         {/* Connecting Line */}
-                        <div className="absolute top-4 left-5 right-5 h-[2px] bg-slate-800/50 z-0" />
+                        <div className="absolute top-6 left-[7.14%] right-[7.14%] h-[2px] bg-slate-800/50 z-0" />
 
                         {lifecycleDates.map((milestone, idx) => (
                            <Tooltip key={milestone.label}>
@@ -177,14 +177,20 @@ export default function SystemLifecycleIntelligence({ stats }: SystemLifecycleIn
                                     initial={{ opacity: 0, y: 10 }}
                                     animate={{ opacity: 1, y: 0 }}
                                     transition={{ delay: idx * 0.05 }}
-                                    className="relative z-10 flex flex-col items-center gap-2 group hover:cursor-pointer"
+                                    className="relative z-10 flex flex-col items-center gap-2 group hover:cursor-pointer w-full"
                                  >
                                     <div className={`w-8 h-8 rounded-full ${milestone.bg} border-2 border-slate-900 group-hover:border-indigo-500/40 flex items-center justify-center transition-all`}>
                                        <milestone.icon className={`w-3.5 h-3.5 ${milestone.color}`} />
                                     </div>
-                                    <div className="flex flex-col items-center text-center">
-                                       <span className="text-[8px] font-black text-slate-500 uppercase tracking-tighter mb-0.5">{milestone.label}</span>
-                                       <span className="text-[10px] font-bold text-white whitespace-nowrap">{milestone.date}</span>
+                                    <div className="flex flex-col items-center text-center w-full mt-1">
+                                       <div className="h-8 flex items-center justify-center px-1 w-full">
+                                          <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider leading-tight text-center max-w-[85px] group-hover:text-indigo-400 transition-colors">
+                                             {milestone.label}
+                                          </span>
+                                       </div>
+                                       <span className="text-[10px] font-bold text-white whitespace-nowrap mt-1">
+                                          {milestone.date}
+                                       </span>
                                     </div>
                                  </motion.div>
                               </TooltipTrigger>

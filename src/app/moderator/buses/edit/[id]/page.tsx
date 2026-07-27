@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState, useEffect, use } from "react";
 import { useRouter } from "next/navigation";
@@ -67,7 +67,7 @@ export default function EditBusPage({ params }: { params: Promise<{ id: string }
     driverUID: "",
     routeId: "",
     shift: "",
-    status: "Active",
+    status: "active",
     morningLoad: "0",
     eveningLoad: "0"
   });
@@ -114,7 +114,7 @@ export default function EditBusPage({ params }: { params: Promise<{ id: string }
           driverUID: bus.assignedDriverId || bus.driverUID || bus.activeDriverId || "",
           routeId: bus.routeId,
           shift: bus.shift || "",
-          status: bus.status || "Active",
+          status: bus.status || "active",
           morningLoad: mLoad.toString(),
           eveningLoad: eLoad.toString()
         });
@@ -322,7 +322,7 @@ export default function EditBusPage({ params }: { params: Promise<{ id: string }
                     </div>
                     {drivers
                       .filter(d => {
-                        const bId = d.assignedBusId || d.busId || d.busAssigned;
+                        const bId = d.busId || d.busId || d.busAssigned;
                         return !bId || bId === id || bId === formData.busId || bId === `bus_${formData.busId}`;
                       })
                       .map(driver => (
@@ -336,11 +336,11 @@ export default function EditBusPage({ params }: { params: Promise<{ id: string }
                     </div>
                     {drivers
                       .filter(d => {
-                        const bId = d.assignedBusId || d.busId || d.busAssigned;
+                        const bId = d.busId || d.busId || d.busAssigned;
                         return bId && bId !== id && bId !== formData.busId && bId !== `bus_${formData.busId}`;
                       })
                       .map(driver => {
-                        const bId = driver.assignedBusId || driver.busId || driver.busAssigned;
+                        const bId = driver.busId || driver.busId || driver.busAssigned;
                         const bus = buses.find(b => b.busId === bId || b.id === bId);
                         return (
                           <SelectItem key={driver.uid} value={driver.uid || (driver as any).id || ''} disabled>
@@ -424,9 +424,9 @@ export default function EditBusPage({ params }: { params: Promise<{ id: string }
                     <SelectValue placeholder="Select Status" />
                   </SelectTrigger>
                   <SelectContent position="popper" side="bottom" align="start">
-                    <SelectItem value="Active">Active</SelectItem>
-                    <SelectItem value="Inactive">Inactive</SelectItem>
-                    <SelectItem value="Maintenance">Maintenance</SelectItem>
+                    <SelectItem value="active">Active</SelectItem>
+                    <SelectItem value="inactive">Inactive</SelectItem>
+                    <SelectItem value="maintenance">Maintenance</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

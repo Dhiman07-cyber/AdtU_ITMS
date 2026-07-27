@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { adminDb } from '@/lib/firebase-admin';
 import { verifyApiAuth } from '@/lib/security/api-auth';
 import { checkRateLimit, RateLimits, createRateLimitId } from '@/lib/security/rate-limiter';
 import { calculateRenewalDate } from '@/lib/utils/renewal-utils';
+import { computeBlockDatesFromValidUntil } from '@/lib/utils/deadline-computation';
 import { getDeadlineConfig } from '@/lib/deadline-config-service';
+import { createUser, createStudent } from '@/domains/identity';
 
 export async function POST(request: NextRequest) {
   try {
@@ -35,80 +36,69 @@ export async function POST(request: NextRequest) {
     delete newStudentData.role;
     delete newStudentData.uid;
 
-    if (!adminDb) {
-      return NextResponse.json({ error: 'Database unavailable' }, { status: 503 });
-    }
-
-    // Generate a unique, non-deterministic ID via Firestore
-    const studentId = adminDb.collection('students').doc().id;
+    const studentId = crypto.randomUUID();
     
     // CRITICAL: Extract session information from application data
-    // Students can apply for current year or next year, so we use the sessionInfo from application
     let sessionEndYear: number;
     let sessionStartYear: number;
     let validUntil: string;
     
+    const config = await getDeadlineConfig();
+
     if (newStudentData.sessionInfo) {
-      // Application data contains proper session information
       sessionStartYear = newStudentData.sessionInfo.sessionStartYear;
       sessionEndYear = newStudentData.sessionInfo.sessionEndYear;
       validUntil = newStudentData.sessionInfo.validUntil;
-      
       console.log(`📅 Creating student with session: ${sessionStartYear}-${sessionEndYear}, validUntil: ${validUntil}`);
     } else {
-      // Fallback: Only if no sessionInfo is provided (shouldn't happen with proper applications)
-      console.warn('⚠️ No sessionInfo provided in student data - using current year fallback');
+      console.warn('⚠️ No sessionInfo provided in student data - computing dynamically from Firestore deadline config');
       const currentYear = new Date().getFullYear();
       sessionStartYear = currentYear;
       sessionEndYear = currentYear;
-      
-      try {
-        const config = await getDeadlineConfig();
-        const renewalResult = calculateRenewalDate(null, 1, config);
-        validUntil = renewalResult.newValidUntil;
-      } catch (configError) {
-        console.warn('Could not fetch deadline config, using default validity');
-        const fallbackDate = new Date(currentYear, 11, 31, 23, 59, 59, 999);
-        validUntil = fallbackDate.toISOString();
-      }
+      const renewalResult = calculateRenewalDate(null, 1, config);
+      validUntil = renewalResult.newValidUntil;
     }
+
+    const blockDates = computeBlockDatesFromValidUntil(validUntil, config);
     
     const newStudent = {
       ...newStudentData,
       id: studentId,
       sessionStartYear,
       sessionEndYear,
-      validUntil
+      validUntil,
+      softBlock: blockDates.softBlock,
+      hardBlock: blockDates.hardBlock
     };
 
-    // ATOMIC WRITE: Both documents must commit or fail together
-    const userDocRef = adminDb.doc(`users/${studentId}`);
-    const studentsCollectionRef = adminDb.doc(`students/${studentId}`);
     const createdAt = new Date().toISOString();
 
-    await adminDb.runTransaction(async (transaction) => {
-      transaction.set(userDocRef, {
-        ...newStudent,
-        uid: studentId,
-        role: 'student',
-        createdAt,
-        createdBy: auth.uid,
-        status: 'active'
-      });
-
-      transaction.set(studentsCollectionRef, {
-        ...newStudent,
-        uid: studentId,
-        role: 'student',
-        createdAt,
-        createdBy: auth.uid,
-        status: 'active',
-        fullName: newStudentData.name || newStudentData.fullName,
-        sessionStartYear,
-        sessionEndYear,
-        validUntil
-      });
+    // Write user to PostgreSQL (canonical source of truth) — before transaction
+    await createUser({
+      uid: studentId,
+      email: newStudentData.email,
+      name: newStudentData.name || newStudentData.fullName,
+      role: 'student',
+      createdAt,
     });
+
+    // Write student to PostgreSQL (canonical source of truth) — before transaction
+    await createStudent({
+      uid: studentId,
+      email: newStudentData.email,
+      fullName: newStudentData.name || newStudentData.fullName,
+      role: 'student',
+      status: 'active',
+      createdAt,
+      ...newStudentData,
+      sessionStartYear,
+      sessionEndYear,
+      validUntil,
+      softBlock: blockDates.softBlock,
+      hardBlock: blockDates.hardBlock,
+    });
+
+    // Canonical: PostgreSQL only. Firestore removed (D1 Identity freeze).
 
     return NextResponse.json(newStudent, { status: 201 });
   } catch (error) {

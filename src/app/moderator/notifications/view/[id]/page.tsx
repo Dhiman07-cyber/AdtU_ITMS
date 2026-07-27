@@ -5,8 +5,6 @@ import { useParams, useRouter } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Loader2, ArrowLeft } from "lucide-react";
-import { doc, getDoc } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
 import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import Link from 'next/link';
 
@@ -20,10 +18,10 @@ export default function ModeratorViewNotification() {
   useEffect(() => {
     const fetchNotification = async () => {
       try {
-        const docRef = doc(db, 'notifications', id);
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) {
-          setNotification({ id: docSnap.id, ...docSnap.data() });
+        const res = await fetch(`/api/notifications/${id}`, { credentials: 'include' });
+        if (res.ok) {
+          const data = await res.json();
+          setNotification(data);
         }
       } catch (error) {
         console.error("Error fetching notification:", error);

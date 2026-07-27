@@ -1,8 +1,12 @@
-
+﻿
 import { NextRequest, NextResponse } from 'next/server';
 import { auth } from '@/lib/firebase-admin';
+import { resolveUserRole } from '@/lib/security/role-cache';
+import { getDriverById } from '@/domains/identity';
+import { getBusById } from '@/domains/fleet';
 import {
   readFeedback,
+  readFeedbackPaginated,
   addFeedback, // Changed from writeFeedback
   cleanupOldFeedback,
   generateFeedbackId,
@@ -53,33 +57,28 @@ export async function POST(request: NextRequest) {
 
     const userId = decodedToken.uid;
 
-    // Get user data from Firestore
-    const { db } = await import('@/lib/firebase-admin');
+    const userRoleData = await resolveUserRole(userId);
+    const userRole = userRoleData.role;
+
+    const { getByUid } = await import('@/domains/student');
     let userData: any = null;
-    let userRole: string = '';
-
-    // First check users collection for role
-    const userDoc = await db.collection('users').doc(userId).get();
-    if (userDoc.exists) {
-      const userDocData = userDoc.data();
-      userRole = userDocData?.role || '';
-
-      // If user has student or driver role, get detailed data from respective collection
-      if (userRole === 'student') {
-        const studentDoc = await db.collection('students').doc(userId).get();
-        if (studentDoc.exists) {
-          userData = studentDoc.data();
-        }
-      } else if (userRole === 'driver') {
-        const driverDoc = await db.collection('drivers').doc(userId).get();
-        if (driverDoc.exists) {
-          userData = driverDoc.data();
-        }
-      }
-    }
 
     // Reject if user is not student or driver
-    if (!userData || (userRole !== 'student' && userRole !== 'driver')) {
+    if (userRole !== 'student' && userRole !== 'driver') {
+      return NextResponse.json(
+        { error: 'Only students and drivers can submit feedback' },
+        { status: 403 }
+      );
+    }
+
+    // Get user data based on role
+    if (userRole === 'student') {
+      userData = await getByUid(userId) as Record<string, any> | null;
+    } else if (userRole === 'driver') {
+      userData = await getDriverById(userId);
+    }
+
+    if (!userData) {
       return NextResponse.json(
         { error: 'Only students and drivers can submit feedback' },
         { status: 403 }
@@ -119,14 +118,14 @@ export async function POST(request: NextRequest) {
     }
 
     // Get bus info if available
-    let bus_id = userData.assignedBusId || userData.busId || null;
+    let bus_id = userData.busId || userData.busId || null;
     let bus_plate = null;
 
     if (bus_id) {
       try {
-        const busDoc = await db.collection('buses').doc(bus_id).get();
-        if (busDoc.exists) {
-          bus_plate = busDoc.data()?.plateNumber || null;
+        const busData = await getBusById(bus_id);
+        if (busData) {
+          bus_plate = busData.plateNumber || null;
         }
       } catch (e) {
         console.error('Error fetching bus info for feedback:', e);
@@ -209,12 +208,9 @@ export async function GET(request: NextRequest) {
 
     const userId = decodedToken.uid;
 
-    // Get user role from Firestore
-    const { db } = await import('@/lib/firebase-admin');
-    const adminDoc = await db.collection('admins').doc(userId).get();
-    const moderatorDoc = await db.collection('moderators').doc(userId).get();
-
-    if (!adminDoc.exists && !moderatorDoc.exists) {
+    // Get user role
+    const userRole = await resolveUserRole(userId);
+    if (userRole.role !== 'admin' && userRole.role !== 'moderator') {
       return NextResponse.json(
         { error: 'Access denied. Admin or Moderator role required.' },
         { status: 403 }
@@ -222,15 +218,6 @@ export async function GET(request: NextRequest) {
     }
 
     // Read feedback from Firestore
-    let entries = await readFeedback();
-
-    // Trigger cleanup of expired feedback (lazy cleanup)
-    // Only updates DB, returns filtered list if needed, but readFeedback() already returns all currently in DB.
-    // If cleanup runs, next read will be cleaner.
-    // For consistency, we can filter the returned list too based on cleanup logic response.
-    entries = await cleanupOldFeedback(entries);
-
-    // Parse query parameters
     const { searchParams } = new URL(request.url);
     const page = parseInt(searchParams.get('page') || '1');
     const limit = parseInt(searchParams.get('limit') || '25');
@@ -238,10 +225,27 @@ export async function GET(request: NextRequest) {
     const from = searchParams.get('from');
     const to = searchParams.get('to');
 
-    // Filter by search query (in-memory since we fetched all)
-    // For production, use Algolia or Typesense or separate collection
-    // Filter by search query (in-memory since we fetched all)
-    // For production, use Algolia or Typesense or separate collection
+    // Use server-side pagination when no search/date filters
+    // This avoids loading all entries into memory
+    let entries: FeedbackEntry[];
+    let total: number;
+
+    if (!query && !from && !to) {
+      // Server-side pagination - efficient for large datasets
+      const result = await readFeedbackPaginated(page, limit);
+      entries = result.entries;
+      total = result.total;
+    } else {
+      // Filters present - fetch all and filter in memory
+      // (Firestore doesn't support full-text search or complex range filters easily)
+      entries = await readFeedback();
+      total = entries.length;
+    }
+
+    // Trigger cleanup of expired feedback (lazy cleanup)
+    entries = await cleanupOldFeedback(entries);
+
+    // Filter by search query (in-memory since we may have fetched all)
     let filtered = entries;
     if (query) {
       const lowerQuery = query.toLowerCase();
@@ -269,15 +273,16 @@ export async function GET(request: NextRequest) {
       new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
     );
 
-    // Paginate
-    const total = filtered.length;
+    // Paginate (if we used server-side pagination, this is a no-op for first page)
+    // But needed for filtered results
+    const filteredTotal = filtered.length;
     const startIndex = (page - 1) * limit;
     const endIndex = startIndex + limit;
     const paginatedEntries = filtered.slice(startIndex, endIndex);
 
     return NextResponse.json({
       success: true,
-      total,
+      total: query || from || to ? filteredTotal : total,
       page,
       limit,
       items: paginatedEntries

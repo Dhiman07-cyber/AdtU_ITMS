@@ -43,7 +43,7 @@ export default function Step3Bus({
           buses={buses}
           selectedRouteId={formData.routeId || ''}
           selectedBusId={formData.busId || ''}
-          selectedStopId={formData.stopId || ''}
+          selected_stop_name={formData.stop_name || ''}
           selectedShift={formData.shift}
           onReferenceChange={handleRefChange}
           onCapacityCheckResult={setCapacityCheckResult}
@@ -60,7 +60,7 @@ export default function Step3Bus({
                   handleInputChange('shift', value);
                   handleInputChange('routeId', '');
                   handleInputChange('busId', '');
-                  handleInputChange('stopId', '');
+                  handleInputChange('stop_name', '');
                   handleInputChange('busAssigned', '');
                 }}
               >
@@ -88,7 +88,7 @@ export default function Step3Bus({
         </Button>
         <Button 
           onClick={onNext} 
-          className="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold h-11 px-6 rounded-xl shadow-lg shadow-indigo-600/20 transition-colors flex items-center gap-2"
+          className="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold h-11 px-6 rounded-xl transition-colors flex items-center gap-2"
         >
           Continue
           <ArrowRight className="w-4 h-4" />

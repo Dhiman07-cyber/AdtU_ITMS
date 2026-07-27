@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { deleteRouteAndData } from '@/lib/cleanup-helpers';
 import { verifyApiAuth } from '@/lib/security/api-auth';
 import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
+import { clearRouteCache } from '@/lib/profile-service';
 
 export async function DELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -27,6 +28,8 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
         error: result.error || 'Failed to delete route' 
       }, { status: 500 });
     }
+
+    clearRouteCache(id);
     
     return NextResponse.json({ 
       success: true, 
