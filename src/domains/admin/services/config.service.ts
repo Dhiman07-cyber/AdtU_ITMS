@@ -93,7 +93,11 @@ export async function getSystemConfig(): Promise<ConfigResult<SystemConfig>> {
 
   const doc = await adminDb.collection('settings').doc('config').get();
   if (!doc.exists) {
-    throw new Error('Configuration missing in settings database. Please configure settings and try again later.');
+    return {
+      data: { appName: 'AdtU Bus Services', busFee: { amount: 5000, version: 1 } } as any,
+      updatedAt: null,
+      updatedByUid: null,
+    };
   }
 
   const data = doc.data() as SystemConfig;
@@ -209,7 +213,11 @@ export async function getLegalConfig(type: 'privacy' | 'terms'): Promise<ConfigR
 
   const doc = await adminDb.collection('settings').doc(type).get();
   if (!doc.exists) {
-    throw new Error(`Configuration missing in settings database for ${type}. Please configure settings and try again later.`);
+    return {
+      data: { title: type === 'privacy' ? 'Privacy Policy' : 'Terms of Service', sections: [] },
+      updatedAt: null,
+      updatedByUid: null,
+    };
   }
 
   const data = doc.data() as LegalConfig;

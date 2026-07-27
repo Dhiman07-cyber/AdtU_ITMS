@@ -1,79 +1,126 @@
-name: CI
+name: Continuous Integration (CI)
 
 on:
   pull_request:
+    branches: [main, develop]
   push:
     branches: [main]
 
-# Cancel superseded runs on the same ref.
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  verify:
-    name: Verify (TypeScript · Tests · Build · Performance)
+  typecheck-app:
+    name: 1. Typecheck (App)
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-
       - name: Install dependencies
         run: npm ci
-
-      # ── 1. TypeScript — app layer ──────────────────────────────────────────
-      - name: Typecheck (app)
+      - name: TypeScript Check (App)
         run: npx tsc --noEmit
 
-      # ── 2. TypeScript — WS server layer ───────────────────────────────────
-      - name: Typecheck (server)
+  typecheck-server:
+    name: 2. Typecheck (WebSocket Server)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: TypeScript Check (Server)
         run: npx tsc --noEmit --project server/tsconfig.json
 
-      # ── 3. Lint (non-blocking — existing debt) ────────────────────────────
-      - name: Lint
+  lint:
+    name: 3. Code Style & Linting
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: ESLint Check
         run: npm run lint
-        continue-on-error: true
 
-      # ── 4. Tests (including reliability & observability & performance) ─────
-      - name: Test
+  unit-tests:
+    name: 4. Unit & Integration Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Run Vitest Suite
         run: npm run test:run
 
-      # ── 5. Production build ───────────────────────────────────────────────
-      - name: Build
+  build-app:
+    name: 5. Next.js Production Build
+    needs: [typecheck-app, typecheck-server, lint]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Build Next.js Application
         run: npm run build
         env:
           NODE_ENV: production
-          # Firebase Client
-          NEXT_PUBLIC_FIREBASE_API_KEY:               ci-placeholder
-          NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN:           ci.firebaseapp.com
-          NEXT_PUBLIC_FIREBASE_PROJECT_ID:            ci
-          NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET:        ci.appspot.com
-          NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID:   "000000000000"
-          NEXT_PUBLIC_FIREBASE_APP_ID:                1:000000000000:web:ci
-          # Firebase Admin
-          FIREBASE_CLIENT_EMAIL:                      ci@ci.iam.gserviceaccount.com
-          FIREBASE_PRIVATE_KEY:                       "-----BEGIN RSA PRIVATE KEY-----\nci\n-----END RSA PRIVATE KEY-----"
-          # Supabase
-          NEXT_PUBLIC_SUPABASE_URL:                   https://ci.supabase.co
-          NEXT_PUBLIC_SUPABASE_ANON_KEY:              ci
-          SUPABASE_SERVICE_ROLE_KEY:                  ci
-          # Crypto secrets
-          SIGNING_SECRET_KEY:                         ci-signing-secret-key-placeholder-32ch
-          ENCRYPTION_SECRET_KEY:                      ci-encryption-secret-placeholder-32ch
-          RECEIPT_SIGNING_SECRET:                     ci-receipt-signing-secret-placeholder
-          DOCUMENT_PRIVATE_KEY:                       ci
-          DOCUMENT_PUBLIC_KEY:                        ci
-          # Payment
-          RAZORPAY_KEY_ID:                            ci
-          RAZORPAY_KEY_SECRET:                        ci
-          RAZORPAY_WEBHOOK_SECRET:                    ci
-          # Storage
-          CLOUDINARY_API_KEY:                         ci
-          CLOUDINARY_API_SECRET:                      ci
-          # Operations
-          CRON_SECRET:                                ci
+          NEXT_PUBLIC_FIREBASE_API_KEY: ci-placeholder
+          NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: ci.firebaseapp.com
+          NEXT_PUBLIC_FIREBASE_PROJECT_ID: ci
+          NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: ci.appspot.com
+          NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: "000000000000"
+          NEXT_PUBLIC_FIREBASE_APP_ID: 1:000000000000:web:ci
+          FIREBASE_CLIENT_EMAIL: ci@ci.iam.gserviceaccount.com
+          FIREBASE_PRIVATE_KEY: "-----BEGIN RSA PRIVATE KEY-----\nci\n-----END RSA PRIVATE KEY-----"
+          NEXT_PUBLIC_SUPABASE_URL: https://ci.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ci
+          SUPABASE_SERVICE_ROLE_KEY: ci
+          SIGNING_SECRET_KEY: ci-signing-secret-key-placeholder-32ch
+          ENCRYPTION_SECRET_KEY: ci-encryption-secret-placeholder-32ch
+          RECEIPT_SIGNING_SECRET: ci-receipt-signing-secret-placeholder
+          DOCUMENT_PRIVATE_KEY: ci
+          DOCUMENT_PUBLIC_KEY: ci
+          RAZORPAY_KEY_ID: ci
+          RAZORPAY_KEY_SECRET: ci
+          RAZORPAY_WEBHOOK_SECRET: ci
+          CLOUDINARY_API_KEY: ci
+          CLOUDINARY_API_SECRET: ci
+          CRON_SECRET: ci
+          WS_PRIVILEGED_TOKEN: ci-ws-token
+      - name: Generate Release Manifest
+        run: npm run manifest
+
+  build-docker:
+    name: 6. Docker Container Verification
+    needs: [build-app]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Build Application Container
+        run: docker build -t itms-app:ci .
+      - name: Build WebSocket Server Container
+        run: docker build -t itms-ws:ci -f server/Dockerfile .

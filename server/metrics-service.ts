@@ -34,6 +34,7 @@ export class MetricsService {
   };
 
   inc(k: MetricKey, n = 1): void { this.state[k] += n; }
+  get(k: MetricKey): number { return this.state[k] || 0; }
 
   get uptime() { return Date.now() - this.startTime; }
 

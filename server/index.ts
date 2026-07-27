@@ -8,11 +8,17 @@ import { metricsService } from './metrics-service';
 import { stopOfflineQueue } from './offline-queue';
 import { stopRateLimiter } from './rate-limiter';
 import { stopMessageValidator } from './message-validator';
+import { validateEnvironment } from '../src/lib/env-validator';
 
 const WS_PORT = parseInt(process.env.WS_PORT || '3001', 10);
 const HEALTH_PORT = parseInt(process.env.HEALTH_PORT || '9090', 10);
 
 async function main() {
+  const envCheck = validateEnvironment({ isWebSocketServer: true });
+  if (!envCheck.valid && process.env.NODE_ENV === 'production') {
+    logger.error('startup_blocked_invalid_environment', { missing: envCheck.missing });
+    process.exit(1);
+  }
   if (!process.env.FIREBASE_CLIENT_EMAIL || !process.env.FIREBASE_PRIVATE_KEY) {
     logger.warn('Firebase Admin credentials not found; auth will reject all connections', { port: WS_PORT });
   }
@@ -36,6 +42,15 @@ async function main() {
       const status = healthService.readiness();
       res.writeHead(status.status === 'ok' ? 200 : 503);
       res.end(JSON.stringify(status));
+    } else if (req.url === '/health/startup') {
+      healthService.startup().then((status) => {
+        res.writeHead(status.status === 'ok' ? 200 : 503);
+        res.end(JSON.stringify(status));
+      }).catch(() => {
+        res.writeHead(503);
+        res.end(JSON.stringify({ status: 'error' }));
+      });
+      return;
     } else if (req.url === '/health') {
       res.writeHead(200);
       res.end(JSON.stringify(healthService.liveness()));

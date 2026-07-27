@@ -1329,7 +1329,7 @@ export default function ModeratorApplicationDetailPage() {
                 <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider">Payment made on</span>
                 <span className="text-[13px] font-bold text-zinc-200">
                   {paymentData?.timestamp || application.formData?.paymentInfo?.paymentTime || application.formData?.paymentInfo?.paidAt
-                    ? new Date(paymentData?.timestamp || application.formData?.paymentInfo?.paymentTime || application.formData?.paymentInfo?.paidAt!).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })
+                    ? new Date(paymentData?.timestamp || application.formData?.paymentInfo?.paymentTime || (application.formData?.paymentInfo?.paidAt as string)).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })
                     : 'N/A'}
                 </span>
               </div>

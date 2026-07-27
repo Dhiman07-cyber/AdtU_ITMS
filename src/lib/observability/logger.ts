@@ -61,12 +61,14 @@ function emitLog(
   const ctx = getRequestContext();
   const safeMeta = (meta ? redactMetadata(meta) : {}) as Record<string, unknown>;
 
-  const entry: StructuredLogEntry = {
+  const entry: StructuredLogEntry & { level: string; op: string } = {
     timestamp: new Date().toISOString(),
     severity,
+    level: severity.toLowerCase(),
     service: ctx?.service || observabilityConfig.serviceName,
     component: component || ctx?.component || 'core',
     operation: operation || ctx?.operation || 'unknown',
+    op: operation || ctx?.operation || 'unknown',
     correlation_id: ctx?.correlationId || (safeMeta.correlationId as string) || 'none',
     request_id: ctx?.requestId || (safeMeta.requestId as string) || 'none',
     trace_id: ctx?.traceContext?.traceId || (safeMeta.traceId as string) || 'none',

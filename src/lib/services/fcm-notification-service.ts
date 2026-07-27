@@ -66,6 +66,16 @@ export async function verifyDriverRouteBinding(
 
     if (activeTrip?.bus_id === busId) return { authorized: true };
 
+    const { data: bus } = await supabase
+      .from('buses')
+      .select('driver_id, driver_uid')
+      .eq('id', busId)
+      .maybeSingle();
+
+    if (bus && (bus.driver_id === driverId || bus.driver_uid === driverId)) {
+      return { authorized: true };
+    }
+
     return { authorized: false, reason: 'No active trip found for this driver and bus' };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Driver authorization failed';
