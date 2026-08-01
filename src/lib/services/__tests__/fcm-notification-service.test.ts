@@ -178,6 +178,7 @@ describe('FCM Notification Service', () => {
         const chain: Record<string, any> = {
           select: vi.fn(() => chain),
           eq: vi.fn(() => chain),
+          or: vi.fn(() => chain),
           in: vi.fn(() => chain),
           limit: vi.fn(() => chain),
           maybeSingle: vi.fn(),
@@ -200,13 +201,12 @@ describe('FCM Notification Service', () => {
         const chain: Record<string, any> = {
           select: vi.fn(() => chain),
           eq: vi.fn(() => chain),
+          or: vi.fn(() => chain),
           in: vi.fn(() => chain),
           limit: vi.fn(() => chain),
           maybeSingle: vi.fn(),
         };
-        if (table === 'driver_status') {
-          chain.maybeSingle.mockResolvedValue({ data: { bus_id: 'other', driver_uid: 'x' }, error: null });
-        } else if (table === 'buses') {
+        if (table === 'buses') {
           chain.maybeSingle.mockResolvedValue({ data: { driver_uid: 'x' }, error: null });
         }
         return chain;

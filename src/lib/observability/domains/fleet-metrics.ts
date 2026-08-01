@@ -7,7 +7,7 @@ import { canonicalEventBus, createCanonicalEvent } from '../events';
 
 class FleetDomainObservability {
   public recordDriverAssigned(driverId: string, busId: string, shift?: string, assignedBy?: string): void {
-    metrics.counter('fleet_driver_assignments_total', 'Total driver-bus assignments', { shift: shift || 'all' });
+    metrics.counter('itms_active_trips_total', 'Total active trips started', { shift: shift || 'all' });
 
     const event = createCanonicalEvent(
       'DriverAssigned',

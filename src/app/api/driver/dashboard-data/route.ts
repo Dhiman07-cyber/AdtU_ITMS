@@ -15,14 +15,22 @@ export const GET = withSecurity(
         const uid = auth.uid;
         const supabase = getSupabaseServer();
 
-        // 1. Fetch Driver Profile
-        const { data: driverProfileResult } = await supabase
-            .from('driver_profiles')
-            .select('uid, full_name, license_number, employee_id, joining_date, status')
-            .eq('uid', uid)
-            .maybeSingle();
+        // 1 & 2. Fetch Driver Profile and Active Trip in PARALLEL
+        const [profileQueryRes, activeTripRes] = await Promise.all([
+            supabase
+                .from('driver_profiles')
+                .select('uid, full_name, license_number, employee_id, joining_date, status')
+                .eq('uid', uid)
+                .maybeSingle(),
+            supabase
+                .from('active_trips')
+                .select('trip_id, bus_id, route_id, shift, status, start_time')
+                .eq('driver_id', uid)
+                .eq('status', 'active')
+                .maybeSingle()
+        ]);
 
-        let driverProfile = driverProfileResult;
+        let driverProfile = profileQueryRes.data;
 
         // Fallback: If driver_profiles row is missing, check users table and auto-create profile
         if (!driverProfile) {
@@ -54,14 +62,7 @@ export const GET = withSecurity(
             driverProfile = newProfile;
         }
 
-        // 2. Fetch Active Trip for this driver from active_trips
-        const { data: activeTrip } = await supabase
-            .from('active_trips')
-            .select('trip_id, bus_id, route_id, shift, status, start_time')
-            .eq('driver_id', uid)
-            .eq('status', 'active')
-            .maybeSingle();
-
+        const activeTrip = activeTripRes.data;
         const isTripActive = !!activeTrip;
         const busId = activeTrip?.bus_id || null;
         const routeId = activeTrip?.route_id || null;

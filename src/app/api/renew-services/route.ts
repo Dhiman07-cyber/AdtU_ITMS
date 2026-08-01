@@ -9,6 +9,7 @@ import { paymentsSupabaseService } from '@/lib/services/payments-supabase';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import { computeBlockDatesFromValidUntil } from '@/lib/utils/deadline-computation';
 import { calculateRenewalDate,formatRenewalDate } from '@/lib/utils/renewal-utils';
+import { normalizeShift } from '@/lib/utils/shift-utils';
 import crypto from 'crypto';
 import { NextRequest,NextResponse } from 'next/server';
 
@@ -207,7 +208,10 @@ export async function POST(request: NextRequest) {
 
         if (seatWasReleased && renewalBusId) {
           try {
-            const shift = studentData.shift || 'Morning';
+            const shift = normalizeShift(studentData.shift);
+            if (!shift) {
+              throw new Error('Student profile missing valid shift assignment for renewal seat check.');
+            }
             // ponytail: checkBusCapacity is a fast-fail optimization (STABLE read, no lock).
             // The real capacity guard is inside bus_increment_capacity (FOR UPDATE + re-check).
             // This check avoids the heavier locked increment when the bus is clearly full.

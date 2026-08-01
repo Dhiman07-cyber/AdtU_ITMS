@@ -160,6 +160,35 @@ export async function getValidTokensForBus(busId: string): Promise<TokenWithMeta
 }
 
 /**
+ * Get all valid tokens for students assigned to a specific bus AND matching shift.
+ */
+export async function getValidTokensForBusAndShift(busId: string, shift?: string): Promise<TokenWithMeta[]> {
+  const { isShiftCompatible } = await import('@/lib/utils');
+  const busVariations = [busId];
+  if (busId.startsWith('bus_')) {
+    busVariations.push(busId.replace('bus_', ''));
+  } else {
+    busVariations.push(`bus_${busId}`);
+  }
+
+  const students = await getStudentsByBusIds(busVariations);
+  if (students.length === 0) {
+    return [];
+  }
+
+  const filteredStudents = shift
+    ? students.filter(s => isShiftCompatible(s.shift, shift))
+    : students;
+
+  if (filteredStudents.length === 0) {
+    return [];
+  }
+
+  const userIds = filteredStudents.map(s => s.uid);
+  return getValidFcmTokensForUsers(userIds);
+}
+
+/**
  * Cleanup stale tokens across all users.
  */
 export async function cleanupStaleTokens(maxAgeDays: number = 30): Promise<{

@@ -5,11 +5,13 @@ import { NextResponse } from 'next/server';
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const auth = await verifyApiAuth(request, ['admin', 'moderator']);
+    const auth = await verifyApiAuth(request, ['admin', 'moderator', 'student', 'driver']);
     if (!auth.authenticated) return auth.response;
 
-    const permissionDenied = await requireModeratorPermission(auth, 'students', 'canView');
-    if (permissionDenied) return permissionDenied;
+    if (auth.role === 'moderator') {
+      const permissionDenied = await requireModeratorPermission(auth, 'students', 'canView');
+      if (permissionDenied) return permissionDenied;
+    }
 
     const { id } = await params;
     const cleanId = decodeURIComponent(id || '').trim();
@@ -23,6 +25,11 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
 
     if (!student) {
       return NextResponse.json({ error: 'Student not found' }, { status: 404 });
+    }
+
+    // Student self-access check: students can only access their own profile
+    if (auth.role === 'student' && auth.uid !== student.uid && auth.uid !== student.id) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
     // Format the date of birth to ensure it's in YYYY-MM-DD format (if present)

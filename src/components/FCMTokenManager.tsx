@@ -9,7 +9,7 @@ import {
 	saveFCMToken
 } from "@/lib/fcm-service";
 import { usePathname } from "next/navigation";
-import { useCallback,useEffect,useRef } from "react";
+import { useCallback,useEffect,useRef,useState } from "react";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 const TOKEN_REFRESH_INTERVAL_MS = 12 * 60 * 60 * 1000; // 12 hours
@@ -64,30 +64,42 @@ export function FCMTokenManager() {
     try {
       // 1. Check browser support
       if (typeof window === 'undefined' || !('serviceWorker' in navigator) || !('PushManager' in window)) {
+        console.warn('⚠️ [FCMTokenManager] Browser does not support push notifications — skipping token sync.');
         return;
       }
 
       // 2. Check/request notification permission
+      if (Notification.permission === 'denied') {
+        console.error('❌ [FCMTokenManager] Notification permission is DENIED by the browser. '
+          + 'Students must allow notifications in browser settings. FCM tokens cannot be saved.');
+        return;
+      }
       const hasPermission = await requestNotificationPermission();
-      if (!hasPermission) return;
-
-      // 3. Get FCM token from Firebase SDK
-      const fcmToken = await getFCMToken();
-      if (!fcmToken) return;
-
-      // 4. Check if sync is needed
-      const lsTokenKey = `${LS_TOKEN_KEY_PREFIX}${currentUser.uid}`;
-      const lsSyncKey = `${LS_LAST_SYNC_PREFIX}${currentUser.uid}`;
-      const cachedToken = localStorage.getItem(lsTokenKey);
-      const lastSync = parseInt(localStorage.getItem(lsSyncKey) || '0', 10);
-      const timeSinceLastSync = Date.now() - lastSync;
-
-      // Skip if token unchanged AND last sync was recent (within refresh interval)
-      if (!force && cachedToken === fcmToken && timeSinceLastSync < TOKEN_REFRESH_INTERVAL_MS) {
+      if (!hasPermission) {
+        console.warn('⚠️ [FCMTokenManager] Notification permission not granted — FCM tokens will not be saved.');
         return;
       }
 
+      // 3. Get FCM token from Firebase SDK
+      const fcmToken = await getFCMToken();
+      if (!fcmToken) {
+        console.error('❌ [FCMTokenManager] getFCMToken() returned null. '
+          + 'Check NEXT_PUBLIC_FIREBASE_VAPID_KEY env var and that the service worker registered successfully.');
+        return;
+      }
+
+      // 4. Check if sync is needed (sessionStorage ensures every new app session syncs with Supabase)
+      const ssSyncKey = `fcm_session_synced_${currentUser.uid}`;
+      const lsTokenKey = `${LS_TOKEN_KEY_PREFIX}${currentUser.uid}`;
+      const cachedToken = localStorage.getItem(lsTokenKey);
       const isNewToken = cachedToken !== fcmToken;
+      const sessionSynced = sessionStorage.getItem(ssSyncKey) === 'true';
+
+      // Skip ONLY if token is unchanged AND we already synced in this browser session
+      if (!force && !isNewToken && sessionSynced) {
+        return;
+      }
+
       if (isNewToken) {
         console.log('🔑 FCM token changed or first registration, saving...');
       } else {
@@ -97,18 +109,21 @@ export function FCMTokenManager() {
       // 5. Get fresh auth ID token
       const idToken = await currentUser.getIdToken(true);
 
-      // 6. Save to Firestore via API
+      // 6. Save to PostgreSQL via API
       const saved = await saveFCMToken(currentUser.uid, fcmToken, 'web', idToken);
       if (saved) {
         localStorage.setItem(lsTokenKey, fcmToken);
-        localStorage.setItem(lsSyncKey, Date.now().toString());
+        sessionStorage.setItem(ssSyncKey, 'true');
         if (isNewToken) {
-          console.log('✅ FCM token registered successfully');
+          console.log('✅ [FCMTokenManager] FCM token registered successfully (token length:', fcmToken.length, ')');
+        } else {
+          console.log('🔄 [FCMTokenManager] FCM token refreshed successfully.');
         }
       } else {
-        console.warn('⚠️ FCM token save failed, will retry on next sync');
-        // Clear sync timestamp so we retry sooner
-        localStorage.removeItem(lsSyncKey);
+        console.error('❌ [FCMTokenManager] saveFCMToken() returned false — token NOT saved to fcm_tokens table. '
+          + 'Check /api/save-fcm-token response in Network tab for HTTP 400/403/500.');
+        localStorage.removeItem(lsTokenKey);
+        sessionStorage.removeItem(ssSyncKey);
       }
     } catch (error) {
       // CRITICAL: Never crash the host page
@@ -213,6 +228,68 @@ export function FCMTokenManager() {
     };
   }, [currentUser?.uid, userData, pathname]);
 
-  // This component doesn't render any UI
-  return null;
+  const [showPromptBanner, setShowPromptBanner] = useState(false);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && 'Notification' in window && userData?.role === 'student') {
+      if (Notification.permission === 'default') {
+        setShowPromptBanner(true);
+      }
+    }
+  }, [userData]);
+
+  const handleEnableNotifications = async () => {
+    setShowPromptBanner(false);
+    if (!currentUser) return;
+    try {
+      const granted = await requestNotificationPermission();
+      if (granted) {
+        await syncToken(true);
+        addToastRef.current?.('🔔 Push notifications enabled! You will be notified when your trip starts.', 'success');
+      } else {
+        addToastRef.current?.('Notifications permission was not granted.', 'info');
+      }
+    } catch (err) {
+      console.warn('Failed to enable notifications:', err);
+    }
+  };
+
+  return (
+    <>
+      {showPromptBanner && (
+        <div className="fixed bottom-4 right-4 left-4 sm:left-auto sm:max-w-md z-50 p-4 bg-gray-900 text-white rounded-2xl shadow-2xl border border-gray-800 flex flex-col gap-3 animate-in slide-in-from-bottom duration-300">
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex items-center gap-2.5">
+              <span className="text-2xl">🚌</span>
+              <div>
+                <h4 className="font-semibold text-sm">Enable Trip Notifications</h4>
+                <p className="text-xs text-gray-300">Get instant alerts on your phone when your bus starts its journey.</p>
+              </div>
+            </div>
+            <button
+              onClick={() => setShowPromptBanner(false)}
+              className="text-gray-400 hover:text-white p-1 text-xs"
+              aria-label="Dismiss"
+            >
+              ✕
+            </button>
+          </div>
+          <div className="flex justify-end gap-2 pt-1">
+            <button
+              onClick={() => setShowPromptBanner(false)}
+              className="px-3 py-1.5 text-xs text-gray-400 hover:text-white rounded-lg transition-colors"
+            >
+              Later
+            </button>
+            <button
+              onClick={handleEnableNotifications}
+              className="px-4 py-1.5 text-xs font-medium bg-amber-500 hover:bg-amber-600 text-gray-950 rounded-lg transition-colors shadow-sm"
+            >
+              Enable Notifications
+            </button>
+          </div>
+        </div>
+      )}
+    </>
+  );
 }

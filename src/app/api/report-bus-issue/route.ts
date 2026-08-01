@@ -52,7 +52,23 @@ export async function POST(request: Request) {
               title: 'Bus Issue Reported',
               body: `Driver ${issueWithDriver.driverName} reported an issue with bus ${issueData.busId}: ${issueData.title}`
             },
-            tokens: moderatorTokens
+            tokens: moderatorTokens,
+            android: {
+              priority: 'high' as const,
+              notification: { channelId: 'bus_alerts', sound: 'default' }
+            },
+            webpush: {
+              headers: { Urgency: 'high' },
+              notification: {
+                title: 'Bus Issue Reported',
+                body: `Driver ${issueWithDriver.driverName} reported an issue with bus ${issueData.busId}: ${issueData.title}`,
+                icon: '/icons/icon-192x192.png',
+                badge: '/icons/icon-72x72.png',
+              },
+              fcmOptions: {
+                link: '/moderator/notifications'
+              }
+            }
           };
 
           await messaging.sendEachForMulticast(message);

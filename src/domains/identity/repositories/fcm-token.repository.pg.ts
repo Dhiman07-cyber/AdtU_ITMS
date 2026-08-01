@@ -91,25 +91,34 @@ export async function deleteToken(userId: string, tokenHash: string): Promise<vo
  * Returns deduplicated tokens.
  */
 export async function getValidTokensForUsers(userIds: string[]): Promise<FcmTokenWithMeta[]> {
-  if (userIds.length === 0) return [];
+  if (!userIds || userIds.length === 0) return [];
 
   const db = getSupabaseServer();
+  const chunkSize = 200;
+  const allRows: Array<{ token: string; platform: string; user_id: string }> = [];
 
-  const { data, error } = await db
-    .from('fcm_tokens')
-    .select('token, platform, user_id')
-    .in('user_id', userIds)
-    .eq('valid', true);
+  for (let i = 0; i < userIds.length; i += chunkSize) {
+    const chunk = userIds.slice(i, i + chunkSize);
+    const { data, error } = await db
+      .from('fcm_tokens')
+      .select('token, platform, user_id')
+      .in('user_id', chunk)
+      .eq('valid', true);
 
-  if (error) {
-    console.error('FCM token read failed:', error.message);
-    return [];
+    if (error) {
+      console.error('FCM token read failed for chunk:', error.message);
+      continue;
+    }
+
+    if (data) {
+      allRows.push(...data);
+    }
   }
 
   // Deduplicate by token value
   const seen = new Set<string>();
   const unique: FcmTokenWithMeta[] = [];
-  for (const row of data ?? []) {
+  for (const row of allRows) {
     if (!seen.has(row.token)) {
       seen.add(row.token);
       unique.push({

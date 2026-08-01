@@ -11,6 +11,7 @@ vi.mock('@/lib/supabase-server', () => ({
 }));
 
 vi.mock('@/domains/trip/services/trip-validation.service', () => ({
+  tripStartPreflight: vi.fn(() => Promise.resolve({ authorized: true, busData: { bus_number: 'BUS-01', route_id: 'r1' }, conflict: false })),
   verifyDriverBusAssignment: vi.fn(() => Promise.resolve({ authorized: true, busData: { bus_number: 'BUS-01' } })),
   checkNoConflict: vi.fn(() => Promise.resolve({ conflict: false })),
   resolveRouteId: vi.fn(() => Promise.resolve('r1')),

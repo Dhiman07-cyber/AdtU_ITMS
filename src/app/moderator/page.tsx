@@ -10,7 +10,6 @@ import { useCallback,useEffect,useMemo,useState } from 'react';
 import {
 	DashboardHeader,
 	DashboardStats,
-	HeroLiveOperations,
 	QuickActions,
 	SystemHealthStrip,
 	SystemLifecycleIntelligence
@@ -298,16 +297,7 @@ export default function EnhancedModeratorDashboard() {
           <HighLoadAlert role="moderator" className="animate-in fade-in slide-in-from-top-4 duration-700" />
         </div>
 
-        <HeroLiveOperations
-          activeTrips={activeTrips}
-          totalBuses={stats.totalBuses}
-          totalStudents={stats.totalStudents}
-          stats={stats}
-          allBuses={allBuses}
-          allRoutes={allRoutes}
-          allDrivers={[]} // Simplified
-          role="moderator"
-        />
+
 
         <KeyMetricsGrid stats={stats} role="moderator" />
 

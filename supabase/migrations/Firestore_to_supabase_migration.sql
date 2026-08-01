@@ -961,20 +961,20 @@ DECLARE
 BEGIN
     SELECT trip_id INTO v_existing FROM active_trips
     WHERE bus_id = p_bus_id AND driver_id = p_driver_id AND status = 'active';
-    IF FOUND THEN RETURN jsonb_build_object('success', true, 'tripId', v_existing.trip_id, 'alreadyActive', true); END IF;
+    IF FOUND THEN RETURN jsonb_build_object('success', true, 'tripId', v_existing.trip_id::text, 'alreadyActive', true); END IF;
 
-    UPDATE active_trips SET status = 'ended', end_time = v_now
+    DELETE FROM active_trips
     WHERE status = 'active' AND (bus_id = p_bus_id OR driver_id = p_driver_id)
       AND last_heartbeat < v_now - INTERVAL '600 seconds';
 
     BEGIN
         INSERT INTO active_trips (trip_id, bus_id, driver_id, route_id, shift, status, start_time, last_heartbeat, expires_at)
-        VALUES (p_trip_id, p_bus_id, p_driver_id, p_route_id, p_shift, 'active', v_now, v_now, v_expires_at);
+        VALUES (p_trip_id::uuid, p_bus_id, p_driver_id, p_route_id, p_shift, 'active', v_now, v_now, v_expires_at);
         RETURN jsonb_build_object('success', true, 'tripId', p_trip_id, 'alreadyActive', false);
     EXCEPTION WHEN unique_violation THEN
         SELECT trip_id, driver_id INTO v_existing FROM active_trips WHERE bus_id = p_bus_id AND status = 'active' LIMIT 1;
         IF FOUND AND v_existing.driver_id = p_driver_id THEN
-            RETURN jsonb_build_object('success', true, 'tripId', v_existing.trip_id, 'alreadyActive', true);
+            RETURN jsonb_build_object('success', true, 'tripId', v_existing.trip_id::text, 'alreadyActive', true);
         END IF;
         RETURN jsonb_build_object('success', false, 'error', 'LOCKED_BY_OTHER', 'activeDriverId', COALESCE(v_existing.driver_id, 'unknown'));
     END;
@@ -988,7 +988,7 @@ RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE v_expires_at TIMESTAMPTZ := NOW() + (p_ttl_seconds || ' seconds')::INTERVAL; v_updated INTEGER;
 BEGIN
     UPDATE active_trips SET last_heartbeat = NOW(), expires_at = v_expires_at
-    WHERE trip_id = p_trip_id AND driver_id = p_driver_id AND bus_id = p_bus_id AND status = 'active';
+    WHERE trip_id = p_trip_id::uuid AND driver_id = p_driver_id AND bus_id = p_bus_id AND status = 'active';
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     IF v_updated = 1 THEN RETURN jsonb_build_object('success', true);
     ELSE RETURN jsonb_build_object('success', false, 'error', 'Active trip not found'); END IF;
@@ -1000,7 +1000,7 @@ RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE v_updated INTEGER;
 BEGIN
     UPDATE active_trips SET status = 'ended', end_time = NOW()
-    WHERE trip_id = p_trip_id AND bus_id = p_bus_id AND driver_id = p_driver_id AND status = 'active';
+    WHERE trip_id = p_trip_id::uuid AND bus_id = p_bus_id AND driver_id = p_driver_id AND status = 'active';
     GET DIAGNOSTICS v_updated = ROW_COUNT;
     RETURN jsonb_build_object('success', true, 'released', v_updated > 0);
 END;
@@ -1008,22 +1008,35 @@ $$;
 
 CREATE OR REPLACE FUNCTION public.acquire_fcm_lock(p_trip_id TEXT, p_bus_id TEXT, p_lock_type TEXT)
 RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
-DECLARE v_column TEXT; v_updated INTEGER;
+DECLARE 
+    v_column TEXT; 
+    v_updated INTEGER := 0;
+    v_trip_uuid UUID;
 BEGIN
     IF p_lock_type = 'start' THEN v_column := 'fcm_start_sent';
     ELSIF p_lock_type = 'end' THEN v_column := 'fcm_end_sent';
     ELSE RETURN jsonb_build_object('success', false, 'error', 'Invalid lock_type'); END IF;
 
+    BEGIN
+        v_trip_uuid := p_trip_id::uuid;
+    EXCEPTION WHEN OTHERS THEN
+        RETURN jsonb_build_object('success', true, 'acquired', true);
+    END;
+
     IF v_column = 'fcm_start_sent' THEN
         UPDATE active_trips SET fcm_start_sent = true
-        WHERE trip_id = p_trip_id AND bus_id = p_bus_id AND status = 'active' AND fcm_start_sent = false;
+        WHERE trip_id = v_trip_uuid AND bus_id = p_bus_id AND fcm_start_sent = false;
     ELSE
         UPDATE active_trips SET fcm_end_sent = true
-        WHERE trip_id = p_trip_id AND bus_id = p_bus_id AND status = 'active' AND fcm_end_sent = false;
+        WHERE trip_id = v_trip_uuid AND bus_id = p_bus_id AND fcm_end_sent = false;
     END IF;
+
     GET DIAGNOSTICS v_updated = ROW_COUNT;
-    IF v_updated = 1 THEN RETURN jsonb_build_object('success', true, 'acquired', true);
-    ELSE RETURN jsonb_build_object('success', true, 'acquired', false); END IF;
+    IF v_updated >= 1 THEN 
+        RETURN jsonb_build_object('success', true, 'acquired', true);
+    ELSE 
+        RETURN jsonb_build_object('success', true, 'acquired', false);
+    END IF;
 END;
 $$;
 
@@ -1120,13 +1133,21 @@ DECLARE
   v_trip RECORD;
 BEGIN
   FOR v_trip IN
-    SELECT at.trip_id, at.bus_id, at.driver_id
+    SELECT at.trip_id, at.bus_id, at.driver_id, at.route_id, at.shift, at.start_time
     FROM public.active_trips at
     WHERE at.status = 'active'
       AND at.last_heartbeat < NOW() - (p_heartbeat_timeout_seconds || ' seconds')::INTERVAL
   LOOP
-    UPDATE public.active_trips
-    SET status = 'ended', end_time = NOW()
+    INSERT INTO public.driver_trip_history (
+      trip_id, bus_id, driver_id, route_id, shift, status, ended_reason, start_time, end_time, duration_seconds
+    ) VALUES (
+      v_trip.trip_id, v_trip.bus_id, v_trip.driver_id, v_trip.route_id, v_trip.shift,
+      'completed', 'completed_stale', v_trip.start_time, NOW(),
+      GREATEST(0, EXTRACT(EPOCH FROM (NOW() - v_trip.start_time))::INTEGER)
+    )
+    ON CONFLICT (trip_id) DO NOTHING;
+
+    DELETE FROM public.active_trips
     WHERE active_trips.trip_id = v_trip.trip_id;
     
     RETURN QUERY SELECT v_trip.trip_id, v_trip.bus_id, v_trip.driver_id;
@@ -1211,7 +1232,7 @@ CREATE INDEX IF NOT EXISTS idx_buses_evening_load ON buses(evening_load);
 -- idx_routes_route_id removed: route_id column dropped (was always identical to id).
 CREATE INDEX IF NOT EXISTS idx_routes_status ON routes(status);
 
--- Indexes for active_trips, bus_locations, driver_status, waiting_flags, driver_location_updates, temporary_assignments, device_sessions, reassignment_logs, and payments are defined in COMPLETE_SCHEMA.sql.
+-- Indexes for active_trips, bus_locations, waiting_flags, driver_location_updates, temporary_assignments, device_sessions, reassignment_logs, and payments are defined in COMPLETE_SCHEMA.sql.
 CREATE INDEX IF NOT EXISTS idx_temp_assignments_source_request ON temporary_assignments(source_request_id);
 
 -- Processed payments

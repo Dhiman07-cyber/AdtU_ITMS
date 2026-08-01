@@ -13,7 +13,7 @@ import {
 	getBusById,
 	getRouteById
 } from "@/lib/dataService";
-import { formatIdForDisplay } from "@/lib/utils";
+import { formatIdForDisplay, isShiftCompatible } from "@/lib/utils";
 import {
 	AlertCircle,
 	Bus,
@@ -438,25 +438,32 @@ function TrackBusLive() {
     const client = wsClientRef.current;
     if (!client) return;
 
-    console.log(`📍 Subscribing to live location for bus: bus_location_${targetBusId}`);
-    const unsub = client.subscribe(`bus_location_${targetBusId}`, (payload: any) => {
-      const data = payload.payload || payload;
-      if (data && data.lat && data.lng) {
-        setBusLocation({
-          busId: data.busId || targetBusId,
-          driverUid: data.driverUid || '',
-          lat: Number(data.lat),
-          lng: Number(data.lng),
-          speed: data.speed !== undefined ? Number(data.speed) : 0,
-          heading: data.heading !== undefined ? Number(data.heading) : 0,
-          accuracy: data.accuracy,
-          timestamp: data.timestamp || new Date().toISOString(),
-        });
-      }
-    });
+    const busVariations = Array.from(new Set([
+      targetBusId,
+      targetBusId.startsWith('bus_') ? targetBusId.replace('bus_', '') : `bus_${targetBusId}`
+    ]));
+
+    console.log(`📍 Subscribing to live location for bus variations:`, busVariations.map(id => `bus_location_${id}`));
+    const unsubs = busVariations.map(id =>
+      client.subscribe(`bus_location_${id}`, (payload: any) => {
+        const data = payload.payload || payload;
+        if (data && data.lat && data.lng) {
+          setBusLocation({
+            busId: data.busId || targetBusId,
+            driverUid: data.driverUid || '',
+            lat: Number(data.lat),
+            lng: Number(data.lng),
+            speed: data.speed !== undefined ? Number(data.speed) : 0,
+            heading: data.heading !== undefined ? Number(data.heading) : 0,
+            accuracy: data.accuracy,
+            timestamp: data.timestamp || new Date().toISOString(),
+          });
+        }
+      })
+    );
 
     return () => {
-      unsub();
+      unsubs.forEach(unsub => unsub());
     };
   }, [targetBusId, wsClientReady]);
 
@@ -483,6 +490,21 @@ function TrackBusLive() {
         if (result.tripActive) {
           console.log('✅ Active trip found via API:', result.tripData);
           setTripActive(true);
+          if (result.tripData?.current_location) {
+            const loc = result.tripData.current_location;
+            if (loc && loc.lat && loc.lng) {
+              setBusLocation({
+                busId: loc.busId || targetBusId,
+                driverUid: loc.driverUid || result.tripData.driverUid || '',
+                lat: Number(loc.lat),
+                lng: Number(loc.lng),
+                speed: loc.speed !== undefined ? Number(loc.speed) : 0,
+                heading: loc.heading !== undefined ? Number(loc.heading) : 0,
+                accuracy: loc.accuracy,
+                timestamp: loc.timestamp || new Date().toISOString(),
+              });
+            }
+          }
         } else {
           console.log('ℹ️ No active trip found via API');
           setTripActive(false);
@@ -508,6 +530,11 @@ function TrackBusLive() {
         const data = payload.payload || payload;
         const eventType = data.event || payload.event;
         if (eventType === "trip_started" || data.status === "active") {
+          const studentShift = studentData?.shift || studentData?.student_shift;
+          if (data.shift && studentShift && !isShiftCompatible(studentShift, data.shift)) {
+            console.log(`ℹ️ Ignoring trip_started broadcast for bus ${targetBusId} due to shift mismatch (student: ${studentShift}, trip: ${data.shift})`);
+            return;
+          }
           setTripActive(true);
           addToast(`🚌 Trip started for ${formatIdForDisplay(data.routeId || data.busId || targetBusId)}!`, "success");
         } else if (eventType === "trip_ended" || data.status === "ended") {

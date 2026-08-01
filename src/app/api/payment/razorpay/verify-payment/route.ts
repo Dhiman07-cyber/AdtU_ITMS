@@ -79,13 +79,20 @@ export const POST = withSecurity<VerifyPaymentBody>(
         }
 
         let orderDetails: RazorpayOrderDetails;
+        let paymentDetails: RazorpayPaymentDetails;
+
         try {
-            orderDetails = await fetchOrderDetails(razorpay_order_id) as RazorpayOrderDetails;
-            console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] fetchOrderDetails returned:`, JSON.stringify(orderDetails));
+            const [orderRes, paymentRes] = await Promise.all([
+                fetchOrderDetails(razorpay_order_id),
+                fetchPaymentDetails(razorpay_payment_id)
+            ]);
+            orderDetails = orderRes as RazorpayOrderDetails;
+            paymentDetails = paymentRes as RazorpayPaymentDetails;
+            console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] Parallel fetch complete. orderDetails:`, JSON.stringify(orderDetails), `paymentDetails:`, JSON.stringify(paymentDetails));
         } catch (fetchErr: any) {
-            console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] fetchOrderDetails failed:`, fetchErr?.message || fetchErr);
+            console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] Razorpay fetch failed:`, fetchErr?.message || fetchErr);
             return NextResponse.json(
-                { success: false, error: 'Failed to verify order details with Razorpay' },
+                { success: false, error: 'Failed to verify payment or order details with Razorpay' },
                 { status: 502 }
             );
         }
@@ -103,18 +110,6 @@ export const POST = withSecurity<VerifyPaymentBody>(
             return NextResponse.json(
                 { success: false, error: 'Payment order does not belong to the authenticated user' },
                 { status: 403 }
-            );
-        }
-
-        let paymentDetails: RazorpayPaymentDetails;
-        try {
-            paymentDetails = await fetchPaymentDetails(razorpay_payment_id) as RazorpayPaymentDetails;
-            console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] fetchPaymentDetails returned:`, JSON.stringify(paymentDetails));
-        } catch (fetchPayErr: any) {
-            console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] fetchPaymentDetails failed:`, fetchPayErr?.message || fetchPayErr);
-            return NextResponse.json(
-                { success: false, error: 'Failed to verify payment capture with Razorpay' },
-                { status: 502 }
             );
         }
 

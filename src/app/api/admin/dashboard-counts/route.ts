@@ -66,7 +66,7 @@ export const GET = withSecurity(
         safeQuery(supabase.from('applications').select('*', { count: 'exact', head: true }).eq('state', 'awaiting_verification'), fallbackCount),
         safeQuery(supabase.from('applications').select('*', { count: 'exact', head: true }).eq('state', 'submitted').in('application_type', ['renewal', 'renewal_after_soft_block']), fallbackCount),
         adminDb ? safeQuery(adminDb.collection('feedbacks').where('createdAt', '>=', sevenDaysAgo).count().get().then(snap => ({ data: () => ({ count: snap.data().count }) })), { data: () => ({ count: 0 }) }) : Promise.resolve({ data: () => ({ count: 0 }) }),
-        safeQuery(supabase.from('driver_profiles').select('uid, bus_id, route_id, full_name, trip_active, active_trip_id').eq('trip_active', true), fallbackList),
+        safeQuery(supabase.from('active_trips').select('trip_id, bus_id, route_id, driver_id, start_time').eq('status', 'active'), fallbackList),
         safeQuery(supabase.from('payments').select('amount, source'), fallbackList),
         safeQuery(getSystemConfig(), null),
         safeQuery<any>(getDeadlineConfig(), null)
@@ -100,16 +100,16 @@ export const GET = withSecurity(
       const eveningStudents = eveningStudentsSnap.count || 0;
       const expiredStudents = expiredStudentsSnap.count || 0;
 
-      // ── 4. Process Active Trips (Supabase) ──
-      const activeTripData = (statusSnap.data || []).map((driver: any) => {
-        const bus = allBuses.find(b => b.id === driver.bus_id || b.busId === driver.bus_id);
-        const route = allRoutes.find((r: any) => r.id === driver.route_id || r.routeId === driver.route_id);
+      // ── 4. Process Active Trips (Supabase active_trips) ──
+      const activeTripData = (statusSnap.data || []).map((trip: any) => {
+        const bus = allBuses.find(b => b.id === trip.bus_id || b.busId === trip.bus_id || b.bus_number === trip.bus_id);
+        const route = allRoutes.find((r: any) => r.id === trip.route_id || r.routeId === trip.route_id);
         return {
-          id: driver.active_trip_id || driver.uid,
-          busId: bus?.bus_number || driver.bus_id || '?',
+          id: trip.trip_id || trip.id,
+          busId: bus?.bus_number || trip.bus_id || '?',
           routeName: route?.route_name || route?.routeName || 'Tracking...',
-          driverUid: driver.uid,
-          startTime: new Date().toISOString(),
+          driverUid: trip.driver_id,
+          startTime: trip.start_time || new Date().toISOString(),
           studentCount: bus?.currentMembers || 0,
           status: 'In Motion',
         };

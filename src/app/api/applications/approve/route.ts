@@ -18,11 +18,14 @@ export async function POST(request: NextRequest) {
     const decodedToken = await adminAuth.verifyIdToken(token);
     const uid = decodedToken.uid;
 
-    const userRole = await resolveUserRole(uid);
+    const [userRole, updaterInfo] = await Promise.all([
+      resolveUserRole(uid),
+      getUpdaterInfo(adminDb, uid),
+    ]);
+
     if (!userRole.role) {
       return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 });
     }
-    const updaterInfo = await getUpdaterInfo(adminDb, uid);
 
     const permissionDenied = await requireModeratorPermission(
       {

@@ -109,17 +109,23 @@ export const saveFCMToken = async (
     });
 
     if (!response.ok) {
-      console.error(`FCM token save failed (${response.status})`);
+      let errorBody = '';
+      try { errorBody = await response.text(); } catch { /* ignore */ }
+      console.error(
+        `❌ [saveFCMToken] HTTP ${response.status} — token NOT saved.`,
+        { status: response.status, body: errorBody, tokenLength: fcmToken.length, platform }
+      );
       return false;
     }
 
     const data = await response.json();
     return data.success === true;
   } catch (error) {
-    console.error('Error saving FCM token:', error);
+    console.error('❌ [saveFCMToken] Network error saving FCM token:', error);
     return false;
   }
 };
+
 
 /**
  * Listen for FCM messages received while the app is in the foreground.

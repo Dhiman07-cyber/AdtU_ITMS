@@ -169,11 +169,16 @@ function validateAlertmanager() {
 // ── cert validation ───────────────────────────────────────────────────────────
 
 function validateCerts() {
-  const certDir = '/etc/letsencrypt/live';
-  if (!fs.existsSync(certDir)) {
-    warn('TLS', '/etc/letsencrypt/live not found — TLS certificates not present on this host');
-  } else {
+  const letsencryptDir = '/etc/letsencrypt/live';
+  const localCertsDir = path.join(ROOT, 'nginx', 'certs');
+  const hasLocalCerts = fs.existsSync(path.join(localCertsDir, 'fullchain.pem')) && fs.existsSync(path.join(localCertsDir, 'privkey.pem'));
+
+  if (fs.existsSync(letsencryptDir)) {
     info('TLS', 'Let\'s Encrypt certificate directory found');
+  } else if (hasLocalCerts) {
+    info('TLS', 'Local TLS development certificates found in nginx/certs/');
+  } else {
+    warn('TLS', 'TLS certificates not present in nginx/certs/ or /etc/letsencrypt/live');
   }
 }
 

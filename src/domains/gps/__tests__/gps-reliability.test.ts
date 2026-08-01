@@ -10,8 +10,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // Mock persistence layer — tests focus on pipeline validation logic only
 vi.mock('@/domains/gps/services/gps-persistence.service', () => ({
   checkActiveTrip: vi.fn().mockResolvedValue({ valid: true }),
-  getLastLocation: vi.fn().mockResolvedValue(null),
-  persistLocation: vi.fn().mockResolvedValue(true),
 }));
 
 vi.mock('@/lib/security/location-validation-service', () => {
@@ -21,8 +19,7 @@ vi.mock('@/lib/security/location-validation-service', () => {
   return { LocationValidationService };
 });
 
-import { processLocationUpdate } from '../services/gps-pipeline.service';
-import * as persistence from '../services/gps-persistence.service';
+import { processLocationUpdate, clearInMemoryLastLocation, setInMemoryLastLocation } from '../services/gps-pipeline.service';
 
 const base = {
   driverId: 'driver-1',
@@ -35,6 +32,10 @@ const base = {
 };
 
 describe('GPS Reliability — Coordinate Validation', () => {
+  beforeEach(() => {
+    clearInMemoryLastLocation('bus-1');
+  });
+
   it('rejects null island coordinates (0,0) — GPS fix not acquired', async () => {
     const result = await processLocationUpdate({ ...base, lat: 0, lng: 0 });
     expect(result.accepted).toBe(false);
@@ -60,7 +61,7 @@ describe('GPS Reliability — Coordinate Validation', () => {
   });
 
   it('accepts valid coordinates with no prior location', async () => {
-    vi.mocked(persistence.getLastLocation).mockResolvedValueOnce(null);
+    clearInMemoryLastLocation('bus-1');
     const result = await processLocationUpdate(base);
     expect(result.accepted).toBe(true);
   });
@@ -74,7 +75,7 @@ describe('GPS Reliability — Timestamp Ordering', () => {
   };
 
   beforeEach(() => {
-    vi.mocked(persistence.getLastLocation).mockResolvedValue(lastLocation as any);
+    setInMemoryLastLocation('bus-1', lastLocation as any);
   });
 
   it('rejects out-of-order GPS packet (timestamp older than last accepted)', async () => {
@@ -97,7 +98,6 @@ describe('GPS Reliability — Timestamp Ordering', () => {
   });
 
   it('accepts duplicate timestamp with same coordinates (idempotent packet)', async () => {
-    vi.mocked(persistence.persistLocation).mockResolvedValueOnce(true);
     const result = await processLocationUpdate({
       ...base,
       lat: 12.9716,

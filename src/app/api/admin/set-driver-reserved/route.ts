@@ -1,5 +1,4 @@
-import { getActiveAssignmentByDriverUid,unassignDriver } from '@/domains/fleet/repositories/driver-assignment.repository';
-import { getDriverById } from '@/domains/identity';
+import { getDriverById,updateDriver } from '@/domains/identity';
 import { verifyApiAuth } from '@/lib/security/api-auth';
 import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
 import { NextRequest,NextResponse } from 'next/server';
@@ -36,17 +35,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const oldAssignment = await getActiveAssignmentByDriverUid(driverUID);
-    const oldBusId = oldAssignment?.busId ?? driverData.busId;
-
+    const oldBusId = driverData.busId || null;
     console.log(`🔄 Setting driver ${driverUID.substring(0,8)}... as Reserved`);
-    console.log(`   Old bus: ${oldBusId}`);
-
-    try {
-      await unassignDriver(driverUID, 'admin_reassign');
-    } catch (err) {
-      console.error(`⚠️ Failed to unassign driver ${driverUID} in driver_assignments:`, err);
-    }
+    await updateDriver(driverUID, { is_reserved: true, status: 'reserved' });
 
     console.log(`✅ Driver ${driverUID.substring(0,8)}... is now Reserved`);
 

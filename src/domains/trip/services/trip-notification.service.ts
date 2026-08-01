@@ -5,6 +5,7 @@ export async function dispatchTripNotification(params: {
   tripId: string;
   routeName: string;
   busId: string;
+  shift?: string;
   eventType: 'TRIP_STARTED' | 'TRIP_ENDED';
 }) {
   try {

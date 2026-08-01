@@ -2,8 +2,8 @@ import { LocationValidationService } from '@/lib/security/location-validation-se
 import { appLogger } from '@/lib/logger';
 import { ErrorClass } from '@/lib/error-classes';
 import { normalizeLocationUpdate } from './gps-normalizer.service';
-import { checkActiveTrip,getLastLocation,persistLocation } from './gps-persistence.service';
-import type { LastLocation,LocationUpdate,LocationUpdateNormalized,PipelineResult } from './types';
+import { checkActiveTrip } from './gps-persistence.service';
+import type { LastLocation, LocationUpdate, LocationUpdateNormalized, PipelineResult } from './types';
 
 const validator = new LocationValidationService();
 
@@ -61,6 +61,31 @@ function validateJump(n: LocationUpdateNormalized, last: LastLocation): string |
   return null;
 }
 
+const inMemoryLastLocations = new Map<string, LastLocation>();
+
+export function clearInMemoryLastLocation(busId: string): void {
+  if (busId) inMemoryLastLocations.delete(busId);
+}
+
+export function setInMemoryLastLocation(busId: string, loc: LastLocation): void {
+  if (busId) inMemoryLastLocations.set(busId, loc);
+}
+
+export function getLastLocationForBus(busId: string): LastLocation | null {
+  if (!busId) return null;
+  const busVariations = [busId];
+  if (busId.startsWith('bus_')) {
+    busVariations.push(busId.replace('bus_', ''));
+  } else {
+    busVariations.push(`bus_${busId}`);
+  }
+  for (const id of busVariations) {
+    const loc = inMemoryLastLocations.get(id);
+    if (loc) return loc;
+  }
+  return null;
+}
+
 export async function processLocationUpdate(raw: LocationUpdate): Promise<PipelineResult> {
   const start = Date.now();
   const normalized = normalizeLocationUpdate(raw);
@@ -88,7 +113,7 @@ export async function processLocationUpdate(raw: LocationUpdate): Promise<Pipeli
     return { accepted: false, reason: session.reason, normalized };
   }
 
-  const lastLoc = await getLastLocation(normalized.busId, normalized.tripId);
+  const lastLoc = inMemoryLastLocations.get(normalized.busId);
   if (lastLoc) {
     const jumpError = validateJump(normalized, lastLoc);
     if (jumpError) {
@@ -104,14 +129,14 @@ export async function processLocationUpdate(raw: LocationUpdate): Promise<Pipeli
     }
   }
 
-  const persisted = await persistLocation(normalized);
-  if (!persisted) {
-    appLogger.error('gps', 'location_persist_failed', { ...logCtx, errorClass: ErrorClass.GPS_PERSIST_FAILED, latencyMs: Date.now() - start });
-    return { accepted: false, reason: 'Failed to persist location', normalized };
-  }
+  inMemoryLastLocations.set(normalized.busId, {
+    lat: normalized.lat,
+    lng: normalized.lng,
+    timestamp: normalized.timestamp.toISOString(),
+  });
 
   appLogger.debug('gps', 'location_accepted', { ...logCtx, lat: normalized.lat, lng: normalized.lng, latencyMs: Date.now() - start });
-  return { accepted: true, normalized, persisted: true };
+  return { accepted: true, normalized, persisted: false };
 }
 
 export async function processLocationUpdateSimple(raw: LocationUpdate): Promise<PipelineResult> {
@@ -122,3 +147,4 @@ export async function processLocationUpdateSimple(raw: LocationUpdate): Promise<
 
   return { accepted: true, normalized };
 }
+

@@ -248,40 +248,23 @@ export class TripLockService {
         busId: string
     ): Promise<EndTripResult> {
         try {
-            // Verify driver ownership before ending
-            const { data: activeTrip } = await this.supabase
-                .from('active_trips')
-                .select('driver_id, status')
-                .eq('trip_id', tripId)
-                .eq('bus_id', busId)
-                .maybeSingle();
+            // Ownership is already verified by the orchestrator before this call.
+            // The end_trip_atomically RPC also enforces driver_id at the DB level,
+            // so a second getActiveTrip here was a redundant network round-trip.
+            const { data: result, error: rpcError } = await this.supabase
+                .rpc('end_trip_atomically', {
+                    p_trip_id: tripId,
+                    p_bus_id: busId,
+                    p_driver_id: driverId,
+                });
 
-            if (activeTrip) {
-                // Ownership check: only the assigned driver can end
-                if (activeTrip.driver_id !== driverId) {
-                    return { success: false, reason: 'Only the assigned driver can end this trip' };
-                }
+            if (rpcError) {
+                appLogger.error('trip-lock', 'end_trip_rpc_error', { tripId, driverId, busId, error: rpcError.message });
+                return { success: false, reason: rpcError.message };
+            }
 
-                // IDEMPOTENT: If already ended, return success
-                if (activeTrip.status === 'ended') {
-                    heartbeatWriteCache.delete(`${tripId}:${driverId}:${busId}`);
-                    return { success: true };
-                }
-
-                // Release lock via RPC
-                const { error: rpcError } = await this.supabase
-                    .rpc('release_trip_lock', {
-                        p_trip_id: tripId,
-                        p_bus_id: busId,
-                        p_driver_id: driverId,
-                    });
-
-                if (rpcError) {
-                    appLogger.warn('trip-lock', 'release_lock_rpc_error', { tripId, driverId, busId, error: rpcError.message });
-                    // Continue — the lock may have already been released
-                }
-            } else {
-                appLogger.warn('trip-lock', 'end_trip_no_record', { tripId, driverId, busId });
+            if (result?.alreadyEnded) {
+                appLogger.info('trip-lock', 'end_trip_idempotent', { tripId, driverId, busId });
             }
 
             heartbeatWriteCache.delete(`${tripId}:${driverId}:${busId}`);
@@ -299,7 +282,7 @@ export class TripLockService {
     async getActiveTrip(busId: string) {
         const { data, error } = await this.supabase
             .from('active_trips')
-            .select('*')
+            .select('trip_id, driver_id, route_id, shift, expires_at, status')
             .eq('bus_id', busId)
             .eq('status', 'active')
             .maybeSingle();

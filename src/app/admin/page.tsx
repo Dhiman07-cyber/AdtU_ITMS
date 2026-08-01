@@ -20,10 +20,6 @@ const SystemHealthStrip = dynamic(() => import('@/components/admin/dashboard/Sys
   ssr: false,
   loading: DashboardPanelFallback,
 });
-const HeroLiveOperations = dynamic(() => import('@/components/admin/dashboard/HeroLiveOperations'), {
-  ssr: false,
-  loading: DashboardPanelFallback,
-});
 const KeyMetricsGrid = dynamic(() => import('@/components/admin/dashboard/KeyMetricsGrid'), {
   ssr: false,
   loading: DashboardPanelFallback,
@@ -489,16 +485,7 @@ export default function EnhancedAdminDashboard() {
           <HighLoadAlert role="admin" className="animate-in fade-in duration-300 h-auto" />
         </div>
 
-        {/* SECTION 2: PRIMARY SNAPSHOT (HERO ZONE) */}
-        <HeroLiveOperations
-          activeTrips={activeTrips}
-          totalBuses={stats.totalBuses}
-          totalStudents={stats.totalStudents}
-          stats={stats as any as DashboardStats}
-          allBuses={allBuses}
-          allRoutes={allRoutes}
-          allDrivers={[]}
-        />
+
 
         {/* SECTION 2.1: PLATFORM ANALYTICS (GA4 INTEGRATION) */}
         <div className="w-full animate-in fade-in duration-300">

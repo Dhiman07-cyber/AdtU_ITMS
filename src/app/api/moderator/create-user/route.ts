@@ -5,12 +5,12 @@ import { getFirestore } from 'firebase-admin/firestore';
 import { headers } from 'next/headers';
 
 import { incrementBusCapacity } from '@/domains/fleet';
-import { assignDriverToBus } from '@/domains/fleet/repositories/driver-assignment.repository';
 import { createDriver,createStudent,createUser,getStudentById } from '@/domains/identity';
 import { getDeadlineConfig } from '@/lib/deadline-config-service';
 import { resolveUserRole } from '@/lib/security/role-cache';
 import { calculateValidUntilDate } from '@/lib/utils/date-utils';
 import { computeBlockDatesFromValidUntil } from '@/lib/utils/deadline-computation';
+import { normalizeShift } from '@/lib/utils/shift-utils';
 import { getUpdaterInfo } from '@/lib/utils/updatedBy';
 
 let adminApp: any;
@@ -239,7 +239,7 @@ export async function POST(request: Request) {
             profilePhotoUrl: profilePhotoUrl || '',
             routeId: routeId || null,
             busId: busId || null,
-            shift: shift || 'Morning',
+            shift: normalizeShift(shift) || shift,
             approvedBy: approvedBy || 'System (AUTO_MIGRATION)',
             sessionDuration: sessionDuration || '1',
             sessionStartYear: sessionStartYear || new Date().getFullYear(),
@@ -312,18 +312,6 @@ export async function POST(request: Request) {
             updatedAt: new Date().toISOString(),
           });
 
-          // Update bus driver assignment via canonical repository
-          if (busId) {
-            console.log(`🚌 Assigning driver ${uid} to bus ${busId}`);
-            try {
-              await assignDriverToBus(uid, busId, {
-                assignedBy: 'moderator',
-                reason: 'assignment',
-              });
-            } catch (err) {
-              console.warn(`   ⚠️  driver_assignments write failed for ${uid}:`, err);
-            }
-          }
         }
 
         return new Response(JSON.stringify({
@@ -458,17 +446,6 @@ export async function POST(request: Request) {
           updatedAt: new Date().toISOString(),
         });
 
-        // Update bus driver assignment via canonical repository
-        if (busId) {
-          try {
-            await assignDriverToBus(userDocId, busId, {
-              assignedBy: 'moderator',
-              reason: 'assignment',
-            });
-          } catch (err) {
-            console.warn('Failed to write driver_assignments in fallback mode', err);
-          }
-        }
       }
 
       return new Response(JSON.stringify({

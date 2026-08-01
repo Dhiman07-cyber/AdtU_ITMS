@@ -74,6 +74,8 @@ export interface SecurityOptions<T = any> {
     allowBodyToken?: boolean;
     /** Skip auth (for public endpoints that still want rate limiting/validation) */
     skipAuth?: boolean;
+    /** If true, attempt token verification if present, but do not fail with 401 if missing/invalid */
+    optionalAuth?: boolean;
     /** Custom rate limit key prefix (defaults to route path) */
     rateLimitKey?: string;
 }
@@ -178,6 +180,7 @@ export function withSecurity<T = any>(
         schema,
         allowBodyToken = true,
         skipAuth = false,
+        optionalAuth = false,
         rateLimitKey,
     } = options;
 
@@ -249,49 +252,48 @@ export function withSecurity<T = any>(
             if (!skipAuth) {
                 const token = extractToken(request, rawBody, allowBodyToken);
                 if (!token) {
-                    return NextResponse.json(
-                        { success: false, error: 'Authentication required', requestId },
-                        { status: 401 }
-                    );
-                }
-
-                if (!adminAuth) {
+                    if (!optionalAuth) {
+                        return NextResponse.json(
+                            { success: false, error: 'Authentication required', requestId },
+                            { status: 401 }
+                        );
+                    }
+                } else if (!adminAuth) {
                     console.error(`[${requestId}] Firebase Admin not initialized`);
-                    return NextResponse.json(
-                        { success: false, error: 'Server authentication unavailable', requestId },
-                        { status: 500 }
-                    );
+                    if (!optionalAuth) {
+                        return NextResponse.json(
+                            { success: false, error: 'Server authentication unavailable', requestId },
+                            { status: 500 }
+                        );
+                    }
+                } else {
+                    try {
+                        const decodedToken = await adminAuth.verifyIdToken(token);
+                        const resolved = await resolveUserRole(decodedToken.uid);
+                        auth = {
+                            uid: decodedToken.uid,
+                            email: decodedToken.email || '',
+                            role: resolved.role,
+                            name: resolved.name,
+                        };
+                    } catch (error: any) {
+                        if (!optionalAuth) {
+                            const isExpired = error?.code === 'auth/id-token-expired';
+                            return NextResponse.json(
+                                {
+                                    success: false,
+                                    error: isExpired ? 'Session expired. Please sign in again.' : 'Invalid authentication token',
+                                    requestId
+                                },
+                                { status: 401 }
+                            );
+                        }
+                    }
                 }
 
-                let decodedToken;
-                try {
-                    decodedToken = await adminAuth.verifyIdToken(token);
-                } catch (error: any) {
-                    const isExpired = error?.code === 'auth/id-token-expired';
-                    return NextResponse.json(
-                        {
-                            success: false,
-                            error: isExpired ? 'Session expired. Please sign in again.' : 'Invalid authentication token',
-                            requestId
-                        },
-                        { status: 401 }
-                    );
-                }
-
-                // ── 3. Role resolution ──
-                const resolved = await resolveUserRole(decodedToken.uid);
-                const { role, name } = resolved;
-
-                auth = {
-                    uid: decodedToken.uid,
-                    email: decodedToken.email || '',
-                    role,
-                    name,
-                };
-
-                // ── 4. Role authorization ──
-                if (requiredRoles.length > 0 && !requiredRoles.includes(role)) {
-                    console.warn(`[${requestId}] Access denied: ${auth.uid.substring(0,8)}... (${role}) tried to access ${url} requiring [${requiredRoles}]`);
+                // ── 3. Role authorization ──
+                if (requiredRoles.length > 0 && (!auth.uid || !requiredRoles.includes(auth.role))) {
+                    console.warn(`[${requestId}] Access denied: ${auth.uid.substring(0,8)}... (${auth.role}) tried to access ${url} requiring [${requiredRoles}]`);
                     return NextResponse.json(
                         { success: false, error: 'Insufficient permissions', requestId },
                         { status: 403 }

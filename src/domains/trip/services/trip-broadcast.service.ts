@@ -34,7 +34,8 @@ export async function broadcastTripEvent(params: {
   if (params.routeName) payload.routeName = params.routeName;
   if (params.busNumber) payload.busNumber = params.busNumber;
 
-  for (const channelName of channels) {
-    await transport.broadcast(channelName, params.event, payload);
-  }
+  // Broadcast to both channels concurrently — they are independent SSE streams
+  await Promise.all(
+    channels.map(channelName => transport.broadcast(channelName, params.event, payload))
+  );
 }

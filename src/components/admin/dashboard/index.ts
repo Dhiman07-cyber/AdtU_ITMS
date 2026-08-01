@@ -1,6 +1,5 @@
 export { default as BusUtilization } from './BusUtilization';
 export { default as DashboardHeader } from './DashboardHeader';
-export { default as HeroLiveOperations } from './HeroLiveOperations';
 export { default as KeyMetricsGrid } from './KeyMetricsGrid';
 export { default as PlatformAnalytics } from './PlatformAnalytics';
 export { default as QuickActions } from './QuickActions';

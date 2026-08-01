@@ -86,6 +86,9 @@ export async function signInWithGoogle() {
     } else if (error.code === 'auth/network-request-failed') {
       console.warn('⚠️ Network error during sign-in');
       return { success: false, error: 'Network error. Please check your connection and try again.' };
+    } else if (error.code === 'auth/api-key-not-valid' || error.code === 'auth/invalid-api-key' || error.message?.includes('api-key-not-valid')) {
+      console.error('❌ Firebase API Key error: The API key in NEXT_PUBLIC_FIREBASE_API_KEY is invalid or restricted.');
+      return { success: false, error: 'Invalid Firebase API key. Please check NEXT_PUBLIC_FIREBASE_API_KEY in .env and restart your dev server.' };
     }
 
     return { success: false, error: error.message || 'An error occurred during sign in' };

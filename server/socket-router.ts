@@ -7,6 +7,7 @@ import { metricsService } from './metrics-service';
 import { logger } from './structured-logger';
 import { perfMonitor } from './performance-monitor';
 import { wsServer } from './websocket-server';
+import { publishToRedis } from './redis-broadcast';
 
 type MessageHandler = (ws: WebSocket, session: Session, payload: any) => void;
 
@@ -58,12 +59,36 @@ function send(ws: WebSocket, data: Record<string, unknown>): void {
   }
 }
 
+const liveBusLocations = new Map<string, Record<string, unknown>>();
+
+export function updateLiveBusLocation(busId: string, location: Record<string, unknown>): void {
+  if (busId) liveBusLocations.set(busId, location);
+}
+
+export function clearLiveBusLocation(busId: string): void {
+  if (busId) liveBusLocations.delete(busId);
+}
+
+export function getLiveBusLocation(busId: string): Record<string, unknown> | undefined {
+  return liveBusLocations.get(busId);
+}
+
 handle('subscribe', (ws, session, payload) => {
   const channel = payload.channel as string | undefined;
   if (!channel) { send(ws, { type: 'error', message: 'subscribe requires "channel"' }); return; }
   subscriptionManager.subscribe(session.socketId, channel, ws, session);
   logger.debug('subscribe', { uid: session.uid, socketId: session.socketId, channel });
   send(ws, { type: 'subscribed', channel });
+
+  // Immediate initial location push for newly subscribed clients
+  const busIdMatch = channel.match(/^(?:bus:|bus_location_)(.+)$/);
+  if (busIdMatch) {
+    const busId = busIdMatch[1];
+    const cachedLoc = getLiveBusLocation(busId);
+    if (cachedLoc) {
+      send(ws, { type: 'message', channel, event: 'bus_location_update', payload: cachedLoc });
+    }
+  }
 });
 
 handle('unsubscribe', (ws, session, payload) => {
@@ -86,6 +111,68 @@ handle('presence', (ws, session, payload) => {
   send(ws, { type: 'presence_ok' });
 });
 
+handle('location_update', (ws, session, payload) => {
+  // SECURITY: Only drivers may publish GPS location updates.
+  // Students, moderators and other roles are rejected immediately.
+  if (session.role !== 'driver') {
+    send(ws, { type: 'error', message: 'Only drivers may publish location updates' });
+    metricsService.inc('errors');
+    logger.warn('location_update_unauthorized', {
+      uid: session.uid,
+      role: session.role,
+      socketId: session.socketId,
+    });
+    return;
+  }
+
+  const claimedBusId = (payload.busId || payload.bus_id) as string | undefined;
+  // Resolve busId: prefer session.busId (set during presence handshake and
+  // validated by the HTTP trip-start flow) over the payload value.
+  // If payload supplies a busId that differs from session.busId the driver
+  // declared, reject — this prevents a driver from spoofing another bus's GPS.
+  const busId = session.busId || claimedBusId;
+
+  if (!busId) {
+    send(ws, { type: 'error', message: 'location_update requires a busId. Send a presence message first.' });
+    return;
+  }
+
+  // Auto-bind busId to session on first location update if not already bound via presence message
+  if (!session.busId && claimedBusId) {
+    sessionManager.setBusId(session.socketId, claimedBusId);
+  }
+
+  if (claimedBusId && session.busId && claimedBusId !== session.busId) {
+    send(ws, { type: 'error', message: 'busId mismatch: claimed bus does not match your active trip bus' });
+    metricsService.inc('errors');
+    logger.warn('location_update_bus_mismatch', {
+      uid: session.uid,
+      sessionBusId: session.busId,
+      claimedBusId,
+      socketId: session.socketId,
+    });
+    return;
+  }
+
+  const locPayload = {
+    busId,
+    driverUid: session.uid,
+    lat: Number(payload.lat),
+    lng: Number(payload.lng),
+    speed: Number(payload.speed || 0),
+    heading: Number(payload.heading || 0),
+    accuracy: payload.accuracy ? Number(payload.accuracy) : undefined,
+    timestamp: payload.timestamp || new Date().toISOString(),
+  };
+
+  updateLiveBusLocation(busId, locPayload);
+  wsServer.broadcastToChannel(`bus:${busId}`, 'bus_location_update', locPayload);
+  wsServer.broadcastToChannel(`bus_location_${busId}`, 'bus_location_update', locPayload);
+  // Cross-node relay: publish to Redis so other WS nodes broadcast to their local subscribers.
+  // publishToRedis is fire-and-forget; gracefully no-ops when Redis is not configured.
+  publishToRedis(`bus:${busId}`, 'bus_location_update', locPayload);
+});
+
 handle('broadcast', (ws, session, payload) => {
   if (session.role !== 'server') {
     send(ws, { type: 'error', message: 'Only server can broadcast' });
@@ -97,7 +184,16 @@ handle('broadcast', (ws, session, payload) => {
     send(ws, { type: 'error', message: 'broadcast requires "channel" and "event"' });
     return;
   }
-  wsServer.broadcastToChannel(channel, event, (payload.payload || {}) as Record<string, unknown>);
+  const eventPayload = (payload.payload || {}) as Record<string, unknown>;
+  const busIdMatch = channel.match(/^(?:bus:|bus_location_)(.+)$/);
+  if (busIdMatch && event === 'bus_location_update') {
+    updateLiveBusLocation(busIdMatch[1], eventPayload);
+  }
+  wsServer.broadcastToChannel(channel, event, eventPayload);
+  // Cross-node relay: server-originated events (trip_started, trip_ended, etc.)
+  // must also reach subscribers on other WS nodes.
+  publishToRedis(channel, event, eventPayload);
 });
 
 export { send as sendToSocket };
+

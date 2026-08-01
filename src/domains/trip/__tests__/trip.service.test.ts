@@ -35,7 +35,7 @@ vi.mock('@/lib/supabase-server', () => {
   return {
     getSupabaseServer: vi.fn(() => ({
       from: vi.fn((table: string) => {
-        if (table === 'buses' || table === 'driver_status') return makeQueryChain(busRow);
+        if (table === 'buses') return makeQueryChain(busRow);
         if (table === 'routes') return makeQueryChain(routesRow);
         // active_trips and everything else: return null (no existing data)
         return makeQueryChain(null);
@@ -50,10 +50,7 @@ vi.mock('@/lib/services/fcm-notification-service', () => ({
   notifyRoute: vi.fn().mockResolvedValue({ success: true }),
 }));
 
-vi.mock('@/domains/assignment', () => ({
-  getDriverUidByBusId: vi.fn().mockResolvedValue('d1'),
-  getBusIdByDriverUid: vi.fn().mockResolvedValue('b1'),
-}));
+
 
 vi.mock('@/domains/gps', () => ({
   clearHistory: vi.fn(),

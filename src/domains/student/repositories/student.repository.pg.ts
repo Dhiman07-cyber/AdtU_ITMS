@@ -73,6 +73,7 @@ const STUDENT_FIELD_MAP: Record<string, string> = {
   shift: 'shift',
   status: 'status',
   sessionDuration: 'session_duration',
+  durationYears: 'session_duration',
   sessionStartYear: 'session_start_year',
   sessionEndYear: 'session_end_year',
   semester: 'semester',
@@ -410,15 +411,10 @@ export async function pgUnassignRoute(routeId: string): Promise<void> {
 export async function pgFindByBusIds(busIds: string[]): Promise<Student[]> {
   if (busIds.length === 0) return [];
   const db = getSupabaseServer();
-  const filterExpr = busIds.flatMap(id => {
-    const safeId = id.replace(/"/g, '""');
-    return [`bus_id.eq."${safeId}"`];
-  }).join(',');
-
   const { data, error } = await db
     .from('student_profiles')
     .select('*')
-    .or(filterExpr);
+    .in('bus_id', busIds);
 
   if (error) {
     console.error(`StudentRepository (PG) findByBusIds failed:`, error.message);
@@ -433,14 +429,11 @@ export async function pgFindByBusIds(busIds: string[]): Promise<Student[]> {
 export async function pgFindByRouteIds(routeIds: string[]): Promise<Student[]> {
   if (routeIds.length === 0) return [];
   const db = getSupabaseServer();
-  const filterExpr = routeIds.flatMap(id => {
-    const safeId = id.replace(/"/g, '""');
-    return [`route_id.eq."${safeId}"`];
-  }).join(',');
   const { data, error } = await db
     .from('student_profiles')
     .select('*')
-    .or(filterExpr);
+    .in('route_id', routeIds);
+
   if (error) {
     console.error(`StudentRepository (PG) findByRouteIds failed:`, error.message);
     return [];

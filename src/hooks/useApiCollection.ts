@@ -103,7 +103,6 @@ function getDefaultTTL(collectionName: string): number {
         case 'stops':
         case 'config':
             return 15 * 60 * 1000;
-        case 'bus_locations':
         case 'trip_sessions':
         case 'active_trips':
             return 0;

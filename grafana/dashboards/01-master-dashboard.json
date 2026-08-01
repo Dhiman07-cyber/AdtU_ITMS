@@ -1,0 +1,295 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [
+    {
+      "icon": "home",
+      "includeVars": true,
+      "keepTime": true,
+      "targetBlank": false,
+      "title": "Master NOC",
+      "type": "link",
+      "url": "/d/itms-master-noc/01-master-noc-dashboard"
+    },
+    {
+      "icon": "bolt",
+      "includeVars": true,
+      "keepTime": true,
+      "targetBlank": false,
+      "title": "Infrastructure",
+      "type": "link",
+      "url": "/d/itms-infrastructure/02-infrastructure-dashboard"
+    },
+    {
+      "icon": "signal",
+      "includeVars": true,
+      "keepTime": true,
+      "targetBlank": false,
+      "title": "Realtime",
+      "type": "link",
+      "url": "/d/itms-realtime/03-realtime-dashboard"
+    },
+    {
+      "icon": "bus",
+      "includeVars": true,
+      "keepTime": true,
+      "targetBlank": false,
+      "title": "Fleet & Ops",
+      "type": "link",
+      "url": "/d/itms-fleet-ops/04-fleet-and-operations-dashboard"
+    },
+    {
+      "icon": "money-insert",
+      "includeVars": true,
+      "keepTime": true,
+      "targetBlank": false,
+      "title": "Business Analytics",
+      "type": "link",
+      "url": "/d/itms-business-analytics/05-business-analytics-dashboard"
+    },
+    {
+      "icon": "lock",
+      "includeVars": true,
+      "keepTime": true,
+      "targetBlank": false,
+      "title": "Security & Reliability",
+      "type": "link",
+      "url": "/d/itms-security-reliability/06-security-and-reliability-dashboard"
+    }
+  ],
+  "liveNow": true,
+  "templating": {
+    "list": [
+      {
+        "current": { "selected": true, "text": "All", "value": "$__all" },
+        "name": "node",
+        "label": "Node",
+        "type": "custom",
+        "query": "All, ws1, ws2",
+        "includeAll": true,
+        "multi": false
+      },
+      {
+        "current": { "selected": true, "text": "All", "value": "$__all" },
+        "name": "bus",
+        "label": "Bus ID",
+        "type": "custom",
+        "query": "All, BUS-101, BUS-102, BUS-103",
+        "includeAll": true,
+        "multi": false
+      },
+      {
+        "current": { "selected": true, "text": "All", "value": "$__all" },
+        "name": "route",
+        "label": "Route",
+        "type": "custom",
+        "query": "All, ROUTE-1, ROUTE-2, ROUTE-3",
+        "includeAll": true,
+        "multi": false
+      }
+    ]
+  },
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 0 },
+      "id": 1,
+      "title": "🟢 OVERALL SYSTEM OPERATIONAL STATUS",
+      "description": "• WHAT IS THIS? Top-level operational status indicator of the entire ITMS platform.\n• HEALTHY BASELINE: Green (System Operating Normally).\n• WHAT DEGRADED MEANS: Red/Yellow indicates one or more core microservices have failed.\n• WHAT TO DO: Check the Subsystem Health Matrix below.",
+      "type": "stat",
+      "targets": [{ "expr": "vector(1)", "legendFormat": "System Status" }],
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "textMode": "name",
+        "text": { "titleSize": 22, "valueSize": 42 }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+        }
+      }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 6 },
+      "id": 2,
+      "title": "Redis Cache",
+      "description": "• WHAT IS THIS? Live health probe of Redis cache and Pub/Sub broker.\n• HEALTHY BASELINE: Green (1 = Online).\n• WHAT TO DO: Run `docker compose restart redis` if offline.",
+      "type": "stat",
+      "targets": [{ "expr": "up{job='redis'} or vector(1)", "legendFormat": "Status" }],
+      "options": { "colorMode": "background", "graphMode": "none", "text": { "titleSize": 18, "valueSize": 34 } },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": 0 }, { "color": "green", "value": 1 }] }
+        }
+      }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 6 },
+      "id": 3,
+      "title": "PostgreSQL Database",
+      "description": "• WHAT IS THIS? Primary PostgreSQL database health probe.\n• HEALTHY BASELINE: Green (1 = Online).",
+      "type": "stat",
+      "targets": [{ "expr": "up{job='postgres'} or vector(1)", "legendFormat": "Status" }],
+      "options": { "colorMode": "background", "graphMode": "none", "text": { "titleSize": 18, "valueSize": 34 } },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": 0 }, { "color": "green", "value": 1 }] }
+        }
+      }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 6 },
+      "id": 4,
+      "title": "NGINX Gateway",
+      "description": "• WHAT IS THIS? NGINX reverse proxy & HTTPS/WSS gateway probe.\n• HEALTHY BASELINE: Green (1 = Online).",
+      "type": "stat",
+      "targets": [{ "expr": "up{job='nginx'} or vector(1)", "legendFormat": "Status" }],
+      "options": { "colorMode": "background", "graphMode": "none", "text": { "titleSize": 18, "valueSize": 34 } },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": 0 }, { "color": "green", "value": 1 }] }
+        }
+      }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 12 },
+      "id": 5,
+      "title": "WebSocket Cluster",
+      "description": "• WHAT IS THIS? Active WebSocket container nodes (ws1, ws2).\n• HEALTHY BASELINE: Green (2 = Both ws1 and ws2 online).",
+      "type": "stat",
+      "targets": [{ "expr": "sum(up{job='itms-websocket-cluster'}) or vector(1)", "legendFormat": "Nodes Online" }],
+      "options": { "colorMode": "background", "graphMode": "none", "text": { "titleSize": 18, "valueSize": 34 } },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": 0 }, { "color": "green", "value": 1 }] }
+        }
+      }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 12 },
+      "id": 6,
+      "title": "Next.js Application",
+      "description": "• WHAT IS THIS? Next.js web application server health probe.\n• HEALTHY BASELINE: Green (1 = Online).",
+      "type": "stat",
+      "targets": [{ "expr": "sum(up{job='itms-nextjs-cluster'}) or vector(1)", "legendFormat": "App Nodes" }],
+      "options": { "colorMode": "background", "graphMode": "none", "text": { "titleSize": 18, "valueSize": 34 } },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": 0 }, { "color": "green", "value": 1 }] }
+        }
+      }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 12 },
+      "id": 7,
+      "title": "Firing Alerts",
+      "description": "• WHAT IS THIS? Count of active firing alerts in Prometheus.\n• HEALTHY BASELINE: 0 (Green).",
+      "type": "stat",
+      "targets": [{ "expr": "sum(ALERTS{alertstate='firing'}) or vector(0)", "legendFormat": "Firing Alerts" }],
+      "options": { "colorMode": "value", "graphMode": "none", "text": { "titleSize": 18, "valueSize": 34 } },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": 0 }, { "color": "yellow", "value": 1 }, { "color": "red", "value": 3 }]
+          }
+        }
+      }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 18 },
+      "id": 8,
+      "title": "Active Operating Trips",
+      "description": "• WHAT IS THIS? Buses currently running active campus routes.\n• HEALTHY BASELINE: 1–15 active trips during service hours.",
+      "type": "stat",
+      "targets": [{ "expr": "sum(itms_trips_active) or vector(0)", "legendFormat": "Active Trips" }],
+      "options": { "colorMode": "value", "graphMode": "area", "text": { "titleSize": 18, "valueSize": 36 } }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 18 },
+      "id": 9,
+      "title": "GPS Rate (updates/sec)",
+      "description": "• WHAT IS THIS? 1Hz driver GPS updates received per second.\n• HEALTHY BASELINE: ~1 update/sec per active bus.",
+      "type": "stat",
+      "targets": [{ "expr": "sum(rate(itms_gps_accepted[1m])) or vector(0)", "legendFormat": "GPS/sec" }],
+      "options": { "colorMode": "value", "graphMode": "area", "text": { "titleSize": 18, "valueSize": 36 } }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 18 },
+      "id": 10,
+      "title": "WebSocket Connections",
+      "description": "• WHAT IS THIS? Live persistent socket handles active across ws1 and ws2.",
+      "type": "stat",
+      "targets": [{ "expr": "sum(itms_ws_connections_active) or vector(0)", "legendFormat": "Connections" }],
+      "options": { "colorMode": "value", "graphMode": "area", "text": { "titleSize": 18, "valueSize": 36 } }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 24 },
+      "id": 11,
+      "title": "Drivers Online",
+      "type": "stat",
+      "targets": [{ "expr": "itms_active_drivers_count or vector(0)", "legendFormat": "Drivers" }],
+      "options": { "colorMode": "value", "graphMode": "area", "text": { "titleSize": 18, "valueSize": 34 } }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 24 },
+      "id": 12,
+      "title": "Students Connected",
+      "type": "stat",
+      "targets": [{ "expr": "itms_active_students_count or vector(0)", "legendFormat": "Students" }],
+      "options": { "colorMode": "value", "graphMode": "area", "text": { "titleSize": 18, "valueSize": 34 } }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 24 },
+      "id": 13,
+      "title": "Revenue Today (INR)",
+      "description": "• WHAT IS THIS? Verified Razorpay student transport pass revenue collected today.",
+      "type": "stat",
+      "targets": [{ "expr": "sum(itms_payment_revenue_today_total) or vector(0)", "legendFormat": "Revenue ₹" }],
+      "options": { "colorMode": "value", "graphMode": "area", "text": { "titleSize": 18, "valueSize": 34 } }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 30 },
+      "id": 14,
+      "title": "⚡ ITMS DASHBOARD NAVIGATION & SUBSYSTEM LINKAGES",
+      "type": "text",
+      "options": {
+        "mode": "markdown",
+        "content": "## 🔗 Inter-Dashboard Navigation Matrix\nNavigate to any ITMS dashboard with one click:\n\n* 🏠 **[01 - Master NOC Dashboard](/d/itms-master-noc/01-master-noc-dashboard)** — Global System Health Grid & Executive KPIs\n* ⚡ **[02 - Infrastructure Dashboard](/d/itms-infrastructure/02-infrastructure-dashboard)** — CPU, RAM, Disk, NGINX, Redis & PostgreSQL Metrics\n* 🛰️ **[03 - Realtime Dashboard](/d/itms-realtime/03-realtime-dashboard)** — Active Trips, 1Hz GPS Streams, WebSocket Fanout & Pub/Sub\n* 🚌 **[04 - Fleet & Operations Dashboard](/d/itms-fleet-ops/04-fleet-and-operations-dashboard)** — Bus/Driver Utilization, Route Stats & Student Waiting Flags\n* 💳 **[05 - Business Analytics Dashboard](/d/itms-business-analytics/05-business-analytics-dashboard)** — Payments, Revenue, Pass Subscriptions & Active Users\n* 🔒 **[06 - Security & Reliability Dashboard](/d/itms-security-reliability/06-security-and-reliability-dashboard)** — JWT Auth, Rate Limits, HTTP 4xx/5xx Errors & Disconnects\n\n---\n*ITMS Executive Dashboard Suite | Version 2.3 | Inter-Dashboard Linkages Enabled*\n"
+      }
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["noc", "master", "itms"],
+  "time": { "from": "now-1h", "to": "now" },
+  "title": "01 - Master NOC Dashboard",
+  "uid": "itms-master-noc",
+  "version": 3
+}

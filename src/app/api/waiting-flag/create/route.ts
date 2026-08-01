@@ -1,4 +1,4 @@
-﻿import { emitEvent } from '@/domains/realtime/event-emitter';
+import { emitEvent } from '@/domains/realtime/event-emitter';
 import { getByUid } from '@/domains/student';
 import { withSecurity } from '@/lib/security/api-security';
 import { RateLimits } from '@/lib/security/rate-limiter';
@@ -32,8 +32,25 @@ export const POST = withSecurity(
         return NextResponse.json({ success: false, error: 'Invalid GPS accuracy (must be 0-1000m)', requestId }, { status: 400 });
       }
 
-      // 2. Resolve student profile and verify role
-      const studentData = await getByUid(studentUid) as Record<string, any> | null;
+      // 2, 4, 5. Execute Student profile, Active trip check, and Duplicate flag check in PARALLEL
+      const [studentDataRaw, activeTripRes, existingFlagsRes] = await Promise.all([
+        getByUid(studentUid) as Promise<Record<string, any> | null>,
+        supabase
+          .from('active_trips')
+          .select('trip_id')
+          .eq('bus_id', busId)
+          .eq('status', 'active')
+          .maybeSingle(),
+        supabase
+          .from('waiting_flags')
+          .select('id')
+          .eq('student_uid', studentUid)
+          .eq('bus_id', busId)
+          .in('status', ['raised', 'acknowledged'])
+          .limit(1)
+      ]);
+
+      const studentData = studentDataRaw;
       if (!studentData) {
         console.warn(`[${requestId}] Student profile not found for ${studentUid}`);
         return NextResponse.json({ success: false, error: 'Student profile not found', requestId }, { status: 404 });
@@ -42,34 +59,21 @@ export const POST = withSecurity(
       const studentName = studentData.fullName || studentData.name || 'Student';
 
       // 3. Authorization: Is student assigned to this bus?
-      const isAssigned = studentData.busId === busId || studentData.busId === busId;
+      const isAssigned = studentData.busId === busId;
       if (!isAssigned) {
         return NextResponse.json({ success: false, error: 'Authorization failed: Student not assigned to this bus', requestId }, { status: 403 });
       }
 
-      // 4. Check for active trip in Supabase (authoritative source)
-      const { data: activeTrip, error: tripError } = await supabase
-        .from('active_trips')
-        .select('trip_id')
-        .eq('bus_id', busId)
-        .eq('status', 'active')
-        .single();
-
-      if (tripError || !activeTrip) {
+      // Check active trip result
+      const activeTrip = activeTripRes.data;
+      if (activeTripRes.error || !activeTrip) {
         return NextResponse.json({ success: false, error: 'This bus is not currently on an active trip', requestId }, { status: 400 });
       }
 
       const tripId = activeTrip.trip_id;
 
-      // 5. Duplicate Check
-      const { data: existingFlags } = await supabase
-        .from('waiting_flags')
-        .select('id')
-        .eq('student_uid', studentUid)
-        .eq('bus_id', busId)
-        .in('status', ['raised', 'acknowledged'])
-        .limit(1);
-
+      // Duplicate Check result
+      const existingFlags = existingFlagsRes.data;
       if (existingFlags && existingFlags.length > 0) {
         return NextResponse.json({ 
           success: false, 

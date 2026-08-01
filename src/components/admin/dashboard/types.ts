@@ -72,4 +72,6 @@ export interface ActiveTrip {
   startTime: string;
   studentCount: number;
   status: string;
+  shift?: string;
+  capacity?: number;
 }

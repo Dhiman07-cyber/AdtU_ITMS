@@ -85,8 +85,12 @@ export default function RootLayout({
                   <SmoothScrollProvider>
                     <AppShell>
                       {children}
-                      <SpeedInsights />
-                      <VercelAnalytics />
+                      {process.env.VERCEL === '1' && (
+                        <>
+                          <SpeedInsights />
+                          <VercelAnalytics />
+                        </>
+                      )}
                     </AppShell>
                   </SmoothScrollProvider>
                 </NotificationProvider>

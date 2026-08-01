@@ -48,9 +48,10 @@ export type CanonicalShift = 'Morning' | 'Evening' | 'Both';
  * normalizeShift(undefined)       // 'Morning'
  * normalizeShift('')              // 'Morning'
  */
-export function normalizeShift(shift: string | undefined | null): CanonicalShift {
-  if (!shift) return 'Morning';
+export function normalizeShift(shift: string | undefined | null): CanonicalShift | null {
+  if (!shift) return null;
   const n = shift.toLowerCase().trim();
+  if (!n) return null;
 
   // Check for 'Both' variants first
   if (n === 'both') return 'Both';
@@ -63,8 +64,7 @@ export function normalizeShift(shift: string | undefined | null): CanonicalShift
   // Check for 'Morning' (broader match to catch 'morn', 'morning')
   if (n.includes('morn')) return 'Morning';
 
-  // Default fallback
-  return 'Morning';
+  return null;
 }
 
 // ─── Validation ───────────────────────────────────────────────────────────
@@ -117,16 +117,12 @@ export function isValidDriverShift(shift: string | undefined | null): boolean {
  * @param shift1 - First shift (canonical format)
  * @param shift2 - Second shift (canonical format)
  * @returns True if shifts are compatible
- *
- * @example
- * areShiftsCompatible('Both', 'Morning')  // true
- * areShiftsCompatible('Morning', 'Both')  // true
- * areShiftsCompatible('Morning', 'Morning') // true
- * areShiftsCompatible('Morning', 'Evening') // false
  */
 export function areShiftsCompatible(shift1: string | undefined | null, shift2: string | undefined | null): boolean {
+  if (!shift1 || !shift2) return false;
   const s1 = normalizeShift(shift1);
   const s2 = normalizeShift(shift2);
+  if (!s1 || !s2) return false;
 
   if (s1 === 'Both') return true;
   if (s2 === 'Both') return true;

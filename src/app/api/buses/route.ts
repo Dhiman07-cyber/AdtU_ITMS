@@ -1,4 +1,3 @@
-import { assignDriverToBus } from '@/domains/fleet/repositories/driver-assignment.repository';
 import { createBus,getAllBuses,getBusesByRouteId } from '@/domains/fleet/services/fleet.service';
 import { verifyApiAuth } from '@/lib/security/api-auth';
 import { applyRateLimit,createRateLimitId,RateLimits } from '@/lib/security/rate-limiter';
@@ -71,14 +70,6 @@ export async function POST(request: NextRequest) {
     };
 
     await createBus(newBus);
-
-    if (busData.driverUID) {
-      await assignDriverToBus(busData.driverUID, id, {
-        routeId: busData.routeId,
-        assignedBy: 'admin',
-        reason: 'assignment',
-      }).catch(e => console.error('⚠️ Failed to write driver_assignments for new bus:', e));
-    }
 
     return NextResponse.json({ id: newBus.id, ...newBus }, { status: 201, headers: rl.headers });
   } catch (error: any) {

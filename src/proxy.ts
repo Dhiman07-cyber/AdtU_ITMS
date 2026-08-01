@@ -197,7 +197,7 @@ function isCronRoute(pathname: string): boolean {
 /**
  * Extract the allowed origins for CSRF checks
  */
-function getAllowedOrigins(): string[] {
+const STATIC_ALLOWED_ORIGINS: Set<string> = (() => {
     const origins = [
         process.env.NEXT_PUBLIC_APP_URL || '',
         'https://adtu-bus.vercel.app',
@@ -205,8 +205,7 @@ function getAllowedOrigins(): string[] {
     ].filter(Boolean);
 
     if (process.env.NODE_ENV === 'development') {
-        const localProto = 'http';
-        origins.push(`${localProto}://localhost:3000`, `${localProto}://127.0.0.1:3000`);
+        origins.push('http://localhost:3000', 'http://127.0.0.1:3000');
     }
 
     const explicit = (process.env.ALLOWED_ORIGINS || '')
@@ -214,7 +213,13 @@ function getAllowedOrigins(): string[] {
         .map(s => s.trim())
         .filter(Boolean);
 
-    return [...new Set([...origins, ...explicit])];
+    return new Set([...origins, ...explicit]);
+})();
+
+function isOriginAllowed(origin: string): boolean {
+    if (STATIC_ALLOWED_ORIGINS.has(origin)) return true;
+    if (process.env.NODE_ENV === 'development' && origin.startsWith('http://localhost:')) return true;
+    return false;
 }
 
 /**
@@ -242,21 +247,16 @@ function validateOrigin(request: NextRequest): boolean {
         return true;
     }
 
-    const allowedOrigins = getAllowedOrigins();
-
     // Check origin header
-    if (origin) {
-        if (allowedOrigins.some(allowed => origin === allowed)) return true;
-        if (process.env.NODE_ENV === 'development' && origin.startsWith('http://localhost:')) return true;
+    if (origin && isOriginAllowed(origin)) {
+        return true;
     }
 
     // Fallback to referer
     if (referer) {
         try {
             const refererUrl = new URL(referer);
-            const refererOrigin = refererUrl.origin;
-            if (allowedOrigins.some(allowed => refererOrigin === allowed)) return true;
-            if (process.env.NODE_ENV === 'development' && refererOrigin.startsWith('http://localhost:')) return true;
+            if (isOriginAllowed(refererUrl.origin)) return true;
         } catch {
             // Invalid referer URL — reject
         }
@@ -383,3 +383,7 @@ export const config = {
         '/((?!_next/static|_next/image|favicon.ico).*)',
     ],
 };
+
+export { proxy as middleware };
+export default proxy;
+

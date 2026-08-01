@@ -51,16 +51,29 @@ const ITERATION_COUNT = 100000; // PBKDF2 iterations
 const QR_TOKEN_EXPIRY_MS = 24 * 60 * 60 * 1000; // 24 hours for QR codes
 const PAYMENT_TOKEN_EXPIRY_MS = 60 * 60 * 1000; // 1 hour for payment tokens
 
-// ============================================================================
-// KEY DERIVATION
-// ============================================================================
+// Key derivation LRU cache to prevent event-loop lockup on repeated field decryptions
+const derivedKeyCache = new Map<string, Buffer>();
+const MAX_KEY_CACHE_SIZE = 5000;
 
 /**
- * Derive a cryptographic key from the master secret using PBKDF2
+ * Derive a cryptographic key from the master secret using PBKDF2 with LRU caching
  */
 function deriveKey(salt: Buffer, secret: string = ENCRYPTION_KEY): Buffer {
     checkKeys();
-    return crypto.pbkdf2Sync(secret, salt, ITERATION_COUNT, KEY_LENGTH, 'sha256');
+    const cacheKey = salt.toString('hex') + ':' + secret;
+    const cached = derivedKeyCache.get(cacheKey);
+    if (cached) return cached;
+
+    const derived = crypto.pbkdf2Sync(secret, salt, ITERATION_COUNT, KEY_LENGTH, 'sha256');
+
+    if (derivedKeyCache.size >= MAX_KEY_CACHE_SIZE) {
+        const keys = Array.from(derivedKeyCache.keys());
+        for (let i = 0; i < 1000; i++) {
+            derivedKeyCache.delete(keys[i]);
+        }
+    }
+    derivedKeyCache.set(cacheKey, derived);
+    return derived;
 }
 
 // ============================================================================

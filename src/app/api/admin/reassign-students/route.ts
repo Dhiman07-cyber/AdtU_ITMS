@@ -142,7 +142,10 @@ export const POST = withSecurity<ReassignStudentsBody>(
                     throw new ReassignmentValidationError(`Target bus ${toBusId} not found`, 404);
                 }
 
-                const originalShift = normalizeShift(studentData.shift || 'Morning');
+                const originalShift = normalizeShift(studentData.shift);
+                if (!originalShift) {
+                    throw new ReassignmentValidationError(`Student ${assignment.studentName || studentId} profile missing valid shift assignment.`, 400);
+                }
 
                 const studentUpdateData: Record<string, unknown> = {
                     busId: toBusId,

@@ -1,7 +1,9 @@
 import { withSecurity } from '@/lib/security/api-security';
 import { RateLimits } from '@/lib/security/rate-limiter';
 import { BusIdSchema } from '@/lib/security/validation-schemas';
+import { getStudentProfileAndShift } from '@/lib/student-shift-resolver';
 import { getSupabaseServer } from '@/lib/supabase-server';
+import { isShiftCompatible } from '@/lib/utils';
 import { NextResponse } from 'next/server';
 
 /**
@@ -11,7 +13,7 @@ import { NextResponse } from 'next/server';
  * D9: All reads from Supabase (PostgreSQL) — no Firestore.
  */
 export const POST = withSecurity(
-  async (request, { body, requestId }) => {
+  async (request, { auth, body, requestId }) => {
     const { busId } = body as any;
 
     try {
@@ -19,10 +21,11 @@ export const POST = withSecurity(
 
       const supabase = getSupabaseServer();
 
-      // D9: Parallelize Supabase active trip check and bus metadata fetch
-      const [tripRes, busRes] = await Promise.all([
+      // Parallelize Supabase active trip check, bus metadata fetch, and student profile/shift resolution
+      const [tripRes, busRes, resolved] = await Promise.all([
         supabase.from('active_trips').select('trip_id, bus_id, driver_id, route_id, shift, status, start_time, end_time, last_heartbeat').eq('bus_id', busId).eq('status', 'active').maybeSingle(),
-        supabase.from('buses').select('status').eq('id', busId).maybeSingle()
+        supabase.from('buses').select('status').eq('id', busId).maybeSingle(),
+        auth?.uid ? getStudentProfileAndShift(auth.uid) : Promise.resolve(null)
       ]);
 
       if (tripRes.error) {
@@ -34,6 +37,16 @@ export const POST = withSecurity(
       const busStatus = busRes.data?.status || null;
 
       if (activeTrip) {
+        const studentShift = resolved?.shift;
+        if (!studentShift || !isShiftCompatible(studentShift, activeTrip.shift)) {
+          return NextResponse.json({
+            success: true,
+            hasActiveTrip: false,
+            tripData: null,
+            requestId
+          });
+        }
+
         return NextResponse.json({
           success: true,
           hasActiveTrip: true,

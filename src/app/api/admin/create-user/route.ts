@@ -1,7 +1,6 @@
 import { getSystemConfig } from '@/domains/admin';
 import { createAuditEvent } from '@/domains/audit';
 import { getBusById,incrementBusCapacity } from '@/domains/fleet';
-import { assignDriverToBus } from '@/domains/fleet/repositories/driver-assignment.repository';
 import { createAdmin,createDriver,createModerator,createStudent,createUser,getStudentById } from '@/domains/identity';
 import * as routeService from '@/domains/route';
 import { sendBusFullAlert } from '@/lib/busCapacityService';
@@ -342,17 +341,7 @@ export const POST = withSecurity<CreateUserBody>(
                 updatedAt: now,
             });
 
-            // Update bus driver assignment via canonical repository
-            if (busId) {
-                try {
-                    await assignDriverToBus(uid, busId, {
-                        assignedBy: 'admin',
-                        reason: 'assignment',
-                    });
-                } catch (err) {
-                    console.error(`⚠️ Failed to assign driver ${uid} in driver_assignments:`, err);
-                }
-            }
+            // Driver profile created successfully
         } else {
             // Moderator or Admin
             // Write user to PostgreSQL (canonical source of truth)

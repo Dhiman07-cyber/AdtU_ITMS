@@ -174,10 +174,10 @@ const nextConfig: NextConfig = {
         key: 'Strict-Transport-Security',
         value: 'max-age=31536000; includeSubDomains; preload',
       }] : []),
-      // COOP header set to allow Firebase Auth popups
+      // COOP header configured for Firebase Auth popup compatibility
       {
         key: 'Cross-Origin-Opener-Policy',
-        value: 'same-origin-allow-popups',
+        value: isProduction ? 'same-origin-allow-popups' : 'unsafe-none',
       },
       {
         key: 'Cross-Origin-Embedder-Policy',

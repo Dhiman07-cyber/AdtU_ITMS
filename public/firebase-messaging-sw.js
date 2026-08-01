@@ -80,8 +80,8 @@ if (messaging) {
 
       const options = {
         body,
-        icon: '/icons/icon-192x192.svg',
-        badge: '/icons/icon-72x72.svg',
+        icon: data.icon || '/icons/icon-192x192.png',
+        badge: '/icons/icon-72x72.png',
         tag: String(data.tripId || `bus-${data.type || 'notification'}`).slice(0, 80),
         requireInteraction: data.type === 'TRIP_STARTED',
         data: { ...data, click_action: toSafeAppPath(clickUrl) },

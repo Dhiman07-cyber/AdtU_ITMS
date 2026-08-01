@@ -1,43 +1,34 @@
-import { shouldWriteLocationBreadcrumb } from '@/lib/services/location-write-throttle';
 import { getSupabaseServer } from '@/lib/supabase-server';
-import type { LocationUpdateNormalized } from './types';
 
-export async function persistLocation(n: LocationUpdateNormalized): Promise<boolean> {
-  const supabase = getSupabaseServer();
-  const timestampIso = n.timestamp.toISOString();
+interface CachedTripLock {
+  valid: boolean;
+  tripId: string;
+  cachedAt: number;
+}
 
-  const busLocationWrite = supabase.from('bus_locations').insert({
-    bus_id: n.busId,
-    route_id: n.routeId,
-    driver_uid: n.driverId,
-    lat: n.lat,
-    lng: n.lng,
-    accuracy: n.accuracy,
-    speed: n.speed,
-    heading: n.heading,
-    timestamp: timestampIso,
-    trip_id: n.tripId,
-    is_snapshot: false,
-  });
+const tripLockCache = new Map<string, CachedTripLock>();
+const CACHE_TTL_MS = 10_000; // 10 seconds
 
-  const writeBreadcrumb = shouldWriteLocationBreadcrumb(n.tripId, n.timestamp.getTime());
-  const breadcrumbWrite = writeBreadcrumb
-    ? supabase.from('driver_location_updates').insert({
-        driver_uid: n.driverId,
-        bus_id: n.busId,
-        lat: n.lat,
-        lng: n.lng,
-        speed: n.speed,
-        heading: n.heading,
-        timestamp: timestampIso,
-      })
-    : Promise.resolve({ error: null });
-
-  const results = await Promise.allSettled([busLocationWrite, breadcrumbWrite]);
-  return !results.some(r => r.status === 'rejected');
+export function invalidateActiveTripCache(busId?: string, driverId?: string): void {
+  if (busId && driverId) {
+    tripLockCache.delete(`${driverId}:${busId}`);
+  } else {
+    tripLockCache.clear();
+  }
 }
 
 export async function checkActiveTrip(driverId: string, busId: string, tripId: string): Promise<{ valid: boolean; reason?: string }> {
+  const cacheKey = `${driverId}:${busId}`;
+  const now = Date.now();
+  const cached = tripLockCache.get(cacheKey);
+
+  if (cached && (now - cached.cachedAt < CACHE_TTL_MS)) {
+    if (tripId && cached.tripId !== tripId) {
+      return { valid: false, reason: 'Trip mismatch for location update' };
+    }
+    return { valid: cached.valid };
+  }
+
   const supabase = getSupabaseServer();
 
   const { data: activeTrip, error } = await supabase
@@ -49,6 +40,7 @@ export async function checkActiveTrip(driverId: string, busId: string, tripId: s
     .maybeSingle();
 
   if (error || !activeTrip) {
+    tripLockCache.delete(cacheKey);
     return { valid: false, reason: 'No active trip lock found for this driver/bus' };
   }
 
@@ -56,17 +48,12 @@ export async function checkActiveTrip(driverId: string, busId: string, tripId: s
     return { valid: false, reason: 'Trip mismatch for location update' };
   }
 
+  tripLockCache.set(cacheKey, {
+    valid: true,
+    tripId: activeTrip.trip_id,
+    cachedAt: now,
+  });
+
   return { valid: true };
 }
 
-export async function getLastLocation(busId: string, tripId: string): Promise<{ lat: number; lng: number; timestamp: string } | null> {
-  const supabase = getSupabaseServer();
-  const { data: lastLocations } = await supabase
-    .from('bus_locations')
-    .select('lat, lng, timestamp')
-    .eq('bus_id', busId)
-    .eq('trip_id', tripId)
-    .order('timestamp', { ascending: false })
-    .limit(1);
-  return lastLocations && lastLocations.length > 0 ? lastLocations[0] : null;
-}

@@ -1,5 +1,4 @@
-﻿import { createBus,getBusById } from '@/domains/fleet';
-import { assignDriverToBus } from '@/domains/fleet/repositories/driver-assignment.repository';
+import { createBus,getBusById } from '@/domains/fleet';
 import { getUserById } from '@/domains/identity';
 import * as routeService from '@/domains/route';
 import { adminAuth } from '@/lib/firebase-admin';
@@ -96,18 +95,7 @@ export async function POST(request: Request) {
       load: initialLoad
     });
 
-    // Update driver assignment via canonical repository
-    if (driverUID) {
-      try {
-        await assignDriverToBus(driverUID, busId, {
-          routeId,
-          assignedBy: 'admin',
-          reason: 'assignment',
-        });
-      } catch (e) {
-        console.error('⚠️ Failed to write driver_assignments:', e);
-      }
-    }
+
 
     return NextResponse.json({
       success: true,

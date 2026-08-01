@@ -2,7 +2,9 @@ import { requireTransportEntitlement } from '@/lib/entitlement/require-transport
 import { withSecurity } from '@/lib/security/api-security';
 import { RateLimits } from '@/lib/security/rate-limiter';
 import { TripStatusQuerySchema } from '@/lib/security/validation-schemas';
+import { getStudentProfileAndShift } from '@/lib/student-shift-resolver';
 import { getSupabaseServer } from '@/lib/supabase-server';
+import { isShiftCompatible } from '@/lib/utils';
 import { NextResponse } from 'next/server';
 
 /**
@@ -32,6 +34,13 @@ export const GET = withSecurity(
             }, { status: 400 });
         }
 
+        const busVariations = [busId];
+        if (busId.startsWith('bus_')) {
+            busVariations.push(busId.replace('bus_', ''));
+        } else {
+            busVariations.push(`bus_${busId}`);
+        }
+
         // PERF: Use singleton Supabase client instead of creating one per request
         const supabase = getSupabaseServer();
 
@@ -39,7 +48,7 @@ export const GET = withSecurity(
         const { data: rows, error } = await supabase
             .from('active_trips')
             .select('trip_id, bus_id, driver_id, route_id, shift, status, start_time, last_heartbeat')
-            .eq('bus_id', busId)
+            .in('bus_id', busVariations)
             .eq('status', 'active')
             .order('start_time', { ascending: false })
             .limit(1);
@@ -56,11 +65,28 @@ export const GET = withSecurity(
         }
 
         if (data) {
+            // Check shift compatibility for student role
+            if (auth.role === 'student') {
+                const resolved = await getStudentProfileAndShift(auth.uid);
+
+                if (resolved.shift && !isShiftCompatible(resolved.shift, data.shift)) {
+                    console.log(`ℹ️ Trip active for bus ${busId} but shift incompatible (student: ${resolved.shift}, trip: ${data.shift})`);
+                    return NextResponse.json({
+                        tripActive: false,
+                        tripData: null,
+                        reason: 'shift_mismatch'
+                    });
+                }
+            }
+
             console.log(`✅ Active trip found for bus ${busId}:`, {
                 tripId: data.trip_id,
                 status: data.status,
                 startedAt: data.start_time
             });
+
+            const { getLastLocationForBus } = await import('@/domains/gps');
+            const lastLoc = getLastLocationForBus(busId);
 
             return NextResponse.json({
                 tripActive: true,
@@ -71,12 +97,18 @@ export const GET = withSecurity(
                     routeId: data.route_id,
                     shift: data.shift,
                     startedAt: data.start_time,
-                    lastUpdated: data.last_heartbeat
+                    lastUpdated: data.last_heartbeat,
+                    current_location: lastLoc ? {
+                        busId,
+                        driverUid: data.driver_id,
+                        lat: lastLoc.lat,
+                        lng: lastLoc.lng,
+                        timestamp: lastLoc.timestamp,
+                    } : null
                 }
             });
         }
 
-        console.log(`ℹ️ No active trip found for bus ${busId}`);
         return NextResponse.json({
             tripActive: false,
             tripData: null

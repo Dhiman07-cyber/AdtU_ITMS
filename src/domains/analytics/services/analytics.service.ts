@@ -96,12 +96,12 @@ export async function getDashboardCounts() {
   }
 
   const activeTripData = raw.driverStatusData.map((status: any) => {
-    const bus = allBuses.find(b => b.busId === status.bus_id);
-    const route = allRoutes.find(r => r.routeId === status.route_id);
+    const bus = allBuses.find(b => b.busId === status.bus_id || b.id === status.bus_id || b.bus_number === status.bus_id);
+    const route = allRoutes.find(r => r.routeId === status.route_id || r.id === status.route_id);
     return {
-      id: status.id, busId: bus?.busNumber || status.bus_id || '?',
-      routeName: route?.routeName || 'Tracking...', driverUid: status.driver_uid,
-      startTime: status.started_at || new Date().toISOString(),
+      id: status.trip_id || status.id, busId: bus?.busNumber || bus?.bus_number || status.bus_id || '?',
+      routeName: route?.routeName || route?.route_name || 'Tracking...', driverUid: status.driver_id || status.driver_uid,
+      startTime: status.start_time || status.started_at || new Date().toISOString(),
       studentCount: bus?.currentMembers || 0, status: 'In Motion',
     };
   });

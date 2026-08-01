@@ -1,6 +1,6 @@
-﻿/**
+/**
  * Cleanup Helper Functions
- * Utilities for deleting data from Firestore and associated resources
+ * Utilities for cascading user, bus, and route deletions across PostgreSQL (Supabase), Firebase Auth, Cloudinary, and FCM.
  */
 
 import * as fleetService from '@/domains/fleet';
@@ -32,20 +32,18 @@ export async function deleteCloudinaryImage(imageUrl: string): Promise<boolean> 
 }
 
 /**
- * Delete user and associated data from Firestore, Firebase Auth, and Cloudinary
+ * Delete user and associated data from PostgreSQL, Firebase Auth, Cloudinary, and FCM
  * 
  * IMPORTANT: Google Account Deletion Process
  * - This function deletes the user from Firebase Authentication
  * - For Google-authenticated users, it attempts to disconnect the Google provider
  * - However, the actual Google account itself cannot be deleted programmatically
  * - The Google account remains active but is disconnected from Firebase Auth
- * - Users cannot re-register with the same Google account unless manually reconnected
  * 
  * What happens to Google accounts:
  * 1. Google provider is disconnected from Firebase Auth
  * 2. Firebase Auth user record is deleted
  * 3. Google account remains active but cannot be used to sign in
- * 4. User would need to manually reconnect their Google account to re-register
  */
 export async function deleteUserAndData(
   userId: string,
@@ -68,9 +66,24 @@ export async function deleteUserAndData(
       return { success: false, error: 'User not found' };
     }
 
+    // Active trip protection for drivers
+    if (userType === 'driver') {
+      const db = getSupabaseServer();
+      const { data: activeTrip } = await db
+        .from('active_trips')
+        .select('id')
+        .eq('driver_id', userId)
+        .eq('status', 'active')
+        .maybeSingle();
+
+      if (activeTrip) {
+        return { success: false, error: 'Cannot delete driver while an active trip is in progress. End the trip first.' };
+      }
+    }
+
     const profileImageUrl = userData?.profilePhotoUrl;
     const firebaseAuthUid = userData?.uid || userId;
-    const busId = userData?.busId || userData?.currentBusId || userData?.busId || null;
+    const busId = userData?.busId || userData?.currentBusId || null;
     const shouldDecrement = !!busId && !wasSeatReleased(userData);
 
     // 2. PostgreSQL Transaction Commit Boundary (PG deletes first)
@@ -109,7 +122,7 @@ export async function deleteUserAndData(
       }
     }
 
-    // 3. Firebase Auth User Deletion & JWT Revocation (Pre-commit / External)
+    // 3. Firebase Auth User Deletion & JWT Revocation (External)
     try {
       await adminAuth.revokeRefreshTokens(firebaseAuthUid);
       await adminAuth.deleteUser(firebaseAuthUid);
@@ -120,13 +133,13 @@ export async function deleteUserAndData(
       }
     }
 
-    // 4. Firestore & Legacy Cleanup (External)
+    // 4. FCM & Request Cleanup (External)
     if (userType === 'student') {
       // Delete FCM tokens from Firestore subcollection
       try {
         await deleteUserTokens(userId);
       } catch (fcmErr: any) {
-        console.warn('Firestore tokens subcollection delete warning:', fcmErr.message);
+        console.warn('FCM tokens subcollection delete warning:', fcmErr.message);
       }
 
       // Delete profile update requests
@@ -141,21 +154,14 @@ export async function deleteUserAndData(
           await batch.commit();
         }
       } catch (requestsError: any) {
-        console.warn('Firestore profile update requests delete warning:', requestsError.message);
+        console.warn('Profile update requests delete warning:', requestsError.message);
       }
-
-      // ponytail: Legacy Firestore fcm_tokens collection cleanup removed — PostgreSQL
-      // fcm_tokens table is the canonical store. Old Firestore collection is dead data.
-
-      // ponytail: Firestore waiting_flags cleanup removed — PostgreSQL
-      // delete_student_cascade_v1 RPC already deletes waiting_flags by student_uid.
     } else if (userType === 'driver') {
-      // Delete driver's trip logs
-      await deleteDriverTripLogs(userId);
+      console.log(`ℹ️ Preserving trip history logs and operational notifications for deleted driver: ${userId.substring(0,8)}...`);
     }
 
-    // Common non-student notifications delete (already handled in RPC for student)
-    if (userType !== 'student') {
+    // Common moderator notifications cleanup
+    if (userType === 'moderator') {
       await deleteUserNotifications(userId);
     }
 
@@ -195,7 +201,7 @@ export async function deleteUserAndData(
 }
 
 /**
- * Delete user's notifications
+ * Delete user's notifications in PostgreSQL
  */
 async function deleteUserNotifications(userId: string): Promise<void> {
   try {
@@ -207,18 +213,7 @@ async function deleteUserNotifications(userId: string): Promise<void> {
 }
 
 /**
- * Delete driver's trip logs
- *
- * ponytail: Firestore trip_logs cleanup removed — trip data lifecycle is
- * managed by PostgreSQL: active_trips cleaned by cleanup-stale-locks cron,
- * bus_locations/driver_location_updates cleaned by cleanup_old_* RPCs.
- */
-async function deleteDriverTripLogs(_driverId: string): Promise<void> {
-  // No-op: PostgreSQL trip lifecycle manages this data.
-}
-
-/**
- * Delete bus and associated data
+ * Delete bus and associated data in PostgreSQL
  */
 export async function deleteBusAndData(
   busId: string
@@ -251,7 +246,7 @@ export async function deleteBusAndData(
     // 2. Unassign bus from drivers in PostgreSQL
     try {
       const drivers = await getAllDrivers();
-      const assignedDrivers = drivers.filter(d => d.busId === busId || d.busId === busId);
+      const assignedDrivers = drivers.filter(d => d.busId === busId);
       for (const driver of assignedDrivers) {
         await updateDriver(driver.uid, {
           busId: null,
@@ -301,9 +296,3 @@ export async function deleteRouteAndData(
     return { success: false, error: error.message };
   }
 }
-
-
-// ponytail: cleanupTripData/cleanupSupabaseTripData removed — never called.
-// Trip data cleanup is handled by PostgreSQL cron: cleanup-stale-locks cleans
-// active_trips, bus_locations, driver_location_updates, waiting_flags by trip_id.
-

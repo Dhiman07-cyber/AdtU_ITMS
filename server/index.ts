@@ -9,6 +9,9 @@ import { stopOfflineQueue } from './offline-queue';
 import { stopRateLimiter } from './rate-limiter';
 import { stopMessageValidator } from './message-validator';
 import { validateEnvironment } from '../src/lib/env-validator';
+import { redisClient } from './redis-client';
+import { initRedisBroadcastRelay } from './redis-broadcast';
+import { updateLiveBusLocation } from './socket-router';
 
 const WS_PORT = parseInt(process.env.WS_PORT || '3001', 10);
 const HEALTH_PORT = parseInt(process.env.HEALTH_PORT || '9090', 10);
@@ -25,6 +28,24 @@ async function main() {
 
   const server = createServer();
   wsServer.start(server);
+
+  // Connect Redis and initialize cross-node broadcast relay.
+  // Graceful: if REDIS_URL is absent, redisClient.connect() returns false
+  // and redisPubSub calls become no-ops — single-node mode continues.
+  redisClient.connect().then((connected) => {
+    if (connected) {
+      initRedisBroadcastRelay(
+        // onBroadcast: relay received cross-node events to local WS subscribers
+        (channel, event, payload) => wsServer.broadcastToChannel(channel, event, payload),
+        // onLocationUpdate: keep the in-process live-location cache in sync
+        (busId, payload) => updateLiveBusLocation(busId, payload),
+      ).catch((err) => {
+        logger.warn('redis_broadcast_relay_init_failed', { error: (err as Error).message });
+      });
+    } else {
+      logger.info('redis_not_configured_running_single_node');
+    }
+  });
 
   server.listen(WS_PORT, () => {
     logger.info('websocket_runtime_started', { port: WS_PORT });

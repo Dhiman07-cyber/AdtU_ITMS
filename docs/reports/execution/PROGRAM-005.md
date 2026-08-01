@@ -198,9 +198,7 @@ Build pipeline verified and standardized:
 ## 14. DOCUMENTATION UPDATES
 
 Synchronized all infrastructure documentation to reflect Phase-01 standardization:
-- `docs/deployment.md`: Updated to document full Docker Compose stack, Node 22 LTS standardization, port mapping, and fail-fast environment checks.
-- `docs/environment-reference.md`: Updated with `src/lib/env-validator.ts` details, variable classifications, and fail-fast boot behaviors.
-- `docs/runbooks.md`: Verified alignment with standardized process lifecycle and PM2/Docker commands.
+- `docs/operations/ops-playbook.md`: Consolidated master operations manual documentation including Docker Compose stacks, Node 22 LTS standardization, port mapping, environment validation, and verified runbooks.
 
 ---
 
@@ -838,7 +836,7 @@ All completion criteria for PROGRAM-005 Phase-04 have been fulfilled:
 4. **Distributed PubSub Layer (Redis 7.2 Alpine):**
    - Synchronizes channel broadcasts across all active WebSocket compute nodes.
 5. **Database Authority (Supabase PostgreSQL 17):**
-   - Holds persistent operational state (`bus_locations`, `driver_status`, `active_trips`, `payments`).
+   - Holds persistent operational state (`bus_locations`, `active_trips`, `payments`).
 
 ---
 

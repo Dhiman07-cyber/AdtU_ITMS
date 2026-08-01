@@ -1,5 +1,4 @@
-﻿import { getBusById,updateBus } from '@/domains/fleet';
-import { assignDriverToBus,getActiveAssignmentByBusId,unassignDriver } from '@/domains/fleet/repositories/driver-assignment.repository';
+import { getBusById,updateBus } from '@/domains/fleet';
 import { getUserById } from '@/domains/identity';
 import * as routeService from '@/domains/route';
 import { adminAuth } from '@/lib/firebase-admin';
@@ -83,16 +82,11 @@ export async function PUT(request: Request) {
         }
 
         // ---------------------------------------------------------
-        // 2. Driver Logic — resolve current driver from canonical source
         // ---------------------------------------------------------
-        const newDriverId = driverUID;
-        const currentAssignment = await getActiveAssignmentByBusId(busId);
-        const currentDriverId = currentAssignment?.driverUid ?? null;
-
-        if (newDriverId && newDriverId !== currentDriverId) {
-            if (oldBusData.activeTripId) {
-                return NextResponse.json({ success: false, error: 'Cannot change driver during an active trip.' }, { status: 400 });
-            }
+        // 2. Active Trip Guard
+        // ---------------------------------------------------------
+        if (oldBusData.activeTripId) {
+            return NextResponse.json({ success: false, error: 'Cannot update bus configuration during an active trip.' }, { status: 400 });
         }
 
         // ---------------------------------------------------------
@@ -106,31 +100,6 @@ export async function PUT(request: Request) {
             routeData = await routeService.getById(newRouteId);
             if (!routeData) {
                 return NextResponse.json({ success: false, error: `Route "${newRouteId}" not found in canonical routes.` }, { status: 404 });
-            }
-        }
-
-        // ─── COMMIT — canonical source of truth ───
-
-        // 1. Unassign old driver via canonical repository
-        if (newDriverId && newDriverId !== currentDriverId && currentDriverId) {
-            try {
-                await unassignDriver(currentDriverId, 'admin_reassign');
-            } catch (err) {
-                console.error(`⚠️ Failed to unassign old driver ${currentDriverId} in driver_assignments:`, err);
-            }
-        }
-
-        // 2. Assign new driver via canonical repository
-        if (newDriverId && newDriverId !== currentDriverId) {
-            const finalRouteId = routeChanged ? newRouteId : oldBusData.routeId;
-            try {
-                await assignDriverToBus(newDriverId, busId, {
-                    routeId: finalRouteId,
-                    assignedBy: 'admin',
-                    reason: 'admin_reassign',
-                });
-            } catch (err) {
-                console.error(`⚠️ Failed to assign new driver ${newDriverId} in driver_assignments:`, err);
             }
         }
 

@@ -31,6 +31,12 @@ const SUPPRESSED_ERROR_PATTERNS = [
   'net::ERR_',
   'Failed to fetch',
   'AbortError',
+  'ERR_CACHE_OPERATION_NOT_SUPPORTED',
+  'SecurityError',
+  'cross-origin frame',
+  'pmtiles',
+  'guwahati.pmtiles',
+  'MapLibre',
 ];
 
 // Chunk-loading related errors
@@ -73,24 +79,28 @@ function isChunkLoadError(message: string): boolean {
 export function normalizeErrorMessage(error: any): string {
   if (!error) return 'An unknown error occurred';
 
-  // Handle empty error objects {}
+  // Handle Event / MapLibre DOM objects safely without triggering Window serialization SecurityErrors
   if (typeof error === 'object') {
-    if (Object.keys(error).length === 0) {
-      return 'Connection error. Please check your network.';
+    if (typeof Event !== 'undefined' && error instanceof Event) {
+      return `Event: ${error.type || 'unknown'}`;
     }
 
     // Try common error properties
     const message = error.message || error.error || error.reason || error.detail;
-    if (message) return message;
+    if (message && typeof message === 'string') return message;
 
-    // Try to stringify for debugging
+    if (Object.keys(error).length === 0) {
+      return 'An unexpected issue occurred.';
+    }
+
+    // Try to stringify for debugging safely
     try {
       const stringified = JSON.stringify(error);
       if (stringified === '{}') {
-        return 'Connection error. Please check your network.';
+        return 'An unexpected issue occurred.';
       }
     } catch {
-      // Ignore stringify errors
+      // Ignore cross-origin stringify errors
     }
   }
 
@@ -225,13 +235,17 @@ export function initMobileErrorHandler() {
     // Prevent the default behavior (which might crash the app)
     event.preventDefault();
 
-    // Log to console for debugging (with normalized message)
-    if (event.reason instanceof Error) {
-      console.error('Error details:', {
-        message: event.reason.message || 'No message',
-        name: event.reason.name || 'Unknown',
-        stack: event.reason.stack || 'No stack trace'
-      });
+    // Log to console for debugging (safely guarded against cross-origin property access)
+    try {
+      if (event.reason instanceof Error) {
+        console.error('Error details:', {
+          message: event.reason.message || 'No message',
+          name: event.reason.name || 'Unknown',
+          stack: typeof event.reason.stack === 'string' ? event.reason.stack : 'No stack trace'
+        });
+      }
+    } catch {
+      // Ignore Window / cross-origin inspection errors
     }
 
     // Store in sessionStorage for debugging

@@ -1,0 +1,212 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [
+    {
+      "icon": "home",
+      "includeVars": true,
+      "keepTime": true,
+      "targetBlank": false,
+      "title": "Master NOC",
+      "type": "link",
+      "url": "/d/itms-master-noc/01-master-noc-dashboard"
+    },
+    {
+      "icon": "bolt",
+      "includeVars": true,
+      "keepTime": true,
+      "targetBlank": false,
+      "title": "Infrastructure",
+      "type": "link",
+      "url": "/d/itms-infrastructure/02-infrastructure-dashboard"
+    },
+    {
+      "icon": "signal",
+      "includeVars": true,
+      "keepTime": true,
+      "targetBlank": false,
+      "title": "Realtime",
+      "type": "link",
+      "url": "/d/itms-realtime/03-realtime-dashboard"
+    },
+    {
+      "icon": "bus",
+      "includeVars": true,
+      "keepTime": true,
+      "targetBlank": false,
+      "title": "Fleet & Ops",
+      "type": "link",
+      "url": "/d/itms-fleet-ops/04-fleet-and-operations-dashboard"
+    },
+    {
+      "icon": "money-insert",
+      "includeVars": true,
+      "keepTime": true,
+      "targetBlank": false,
+      "title": "Business Analytics",
+      "type": "link",
+      "url": "/d/itms-business-analytics/05-business-analytics-dashboard"
+    },
+    {
+      "icon": "lock",
+      "includeVars": true,
+      "keepTime": true,
+      "targetBlank": false,
+      "title": "Security & Reliability",
+      "type": "link",
+      "url": "/d/itms-security-reliability/06-security-and-reliability-dashboard"
+    }
+  ],
+  "liveNow": true,
+  "templating": {
+    "list": [
+      {
+        "current": { "selected": true, "text": "All", "value": "$__all" },
+        "name": "node",
+        "label": "Node",
+        "type": "custom",
+        "query": "All, ws1, ws2",
+        "includeAll": true,
+        "multi": false
+      }
+    ]
+  },
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 10, "w": 12, "x": 0, "y": 0 },
+      "id": 1,
+      "title": "CPU Usage by Service Node",
+      "description": "• WHAT IS THIS? CPU utilization rate across Node.js, Redis, and Database container processes.\n• HEALTHY BASELINE: Green (< 60%). Yellow (60-85%). Red (> 85%).",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum(rate(process_cpu_seconds_total[1m])) by (job, instance)",
+          "legendFormat": "{{job}} - {{instance}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "lineWidth": 3, "fillOpacity": 15 },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 0.6 }, { "color": "red", "value": 0.85 }]
+          }
+        }
+      }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 0 },
+      "id": 2,
+      "title": "Memory Heap & RSS Allocations (MB)",
+      "description": "• WHAT IS THIS? Resident Set Size (RSS) and Node.js V8 Heap RAM memory consumption.\n• HEALTHY BASELINE: RSS < 400 MB, Heap < 256 MB.",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "process_resident_memory_bytes / 1024 / 1024",
+          "legendFormat": "RSS {{job}} (MB)"
+        },
+        {
+          "expr": "nodejs_heap_size_used_bytes / 1024 / 1024",
+          "legendFormat": "Heap {{job}} (MB)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "lineWidth": 3, "fillOpacity": 15 }
+        }
+      }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 10, "w": 12, "x": 0, "y": 10 },
+      "id": 3,
+      "title": "Redis Memory & Command Ops Rate",
+      "description": "• WHAT IS THIS? Redis RAM memory consumption and command execution throughput per second.",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "redis_memory_used_bytes / 1024 / 1024",
+          "legendFormat": "Redis Used RAM (MB)"
+        },
+        {
+          "expr": "rate(redis_commands_total[1m])",
+          "legendFormat": "Redis Commands/sec"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "lineWidth": 3, "fillOpacity": 15 }
+        }
+      }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 10 },
+      "id": 4,
+      "title": "PostgreSQL Query Throughput & Latency P95",
+      "description": "• WHAT IS THIS? PostgreSQL database query rate and 95th percentile query execution time in milliseconds.\n• HEALTHY BASELINE: P95 Latency < 100 ms (Green). 100-300 ms (Yellow). > 300 ms (Red).",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum(rate(database_queries_total[1m]))",
+          "legendFormat": "Queries/sec"
+        },
+        {
+          "expr": "histogram_quantile(0.95, rate(itms_db_query_duration_seconds_bucket[5m])) * 1000",
+          "legendFormat": "P95 Latency (ms)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "lineWidth": 3, "fillOpacity": 15 }
+        }
+      }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 20 },
+      "id": 5,
+      "title": "NGINX Traffic & Upstream Routing",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum(rate(nginx_http_requests_total[1m]))",
+          "legendFormat": "NGINX Total Requests/sec"
+        },
+        {
+          "expr": "nginx_connections_active",
+          "legendFormat": "Active Connections"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "lineWidth": 3, "fillOpacity": 15 }
+        }
+      }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 28 },
+      "id": 6,
+      "title": "⚡ ITMS DASHBOARD NAVIGATION & SUBSYSTEM LINKAGES",
+      "type": "text",
+      "options": {
+        "mode": "markdown",
+        "content": "## 🔗 Inter-Dashboard Navigation Matrix\nNavigate to any ITMS dashboard with one click:\n\n* 🏠 **[01 - Master NOC Dashboard](/d/itms-master-noc/01-master-noc-dashboard)** — Global System Health Grid & Executive KPIs\n* ⚡ **[02 - Infrastructure Dashboard](/d/itms-infrastructure/02-infrastructure-dashboard)** — CPU, RAM, Disk, NGINX, Redis & PostgreSQL Metrics\n* 🛰️ **[03 - Realtime Dashboard](/d/itms-realtime/03-realtime-dashboard)** — Active Trips, 1Hz GPS Streams, WebSocket Fanout & Pub/Sub\n* 🚌 **[04 - Fleet & Operations Dashboard](/d/itms-fleet-ops/04-fleet-and-operations-dashboard)** — Bus/Driver Utilization, Route Stats & Student Waiting Flags\n* 💳 **[05 - Business Analytics Dashboard](/d/itms-business-analytics/05-business-analytics-dashboard)** — Payments, Revenue, Pass Subscriptions & Active Users\n* 🔒 **[06 - Security & Reliability Dashboard](/d/itms-security-reliability/06-security-and-reliability-dashboard)** — JWT Auth, Rate Limits, HTTP 4xx/5xx Errors & Disconnects\n\n---\n*ITMS Executive Dashboard Suite | Version 2.3 | Inter-Dashboard Linkages Enabled*\n"
+      }
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["infrastructure", "system", "itms"],
+  "time": { "from": "now-1h", "to": "now" },
+  "title": "02 - Infrastructure Dashboard",
+  "uid": "itms-infrastructure",
+  "version": 3
+}

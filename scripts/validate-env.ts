@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import { validateEnvironment } from '../src/lib/env-validator';
 
 function main() {

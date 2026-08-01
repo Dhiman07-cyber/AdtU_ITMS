@@ -19,13 +19,19 @@ export const POST = withSecurity<{ busId: string; tripId?: string }>(
       );
     }
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       success: true,
       tripId: result.tripId,
       busId,
       timestamp: new Date().toISOString(),
       processingTimeMs: Date.now() - startTime,
     });
+
+    response.headers.set('Deprecation', 'true');
+    response.headers.set('Sunset', '2026-09-01');
+    response.headers.set('Link', '</api/driver/end-journey-v2>; rel="successor-version"');
+
+    return response;
   },
   {
     requiredRoles: ['driver'],

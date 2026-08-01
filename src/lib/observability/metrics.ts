@@ -77,9 +77,12 @@ class MetricRegistry {
     const labelKey = this.serializeLabels(labels);
     const list = store.get(labelKey) || [];
     list.push(value);
-    // Keep max 1000 samples per bucket
-    if (list.length > 1000) list.shift();
-    store.set(labelKey, list);
+    // Amortized batch eviction: trim back to 1,000 only when array reaches 1,200
+    if (list.length > 1200) {
+      store.set(labelKey, list.slice(list.length - 1000));
+    } else {
+      store.set(labelKey, list);
+    }
   }
 
   timer(name: string, help: string, durationMs: number, labels?: Record<string, string>): void {

@@ -479,33 +479,34 @@ async function fetchDriverProfile(uid: string): Promise<DriverProfile | null> {
       }
     }
 
-    const joiningDate = toDate(data.joiningDate);
+    const joiningDate = toDate(data.joiningDate || data.joining_date);
     const yearsOfService = calculateYearsOfService(joiningDate);
 
     return {
       uid,
       role: 'driver',
-      fullName: data.fullName || data.name || 'Unknown',
+      fullName: data.fullName || data.full_name || data.name || 'Unknown',
       email: data.email || '',
       phone: data.phoneNumber || data.phone || '',
-      profilePhotoUrl: data.profilePhotoUrl || data.profilePicture,
-      createdAt: toDate(data.createdAt),
-      updatedAt: toDate(data.updatedAt),
-      approvedBy: data.approvedBy || 'Not available',
-      licenseNumber: data.licenseNumber,
+      profilePhotoUrl: data.profilePhotoUrl || data.profile_photo_url || data.profilePicture,
+      createdAt: toDate(data.createdAt || data.created_at),
+      updatedAt: toDate(data.updatedAt || data.updated_at),
+      approvedBy: data.approvedBy || data.approved_by || 'System',
+      licenseNumber: data.licenseNumber || data.license_number,
       busId: busIds.length > 0 ? busIds[0] : undefined,
       busIds: busIds,
       busNumbers,
       routeId: routeIds.length > 0 ? routeIds[0] : undefined,
       routeIds: routeIds,
       routeNames,
-      shift: data.shift,
+      shift: data.shift || 'Both',
       joiningDate,
       yearsOfService,
-      altPhone: data.altPhone || data.alternatePhone,
+      altPhone: data.altPhone || data.alternatePhone || data.alternate_phone || data.alt_phone,
       dob: toDate(data.dob),
-      driverId: data.driverId || data.employeeId,
-      aadharNumber: data.aadharNumber,
+      driverId: data.driverId || data.employeeId || data.employee_id,
+      employeeId: data.employeeId || data.employee_id,
+      aadharNumber: data.aadharNumber || data.aadhar_number,
     };
   } catch (error) {
     console.error('Error fetching driver profile:', error);

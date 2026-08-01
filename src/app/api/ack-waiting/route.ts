@@ -1,4 +1,4 @@
-﻿import { getDriverById,getValidFcmTokensForUsers } from '@/domains/identity';
+import { getDriverById,getValidFcmTokensForUsers } from '@/domains/identity';
 import { adminAuth } from '@/lib/firebase-admin';
 import { withSecurity } from '@/lib/security/api-security';
 import { RateLimits } from '@/lib/security/rate-limiter';
@@ -77,14 +77,30 @@ export const POST = withSecurity(
           if (studentTokens.length > 0) {
             const message = {
               notification: {
-                title: 'Bus Acknowledged',
-                body: `Driver ${driverData.fullName || 'the bus driver'} has acknowledged your waiting request. Get ready!`
+                title: 'Driver Acknowledged!',
+                body: `Driver ${driverData.fullName || 'the bus driver'} has acknowledged your wait request. Get ready!`
               },
               tokens: studentTokens,
               data: {
                 type: 'waiting_flag_ack',
                 flagId: waitingFlagId,
                 busId: waitingFlag.bus_id
+              },
+              android: {
+                priority: 'high' as const,
+                notification: { channelId: 'bus_alerts', sound: 'default' }
+              },
+              webpush: {
+                headers: { Urgency: 'high' },
+                notification: {
+                  title: 'Driver Acknowledged!',
+                  body: `Driver ${driverData.fullName || 'the bus driver'} has acknowledged your wait request. Get ready!`,
+                  icon: '/icons/icon-192x192.png',
+                  badge: '/icons/icon-72x72.png',
+                },
+                fcmOptions: {
+                  link: '/student/track-bus'
+                }
               }
             };
 

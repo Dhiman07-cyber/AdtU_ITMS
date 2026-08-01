@@ -2274,7 +2274,7 @@ docker compose up --scale ws1=2 --scale ws2=2 -d
 | Feature flags | 1 | Configuration |
 
 ### Complete Environment Reference
-See [`docs/environment-reference.md`](./environment-reference.md).
+See [`docs/operations/ops-playbook.md`](../../operations/ops-playbook.md#section-2--environment-variables-reference).
 
 ---
 
@@ -2515,7 +2515,7 @@ ec2-user hard nofile 65536
 
 ## 11. Operational Runbooks
 
-See [`docs/runbooks.md`](./runbooks.md) for the complete runbook library.
+See [`docs/operations/ops-playbook.md`](../../operations/ops-playbook.md#section-3--operational-runbooks-rb-01--rb-12) for the complete runbook library.
 
 | Runbook | Title |
 |---------|-------|
@@ -2612,9 +2612,9 @@ Phase 4: Kubernetes (EKS) + Redis cluster + RDS (if Supabase limits hit)
 
 | Document | Status | Location |
 |----------|--------|----------|
-| Architecture overview | ✅ Complete | `docs/deployment.md` |
-| Environment reference | ✅ Complete | `docs/environment-reference.md` (Phase-07 new) |
-| Operational runbooks | ✅ Complete | `docs/runbooks.md` (Phase-07 new) |
+| Architecture overview | ✅ Complete | `docs/operations/ops-playbook.md#section-1--canonical-production-deployment-guide` |
+| Environment reference | ✅ Complete | `docs/operations/ops-playbook.md#section-2--environment-variables-reference` |
+| Operational runbooks | ✅ Complete | `docs/operations/ops-playbook.md#section-3--operational-runbooks-rb-01--rb-12` |
 | Decision records (9) | ✅ Complete | `docs/decisions/PR-001.md` — `PR-010.md` |
 | Phase reports (7) | ✅ Complete | `docs/reports/execution/PROGRAM-003-PHASE-01` through `PHASE-07` |
 | Reliability playbook | ✅ Complete | `docs/reports/execution/PROGRAM-003-PHASE-04.md` |
@@ -2680,23 +2680,16 @@ Phase 4: Kubernetes (EKS) + Redis cluster + RDS (if Supabase limits hit)
 - Gate 2: `npx tsc --noEmit --project server/tsconfig.json` — dedicated WS server typecheck
 - WS server type regressions now block CI independently of the Next.js app layer
 
-### 3. Operational Runbooks (`docs/runbooks.md`)
+### 3. Operational Playbook & Runbooks (`docs/operations/ops-playbook.md`)
 
-**New file.** 12 runbooks (RB-01 through RB-12) covering:
+**New consolidated manual.** Covers:
 - Standard and emergency deployment procedures
 - Secret rotation with per-variable guidance
 - TLS renewal, database migration (with rollback pattern)
 - Emergency shutdown, Redis recovery, database backup
 - Post-deployment health verification checklist
 - Scaling procedures, incident response with severity classification
-
-### 4. Environment Reference (`docs/environment-reference.md`)
-
-**New file.** Complete reference for all 50+ environment variables:
-- Required vs. Optional classification
-- Generation instructions for cryptographic secrets
-- Startup-time validation behavior documentation
-- Clear separation of public vs. server-only variables
+- Complete reference for all 50+ environment variables (Required vs. Optional classification, generation instructions, and validation behavior)
 
 ---
 
@@ -2758,7 +2751,7 @@ Phase 4: Kubernetes (EKS) + Redis cluster + RDS (if Supabase limits hit)
 | Domain | Certification | Evidence |
 |--------|--------------|---------|
 | **Deployment** | ✅ Production-ready | PM2 + Docker Compose + Vercel; zero-downtime reload; rollback procedure (RB-02) |
-| **Environment** | ✅ Documented | 50+ variables catalogued in `docs/environment-reference.md`; startup validation in health endpoint |
+| **Environment** | ✅ Documented | 50+ variables catalogued in `docs/operations/ops-playbook.md#section-2--environment-variables-reference`; startup validation in health endpoint |
 | **Database** | ✅ Production-safe | Atomic RPC locking; migration procedure (RB-06); daily backup (RB-09) |
 | **Backup** | ✅ Designed | Daily/weekly pg_dump; PITR on paid tier; Firestore daily export |
 | **Disaster Recovery** | ✅ Documented | 9 failure scenarios with detection, recovery, and RTO defined |
@@ -2955,7 +2948,7 @@ Exhaustive chaos simulations were executed across all runtime layers:
 ---
 
 ## 22. Documentation Consistency Audit
-- **Document Alignment:** `docs/deployment.md`, `docs/environment-reference.md`, and `docs/runbooks.md` reflect the hardened production configuration, ports (3000, 3001, 9090), and security settings.
+- **Document Alignment:** `docs/operations/ops-playbook.md` reflects the hardened production configuration, ports (3000, 3001, 9090), runbooks, and security settings.
 
 ---
 
@@ -2975,7 +2968,7 @@ Exhaustive chaos simulations were executed across all runtime layers:
 
 ## 25. Remaining Risks
 - **Pre-existing Integration Test Mocks (3 tests):** 3 legacy tests in `config.service.test.ts` and `fcm-notification-service.test.ts` require minor mock adjustment for legacy Firestore paths. Runtime code is 100% verified.
-- **Production Environmental Secrets:** Ensure `.env` secrets on EC2/Vercel are set with sufficient entropy as outlined in `docs/environment-reference.md`.
+- **Production Environmental Secrets:** Ensure `.env` secrets on EC2/Vercel are set with sufficient entropy as outlined in `docs/operations/ops-playbook.md#section-2--environment-variables-reference`.
 
 ---
 

@@ -1,8 +1,9 @@
-import { clsx,type ClassValue } from "clsx";
+import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
+import { areShiftsCompatible } from "@/lib/utils/shift-utils";
 
 export function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs))
+  return twMerge(clsx(inputs));
 }
 
 /**
@@ -15,4 +16,8 @@ export function formatIdForDisplay(id: string | undefined | null): string {
     .split('-')
     .map(word => word.charAt(0).toUpperCase() + word.slice(1))
     .join('-');
+}
+
+export function isShiftCompatible(studentShift?: string | null, tripShift?: string | null): boolean {
+  return areShiftsCompatible(studentShift, tripShift);
 }

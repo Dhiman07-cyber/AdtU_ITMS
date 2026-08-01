@@ -22,7 +22,7 @@ import { useRouter } from "next/navigation";
 import { useCallback,useEffect,useRef,useState } from "react";
 
 type TripMode = "dev" | "production";
-type Step = "select-mode" | "select-bus" | "scan-qr" | "select-shift" | "confirming" | "done" | "error";
+type Step = "select-bus" | "scan-qr" | "select-shift" | "confirming" | "done" | "error";
 
 interface BusInfo {
   id: string;
@@ -36,21 +36,21 @@ export default function StartTripPage() {
   const { currentUser, userData } = useAuth();
   const router = useRouter();
 
-  const configMode = (process.env.NEXT_PUBLIC_TRIP_INITIATION_MODE as TripMode) ||
-    (process.env.NEXT_PUBLIC_ENABLE_QR_START === "true" ? "production" : "dev");
+  const configMode: TripMode = (process.env.NEXT_PUBLIC_TRIP_INITIATION_MODE as TripMode) ||
+    (process.env.NODE_ENV === "development" ? "dev" : "production");
 
-  const [mode, setMode] = useState<TripMode>(configMode);
+  const [mode] = useState<TripMode>(configMode);
   const [step, setStep] = useState<Step>(configMode === "production" ? "scan-qr" : "select-bus");
   const [buses, setBuses] = useState<BusInfo[]>([]);
   const [selectedBus, setSelectedBus] = useState<BusInfo | null>(null);
   const [selectedShift, setSelectedShift] = useState<"Morning" | "Evening" | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(configMode !== "production");
   const [resolvingQR, setResolvingQR] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<{ tripId: string } | null>(null);
 
   useEffect(() => {
-    if (!currentUser?.uid) return;
+    if (!currentUser?.uid || configMode === "production") return;
     const fetchBuses = async () => {
       try {
         const res = await authApiFetch(currentUser, "/api/driver/available-buses");
@@ -65,14 +65,7 @@ export default function StartTripPage() {
       }
     };
     fetchBuses();
-  }, [currentUser]);
-
-  const chooseMode = (m: TripMode) => {
-    setMode(m);
-    setError(null);
-    if (m === "dev") setStep("select-bus");
-    else setStep("scan-qr");
-  };
+  }, [currentUser, configMode]);
 
   const selectBus = (bus: BusInfo) => {
     setSelectedBus(bus);
@@ -148,18 +141,14 @@ export default function StartTripPage() {
   const goBack = () => {
     setError(null);
     if (step === "select-bus" || step === "scan-qr") {
-      setStep("select-mode");
-      setSelectedBus(null);
-      setSelectedShift(null);
+      router.push("/driver");
     } else if (step === "select-shift") {
       if (mode === "dev") setStep("select-bus");
       else setStep("scan-qr");
     } else if (step === "confirming") {
       setStep("select-shift");
     } else {
-      setStep("select-mode");
-      setSelectedBus(null);
-      setSelectedShift(null);
+      router.push("/driver");
     }
   };
 
@@ -198,15 +187,19 @@ export default function StartTripPage() {
       <div className="max-w-lg mx-auto px-4 py-6 space-y-6">
         {/* Header */}
         <div className="flex items-center gap-3">
-          {step !== "select-mode" && (
-            <button onClick={goBack} className="p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
-              <ArrowLeft className="h-5 w-5" />
-            </button>
-          )}
+          <button onClick={goBack} className="p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
+            <ArrowLeft className="h-5 w-5" />
+          </button>
           <div>
             <h1 className="text-xl font-bold">Start Trip</h1>
             <p className="text-sm text-gray-500">
-              {mode === "dev" ? "Select a bus to operate" : "Scan the QR code on your bus"}
+              {step === "select-bus"
+                ? "Select a bus to operate"
+                : step === "scan-qr"
+                ? "Scan the QR code on your bus"
+                : step === "select-shift"
+                ? "Select trip shift"
+                : "Confirm and start trip"}
             </p>
           </div>
         </div>
@@ -220,41 +213,6 @@ export default function StartTripPage() {
             </div>
             <button onClick={() => setError(null)} className="text-red-400 hover:text-red-600">
               &times;
-            </button>
-          </div>
-        )}
-
-        {/* Step: Mode Selection */}
-        {step === "select-mode" && (
-          <div className="space-y-4">
-            <p className="text-sm text-gray-600 dark:text-gray-400">Choose how to start your trip:</p>
-            <button
-              onClick={() => chooseMode("dev")}
-              className="w-full p-5 rounded-2xl border-2 border-blue-200 dark:border-blue-800 bg-white dark:bg-gray-900 hover:border-blue-400 transition-all text-left"
-            >
-              <div className="flex items-center gap-4">
-                <div className="p-3 rounded-xl bg-blue-100 dark:bg-blue-900/30">
-                  <Bus className="h-6 w-6 text-blue-600" />
-                </div>
-                <div>
-                  <p className="font-semibold">Select Bus</p>
-                  <p className="text-sm text-gray-500">Choose from your assigned buses</p>
-                </div>
-              </div>
-            </button>
-            <button
-              onClick={() => chooseMode("production")}
-              className="w-full p-5 rounded-2xl border-2 border-purple-200 dark:border-purple-800 bg-white dark:bg-gray-900 hover:border-purple-400 transition-all text-left"
-            >
-              <div className="flex items-center gap-4">
-                <div className="p-3 rounded-xl bg-purple-100 dark:bg-purple-900/30">
-                  <QrCode className="h-6 w-6 text-purple-600" />
-                </div>
-                <div>
-                  <p className="font-semibold">Scan QR Code</p>
-                  <p className="text-sm text-gray-500">Scan the QR code on your bus</p>
-                </div>
-              </div>
             </button>
           </div>
         )}

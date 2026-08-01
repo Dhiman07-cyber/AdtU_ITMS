@@ -32,6 +32,7 @@ import type { Application,ApplicationState,ApplicationType } from '@/lib/types/a
 import { isUpcomingApplication } from '@/lib/utils/application-eligibility';
 import { calculateValidUntilDate } from '@/lib/utils/date-utils';
 import { computeBlockDatesFromValidUntil } from '@/lib/utils/deadline-computation';
+import { normalizeShift } from '@/lib/utils/shift-utils';
 import * as repository from '../repositories/application.repository';
 
 // ─── CRUD Methods ────────────────────────────────────────────────────────────
@@ -187,10 +188,15 @@ export async function submitFinal(
     }
   }
 
-  const busId = formData.busId || formData.bus_id || formData.selectedBus || formData.busId || body.busId || body.bus_id;
-  const routeId = formData.routeId || formData.route_id || formData.selectedRoute || formData.routeId || body.routeId || body.route_id;
-  const stop_name = formData.stop_name || formData.stop_name || formData.selected_stop_name || formData.selectedStop || body.stop_name || body.stop_name || formData.stop_name || formData.stop_name || body.stop_name || body.stop_name;
-  const shift = formData.shift || formData.selectedShift || body.shift || 'Morning';
+  const busId = formData.busId || formData.bus_id || formData.selectedBus || body.busId || body.bus_id;
+  const routeId = formData.routeId || formData.route_id || formData.selectedRoute || body.routeId || body.route_id;
+  const stop_name = formData.stop_name || formData.selected_stop_name || formData.selectedStop || body.stop_name;
+  const rawShift = formData.shift || formData.selectedShift || body.shift;
+  const shift = normalizeShift(rawShift);
+
+  if (!shift) {
+    throw new Error('Shift selection (Morning or Evening) is required for application submission.');
+  }
 
   const applicationData: any = {
     applicationId: body.applicationId || uid,
@@ -375,8 +381,11 @@ const finalSessionEndYear = ((student as any).sessionEndYear && (student as any)
       const blockDates: { softBlock: string; hardBlock: string } = computeBlockDatesFromValidUntil(finalValidUntil, deadlineConfig);
 
       const seatWasReleased = !!(student as any).seatReleasedAt;
-      const renewalBusId = overrides?.busId || (student as any).busId || (student as any).currentBusId || (student as any).busId || null;
-      const studentShift = (student as any).shift || 'Morning';
+      const renewalBusId = overrides?.busId || (student as any).busId || (student as any).currentBusId || null;
+      const studentShift = normalizeShift((student as any).shift || app.shift);
+      if (!studentShift) {
+        throw new Error('Student record is missing a valid shift assignment.');
+      }
 
       let studentDataForRenewalRpc: Record<string, any> | null = null;
 
@@ -425,7 +434,10 @@ const finalSessionEndYear = ((student as any).sessionEndYear && (student as any)
       studentData = await buildStudentData(app, approverData, overrides);
 
       const targetBusId = overrides?.busId || studentData.busId || app.bus_id;
-      const studentShift = studentData.shift || app.shift || 'Morning';
+      const studentShift = normalizeShift(studentData.shift || app.shift);
+      if (!studentShift) {
+        throw new Error('Application is missing a valid shift assignment.');
+      }
 
       if (targetBusId) {
         const { data: capResult, error: capError } = await db.rpc('bus_increment_capacity', {
@@ -833,7 +845,11 @@ async function buildStudentData(
   const busId = overrides?.busId || app.bus_id || app.busId || fd.busId || fd.bus_id || fd.selectedBus;
   const routeId = app.route_id || app.routeId || fd.routeId || fd.route_id || fd.selectedRoute;
   const stop_name = app.stop_name || fd.stop_name || fd.selected_stop_name || fd.selectedStop;
-  const shift = app.shift || fd.shift || fd.selectedShift || 'Morning';
+  const rawShift = app.shift || fd.shift || fd.selectedShift;
+  const shift = normalizeShift(rawShift);
+  if (!shift) {
+    throw new Error('Application is missing a valid shift assignment.');
+  }
 
   const fullName = app.full_name || fd.fullName || app.name || '';
   const email = app.email || fd.email || '';

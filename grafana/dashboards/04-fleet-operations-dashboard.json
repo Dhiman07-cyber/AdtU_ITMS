@@ -1,0 +1,206 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [
+    {
+      "icon": "home",
+      "includeVars": true,
+      "keepTime": true,
+      "targetBlank": false,
+      "title": "Master NOC",
+      "type": "link",
+      "url": "/d/itms-master-noc/01-master-noc-dashboard"
+    },
+    {
+      "icon": "bolt",
+      "includeVars": true,
+      "keepTime": true,
+      "targetBlank": false,
+      "title": "Infrastructure",
+      "type": "link",
+      "url": "/d/itms-infrastructure/02-infrastructure-dashboard"
+    },
+    {
+      "icon": "signal",
+      "includeVars": true,
+      "keepTime": true,
+      "targetBlank": false,
+      "title": "Realtime",
+      "type": "link",
+      "url": "/d/itms-realtime/03-realtime-dashboard"
+    },
+    {
+      "icon": "bus",
+      "includeVars": true,
+      "keepTime": true,
+      "targetBlank": false,
+      "title": "Fleet & Ops",
+      "type": "link",
+      "url": "/d/itms-fleet-ops/04-fleet-and-operations-dashboard"
+    },
+    {
+      "icon": "money-insert",
+      "includeVars": true,
+      "keepTime": true,
+      "targetBlank": false,
+      "title": "Business Analytics",
+      "type": "link",
+      "url": "/d/itms-business-analytics/05-business-analytics-dashboard"
+    },
+    {
+      "icon": "lock",
+      "includeVars": true,
+      "keepTime": true,
+      "targetBlank": false,
+      "title": "Security & Reliability",
+      "type": "link",
+      "url": "/d/itms-security-reliability/06-security-and-reliability-dashboard"
+    }
+  ],
+  "liveNow": true,
+  "templating": {
+    "list": [
+      {
+        "current": { "selected": true, "text": "All", "value": "$__all" },
+        "name": "bus",
+        "label": "Bus ID",
+        "type": "custom",
+        "query": "All, BUS-101, BUS-102, BUS-103",
+        "includeAll": true,
+        "multi": false
+      },
+      {
+        "current": { "selected": true, "text": "All", "value": "$__all" },
+        "name": "route",
+        "label": "Route",
+        "type": "custom",
+        "query": "All, ROUTE-1, ROUTE-2, ROUTE-3",
+        "includeAll": true,
+        "multi": false
+      }
+    ]
+  },
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 0 },
+      "id": 1,
+      "title": "Bus Utilization Rate (%)",
+      "type": "stat",
+      "targets": [{ "expr": "(sum(itms_trips_active) / sum(itms_buses_total)) * 100 or vector(0)", "legendFormat": "Fleet Utilization %" }],
+      "options": { "colorMode": "value", "graphMode": "area", "text": { "titleSize": 18, "valueSize": 36 } },
+      "fieldConfig": { "defaults": { "unit": "percent" } }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 0 },
+      "id": 2,
+      "title": "Active Shift Drivers",
+      "type": "stat",
+      "targets": [{ "expr": "itms_active_drivers_count or vector(0)", "legendFormat": "Shift Drivers" }],
+      "options": { "colorMode": "value", "graphMode": "none", "text": { "titleSize": 18, "valueSize": 36 } }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 6, "w": 6, "x": 12, "y": 0 },
+      "id": 3,
+      "title": "Trips Completed Today",
+      "type": "stat",
+      "targets": [{ "expr": "sum(itms_trips_completed_today_total) or vector(0)", "legendFormat": "Completed Trips" }],
+      "options": { "colorMode": "value", "graphMode": "area", "text": { "titleSize": 18, "valueSize": 36 } }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 6, "w": 6, "x": 18, "y": 0 },
+      "id": 4,
+      "title": "Active Student Waiting Flags",
+      "type": "stat",
+      "targets": [{ "expr": "sum(itms_waiting_flags_active) or vector(0)", "legendFormat": "Waiting Flags" }],
+      "options": { "colorMode": "value", "graphMode": "area", "text": { "titleSize": 18, "valueSize": 36 } }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 10, "w": 12, "x": 0, "y": 6 },
+      "id": 5,
+      "title": "Active Trips & Completion Rate Over Time",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum(itms_trips_active)",
+          "legendFormat": "Active Trips"
+        },
+        {
+          "expr": "rate(itms_trips_ended[5m])",
+          "legendFormat": "Completion Rate (trips/min)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "lineWidth": 3, "fillOpacity": 15 }
+        }
+      }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 6 },
+      "id": 6,
+      "title": "Average Trip Duration (minutes)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "avg(itms_trip_duration_seconds) / 60",
+          "legendFormat": "Avg Duration (min)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "lineWidth": 3, "fillOpacity": 15 }
+        }
+      }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 16 },
+      "id": 7,
+      "title": "Route Statistics & Notification Dispatches",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "rate(itms_notifications_sent[1m])",
+          "legendFormat": "FCM Notifications/sec"
+        },
+        {
+          "expr": "sum(rate(itms_waiting_flags_created_total[1m]))",
+          "legendFormat": "Waiting Flags Raised/sec"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "lineWidth": 3, "fillOpacity": 15 }
+        }
+      }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 26 },
+      "id": 8,
+      "title": "⚡ ITMS DASHBOARD NAVIGATION & SUBSYSTEM LINKAGES",
+      "type": "text",
+      "options": {
+        "mode": "markdown",
+        "content": "## 🔗 Inter-Dashboard Navigation Matrix\nNavigate to any ITMS dashboard with one click:\n\n* 🏠 **[01 - Master NOC Dashboard](/d/itms-master-noc/01-master-noc-dashboard)** — Global System Health Grid & Executive KPIs\n* ⚡ **[02 - Infrastructure Dashboard](/d/itms-infrastructure/02-infrastructure-dashboard)** — CPU, RAM, Disk, NGINX, Redis & PostgreSQL Metrics\n* 🛰️ **[03 - Realtime Dashboard](/d/itms-realtime/03-realtime-dashboard)** — Active Trips, 1Hz GPS Streams, WebSocket Fanout & Pub/Sub\n* 🚌 **[04 - Fleet & Operations Dashboard](/d/itms-fleet-ops/04-fleet-and-operations-dashboard)** — Bus/Driver Utilization, Route Stats & Student Waiting Flags\n* 💳 **[05 - Business Analytics Dashboard](/d/itms-business-analytics/05-business-analytics-dashboard)** — Payments, Revenue, Pass Subscriptions & Active Users\n* 🔒 **[06 - Security & Reliability Dashboard](/d/itms-security-reliability/06-security-and-reliability-dashboard)** — JWT Auth, Rate Limits, HTTP 4xx/5xx Errors & Disconnects\n\n---\n*ITMS Executive Dashboard Suite | Version 2.3 | Inter-Dashboard Linkages Enabled*\n"
+      }
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["fleet", "operations", "trips", "itms"],
+  "time": { "from": "now-1h", "to": "now" },
+  "title": "04 - Fleet & Operations Dashboard",
+  "uid": "itms-fleet-ops",
+  "version": 3
+}

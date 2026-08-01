@@ -6,6 +6,7 @@ import { getTransportEntitlement } from '@/lib/entitlement/transport-entitlement
 import { withSecurity } from '@/lib/security/api-security';
 import { RateLimits } from '@/lib/security/rate-limiter';
 import { getSupabaseServer } from '@/lib/supabase-server';
+import { isShiftCompatible } from '@/lib/utils';
 import { NextResponse } from 'next/server';
 
 /**
@@ -103,33 +104,46 @@ export const GET = withSecurity(
         const busId = studentData.busId || studentData.busId;
         const routeId = studentData.routeId || studentData.routeId;
 
-        // 2. Parallelize everything else (bus from PG, driver from PG, route from PG)
+        // 2. Parallelize core metadata reads (bus, route, drivers, active trip)
         const [busData, dbRoute, drivers, tripStatus] = await Promise.all([
             busId ? getBusById(busId) : Promise.resolve(null),
             routeId ? routeService.getById(routeId) : Promise.resolve(null),
             busId ? getDriversByBusId(busId) : Promise.resolve([]),
-            busId ? supabase.from('active_trips').select('trip_id, status, start_time, last_heartbeat').eq('bus_id', busId).eq('status', 'active').maybeSingle() : Promise.resolve(null)
+            busId ? supabase.from('active_trips').select('trip_id, status, start_time, last_heartbeat, shift').eq('bus_id', busId).eq('status', 'active').maybeSingle() : Promise.resolve(null)
         ]);
 
         // Process Bus & Route
         const bus = busData || null;
         const route = dbRoute ? { ...dbRoute, active: dbRoute.status === 'active' } : null;
 
-        // Process Driver (Match shift)
+        // Process Driver (Match shift strictly using canonical shift compatibility)
         let driver = null;
-        if (drivers && drivers.length > 0) {
-            const studentShift = (studentData.shift || 'Morning').toString().toLowerCase();
-            
-            // Try shift match
-            driver = drivers.find((d: any) => (d.shift || '').toLowerCase().includes(studentShift));
-            
-            // Fallback to "Both" or first driver
-            if (!driver) driver = drivers.find((d: any) => (d.shift || '').toLowerCase().includes('both'));
-            if (!driver) driver = drivers[0];
+        const studentShift = studentData.shift;
+        if (drivers && drivers.length > 0 && studentShift) {
+            driver = drivers.find((d: any) => isShiftCompatible(studentShift, d.shift)) || null;
         }
 
-        // Process Trip Status
-        const isTripActive = tripStatus?.data ? tripStatus.data.status === 'active' : false;
+        // Process Trip Status (Match student shift strictly with trip shift)
+        let isTripActive = tripStatus?.data ? tripStatus.data.status === 'active' : false;
+        if (isTripActive && tripStatus?.data) {
+            if (!studentShift || !isShiftCompatible(studentShift, tripStatus.data.shift)) {
+                isTripActive = false;
+            }
+        }
+
+        // OPTIMIZATION: Only fetch waiting flags if a trip is currently active
+        let activeWaitingFlag = null;
+        if (isTripActive) {
+            const { data: flagData } = await supabase
+                .from('waiting_flags')
+                .select('*')
+                .eq('student_uid', uid)
+                .in('status', ['raised', 'acknowledged', 'waiting'])
+                .limit(1);
+            if (flagData && flagData.length > 0) {
+                activeWaitingFlag = flagData[0];
+            }
+        }
 
         return NextResponse.json({
             student: studentData,
@@ -137,7 +151,8 @@ export const GET = withSecurity(
             route,
             driver,
             tripActive: isTripActive,
-            tripData: tripStatus?.data || null,
+            tripData: isTripActive ? (tripStatus?.data || null) : null,
+            activeWaitingFlag,
             entitled: true,
             entitlementReason: entitlement.reason,
         });

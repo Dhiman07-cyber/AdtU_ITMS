@@ -98,9 +98,12 @@ async function getBrowser() {
   return browserInstance;
 }
 
-export async function generateReceiptPdf(paymentId: string): Promise<Buffer | null> {
+export async function generateReceiptPdf(paymentOrId: string | PaymentRecord): Promise<Buffer | null> {
   try {
-    const payment = await paymentsSupabaseService.getPaymentById(paymentId);
+    const payment = typeof paymentOrId === 'string'
+      ? await paymentsSupabaseService.getPaymentById(paymentOrId)
+      : paymentOrId;
+
     if (!payment || payment.status !== 'Completed') {
       return null;
     }
@@ -146,18 +149,17 @@ export async function generateReceiptPdf(paymentId: string): Promise<Buffer | nu
 
     let approvedByDisplay = getApprovedByDisplay(payment);
 
-    // Template HTML (Shared with Route)
+    // Template HTML (Local fonts, fast rendering)
     const receiptHTML = `
 <!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
     * { box-sizing: border-box; -webkit-print-color-adjust: exact; }
-    body { font-family: 'Inter', sans-serif; margin: 0; padding: 0; background: #ffffff; color: #1e293b; line-height: 1.5; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 0; padding: 0; background: #ffffff; color: #1e293b; line-height: 1.5; }
     .container { width: 100%; max-width: 800px; margin: 0 auto; padding: 40px 50px; position: relative; }
-    .security-watermark { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; opacity: 0.08; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='250' height='150'%3E%3Ctext x='50%25' y='50%25' font-family='Inter, sans-serif' font-weight='800' font-size='12' text-anchor='middle' alignment-baseline='middle' fill='%2364748b' transform='rotate(-30 125 75)'%3EAdtU ITMS System Verified%3C/text%3E%3C/svg%3E"); background-repeat: repeat; }
+    .security-watermark { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; opacity: 0.08; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='250' height='150'%3E%3Ctext x='50%25' y='50%25' font-family='sans-serif' font-weight='800' font-size='12' text-anchor='middle' alignment-baseline='middle' fill='%2364748b' transform='rotate(-30 125 75)'%3EAdtU ITMS System Verified%3C/text%3E%3C/svg%3E"); background-repeat: repeat; }
     .header { display: flex; justify-content: space-between; align-items: flex-start; padding-bottom: 25px; border-bottom: 2px solid #f1f5f9; margin-bottom: 35px; position: relative; z-index: 2; }
     .brand { max-width: 280px; }
     .brand svg { height: 50px; width: auto; margin-bottom: 0px; }
@@ -280,7 +282,7 @@ export async function generateReceiptPdf(paymentId: string): Promise<Buffer | nu
     const browser = await getBrowser();
     const page = await browser.newPage();
     try {
-      await page.setContent(receiptHTML, { waitUntil: 'networkidle0' as any });
+      await page.setContent(receiptHTML, { waitUntil: 'domcontentloaded' as any });
       const pdfBuffer = await page.pdf({
         format: 'A4',
         printBackground: true

@@ -13,6 +13,14 @@ export const GET = withSecurity(
     try {
       const uid = auth.uid;
 
+      if (!uid) {
+        return NextResponse.json({
+          success: true,
+          exists: false,
+          user: null,
+        });
+      }
+
       const user = await getUserById(uid);
 
       if (!user) {
@@ -48,6 +56,6 @@ export const GET = withSecurity(
     }
   },
   {
-    requiredRoles: [],
+    optionalAuth: true,
   }
 );

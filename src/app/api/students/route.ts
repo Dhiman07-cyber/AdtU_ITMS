@@ -16,7 +16,7 @@ const MAX_LIMIT = 200;
 
 export async function GET(request: NextRequest) {
   try {
-    const auth = await verifyApiAuth(request, ['admin', 'moderator']);
+    const auth = await verifyApiAuth(request, ['admin', 'moderator', 'driver']);
     if (!auth.authenticated) return auth.response;
 
     const rl = await applyRateLimit(createRateLimitId(auth.uid, 'students-list'), RateLimits.READ);
@@ -33,7 +33,16 @@ export async function GET(request: NextRequest) {
 
     let studentRows: Record<string, any>[];
 
-    if (busId) {
+    if (enrollmentId) {
+      const db = getSupabaseServer();
+      const { data, error } = await db
+        .from('student_profiles')
+        .select('*')
+        .ilike('enrollment_id', enrollmentId.trim());
+
+      if (error) throw error;
+      studentRows = data || [];
+    } else if (busId) {
       studentRows = await getStudentsByBusIds([busId]);
       studentRows = studentRows.filter((row: any) => !row.status || row.status === 'active');
     } else if (q) {
@@ -75,31 +84,30 @@ export async function GET(request: NextRequest) {
       studentRows = await getStudentsByStatus('active');
     }
 
-    const students = (enrollmentId ? studentRows.filter((row: any) =>
-      (row.enrollmentId || '').toLowerCase() === enrollmentId.toLowerCase()
-    ) : studentRows).map((row: any) => ({
+    const students = studentRows.map((row: any) => ({
       id: row.uid || row.id,
-      name: row.fullName || row.name || '',
+      name: row.fullName || row.full_name || row.name || '',
+      fullName: row.fullName || row.full_name || row.name || '',
       email: row.email || '',
       phone: row.phone || '',
-      altPhone: row.altPhone || '',
-      enrollmentId: row.enrollmentId || '',
+      altPhone: row.altPhone || row.alt_phone || '',
+      enrollmentId: row.enrollmentId || row.enrollment_id || '',
       gender: row.gender || '',
       dob: row.dob || '',
       faculty: row.faculty || '',
       department: row.department || '',
-      parentName: row.parentName || '',
-      parentPhone: row.parentPhone || '',
+      parentName: row.parentName || row.parent_name || '',
+      parentPhone: row.parentPhone || row.parent_phone || '',
       busId: row.busId || row.bus_id || '',
       routeId: row.routeId || row.route_id || '',
-      stop_name: row.stop_name || row.stop_name || row.stop_name || row.stop_name || '',
+      stop_name: row.stop_name || row.stop_name || '',
       profilePhotoUrl: row.profilePhotoUrl || row.profile_photo_url || '',
       status: row.status || 'active',
       shift: row.shift || '',
       semester: row.semester || '',
-      sessionStartYear: row.sessionStartYear || '',
-      sessionEndYear: row.sessionEndYear || '',
-      enrollmentYear: row.sessionStartYear || '',
+      sessionStartYear: row.sessionStartYear || row.session_start_year || '',
+      sessionEndYear: row.sessionEndYear || row.session_end_year || '',
+      enrollmentYear: row.sessionStartYear || row.session_start_year || '',
     }));
 
     return NextResponse.json(students, { headers: rl.headers });

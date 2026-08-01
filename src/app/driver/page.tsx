@@ -105,33 +105,30 @@ export default function DriverDashboard() {
     
     console.log('🔄 Setting up robust trip status sync for driver:', currentUser.uid, 'and bus:', busId);
 
-    // 1. Initial Status Sync - Direct from Supabase (Bypassing RLS issues)
+    // 1. Initial Status Sync - Direct from Supabase active_trips
     const fetchCurrentStatus = async () => {
       try {
-        console.log('🔍 Fetching current driver status from Supabase...');
+        console.log('🔍 Fetching current driver trip status from active_trips...');
         const { data, error } = await supabase
-          .from('driver_status')
-          .select('status, bus_id')
-          .eq('driver_uid', currentUser.uid)
+          .from('active_trips')
+          .select('trip_id, bus_id')
+          .eq('driver_id', currentUser.uid)
+          .eq('status', 'active')
           .maybeSingle();
 
         if (error) throw error;
 
         if (data) {
-          console.log('✅ Current status found:', data);
-          const isActive = data.status === 'on_trip' || data.status === 'enroute';
-          setHasActiveTrip(isActive);
-        } else {
-          // If no driver_status row for UID, check by busId as fallback
-          if (busId) {
-            const response = await authApiFetch(currentUser, '/api/student/trip-status', {
-              query: { busId },
-              timeoutMs: 8000,
-            });
-            if (response.ok) {
-              const result = await response.json();
-              setHasActiveTrip(!!result.tripActive);
-            }
+          console.log('✅ Active trip found:', data);
+          setHasActiveTrip(true);
+        } else if (busId) {
+          const response = await authApiFetch(currentUser, '/api/student/trip-status', {
+            query: { busId },
+            timeoutMs: 8000,
+          });
+          if (response.ok) {
+            const result = await response.json();
+            setHasActiveTrip(!!result.tripActive);
           }
         }
       } catch (err) {
@@ -383,7 +380,7 @@ export default function DriverDashboard() {
                   </Button>
                 ) : (
                   <Button
-                    onClick={() => router.push('/driver/trip/start')}
+                    onClick={() => router.push('/driver/live-tracking?initiate=true')}
                     disabled={busData?.status === 'inactive'}
                     className={`group relative overflow-hidden font-bold shadow-xl transform transition-all duration-300 px-3 py-6 sm:px-6 sm:py-3 rounded-2xl border ${busData?.status === 'inactive'
                       ? 'bg-gray-600 text-gray-300 border-gray-500 cursor-not-allowed opacity-70'

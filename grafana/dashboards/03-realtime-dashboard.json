@@ -1,0 +1,226 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [
+    {
+      "icon": "home",
+      "includeVars": true,
+      "keepTime": true,
+      "targetBlank": false,
+      "title": "Master NOC",
+      "type": "link",
+      "url": "/d/itms-master-noc/01-master-noc-dashboard"
+    },
+    {
+      "icon": "bolt",
+      "includeVars": true,
+      "keepTime": true,
+      "targetBlank": false,
+      "title": "Infrastructure",
+      "type": "link",
+      "url": "/d/itms-infrastructure/02-infrastructure-dashboard"
+    },
+    {
+      "icon": "signal",
+      "includeVars": true,
+      "keepTime": true,
+      "targetBlank": false,
+      "title": "Realtime",
+      "type": "link",
+      "url": "/d/itms-realtime/03-realtime-dashboard"
+    },
+    {
+      "icon": "bus",
+      "includeVars": true,
+      "keepTime": true,
+      "targetBlank": false,
+      "title": "Fleet & Ops",
+      "type": "link",
+      "url": "/d/itms-fleet-ops/04-fleet-and-operations-dashboard"
+    },
+    {
+      "icon": "money-insert",
+      "includeVars": true,
+      "keepTime": true,
+      "targetBlank": false,
+      "title": "Business Analytics",
+      "type": "link",
+      "url": "/d/itms-business-analytics/05-business-analytics-dashboard"
+    },
+    {
+      "icon": "lock",
+      "includeVars": true,
+      "keepTime": true,
+      "targetBlank": false,
+      "title": "Security & Reliability",
+      "type": "link",
+      "url": "/d/itms-security-reliability/06-security-and-reliability-dashboard"
+    }
+  ],
+  "liveNow": true,
+  "templating": {
+    "list": [
+      {
+        "current": { "selected": true, "text": "All", "value": "$__all" },
+        "name": "node",
+        "label": "Node",
+        "type": "custom",
+        "query": "All, ws1, ws2",
+        "includeAll": true,
+        "multi": false
+      },
+      {
+        "current": { "selected": true, "text": "All", "value": "$__all" },
+        "name": "bus",
+        "label": "Bus ID",
+        "type": "custom",
+        "query": "All, BUS-101, BUS-102, BUS-103",
+        "includeAll": true,
+        "multi": false
+      },
+      {
+        "current": { "selected": true, "text": "All", "value": "$__all" },
+        "name": "route",
+        "label": "Route",
+        "type": "custom",
+        "query": "All, ROUTE-1, ROUTE-2, ROUTE-3",
+        "includeAll": true,
+        "multi": false
+      }
+    ]
+  },
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 0 },
+      "id": 1,
+      "title": "Active Operating Trips",
+      "description": "• WHAT IS THIS? Number of buses currently driving active trips and streaming live location coordinates.",
+      "type": "stat",
+      "targets": [{ "expr": "sum(itms_trips_active) or vector(0)", "legendFormat": "Active Trips" }],
+      "options": { "colorMode": "value", "graphMode": "area", "text": { "titleSize": 18, "valueSize": 36 } }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 0 },
+      "id": 2,
+      "title": "GPS Coordinate Ingest Rate",
+      "description": "• WHAT IS THIS? Ingest frequency of incoming 1Hz driver GPS updates per second.",
+      "type": "stat",
+      "targets": [{ "expr": "sum(rate(itms_gps_accepted[1m])) or vector(0)", "legendFormat": "GPS Updates/sec" }],
+      "options": { "colorMode": "value", "graphMode": "area", "text": { "titleSize": 18, "valueSize": 36 } }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 0 },
+      "id": 3,
+      "title": "Active WebSocket Connections",
+      "description": "• WHAT IS THIS? Total open TCP WebSocket connections active across ws1 and ws2.",
+      "type": "stat",
+      "targets": [{ "expr": "sum(itms_ws_connections_active) or vector(0)", "legendFormat": "Sockets" }],
+      "options": { "colorMode": "value", "graphMode": "area", "text": { "titleSize": 18, "valueSize": 36 } }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 10, "w": 12, "x": 0, "y": 6 },
+      "id": 4,
+      "title": "WebSocket Connections by Node (ws1 vs ws2)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "itms_ws_connections_active",
+          "legendFormat": "Node {{instance}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "lineWidth": 3, "fillOpacity": 15 }
+        }
+      }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 6 },
+      "id": 5,
+      "title": "WebSocket Broadcast Message Rate (msg/sec)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "rate(itms_ws_broadcasts_sent[1m])",
+          "legendFormat": "Broadcasts {{instance}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "lineWidth": 3, "fillOpacity": 15 }
+        }
+      }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 10, "w": 12, "x": 0, "y": 16 },
+      "id": 6,
+      "title": "Redis Pub/Sub Channel Telemetry",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "rate(itms_redis_pubsub_messages_total[1m])",
+          "legendFormat": "PubSub Messages/sec"
+        },
+        {
+          "expr": "itms_redis_pubsub_channels_active",
+          "legendFormat": "Active Channels"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "lineWidth": 3, "fillOpacity": 15 }
+        }
+      }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 16 },
+      "id": 7,
+      "title": "Client Reconnects & Heartbeat Latencies",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "rate(itms_ws_reconnects[1m])",
+          "legendFormat": "Reconnects/sec"
+        },
+        {
+          "expr": "rate(itms_ws_heartbeat_timeouts[1m])",
+          "legendFormat": "Heartbeat Timeouts/sec"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "lineWidth": 3, "fillOpacity": 15 }
+        }
+      }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 26 },
+      "id": 8,
+      "title": "⚡ ITMS DASHBOARD NAVIGATION & SUBSYSTEM LINKAGES",
+      "type": "text",
+      "options": {
+        "mode": "markdown",
+        "content": "## 🔗 Inter-Dashboard Navigation Matrix\nNavigate to any ITMS dashboard with one click:\n\n* 🏠 **[01 - Master NOC Dashboard](/d/itms-master-noc/01-master-noc-dashboard)** — Global System Health Grid & Executive KPIs\n* ⚡ **[02 - Infrastructure Dashboard](/d/itms-infrastructure/02-infrastructure-dashboard)** — CPU, RAM, Disk, NGINX, Redis & PostgreSQL Metrics\n* 🛰️ **[03 - Realtime Dashboard](/d/itms-realtime/03-realtime-dashboard)** — Active Trips, 1Hz GPS Streams, WebSocket Fanout & Pub/Sub\n* 🚌 **[04 - Fleet & Operations Dashboard](/d/itms-fleet-ops/04-fleet-and-operations-dashboard)** — Bus/Driver Utilization, Route Stats & Student Waiting Flags\n* 💳 **[05 - Business Analytics Dashboard](/d/itms-business-analytics/05-business-analytics-dashboard)** — Payments, Revenue, Pass Subscriptions & Active Users\n* 🔒 **[06 - Security & Reliability Dashboard](/d/itms-security-reliability/06-security-and-reliability-dashboard)** — JWT Auth, Rate Limits, HTTP 4xx/5xx Errors & Disconnects\n\n---\n*ITMS Executive Dashboard Suite | Version 2.3 | Inter-Dashboard Linkages Enabled*\n"
+      }
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["realtime", "websocket", "gps", "itms"],
+  "time": { "from": "now-1h", "to": "now" },
+  "title": "03 - Realtime Dashboard",
+  "uid": "itms-realtime",
+  "version": 3
+}

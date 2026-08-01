@@ -61,38 +61,7 @@ export const POST = withSecurity(
             results.reassignmentLogsDeleted = count || 0;
         }
 
-        // 3. Clean Driver Location Updates (Historical)
-        if (cleanupType === 'driver_location_updates' || cleanupType === 'all') {
-            const { count, error } = await supabase
-                .from('driver_location_updates')
-                .delete({ count: 'exact' })
-                .lt('timestamp', isoCutoff);
-            
-            if (error) console.error('Error cleaning driver_location_updates:', error);
-            results.locationUpdatesDeleted = count || 0;
-
-            // Also clean real-time bus locations (historical)
-            const { count: locCount } = await supabase
-                .from('bus_locations')
-                .delete({ count: 'exact' })
-                .lt('timestamp', isoCutoff);
-            results.busLocationsDeleted = locCount || 0;
-
-            // Also clean legacy Firestore location updates
-            try {
-                const oldLocationSnapshot = await adminDb.collection('driver_location_updates').where('timestamp', '<', cutoffDate.getTime()).limit(400).get();
-                if (oldLocationSnapshot.size > 0) {
-                        const batch = adminDb.batch();
-                        oldLocationSnapshot.docs.forEach(doc => batch.delete(doc.ref));
-                        await batch.commit();
-                        results.firestoreLocationUpdatesDeleted = oldLocationSnapshot.size;
-                }
-            } catch (fsError) {
-                console.warn('Firestore location updates cleanup non-critical error:', fsError);
-            }
-        }
-
-        // 4. Clean Waiting Flags
+        // 3. Clean Waiting Flags
         if (cleanupType === 'waiting_flags' || cleanupType === 'all') {
             const { count, error } = await supabase
                 .from('waiting_flags')
@@ -128,12 +97,12 @@ export const GET = withSecurity(
         const [
             { count: activeTrips },
             { count: reassignmentLogs },
-            { count: locationUpdates },
+            { count: tripHistory },
             { count: waitingFlags }
         ] = await Promise.all([
             supabase.from('active_trips').select('*', { count: 'exact', head: true }),
             supabase.from('reassignment_logs').select('*', { count: 'exact', head: true }),
-            supabase.from('driver_location_updates').select('*', { count: 'exact', head: true }),
+            supabase.from('driver_trip_history').select('*', { count: 'exact', head: true }),
             supabase.from('waiting_flags').select('*', { count: 'exact', head: true })
         ]);
 
@@ -142,9 +111,9 @@ export const GET = withSecurity(
             stats: {
                 activeTrips: activeTrips || 0,
                 reassignmentLogs: reassignmentLogs || 0,
-                locationUpdates: locationUpdates || 0,
+                tripHistory: tripHistory || 0,
                 waitingFlags: waitingFlags || 0,
-                total: (activeTrips || 0) + (reassignmentLogs || 0) + (locationUpdates || 0) + (waitingFlags || 0)
+                total: (activeTrips || 0) + (reassignmentLogs || 0) + (tripHistory || 0) + (waitingFlags || 0)
             }
         });
     },

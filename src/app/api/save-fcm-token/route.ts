@@ -1,8 +1,8 @@
-﻿import { getStudentById } from '@/domains/identity';
 import { withSecurity } from '@/lib/security/api-security';
 import { RateLimits } from '@/lib/security/rate-limiter';
 import { SaveFCMTokenSchema } from '@/lib/security/validation-schemas';
 import { isValidTokenFormat,saveToken,subscribeToTopic } from '@/lib/services/fcm-token-service';
+import { getStudentProfileAndShift } from '@/lib/student-shift-resolver';
 import { NextResponse } from 'next/server';
 
 /**
@@ -49,28 +49,9 @@ export const POST = withSecurity(
       }, { status: 403 });
     }
 
-    // 4. Validate user exists in students database in PostgreSQL (canonical source of truth) before saving token
-    const userData = await getStudentById(uid);
-    if (!userData) {
-      console.warn(`[${requestId}] User ${uid} does not exist in PostgreSQL student_profiles`);
-      return NextResponse.json({
-        success: false,
-        error: 'User account not found. Please contact support.',
-        requestId,
-      }, { status: 404 });
-    }
+    // 4. Resolve student profile and save token to PostgreSQL (multi-device support)
+    const resolved = await getStudentProfileAndShift(uid);
 
-    // 5. Additional validation: Only allow active student accounts
-    if (userData.status === 'inactive' || userData.status === 'suspended') {
-      console.warn(`[${requestId}] Student ${uid} account is not active`);
-      return NextResponse.json({
-        success: false,
-        error: 'Student account is not active. Please contact support.',
-        requestId,
-      }, { status: 403 });
-    }
-
-    // 6. Save token to PostgreSQL (multi-device support)
     const result = await saveToken(uid, 'students', token, platform || 'web');
 
     if (!result.success) {
@@ -81,12 +62,25 @@ export const POST = withSecurity(
       );
     }
 
-    // 7. Topic Subscription: Subscribe to route-specific topic for high-performance notifications
-    const routeId = userData.routeId || userData.route_id || userData.routeId;
-    if (routeId) {
+    // 5. Topic Subscription: Subscribe to both general and shift-specific topics
+    if (resolved.routeId) {
+      const routeId = resolved.routeId;
+      const busId = resolved.busId;
       try {
-        const topic = `route_${routeId}`;
-        await subscribeToTopic(token, topic);
+        const shiftLower = resolved.shift ? resolved.shift.toLowerCase() : 'both';
+        const topicPromises = [
+          subscribeToTopic(token, `route_${routeId}`),
+          subscribeToTopic(token, `route_${routeId}_${shiftLower}`),
+        ];
+        if (busId) {
+          const rawBusId = busId.replace('bus_', '');
+          topicPromises.push(
+            subscribeToTopic(token, `bus_${busId}`),
+            subscribeToTopic(token, `bus_${rawBusId}`),
+            subscribeToTopic(token, `bus_${busId}_${shiftLower}`)
+          );
+        }
+        await Promise.all(topicPromises);
       } catch (topicErr) {
         console.warn(`[${requestId}] Topic subscription failed (non-critical):`, topicErr);
       }

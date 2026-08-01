@@ -66,7 +66,6 @@ function getDefaultTTL(collectionName: string): number {
         case 'stops':
         case 'config':
             return 15 * 60 * 1000; // 15 minutes
-        case 'bus_locations':
         case 'trip_sessions':
         case 'active_trips':
             return 0; // 0 minutes (no cache)

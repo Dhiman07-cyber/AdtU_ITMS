@@ -407,7 +407,7 @@ export default function StudentDashboard() {
 
           {/* Enhanced Premium Stats Grid - Mobile Optimized */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-6 lg:gap-8 animate-slide-in-up">
-            {/* Current Status Card - Uses tripActive from Supabase driver_status (dynamic) */}
+            {/* Current Status Card - Uses tripActive from Supabase active_trips (dynamic) */}
             <div className="group cursor-pointer h-full">
               <Card className={`relative overflow-hidden border-2 border-white shadow-lg hover:shadow-xl md:hover:shadow-2xl transition-all duration-500 hover:scale-[1.02] h-full ${tripActive
                 ? 'border-green-400/50 shadow-green-500/20 bg-gradient-to-br from-emerald-900/40 via-green-900/40 to-teal-900/40' // Active Green Theme - Trip is running

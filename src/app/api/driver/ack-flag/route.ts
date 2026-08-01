@@ -27,12 +27,14 @@ export const POST = withSecurity(
     // Initialize Supabase client
     const supabase = getSupabaseServer();
 
-    // Get waiting flag
-    const { data: flagData, error: flagError } = await supabase
-      .from('waiting_flags')
-      .select('*')
-      .eq('id', flagId)
-      .single();
+    // Parallelize: fetch the flag, the active trip lock, and the driver profile in one shot
+    const [flagResult, activeTripResult, driverData] = await Promise.all([
+      supabase.from('waiting_flags').select('*').eq('id', flagId).single(),
+      supabase.from('active_trips').select('trip_id').eq('driver_id', driverUid).eq('status', 'active').maybeSingle(),
+      getDriverById(driverUid),
+    ]);
+
+    const { data: flagData, error: flagError } = flagResult;
 
     if (flagError || !flagData) {
       return NextResponse.json(
@@ -41,24 +43,12 @@ export const POST = withSecurity(
       );
     }
 
-    // Verify driver is assigned to this bus or holds active trip lock
-    const { data: activeTrip } = await supabase
-      .from('active_trips')
-      .select('trip_id')
-      .eq('driver_id', driverUid)
-      .eq('bus_id', flagData.bus_id)
-      .eq('status', 'active')
-      .maybeSingle();
-
-    const driverData = await getDriverById(driverUid);
+    const activeTrip = activeTripResult.data;
     const driverBusId = driverData?.bus_id || driverData?.busId;
-    const driverClaimsBus = activeTrip !== null || driverBusId === flagData.bus_id;
+    const driverClaimsBus = (activeTrip !== null && activeTrip?.trip_id) || driverBusId === flagData.bus_id;
 
     if (!driverClaimsBus) {
-      console.error('Driver assignment validation failed:', {
-        driverUid,
-        busId: flagData.bus_id
-      });
+      console.error('Driver assignment validation failed:', { driverUid, busId: flagData.bus_id });
       return NextResponse.json(
         { error: 'Driver is not assigned to this bus' },
         { status: 403 }

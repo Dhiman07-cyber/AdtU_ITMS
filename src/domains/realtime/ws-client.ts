@@ -126,6 +126,11 @@ export class WebSocketClient {
       this.reconnectAttempts = 0;
       this.emitStatus('connected');
       this.startPing();
+      // Phase-04: Send auth as first message (preferred path).
+      // The server also accepts the URL token (deprecated Path A) for backward
+      // compatibility. When Phase-05 removes URL token support, remove the URL
+      // param from connectInternal() and rely solely on this message.
+      this.send({ type: 'auth', token: this.currentToken });
       for (const ch of this.pendingSubscriptions) this.send({ type: 'subscribe', channel: ch });
     };
 
@@ -154,10 +159,19 @@ export class WebSocketClient {
       } catch { }
     };
 
-    this.ws.onclose = () => {
+    this.ws.onclose = (event: CloseEvent) => {
       this.stopPing();
       this.emitStatus('disconnected');
-      this.scheduleReconnect();
+      if (event.code === 4001 || event.reason === 'Authentication failed') {
+        if (this.config.getNewToken) {
+          this.handleAuthRequired();
+        } else {
+          console.warn('[WS Client] WebSocket closed due to auth failure (4001). Reconnect stopped.');
+          this.emitStatus('error');
+        }
+      } else {
+        this.scheduleReconnect();
+      }
     };
 
     this.ws.onerror = () => {

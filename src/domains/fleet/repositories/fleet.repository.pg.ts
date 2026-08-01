@@ -48,6 +48,7 @@
  * createdAt / updatedAt      → created_at / updated_at
  */
 import { getSupabaseServer } from '@/lib/supabase-server';
+import { normalizeShift } from '@/lib/utils/shift-utils';
 import type { Bus } from '@/lib/types';
 // ─── Bus Field Map ────────────────────────────────────────────────────────────
 
@@ -260,10 +261,12 @@ export interface CapacityMutationResult {
 }
 
 export async function pgCheckBusCapacity(busId: string, shift?: string): Promise<CapacityCheckResult> {
+  const normalized = normalizeShift(shift);
+  if (!normalized) throw new Error('Shift parameter is required for bus capacity check');
   const db = getSupabaseServer();
   const { data, error } = await db.rpc('bus_check_capacity', {
     p_bus_id: busId,
-    p_shift: shift || 'Morning',
+    p_shift: normalized,
   });
   if (error) throw new Error(`FleetRepository (PG) checkBusCapacity failed: ${error.message}`);
   if (!data) throw new Error(`Bus ${busId} not found`);
@@ -272,10 +275,12 @@ export async function pgCheckBusCapacity(busId: string, shift?: string): Promise
 }
 
 export async function pgIncrementBusCapacity(busId: string, shift?: string): Promise<CapacityMutationResult> {
+  const normalized = normalizeShift(shift);
+  if (!normalized) throw new Error('Shift parameter is required for bus capacity increment');
   const db = getSupabaseServer();
   const { data, error } = await db.rpc('bus_increment_capacity', {
     p_bus_id: busId,
-    p_shift: shift || 'Morning',
+    p_shift: normalized,
   });
   if (error) throw new Error(`FleetRepository (PG) incrementBusCapacity failed: ${error.message}`);
   if (!data) throw new Error(`Bus ${busId} not found`);
@@ -284,10 +289,12 @@ export async function pgIncrementBusCapacity(busId: string, shift?: string): Pro
 }
 
 export async function pgDecrementBusCapacity(busId: string, shift?: string): Promise<CapacityMutationResult> {
+  const normalized = normalizeShift(shift);
+  if (!normalized) throw new Error('Shift parameter is required for bus capacity decrement');
   const db = getSupabaseServer();
   const { data, error } = await db.rpc('bus_decrement_capacity', {
     p_bus_id: busId,
-    p_shift: shift || 'Morning',
+    p_shift: normalized,
   });
   if (error) throw new Error(`FleetRepository (PG) decrementBusCapacity failed: ${error.message}`);
   if (!data) throw new Error(`Bus ${busId} not found`);

@@ -1,0 +1,187 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [
+    {
+      "icon": "home",
+      "includeVars": true,
+      "keepTime": true,
+      "targetBlank": false,
+      "title": "Master NOC",
+      "type": "link",
+      "url": "/d/itms-master-noc/01-master-noc-dashboard"
+    },
+    {
+      "icon": "bolt",
+      "includeVars": true,
+      "keepTime": true,
+      "targetBlank": false,
+      "title": "Infrastructure",
+      "type": "link",
+      "url": "/d/itms-infrastructure/02-infrastructure-dashboard"
+    },
+    {
+      "icon": "signal",
+      "includeVars": true,
+      "keepTime": true,
+      "targetBlank": false,
+      "title": "Realtime",
+      "type": "link",
+      "url": "/d/itms-realtime/03-realtime-dashboard"
+    },
+    {
+      "icon": "bus",
+      "includeVars": true,
+      "keepTime": true,
+      "targetBlank": false,
+      "title": "Fleet & Ops",
+      "type": "link",
+      "url": "/d/itms-fleet-ops/04-fleet-and-operations-dashboard"
+    },
+    {
+      "icon": "money-insert",
+      "includeVars": true,
+      "keepTime": true,
+      "targetBlank": false,
+      "title": "Business Analytics",
+      "type": "link",
+      "url": "/d/itms-business-analytics/05-business-analytics-dashboard"
+    },
+    {
+      "icon": "lock",
+      "includeVars": true,
+      "keepTime": true,
+      "targetBlank": false,
+      "title": "Security & Reliability",
+      "type": "link",
+      "url": "/d/itms-security-reliability/06-security-and-reliability-dashboard"
+    }
+  ],
+  "liveNow": true,
+  "templating": {
+    "list": [
+      {
+        "current": { "selected": true, "text": "All", "value": "$__all" },
+        "name": "node",
+        "label": "Node",
+        "type": "custom",
+        "query": "All, ws1, ws2",
+        "includeAll": true,
+        "multi": false
+      }
+    ]
+  },
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 0 },
+      "id": 1,
+      "title": "Auth Failures (1h)",
+      "type": "stat",
+      "targets": [{ "expr": "sum(increase(itms_ws_auth_failures[1h])) or vector(0)", "legendFormat": "Auth Failures" }],
+      "options": { "colorMode": "value", "graphMode": "none", "text": { "titleSize": 18, "valueSize": 36 } }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 0 },
+      "id": 2,
+      "title": "Rate Limit Blocks (1h)",
+      "type": "stat",
+      "targets": [{ "expr": "sum(increase(itms_ws_rate_limit_blocks[1h])) or vector(0)", "legendFormat": "Rate Limits" }],
+      "options": { "colorMode": "value", "graphMode": "none", "text": { "titleSize": 18, "valueSize": 36 } }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 6, "w": 6, "x": 12, "y": 0 },
+      "id": 3,
+      "title": "HTTP 5xx Server Errors (1h)",
+      "type": "stat",
+      "targets": [{ "expr": "sum(increase(itms_http_5xx_errors_total[1h])) or vector(0)", "legendFormat": "5xx Errors" }],
+      "options": { "colorMode": "value", "graphMode": "none", "text": { "titleSize": 18, "valueSize": 36 } },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": 0 }, { "color": "yellow", "value": 1 }, { "color": "red", "value": 5 }]
+          }
+        }
+      }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 6, "w": 6, "x": 18, "y": 0 },
+      "id": 4,
+      "title": "Device Lock Conflicts (1h)",
+      "type": "stat",
+      "targets": [{ "expr": "sum(increase(itms_device_session_conflicts_total[1h])) or vector(0)", "legendFormat": "Device Conflicts" }],
+      "options": { "colorMode": "value", "graphMode": "none", "text": { "titleSize": 18, "valueSize": 36 } }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 10, "w": 12, "x": 0, "y": 6 },
+      "id": 5,
+      "title": "HTTP Error Code Distribution (401 / 403 / 429 / 500)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum(rate(itms_http_requests_total{status=~\"4..\"}[1m]))",
+          "legendFormat": "4xx Client Errors"
+        },
+        {
+          "expr": "sum(rate(itms_http_requests_total{status=~\"5..\"}[1m]))",
+          "legendFormat": "5xx Server Errors"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "lineWidth": 3, "fillOpacity": 15 }
+        }
+      }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 6 },
+      "id": 6,
+      "title": "WebSocket Disconnects & Error Rates",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "rate(itms_ws_reconnects[1m])",
+          "legendFormat": "Reconnect Rate/sec"
+        },
+        {
+          "expr": "rate(itms_ws_errors_total[1m])",
+          "legendFormat": "Socket Errors/sec"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "lineWidth": 3, "fillOpacity": 15 }
+        }
+      }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 16 },
+      "id": 7,
+      "title": "⚡ ITMS DASHBOARD NAVIGATION & SUBSYSTEM LINKAGES",
+      "type": "text",
+      "options": {
+        "mode": "markdown",
+        "content": "## 🔗 Inter-Dashboard Navigation Matrix\nNavigate to any ITMS dashboard with one click:\n\n* 🏠 **[01 - Master NOC Dashboard](/d/itms-master-noc/01-master-noc-dashboard)** — Global System Health Grid & Executive KPIs\n* ⚡ **[02 - Infrastructure Dashboard](/d/itms-infrastructure/02-infrastructure-dashboard)** — CPU, RAM, Disk, NGINX, Redis & PostgreSQL Metrics\n* 🛰️ **[03 - Realtime Dashboard](/d/itms-realtime/03-realtime-dashboard)** — Active Trips, 1Hz GPS Streams, WebSocket Fanout & Pub/Sub\n* 🚌 **[04 - Fleet & Operations Dashboard](/d/itms-fleet-ops/04-fleet-and-operations-dashboard)** — Bus/Driver Utilization, Route Stats & Student Waiting Flags\n* 💳 **[05 - Business Analytics Dashboard](/d/itms-business-analytics/05-business-analytics-dashboard)** — Payments, Revenue, Pass Subscriptions & Active Users\n* 🔒 **[06 - Security & Reliability Dashboard](/d/itms-security-reliability/06-security-and-reliability-dashboard)** — JWT Auth, Rate Limits, HTTP 4xx/5xx Errors & Disconnects\n\n---\n*ITMS Executive Dashboard Suite | Version 2.3 | Inter-Dashboard Linkages Enabled*\n"
+      }
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["security", "reliability", "errors", "itms"],
+  "time": { "from": "now-1h", "to": "now" },
+  "title": "06 - Security & Reliability Dashboard",
+  "uid": "itms-security-reliability",
+  "version": 3
+}

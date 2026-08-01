@@ -1,11 +1,12 @@
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import * as Popover from '@radix-ui/react-popover';
-import { addDays,addMonths,endOfMonth,format,getYear,isAfter,isBefore,isSameDay,isSameMonth,setMonth,setYear,startOfMonth,subDays,subMonths } from 'date-fns';
+import { addDays, addMonths, endOfMonth, format, getYear, isAfter, isBefore, isSameDay, isSameMonth, setMonth, setYear, startOfMonth, subDays, subMonths } from 'date-fns';
 import { eachDayOfInterval } from 'date-fns/eachDayOfInterval';
 import { parseISO } from 'date-fns/parseISO';
-import { Calendar,ChevronDown,ChevronLeft,ChevronRight,Clock,Lock } from 'lucide-react';
-import React,{ useEffect,useState } from 'react';
+import { Calendar as CalendarIcon, ChevronDown, ChevronLeft, ChevronRight, Clock, Lock } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { toast } from 'sonner';
 
 interface EnhancedDatePickerProps {
   id: string;
@@ -57,13 +58,24 @@ export default function EnhancedDatePicker({
   });
   const [isPM, setIsPM] = useState(() => new Date().getHours() >= 12);
 
-  // Parse min and max dates
-  const minDateObj = minDate ? (minDate.includes('T') ? parseISO(minDate.split('T')[0]) : parseISO(minDate)) : undefined;
-  const maxDateObj = maxDate ? (maxDate.includes('T') ? parseISO(maxDate.split('T')[0]) : parseISO(maxDate)) : undefined;
+  // Safely parse min and max dates
+  const parseBoundsDate = (dateStr?: string): Date | undefined => {
+    if (!dateStr) return undefined;
+    try {
+      const clean = dateStr.includes('T') ? dateStr.split('T')[0] : dateStr;
+      const parsed = parseISO(clean);
+      return isNaN(parsed.getTime()) ? undefined : parsed;
+    } catch {
+      return undefined;
+    }
+  };
 
-  // For the actual selected date (no time component for calendar display)
+  const minDateObj = parseBoundsDate(minDate);
+  const maxDateObj = parseBoundsDate(maxDate);
+
+  // Selected date parsing
   const selectedDateStr = value ? (value.includes('T') ? value.split('T')[0] : value) : '';
-  const selectedDate = selectedDateStr ? parseISO(selectedDateStr) : undefined;
+  const selectedDate = selectedDateStr ? parseBoundsDate(selectedDateStr) : undefined;
 
   // Sync currentMonth with selectedDate when it changes or when picker opens
   useEffect(() => {
@@ -72,14 +84,16 @@ export default function EnhancedDatePicker({
     }
   }, [selectedDateStr, isOpen]);
 
-  // Sync time from value
+  // Sync time from value string
   useEffect(() => {
     if (value && value.includes('T')) {
       const timePart = value.split('T')[1].slice(0, 5);
       const [h, m] = timePart.split(':').map(Number);
-      setSelectedHour(h > 12 ? h - 12 : h === 0 ? 12 : h);
-      setSelectedMinute(m);
-      setIsPM(h >= 12);
+      if (!isNaN(h) && !isNaN(m)) {
+        setSelectedHour(h > 12 ? h - 12 : h === 0 ? 12 : h);
+        setSelectedMinute(m);
+        setIsPM(h >= 12);
+      }
     }
   }, [value]);
 
@@ -93,9 +107,8 @@ export default function EnhancedDatePicker({
 
   const generateYearOptions = () => {
     const currentYear = new Date().getFullYear();
-    const years = [];
-    // Include future years
-    for (let year = currentYear + 5; year >= 1920; year--) {
+    const years: number[] = [];
+    for (let year = currentYear + 10; year >= 1920; year--) {
       years.push(year);
     }
     return years;
@@ -105,16 +118,6 @@ export default function EnhancedDatePicker({
     'January', 'February', 'March', 'April', 'May', 'June',
     'July', 'August', 'September', 'October', 'November', 'December'
   ];
-
-  const validateAge = (date: Date): boolean => {
-    switch (validationType) {
-      case 'dob-student': return calculateAge(date) >= 12;
-      case 'dob-driver':
-      case 'dob-moderator': return calculateAge(date) >= 19;
-      case 'joining': return true;
-      default: return true;
-    }
-  };
 
   const calculateAge = (birthDate: Date): number => {
     const today = new Date();
@@ -126,38 +129,74 @@ export default function EnhancedDatePicker({
     return age;
   };
 
+  const checkEligibility = (date: Date): { eligible: boolean; reason?: string } => {
+    // 1. Min Date Check
+    if (minDateObj && isBefore(date, minDateObj) && !isSameDay(date, minDateObj)) {
+      return { 
+        eligible: false, 
+        reason: `Date cannot be earlier than ${format(minDateObj, 'MMM d, yyyy')}.` 
+      };
+    }
+    // 2. Max Date Check
+    if (maxDateObj && isAfter(date, maxDateObj) && !isSameDay(date, maxDateObj)) {
+      return { 
+        eligible: false, 
+        reason: `Date cannot be later than ${format(maxDateObj, 'MMM d, yyyy')}.` 
+      };
+    }
+
+    // 3. Validation Type Checks (Age limits)
+    const age = calculateAge(date);
+    const isFutureDate = age < 0;
+
+    switch (validationType) {
+      case 'dob-student':
+        if (isFutureDate) {
+          return { eligible: false, reason: "Birth date cannot be in the future. Students must be at least 12 years old." };
+        }
+        if (age < 12) {
+          return { eligible: false, reason: `Students must be at least 12 years old (selected age: ${age} yrs).` };
+        }
+        break;
+
+      case 'dob-driver':
+      case 'dob-moderator':
+        if (isFutureDate) {
+          return { eligible: false, reason: "Birth date cannot be in the future. Staff must be at least 19 years old." };
+        }
+        if (age < 19) {
+          return { eligible: false, reason: `Staff must be at least 19 years old (selected age: ${age} yrs).` };
+        }
+        break;
+
+      case 'joining':
+        if (isAfter(date, new Date()) && !isSameDay(date, new Date())) {
+          return { eligible: false, reason: "Joining date cannot be in the future." };
+        }
+        break;
+
+      default:
+        break;
+    }
+
+    return { eligible: true };
+  };
+
   const handleDateSelect = (date: Date) => {
-    if (minDateObj && isBefore(date, minDateObj)) return;
-    if (maxDateObj && isAfter(date, maxDateObj)) return;
+    if (locked) return;
 
-    if (!validateAge(date)) {
-      const age = calculateAge(date);
-      let message = '';
-      
-      const isFutureDate = age < 0;
+    const { eligible, reason } = checkEligibility(date);
 
-      switch (validationType) {
-        case 'dob-student': 
-          message = isFutureDate 
-            ? "Birth date cannot be in the future. Students must be at least 12 years old."
-            : `Students must be at least 12 years old. The selected date would make you ${age} years old.`; 
-          break;
-        case 'dob-driver':
-        case 'dob-moderator': 
-          message = isFutureDate
-            ? "Birth date cannot be in the future. Staff must be at least 19 years old."
-            : `Must be at least 19 years old. The selected date would make you ${age} years old.`; 
-          break;
-        default: message = 'This date is not selectable.';
-      }
-      if (onValidationError) onValidationError(message);
+    if (!eligible && reason) {
+      // Trigger toast feedback & custom validation callback
+      toast.error(reason);
+      if (onValidationError) onValidationError(reason);
       return;
     }
 
     const dateStr = format(date, 'yyyy-MM-dd');
 
     if (includeTime) {
-      // Store date temporarily and switch to time picker
       setTempDate(dateStr);
       setPickerMode('time');
     } else {
@@ -180,6 +219,7 @@ export default function EnhancedDatePicker({
   const goToNextMonth = () => setCurrentMonth(addMonths(currentMonth, 1));
 
   const handleYearChange = (year: number) => {
+    // setYear handles leap year transitions automatically (e.g. Feb 29 -> Feb 28 on non-leap year)
     const newDate = setYear(currentMonth, year);
     setCurrentMonth(newDate);
     setShowYearDropdown(false);
@@ -196,30 +236,32 @@ export default function EnhancedDatePicker({
     const end = endOfMonth(currentMonth);
     const daysInMonth = eachDayOfInterval({ start, end });
     const startDay = start.getDay();
+    
+    // Fill previous month days in correct chronological order
     const prevMonthDays: Date[] = [];
-    for (let i = startDay; i > 0; i--) { prevMonthDays.push(subDays(start, i)); }
+    for (let i = startDay; i > 0; i--) { 
+      prevMonthDays.push(subDays(start, i)); 
+    }
+    
+    // Fill next month days to complete 42-day grid (6 full weeks)
     const nextMonthDays: Date[] = [];
     const daysNeeded = 42 - (prevMonthDays.length + daysInMonth.length);
-    for (let i = 1; i <= daysNeeded; i++) { nextMonthDays.push(addDays(end, i)); }
+    for (let i = 1; i <= daysNeeded; i++) { 
+      nextMonthDays.push(addDays(end, i)); 
+    }
+    
     return [...prevMonthDays, ...daysInMonth, ...nextMonthDays];
-  };
-
-  const isDateSelectable = (date: Date) => {
-    if (minDateObj && isBefore(date, minDateObj)) return false;
-    if (maxDateObj && isAfter(date, maxDateObj)) return false;
-    if (validationType === 'dob-student') return true;
-    if (!validateAge(date)) return false;
-    return true;
   };
 
   const displayValue = selectedDate && !isNaN(selectedDate.getTime())
     ? (includeTime && value.includes('T')
-      ? format(selectedDate, 'MMMM do, yyyy') + ' ' + formatTime(value.split('T')[1].slice(0, 5))
-      : format(selectedDate, 'MMMM do, yyyy'))
+      ? format(selectedDate, 'MMM d, yyyy') + ' ' + formatTime(value.split('T')[1].slice(0, 5))
+      : format(selectedDate, 'MMM d, yyyy'))
     : '';
 
   function formatTime(time24: string): string {
     const [h, m] = time24.split(':').map(Number);
+    if (isNaN(h) || isNaN(m)) return time24;
     const isPM = h >= 12;
     const h12 = h > 12 ? h - 12 : h === 0 ? 12 : h;
     return `${h12}:${m.toString().padStart(2, '0')} ${isPM ? 'PM' : 'AM'}`;
@@ -229,19 +271,17 @@ export default function EnhancedDatePicker({
     if (allowManualInput) onChange(e.target.value);
   };
 
-  // Hour options for scrollable picker
   const hours = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
-  const minutes = Array.from({ length: 60 }, (_, i) => i);
 
   return (
     <div className="relative">
       {label && (
-        <label htmlFor={id} className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+        <label htmlFor={id} className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1">
           {label} {required && <span className="text-red-500">*</span>}
         </label>
       )}
 
-      <Popover.Root open={isOpen} onOpenChange={setIsOpen}>
+      <Popover.Root open={isOpen && !locked} onOpenChange={(open) => !locked && setIsOpen(open)}>
         <Popover.Trigger asChild>
           <div className="relative">
             <Input
@@ -249,10 +289,14 @@ export default function EnhancedDatePicker({
               type="text"
               value={allowManualInput ? value : displayValue}
               placeholder={placeholder}
-              readOnly={!allowManualInput}
+              readOnly={!allowManualInput || locked}
+              disabled={locked}
               required={required}
-              className={`pr-9 text-xs ${className || 'h-10'} border-gray-300 dark:border-gray-600 focus:border-indigo-500 focus:ring-indigo-500 transition-all duration-200 shadow-sm hover:shadow-md`}
+              className={`pr-9 text-xs ${className || 'h-10'} border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-all rounded-md shadow-xs ${
+                locked ? 'opacity-60 cursor-not-allowed bg-slate-50 dark:bg-slate-800' : ''
+              }`}
               onClick={(e) => {
+                if (locked) return;
                 if (!allowManualInput) {
                   e.preventDefault();
                   setIsOpen(true);
@@ -260,74 +304,76 @@ export default function EnhancedDatePicker({
               }}
               onChange={handleManualInputChange}
             />
-            {!allowManualInput && (
-              <div className="absolute right-2.5 top-1/2 transform -translate-y-1/2 flex items-center gap-1 pointer-events-none">
-                {locked ? (
-                  <Lock className="h-3.5 w-3.5 text-gray-400 dark:text-gray-500 animate-pulse" />
-                ) : (
-                  <>
-                    {includeTime && <Clock className="h-3.5 w-3.5 text-purple-500" />}
-                    <Calendar className="h-4 w-4 text-indigo-500" />
-                  </>
-                )}
-              </div>
-            )}
+            <div className="absolute right-2.5 top-1/2 -translate-y-1/2 flex items-center gap-1 pointer-events-none text-slate-400 dark:text-slate-500">
+              {locked ? (
+                <Lock className="h-3.5 w-3.5" />
+              ) : (
+                <>
+                  {includeTime && <Clock className="h-3.5 w-3.5" />}
+                  <CalendarIcon className="h-4 w-4" />
+                </>
+              )}
+            </div>
           </div>
         </Popover.Trigger>
 
         <Popover.Portal>
           <Popover.Content
-            className="z-[9999] bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 w-[280px] backdrop-blur-sm animate-in fade-in zoom-in-95 duration-200"
-            sideOffset={4}
+            className="z-[9999] bg-white dark:bg-slate-900 rounded-xl shadow-lg border border-slate-200 dark:border-slate-800 w-[270px] p-0 animate-in fade-in-50 zoom-in-95 duration-150"
+            sideOffset={6}
             align="start"
           >
             {pickerMode === 'date' ? (
               <>
-                {/* Calendar Header */}
-                <div className="px-2 py-2 bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-indigo-950 dark:to-purple-950 rounded-t-lg">
+                {/* Header */}
+                <div className="px-3 py-2.5 bg-slate-50 dark:bg-slate-800/40 border-b border-slate-100 dark:border-slate-800/80 rounded-t-xl">
                   <div className="flex items-center justify-between">
                     <Button
                       type="button"
                       variant="ghost"
                       size="sm"
                       onClick={goToPreviousMonth}
-                      className="h-8 w-8 p-0 hover:bg-indigo-100 dark:hover:bg-indigo-900 rounded-full"
+                      className="h-7 w-7 p-0 text-slate-600 dark:text-slate-400 hover:bg-slate-200/60 dark:hover:bg-slate-800 rounded-md"
                     >
-                      <ChevronLeft className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
+                      <ChevronLeft className="h-4 w-4" />
                     </Button>
 
-                    <div className="flex space-x-2 relative">
+                    <div className="flex items-center gap-1 relative">
                       <Button
                         type="button"
                         variant="outline"
                         size="sm"
-                        className="h-8 px-3 text-xs font-semibold text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100 dark:hover:bg-indigo-900"
+                        className="h-7 px-2.5 text-xs font-semibold text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800"
                         onClick={() => { setShowMonthDropdown(!showMonthDropdown); setShowYearDropdown(false); }}
                       >
-                        {format(currentMonth, 'MMMM')}
-                        <ChevronDown className="ml-1.5 h-3 w-3" />
+                        {format(currentMonth, 'MMM')}
+                        <ChevronDown className="ml-1 h-3 w-3 text-slate-400" />
                       </Button>
 
                       <Button
                         type="button"
                         variant="outline"
                         size="sm"
-                        className="h-8 px-3 text-xs font-semibold text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800 hover:bg-indigo-100 dark:hover:bg-indigo-900"
+                        className="h-7 px-2.5 text-xs font-semibold text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800"
                         onClick={() => { setShowYearDropdown(!showYearDropdown); setShowMonthDropdown(false); }}
                       >
                         {getYear(currentMonth)}
-                        <ChevronDown className="ml-1.5 h-3 w-3" />
+                        <ChevronDown className="ml-1 h-3 w-3 text-slate-400" />
                       </Button>
 
-                      {/* Dropdowns */}
+                      {/* Month Dropdown */}
                       {showMonthDropdown && (
-                        <div className="absolute top-full mt-1 left-0 bg-white dark:bg-gray-800 rounded-lg shadow-xl border-2 border-indigo-100 dark:border-indigo-900 w-36 z-[10000] animate-in fade-in slide-in-from-top-2 duration-150">
+                        <div className="absolute top-full mt-1 left-0 bg-white dark:bg-slate-900 rounded-lg shadow-md border border-slate-200 dark:border-slate-800 w-32 z-[10000] py-1 animate-in fade-in-50 duration-100">
                           <div className="max-h-48 overflow-y-auto scrollbar-thin" data-lenis-prevent>
                             {monthNames.map((month, index) => (
                               <button
                                 key={month}
                                 type="button"
-                                className={`block w-full text-left px-3 py-2 text-sm font-medium cursor-pointer hover:cursor-pointer ${index === currentMonth.getMonth() ? 'bg-indigo-600 text-white font-bold' : 'text-gray-700 dark:text-gray-300 hover:bg-indigo-50 dark:hover:bg-indigo-900'}`}
+                                className={`block w-full text-left px-3 py-1.5 text-xs transition-colors ${
+                                  index === currentMonth.getMonth()
+                                    ? 'bg-slate-900 text-white font-medium dark:bg-slate-100 dark:text-slate-900'
+                                    : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                                }`}
                                 onClick={() => handleMonthChange(index)}
                               >
                                 {month}
@@ -337,14 +383,19 @@ export default function EnhancedDatePicker({
                         </div>
                       )}
 
+                      {/* Year Dropdown */}
                       {showYearDropdown && (
-                        <div className="absolute top-full mt-1 right-0 bg-white dark:bg-gray-800 rounded-lg shadow-xl border-2 border-indigo-100 dark:border-indigo-900 w-24 z-[10000] animate-in fade-in slide-in-from-top-2 duration-150">
+                        <div className="absolute top-full mt-1 right-0 bg-white dark:bg-slate-900 rounded-lg shadow-md border border-slate-200 dark:border-slate-800 w-24 z-[10000] py-1 animate-in fade-in-50 duration-100">
                           <div className="max-h-48 overflow-y-auto scrollbar-thin" data-lenis-prevent>
                             {generateYearOptions().map((year) => (
                               <button
                                 key={year}
                                 type="button"
-                                className={`block w-full text-left px-3 py-2 text-sm font-medium cursor-pointer hover:cursor-pointer ${year === getYear(currentMonth) ? 'bg-indigo-600 text-white font-bold' : 'text-gray-700 dark:text-gray-300 hover:bg-indigo-50 dark:hover:bg-indigo-900'}`}
+                                className={`block w-full text-left px-3 py-1.5 text-xs transition-colors ${
+                                  year === getYear(currentMonth)
+                                    ? 'bg-slate-900 text-white font-medium dark:bg-slate-100 dark:text-slate-900'
+                                    : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                                }`}
                                 onClick={() => handleYearChange(year)}
                               >
                                 {year}
@@ -360,36 +411,40 @@ export default function EnhancedDatePicker({
                       variant="ghost"
                       size="sm"
                       onClick={goToNextMonth}
-                      className="h-8 w-8 p-0 hover:bg-indigo-100 dark:hover:bg-indigo-900 rounded-full"
+                      className="h-7 w-7 p-0 text-slate-600 dark:text-slate-400 hover:bg-slate-200/60 dark:hover:bg-slate-800 rounded-md"
                     >
-                      <ChevronRight className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
+                      <ChevronRight className="h-4 w-4" />
                     </Button>
                   </div>
                 </div>
 
                 {/* Calendar Grid */}
-                <div className="p-2">
-                  <div className="grid grid-cols-7 gap-0.5 mb-1">
+                <div className="p-3">
+                  <div className="grid grid-cols-7 gap-1 mb-1.5 text-center">
                     {['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map(day => (
-                      <div key={day} className="text-center text-[9px] font-bold text-indigo-600 dark:text-indigo-400 uppercase py-0.5">{day}</div>
+                      <div key={day} className="text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider py-0.5">{day}</div>
                     ))}
                   </div>
-                  <div className="grid grid-cols-7 gap-0.5">
+                  <div className="grid grid-cols-7 gap-1">
                     {getCalendarDays().map((day, index) => {
                       const isCurrentMonth = isSameMonth(day, currentMonth);
                       const isSelected = selectedDate && isSameDay(day, selectedDate);
-                      const isSelectable = isDateSelectable(day);
+                      const { eligible } = checkEligibility(day);
                       const isToday = isSameDay(day, new Date());
                       return (
                         <button
                           key={index}
                           type="button"
-                          className={`h-6 w-6 flex items-center justify-center text-[10px] font-medium rounded transition-all ${!isCurrentMonth ? 'text-gray-300 dark:text-gray-600' :
-                            isSelected ? 'bg-gradient-to-br from-indigo-500 to-purple-600 text-white shadow scale-105' :
-                              'text-gray-700 dark:text-gray-300 hover:bg-indigo-50 dark:hover:bg-indigo-950'
-                            } ${!isSelectable ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'} ${isToday && !isSelected ? 'ring-1 ring-indigo-400' : ''}`}
+                          className={`h-7 w-7 flex items-center justify-center text-xs font-medium rounded-md transition-all ${
+                            !isCurrentMonth
+                              ? 'text-slate-300 dark:text-slate-600'
+                              : isSelected
+                              ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 font-semibold shadow-xs'
+                              : eligible
+                              ? 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                              : 'text-slate-300 dark:text-slate-600 bg-slate-50 dark:bg-slate-800/30 cursor-not-allowed line-through opacity-40'
+                          } ${isToday && !isSelected ? 'ring-1 ring-slate-400 dark:ring-slate-500' : ''}`}
                           onClick={() => handleDateSelect(day)}
-                          disabled={!isSelectable}
                         >
                           {day.getDate()}
                         </button>
@@ -399,34 +454,24 @@ export default function EnhancedDatePicker({
                 </div>
 
                 {/* Footer Buttons */}
-                <div className="flex justify-between gap-2 px-2 pb-2 pt-1 border-t border-gray-100 dark:border-gray-700">
+                <div className="flex justify-between items-center gap-2 p-2.5 border-t border-slate-100 dark:border-slate-800/80 bg-slate-50/50 dark:bg-slate-900/50 rounded-b-xl">
                   <Button
                     type="button"
                     variant="outline"
                     size="sm"
                     onClick={() => { onChange(''); setIsOpen(false); }}
-                    className="h-7 px-3 text-[10px] font-medium flex-1 rounded"
+                    className="h-7 px-3 text-[11px] font-medium text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 flex-1 rounded-md"
                   >
                     Clear
                   </Button>
                   <Button
                     type="button"
-                    variant="outline"
                     size="sm"
                     onClick={() => {
                       const today = new Date();
-                      if (isDateSelectable(today)) {
-                        const dateStr = format(today, 'yyyy-MM-dd');
-                        if (includeTime) {
-                          setTempDate(dateStr);
-                          setPickerMode('time');
-                        } else {
-                          onChange(dateStr);
-                          setIsOpen(false);
-                        }
-                      }
+                      handleDateSelect(today);
                     }}
-                    className="h-7 px-3 text-[10px] font-medium bg-gradient-to-r from-indigo-500 to-purple-600 text-white border-0 flex-1 rounded shadow-sm hover:shadow-md transition-all active:scale-[0.98]"
+                    className="h-7 px-3 text-[11px] font-medium bg-slate-900 hover:bg-slate-800 text-white dark:bg-slate-100 dark:hover:bg-white dark:text-slate-900 flex-1 rounded-md transition-colors"
                   >
                     Today
                   </Button>
@@ -436,42 +481,59 @@ export default function EnhancedDatePicker({
               <>
                 {/* Time Selection */}
                 <div className="p-3">
+                  <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-100 dark:border-slate-800">
+                    <span className="text-xs font-semibold text-slate-600 dark:text-slate-400">Select Time</span>
+                    <button
+                      type="button"
+                      onClick={() => setPickerMode('date')}
+                      className="text-[11px] font-medium text-slate-500 hover:text-slate-900 dark:hover:text-slate-100"
+                    >
+                      ← Back
+                    </button>
+                  </div>
+
                   {/* Time Display */}
-                  <div className="flex items-center justify-center gap-2 mb-3">
-                    <div className="text-2xl font-bold text-purple-600 dark:text-purple-400">
+                  <div className="flex items-center justify-center gap-3 py-2 my-1 bg-slate-50 dark:bg-slate-800/40 rounded-lg border border-slate-100 dark:border-slate-800">
+                    <div className="text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100">
                       {selectedHour}:{selectedMinute.toString().padStart(2, '0')}
                     </div>
-                    <div className="flex flex-col gap-0.5">
+                    <div className="flex flex-col gap-1">
                       <button
                         type="button"
                         onClick={() => setIsPM(false)}
-                        className={`px-1.5 py-0.5 text-[9px] font-bold rounded transition-all ${!isPM ? 'bg-purple-500 text-white' : 'text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'}`}
+                        className={`px-2 py-0.5 text-[10px] font-semibold rounded transition-colors ${
+                          !isPM ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900' : 'text-slate-500 hover:bg-slate-200/50 dark:hover:bg-slate-700'
+                        }`}
                       >
                         AM
                       </button>
                       <button
                         type="button"
                         onClick={() => setIsPM(true)}
-                        className={`px-1.5 py-0.5 text-[9px] font-bold rounded transition-all ${isPM ? 'bg-purple-500 text-white' : 'text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'}`}
+                        className={`px-2 py-0.5 text-[10px] font-semibold rounded transition-colors ${
+                          isPM ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900' : 'text-slate-500 hover:bg-slate-200/50 dark:hover:bg-slate-700'
+                        }`}
                       >
                         PM
                       </button>
                     </div>
                   </div>
 
-                  {/* Hour / Minute Selectors */}
-                  <div className="flex gap-2">
+                  {/* Hour / Minute Lists */}
+                  <div className="flex gap-2 mt-3">
                     <div className="flex-1">
-                      <div className="text-[9px] font-bold text-purple-600 dark:text-purple-400 uppercase text-center mb-1">Hour</div>
-                      <div className="h-36 overflow-y-auto rounded border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900" data-lenis-prevent>
+                      <div className="text-[10px] font-medium text-slate-400 uppercase text-center mb-1">Hour</div>
+                      <div className="h-32 overflow-y-auto rounded-md border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 py-1" data-lenis-prevent>
                         {hours.map((hour) => (
                           <button
                             key={hour}
                             type="button"
                             onClick={() => setSelectedHour(hour)}
-                            className={`w-full py-1.5 text-xs font-medium transition-all ${selectedHour === hour
-                              ? 'bg-purple-500 text-white'
-                              : 'text-gray-700 dark:text-gray-300 hover:bg-purple-50 dark:hover:bg-purple-950'}`}
+                            className={`w-full py-1 text-xs transition-colors ${
+                              selectedHour === hour
+                                ? 'bg-slate-900 text-white font-semibold dark:bg-slate-100 dark:text-slate-900'
+                                : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                            }`}
                           >
                             {hour}
                           </button>
@@ -479,16 +541,18 @@ export default function EnhancedDatePicker({
                       </div>
                     </div>
                     <div className="flex-1">
-                      <div className="text-[9px] font-bold text-purple-600 dark:text-purple-400 uppercase text-center mb-1">Min</div>
-                      <div className="h-36 overflow-y-auto rounded border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900" data-lenis-prevent>
+                      <div className="text-[10px] font-medium text-slate-400 uppercase text-center mb-1">Min</div>
+                      <div className="h-32 overflow-y-auto rounded-md border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 py-1" data-lenis-prevent>
                         {[0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55].map((minute) => (
                           <button
                             key={minute}
                             type="button"
                             onClick={() => setSelectedMinute(minute)}
-                            className={`w-full py-1.5 text-xs font-medium transition-all ${selectedMinute === minute
-                              ? 'bg-purple-500 text-white'
-                              : 'text-gray-700 dark:text-gray-300 hover:bg-purple-50 dark:hover:bg-purple-950'}`}
+                            className={`w-full py-1 text-xs transition-colors ${
+                              selectedMinute === minute
+                                ? 'bg-slate-900 text-white font-semibold dark:bg-slate-100 dark:text-slate-900'
+                                : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                            }`}
                           >
                             {minute.toString().padStart(2, '0')}
                           </button>
@@ -499,13 +563,13 @@ export default function EnhancedDatePicker({
                 </div>
 
                 {/* Confirm Button */}
-                <div className="px-3 pb-3">
+                <div className="p-2.5 border-t border-slate-100 dark:border-slate-800/80 bg-slate-50/50 dark:bg-slate-900/50 rounded-b-xl">
                   <Button
                     type="button"
                     onClick={handleTimeConfirm}
-                    className="w-full h-8 text-xs font-bold bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded shadow hover:shadow-md transition-all"
+                    className="w-full h-8 text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-white dark:bg-slate-100 dark:hover:bg-white dark:text-slate-900 rounded-md transition-colors shadow-xs"
                   >
-                    <Clock className="h-3 w-3 mr-1" />
+                    <Clock className="h-3.5 w-3.5 mr-1.5" />
                     Confirm {selectedHour}:{selectedMinute.toString().padStart(2, '0')} {isPM ? 'PM' : 'AM'}
                   </Button>
                 </div>

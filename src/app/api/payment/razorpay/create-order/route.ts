@@ -18,7 +18,11 @@ export const POST = withSecurity<CreateOrderBody>(
         const { amount, notes, userName, purpose, enrollmentId, durationYears } = body;
         const trustedUserId = auth.uid;
         const trustedDurationYears = durationYears || Number(notes?.duration || 1);
-        const systemConfigResult = await getSystemConfig();
+        const [systemConfigResult, student] = await Promise.all([
+            getSystemConfig(),
+            getStudentByUid(trustedUserId).catch(() => null),
+        ]);
+
         const busFeeAmount = Number(systemConfigResult.data.busFee?.amount || 0);
         const expectedAmount = busFeeAmount * trustedDurationYears;
 
@@ -29,7 +33,6 @@ export const POST = withSecurity<CreateOrderBody>(
             );
         }
 
-        const student = await getStudentByUid(trustedUserId).catch(() => null);
         const studentData = student as any;
         const trustedEnrollmentId = studentData?.enrollmentId || enrollmentId || notes?.enrollmentId || '';
         const trustedStudentName = studentData?.fullName || studentData?.name || userName || auth.name || 'Unknown';

@@ -22,8 +22,11 @@ export const useBusLocation = (busId: string, token?: string | null, externalCli
   const isMountedRef = useRef(true);
   const clientRef = useRef<WebSocketClient | null>(null);
 
+  const isTripActiveRef = useRef(true);
+
   const applyIncomingLocation = useCallback((newLocation: BusLocation) => {
     if (!isValidLatLng(newLocation.lat, newLocation.lng)) return;
+    if (!isTripActiveRef.current) return;
     setCurrentLocation(newLocation);
     setHistory((prev) => {
       const next = [...prev, newLocation];
@@ -55,44 +58,58 @@ export const useBusLocation = (busId: string, token?: string | null, externalCli
       setCurrentLocation(null); setHistory([]); setLoading(false);
       return;
     }
-    setCurrentLocation(null); setHistory([]);
+    setCurrentLocation(null); setHistory([]); setLoading(true);
 
-    const fetchInitialLocation = async () => {
-      if (!supabase || !busId) { if (isMountedRef.current) setLoading(false); return; }
-      if (isMountedRef.current) setLoading(true);
-      try {
-        const { data: locations } = await supabase
-          .from('bus_locations')
-          .select('*')
-          .eq('bus_id', busId)
-          .neq('lat', 0).neq('lng', 0)
-          .order('timestamp', { ascending: false })
-          .limit(1);
-        if (locations && locations.length > 0) {
-          const loc = locations[0];
-          const bl: BusLocation = {
-            busId: loc.bus_id, driverUid: loc.driver_uid,
-            lat: loc.lat, lng: loc.lng,
-            speed: loc.speed || 0, heading: loc.heading || 0,
-            accuracy: loc.accuracy, timestamp: loc.timestamp,
-          };
-          if (isValidLatLng(bl.lat, bl.lng)) applyIncomingLocation(bl);
+    let isSubscribed = true;
+    fetch(`/api/student/trip-status?busId=${encodeURIComponent(busId)}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {}
+    })
+      .then(res => res.ok ? res.json() : null)
+      .then(data => {
+        if (!isSubscribed) return;
+        if (data?.tripActive) {
+          isTripActiveRef.current = true;
+          const loc = data.tripData?.current_location;
+          if (loc && loc.lat && loc.lng) {
+            handleBusLocationUpdate({
+              busId: loc.busId || busId,
+              driverUid: loc.driverUid || data.tripData.driverUid || '',
+              lat: Number(loc.lat),
+              lng: Number(loc.lng),
+              speed: loc.speed || 0,
+              heading: loc.heading || 0,
+              accuracy: loc.accuracy,
+              timestamp: loc.timestamp || new Date().toISOString(),
+            });
+          }
+        } else if (data && !data.tripActive) {
+          isTripActiveRef.current = false;
         }
-      } catch { if (isMountedRef.current) setError('Failed to fetch bus location'); }
-      finally { if (isMountedRef.current) setLoading(false); }
-    };
-    fetchInitialLocation();
-    return () => { isMountedRef.current = false; };
-  }, [busId, applyIncomingLocation]);
+        setLoading(false);
+      })
+      .catch(err => {
+        console.warn('[useBusLocation] Failed to fetch initial location:', err);
+        if (isSubscribed) setLoading(false);
+      });
+
+    return () => { isMountedRef.current = false; isSubscribed = false; };
+  }, [busId, token, handleBusLocationUpdate]);
 
   useEffect(() => {
     if (!busId) return;
 
+    const busVariations = Array.from(new Set([
+      busId,
+      busId.startsWith('bus_') ? busId.replace('bus_', '') : `bus_${busId}`
+    ]));
+
     if (externalClient) {
-      const unsub = externalClient.subscribe(`bus_location_${busId}`, (payload: any) => {
-        handleBusLocationUpdate(payload.payload || payload);
-      });
-      return () => { unsub(); };
+      const unsubs = busVariations.map(id =>
+        externalClient.subscribe(`bus_location_${id}`, (payload: any) => {
+          handleBusLocationUpdate(payload.payload || payload);
+        })
+      );
+      return () => { unsubs.forEach(unsub => unsub()); };
     }
 
     if (!token) return;
@@ -101,12 +118,14 @@ export const useBusLocation = (busId: string, token?: string | null, externalCli
     clientRef.current = client;
     client.connect();
 
-    const unsub = client.subscribe(`bus_location_${busId}`, (payload: any) => {
-      handleBusLocationUpdate(payload.payload || payload);
-    });
+    const unsubs = busVariations.map(id =>
+      client.subscribe(`bus_location_${id}`, (payload: any) => {
+        handleBusLocationUpdate(payload.payload || payload);
+      })
+    );
 
     return () => {
-      unsub();
+      unsubs.forEach(unsub => unsub());
       client.disconnect();
       clientRef.current = null;
     };

@@ -1,6 +1,5 @@
 "use client";
 
-import DynamicStudentMap from "@/components/DynamicStudentMap";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import LocationPermissionModal from "@/components/LocationPermissionModal";
@@ -13,7 +12,7 @@ import { useAuth } from "@/contexts/auth-context";
 import { useToast } from "@/contexts/toast-context";
 import { useFCMToken } from "@/hooks/useFCMToken";
 import { useGeolocation } from "@/hooks/useGeolocation";
-import { getBusById,getBusesByRouteId,getRouteById,getStudentByUid } from "@/lib/dataService";
+import { authApiFetch } from "@/lib/secure-api-client";
 import { supabase } from "@/lib/supabase-client";
 import {
 	AlertCircle,
@@ -27,8 +26,21 @@ import {
 	Users,
 	XCircle
 } from "lucide-react";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useCallback,useEffect,useState } from "react";
+
+const DynamicStudentMap = dynamic(() => import('@/components/DynamicStudentMap'), {
+  ssr: false,
+  loading: () => (
+    <div className="w-full h-[450px] md:h-[calc(100vh-20rem)] md:min-h-[600px] bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-900 dark:to-gray-800 rounded-3xl animate-pulse flex items-center justify-center">
+      <div className="text-center space-y-2">
+        <Bus className="h-8 w-8 mx-auto text-blue-500 animate-bounce" />
+        <p className="text-xs text-gray-500 font-medium">Loading live map...</p>
+      </div>
+    </div>
+  )
+});
 
 function StudentBusLive() {
   const { currentUser, userData } = useAuth();
@@ -62,7 +74,7 @@ function StudentBusLive() {
     enabled: false // Only enable when needed for map centering
   });
 
-  // Fetch student data and related information
+  // Fetch student data and related information in parallel
   useEffect(() => {
     const fetchData = async () => {
       if (!currentUser?.uid) {
@@ -71,83 +83,27 @@ function StudentBusLive() {
       }
 
       try {
-        // Fetch student data
-        const student = await getStudentByUid(currentUser.uid);
-        if (student) {
-          setStudentData(student);
-          console.log('Student data fetched in bus page:', student);
+        const dashRes = await authApiFetch(currentUser, '/api/student/dashboard-data');
 
-          // Fetch route data first
-          const routeId = student.routeId || student.routeId;
-          if (routeId) {
-            console.log('Fetching route data for routeId:', routeId);
-            const route = await getRouteById(routeId);
-            if (route) {
-              setRouteData(route);
-              setStops(route.stops || []);
-              console.log('Route data fetched:', route);
-
-              // Set default selected stop to the first stop
-              if (route.stops && route.stops.length > 0) {
-                setSelectedStop(route.stops[0].stop_name);
-              }
-
-              // Fetch buses for this route
-              const buses = await getBusesByRouteId(routeId);
-              if (buses.length > 0) {
-                // Use the first bus or find the one matching student's shift
-                const assignedBus = buses.find(bus =>
-                  bus.shift === student.shift ||
-                  bus.shift === 'both' ||
-                  !bus.shift
-                ) || buses[0];
-                setBusData(assignedBus);
-                console.log('Bus data fetched:', assignedBus);
-              }
+        if (dashRes.ok) {
+          const result = await dashRes.json();
+          if (result.student) setStudentData(result.student);
+          if (result.bus) setBusData(result.bus);
+          if (result.route) {
+            setRouteData(result.route);
+            setStops(result.route.stops || []);
+            if (result.route.stops && result.route.stops.length > 0) {
+              setSelectedStop(result.route.stops[0].stop_name);
             }
           }
-
-          // Also try direct bus ID if available (fallback)
-          const busId = student.busId || student.busId;
-          if (busId && !busData) {
-            console.log('Fetching direct bus data for busId:', busId);
-            const bus = await getBusById(busId);
-            if (bus) {
-              setBusData(bus);
-              console.log('Direct bus data fetched:', bus);
-            }
-          }
-
-          // Check if student has an active waiting flag
-          const { data: flags, error: flagError } = await supabase
-            .from('waiting_flags')
-            .select('*')
-            .eq('student_uid', currentUser.uid)
-            .in('status', ['raised', 'acknowledged', 'waiting']); // Check multiple statuses
-
-          if (!flagError && flags && flags.length > 0) {
+          setTripActive(!!result.tripActive);
+          if (result.activeWaitingFlag) {
             setWaiting(true);
-            setWaitingFlagId(flags[0].id);
-          }
-
-          // Check if there's an active trip for this bus by querying active_trips
-          try {
-            const { data: activeTrip } = await supabase
-              .from('active_trips')
-              .select('*')
-              .eq('bus_id', student.busId)
-              .eq('status', 'active')
-              .maybeSingle();
-
-            setTripActive(!!activeTrip);
-            console.log('🚌 Active trip check:', { active: !!activeTrip, tripId: activeTrip?.trip_id });
-          } catch (error) {
-            console.error('Error checking active trip:', error);
-            setTripActive(false);
+            setWaitingFlagId(result.activeWaitingFlag.id);
           }
         }
       } catch (error) {
-        console.error("Error fetching data:", error);
+        console.error("Error fetching student bus page data:", error);
       } finally {
         setLoading(false);
       }
@@ -573,7 +529,7 @@ function StudentBusLive() {
 
 /**
  * Phase 3 — entitlement decided before the live bus page (and its Supabase
- * driver_status / waiting_flags subscriptions) mounts. Ineligible students see
+ * active_trips / waiting_flags subscriptions) mounts. Ineligible students see
  * the lifecycle/renewal screen and open no transport subscriptions.
  */
 export default function StudentBusPage() {

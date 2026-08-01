@@ -572,6 +572,15 @@ class PaymentsSupabaseService {
         const decrypted = this.decryptRecord(record);
         if (!decrypted) return decrypted;
 
+        const hasValidName = decrypted.student_name && !decrypted.student_name.startsWith('enc:v1:');
+        const hasValidId = decrypted.student_id && !decrypted.student_id.startsWith('enc:v1:');
+        const hasValidUntil = Boolean(decrypted.valid_until);
+
+        // Fast-path: If decrypted payment record already contains complete details, skip DB fallback
+        if (hasValidName && hasValidId && hasValidUntil) {
+            return decrypted;
+        }
+
         if (decrypted.student_uid) {
             try {
                 const { data: profile } = await this.supabase
@@ -581,10 +590,10 @@ class PaymentsSupabaseService {
                     .maybeSingle();
 
                 if (profile) {
-                    if ((!decrypted.student_name || decrypted.student_name.startsWith('enc:v1:')) && profile.full_name) {
+                    if (!hasValidName && profile.full_name) {
                         decrypted.student_name = profile.full_name;
                     }
-                    if ((!decrypted.student_id || decrypted.student_id.startsWith('enc:v1:')) && profile.enrollment_id) {
+                    if (!hasValidId && profile.enrollment_id) {
                         decrypted.student_id = profile.enrollment_id;
                     }
                     if (profile.valid_until) {
@@ -611,7 +620,81 @@ class PaymentsSupabaseService {
     }
 
     private async enrichPaymentsWithStudentProfiles(records: PaymentRecord[]): Promise<PaymentRecord[]> {
-        return Promise.all(records.map(p => this.enrichPaymentWithStudentProfile(p)));
+        if (!records || records.length === 0) return [];
+
+        const decryptedRecords = records.map(r => this.decryptRecord(r));
+        const uidsNeedingEnrichment = new Set<string>();
+
+        for (const decrypted of decryptedRecords) {
+            const hasValidName = decrypted.student_name && !decrypted.student_name.startsWith('enc:v1:');
+            const hasValidId = decrypted.student_id && !decrypted.student_id.startsWith('enc:v1:');
+            const hasValidUntil = Boolean(decrypted.valid_until);
+
+            if ((!hasValidName || !hasValidId || !hasValidUntil) && decrypted.student_uid) {
+                uidsNeedingEnrichment.add(decrypted.student_uid);
+            }
+        }
+
+        // Fast path: all records already have complete decrypted data
+        if (uidsNeedingEnrichment.size === 0) {
+            return decryptedRecords.map(decrypted => {
+                if (decrypted.session_end_year) {
+                    const payValidYear = decrypted.valid_until ? new Date(decrypted.valid_until).getUTCFullYear() : 0;
+                    if (!decrypted.valid_until || payValidYear < decrypted.session_end_year) {
+                        decrypted.valid_until = new Date(Date.UTC(decrypted.session_end_year, 5, 30, 23, 59, 59, 999)).toISOString();
+                    }
+                }
+                return decrypted;
+            });
+        }
+
+        // Batch query all missing profile UIDs in a single SQL query
+        const profileMap = new Map<string, { full_name?: string; enrollment_id?: string; valid_until?: string }>();
+        try {
+            const { data: profiles } = await this.supabase
+                .from('student_profiles')
+                .select('uid, full_name, enrollment_id, valid_until')
+                .in('uid', Array.from(uidsNeedingEnrichment));
+
+            if (profiles) {
+                for (const prof of profiles) {
+                    profileMap.set(prof.uid, prof);
+                }
+            }
+        } catch {
+            // Ignore batch query error
+        }
+
+        return decryptedRecords.map(decrypted => {
+            const profile = decrypted.student_uid ? profileMap.get(decrypted.student_uid) : undefined;
+            const hasValidName = decrypted.student_name && !decrypted.student_name.startsWith('enc:v1:');
+            const hasValidId = decrypted.student_id && !decrypted.student_id.startsWith('enc:v1:');
+
+            if (profile) {
+                if (!hasValidName && profile.full_name) {
+                    decrypted.student_name = profile.full_name;
+                }
+                if (!hasValidId && profile.enrollment_id) {
+                    decrypted.student_id = profile.enrollment_id;
+                }
+                if (profile.valid_until) {
+                    const payValidYear = decrypted.valid_until ? new Date(decrypted.valid_until).getUTCFullYear() : 0;
+                    const targetEndYear = decrypted.session_end_year || 0;
+                    if (!decrypted.valid_until || (targetEndYear > 0 && payValidYear < targetEndYear)) {
+                        decrypted.valid_until = profile.valid_until;
+                    }
+                }
+            }
+
+            if (decrypted.session_end_year) {
+                const payValidYear = decrypted.valid_until ? new Date(decrypted.valid_until).getUTCFullYear() : 0;
+                if (!decrypted.valid_until || payValidYear < decrypted.session_end_year) {
+                    decrypted.valid_until = new Date(Date.UTC(decrypted.session_end_year, 5, 30, 23, 59, 59, 999)).toISOString();
+                }
+            }
+
+            return decrypted;
+        });
     }
 
     /**

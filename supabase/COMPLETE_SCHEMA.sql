@@ -1,65 +1,6 @@
 -- =====================================================
--- ADTU Bus XQ System - COMPLETE DATABASE SCHEMA
--- This file consolidates ALL database setup into ONE file:
--- - Core tables (bus_locations, driver_status, waiting_flags, etc.)
--- - Reassignment logs & payments tables
--- - All indexes for performance
--- - Secure RLS policies (hardened for production)
--- - Helper functions and triggers
--- - Realtime configuration
---
--- RUN THIS ONCE IN SUPABASE SQL EDITOR
--- =====================================================
-
--- Enable extensions
-CREATE EXTENSION IF NOT EXISTS "pgcrypto";
-
--- Restrict default execution privileges on new functions
-ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
-
--- =====================================================
 -- SECTION 1: CORE TABLES
 -- =====================================================
-
--- bus_locations table (real-time GPS tracking)
-CREATE TABLE IF NOT EXISTS bus_locations (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  bus_id TEXT NOT NULL,
-  route_id TEXT NOT NULL,
-  driver_uid TEXT NOT NULL,
-  lat DOUBLE PRECISION NOT NULL,
-  lng DOUBLE PRECISION NOT NULL,
-  speed DOUBLE PRECISION,
-  heading DOUBLE PRECISION,
-  accuracy DOUBLE PRECISION, -- GPS accuracy in meters
-  timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  is_snapshot BOOLEAN DEFAULT FALSE,
-  trip_id TEXT,
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- idx_bus_locations_bus_id removed: bus_id is the leading column in composite index idx_bus_locations_timestamp_desc(bus_id, timestamp DESC)
-CREATE INDEX IF NOT EXISTS idx_bus_locations_route_id ON bus_locations(route_id);
-CREATE INDEX IF NOT EXISTS idx_bus_locations_timestamp ON bus_locations(timestamp DESC);
-CREATE INDEX IF NOT EXISTS idx_bus_locations_trip ON bus_locations(trip_id);
-CREATE INDEX IF NOT EXISTS idx_bus_locations_cleanup ON bus_locations(bus_id, route_id);
-CREATE INDEX IF NOT EXISTS idx_bus_locations_timestamp_desc ON bus_locations(bus_id, timestamp DESC);
-
--- driver_status table
-CREATE TABLE IF NOT EXISTS driver_status (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  driver_uid TEXT NOT NULL UNIQUE,
-  bus_id TEXT,
-  route_id TEXT,
-  status TEXT NOT NULL CHECK (status IN ('idle', 'enroute', 'on_trip', 'offline')),
-  started_at TIMESTAMPTZ,
-  last_updated_at TIMESTAMPTZ DEFAULT NOW(),
-  trip_id TEXT
-);
-
-CREATE INDEX IF NOT EXISTS idx_driver_status_driver_uid ON driver_status(driver_uid);
-CREATE INDEX IF NOT EXISTS idx_driver_status_trip_id ON driver_status(trip_id);
 
 -- waiting_flags table
 CREATE TABLE IF NOT EXISTS waiting_flags (
@@ -90,42 +31,12 @@ CREATE INDEX IF NOT EXISTS idx_waiting_flags_bus_student ON waiting_flags(bus_id
 CREATE INDEX IF NOT EXISTS idx_waiting_flags_active_raised ON waiting_flags(bus_id, student_uid) WHERE status = 'raised';
 CREATE UNIQUE INDEX IF NOT EXISTS idx_waiting_flags_one_active ON waiting_flags(student_uid, bus_id) WHERE status IN ('raised', 'acknowledged', 'waiting');
 
--- driver_location_updates table (historical breadcrumbs)
-CREATE TABLE IF NOT EXISTS driver_location_updates (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  driver_uid TEXT NOT NULL,
-  bus_id TEXT,
-  lat DOUBLE PRECISION NOT NULL,
-  lng DOUBLE PRECISION NOT NULL,
-  speed DOUBLE PRECISION,
-  heading DOUBLE PRECISION,
-  accuracy DOUBLE PRECISION,
-  timestamp TIMESTAMPTZ DEFAULT NOW()
-);
 
-CREATE INDEX IF NOT EXISTS idx_driver_location_updates_driver_uid ON driver_location_updates(driver_uid);
-CREATE INDEX IF NOT EXISTS idx_driver_location_updates_timestamp ON driver_location_updates(timestamp DESC);
-CREATE INDEX IF NOT EXISTS idx_driver_location_updates_cleanup ON driver_location_updates(driver_uid, bus_id);
 -- =====================================================
--- SECTION 2: CANONICAL DRIVER-BUS ASSIGNMENTS
+-- SECTION 2: CANONICAL DRIVER-BUS ASSIGNMENTS (DECOMMISSIONED)
+-- Driver↔bus dynamic resolution is handled via physical cockpit QR code scan (/api/driver/resolve-bus-qr),
+-- trip exclusivity is enforced via active_trips locks, and operational history is stored in driver_trip_history.
 -- =====================================================
-
-CREATE TABLE IF NOT EXISTS public.driver_assignments (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  driver_uid TEXT NOT NULL,
-  bus_id TEXT NOT NULL,
-  route_id TEXT,
-  assigned_at TIMESTAMPTZ DEFAULT NOW(),
-  unassigned_at TIMESTAMPTZ,
-  assigned_by TEXT DEFAULT 'system',
-  is_active BOOLEAN DEFAULT TRUE,
-  reason TEXT DEFAULT 'assignment',
-  metadata JSONB DEFAULT '{}'::jsonb
-);
-
-CREATE UNIQUE INDEX IF NOT EXISTS idx_da_one_active_bus ON public.driver_assignments(bus_id) WHERE is_active = TRUE;
-CREATE UNIQUE INDEX IF NOT EXISTS idx_da_one_active_driver ON public.driver_assignments(driver_uid) WHERE is_active = TRUE;
-CREATE INDEX IF NOT EXISTS idx_da_history_bus ON public.driver_assignments(bus_id, assigned_at DESC);
 
 -- =====================================================
 -- SECTION 3: REASSIGNMENT LOGS TABLE
@@ -325,21 +236,6 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
--- Trigger for driver_status timestamp
-CREATE OR REPLACE FUNCTION update_driver_status_timestamp()
-RETURNS TRIGGER AS $$
-BEGIN
-  NEW.last_updated_at = NOW();
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
-
-DROP TRIGGER IF EXISTS driver_status_update_timestamp ON driver_status;
-CREATE TRIGGER driver_status_update_timestamp
-  BEFORE UPDATE ON driver_status
-  FOR EACH ROW
-  EXECUTE FUNCTION update_driver_status_timestamp();
-
 -- Function to get effective driver
 CREATE OR REPLACE FUNCTION get_effective_driver(p_bus_id TEXT)
 RETURNS TEXT AS $$
@@ -456,33 +352,14 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
--- Function to delete old bus location breadcrumbs (older than 24 hours)
-CREATE OR REPLACE FUNCTION cleanup_old_bus_locations(p_retention_hours INTEGER DEFAULT 24)
+-- Function to clean up old driver trip history older than 12 months (based on end_time)
+CREATE OR REPLACE FUNCTION cleanup_old_trip_history()
 RETURNS INTEGER AS $$
 DECLARE
   deleted_count INTEGER := 0;
 BEGIN
-  DELETE FROM bus_locations
-  WHERE timestamp < NOW() - (p_retention_hours || ' hours')::INTERVAL
-    AND id NOT IN (
-      SELECT DISTINCT ON (bus_id) id
-      FROM bus_locations
-      ORDER BY bus_id, timestamp DESC
-    );
-  
-  GET DIAGNOSTICS deleted_count = ROW_COUNT;
-  RETURN deleted_count;
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
-
--- Function to delete old driver location updates (older than 48 hours)
-CREATE OR REPLACE FUNCTION cleanup_old_driver_location_updates(p_retention_hours INTEGER DEFAULT 48)
-RETURNS INTEGER AS $$
-DECLARE
-  deleted_count INTEGER := 0;
-BEGIN
-  DELETE FROM driver_location_updates
-  WHERE timestamp < NOW() - (p_retention_hours || ' hours')::INTERVAL;
+  DELETE FROM public.driver_trip_history
+  WHERE end_time < NOW() - INTERVAL '1 year';
   
   GET DIAGNOSTICS deleted_count = ROW_COUNT;
   RETURN deleted_count;
@@ -494,70 +371,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 -- =====================================================
 
 -- Enable RLS on all tables
-ALTER TABLE bus_locations ENABLE ROW LEVEL SECURITY;
-ALTER TABLE driver_status ENABLE ROW LEVEL SECURITY;
 ALTER TABLE waiting_flags ENABLE ROW LEVEL SECURITY;
-ALTER TABLE driver_location_updates ENABLE ROW LEVEL SECURITY;
-
-ALTER TABLE public.reassignment_logs ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.payments ENABLE ROW LEVEL SECURITY;
-
--- ========== bus_locations policies ==========
-DROP POLICY IF EXISTS "bus_locations_select_all" ON bus_locations;
-DROP POLICY IF EXISTS "bus_locations_select_authenticated" ON bus_locations;
-DROP POLICY IF EXISTS "bus_locations_select_anon" ON bus_locations;
-CREATE POLICY "bus_locations_select_anon" ON bus_locations
-  FOR SELECT TO anon, authenticated USING (true);
-
-DROP POLICY IF EXISTS "bus_locations_insert_service" ON bus_locations;
-CREATE POLICY "bus_locations_insert_service" ON bus_locations
-  FOR INSERT TO service_role WITH CHECK (true);
-
-DROP POLICY IF EXISTS "drivers_can_insert_own_location" ON bus_locations;
-CREATE POLICY "drivers_can_insert_own_location" ON bus_locations
-  FOR INSERT TO authenticated
-  WITH CHECK (driver_uid = auth.uid()::text);
-
-DROP POLICY IF EXISTS "bus_locations_update_service" ON bus_locations;
-CREATE POLICY "bus_locations_update_service" ON bus_locations
-  FOR UPDATE TO service_role USING (true);
-
-DROP POLICY IF EXISTS "bus_locations_delete_service" ON bus_locations;
-CREATE POLICY "bus_locations_delete_service" ON bus_locations
-  FOR DELETE TO service_role USING (true);
-
--- ========== driver_status policies ==========
-DROP POLICY IF EXISTS "driver_status_select_all" ON driver_status;
-DROP POLICY IF EXISTS "driver_status_select_authenticated" ON driver_status;
-DROP POLICY IF EXISTS "driver_status_select_anon" ON driver_status;
-CREATE POLICY "driver_status_select_anon" ON driver_status
-  FOR SELECT TO anon, authenticated USING (true);
-
-DROP POLICY IF EXISTS "driver_status_insert_service" ON driver_status;
-CREATE POLICY "driver_status_insert_service" ON driver_status
-  FOR INSERT TO service_role WITH CHECK (true);
-
-DROP POLICY IF EXISTS "drivers_can_upsert_own_status" ON driver_status;
-CREATE POLICY "drivers_can_upsert_own_status" ON driver_status
-  FOR INSERT TO authenticated
-  WITH CHECK (driver_uid = auth.uid()::text);
-
-DROP POLICY IF EXISTS "driver_status_update_service" ON driver_status;
-CREATE POLICY "driver_status_update_service" ON driver_status
-  FOR UPDATE TO service_role USING (true);
-
-DROP POLICY IF EXISTS "drivers_can_update_own_status" ON driver_status;
-CREATE POLICY "drivers_can_update_own_status" ON driver_status
-  FOR UPDATE TO authenticated
-  USING (driver_uid = auth.uid()::text);
-
-DROP POLICY IF EXISTS "driver_status_delete_service" ON driver_status;
-CREATE POLICY "driver_status_delete_service" ON driver_status
-  FOR DELETE TO service_role USING (true);
-
--- Add index on bus_id and driver_uid for faster lookups
-CREATE INDEX IF NOT EXISTS idx_driver_status_bus_id ON driver_status(bus_id);
-CREATE INDEX IF NOT EXISTS idx_driver_status_bus_driver ON driver_status(bus_id, driver_uid);
 
 -- ========== waiting_flags policies (SECURED) ==========
 DROP POLICY IF EXISTS "waiting_flags_select_all" ON waiting_flags;
@@ -586,9 +400,10 @@ ON waiting_flags FOR UPDATE TO authenticated
 USING (
   student_uid = auth.uid()::text
   OR EXISTS (
-    SELECT 1 FROM driver_status 
-    WHERE driver_status.driver_uid = auth.uid()::text
-    AND driver_status.bus_id = waiting_flags.bus_id
+    SELECT 1 FROM active_trips 
+    WHERE active_trips.driver_id = auth.uid()::text
+    AND active_trips.bus_id = waiting_flags.bus_id
+    AND active_trips.status = 'active'
   )
 );
 
@@ -601,31 +416,14 @@ ON waiting_flags FOR DELETE TO authenticated
 USING (
   student_uid = auth.uid()::text
   OR EXISTS (
-    SELECT 1 FROM driver_status 
-    WHERE driver_status.driver_uid = auth.uid()::text
-    AND driver_status.bus_id = waiting_flags.bus_id
+    SELECT 1 FROM active_trips 
+    WHERE active_trips.driver_id = auth.uid()::text
+    AND active_trips.bus_id = waiting_flags.bus_id
+    AND active_trips.status = 'active'
   )
 );
 
--- ========== driver_location_updates policies (SECURED) ==========
-DROP POLICY IF EXISTS "driver_location_updates_select_all" ON driver_location_updates;
-DROP POLICY IF EXISTS "driver_location_updates_select_restricted" ON driver_location_updates;
-CREATE POLICY "driver_location_updates_select_restricted" ON driver_location_updates
-  FOR SELECT TO authenticated
-  USING (driver_uid = auth.uid()::text OR auth.role() = 'service_role');
 
-DROP POLICY IF EXISTS "driver_location_updates_insert_service" ON driver_location_updates;
-CREATE POLICY "driver_location_updates_insert_service" ON driver_location_updates
-  FOR INSERT TO service_role WITH CHECK (true);
-
-DROP POLICY IF EXISTS "drivers_can_insert_own_updates" ON driver_location_updates;
-CREATE POLICY "drivers_can_insert_own_updates" ON driver_location_updates
-  FOR INSERT TO authenticated
-  WITH CHECK (driver_uid = auth.uid()::text);
-
-DROP POLICY IF EXISTS "driver_location_updates_delete_service" ON driver_location_updates;
-CREATE POLICY "driver_location_updates_delete_service" ON driver_location_updates
-  FOR DELETE TO service_role USING (true);
 
 
 
@@ -701,7 +499,44 @@ GRANT SELECT ON public.payments TO authenticated;
 -- Exclusive bus operation with automatic heartbeat recovery
 -- =====================================================
 
--- active_trips table (live trip records for lock management)
+-- driver_trip_history table (historical record of completed operational trips retained for 12 months)
+CREATE TABLE IF NOT EXISTS public.driver_trip_history (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  trip_id UUID NOT NULL,
+  bus_id TEXT NOT NULL,
+  driver_id TEXT NOT NULL,
+  route_id TEXT NOT NULL,
+  shift TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'completed' CHECK (status IN ('completed', 'cancelled')),
+  ended_reason TEXT NOT NULL DEFAULT 'completed' CHECK (ended_reason IN ('completed', 'completed_stale', 'cancelled', 'force_ended')),
+  start_time TIMESTAMPTZ NOT NULL,
+  end_time TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  duration_seconds INTEGER,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_driver_trip_history_driver ON public.driver_trip_history(driver_id);
+CREATE INDEX IF NOT EXISTS idx_driver_trip_history_bus ON public.driver_trip_history(bus_id);
+CREATE INDEX IF NOT EXISTS idx_driver_trip_history_end_time ON public.driver_trip_history(end_time DESC);
+CREATE INDEX IF NOT EXISTS idx_driver_trip_history_created ON public.driver_trip_history(created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_driver_trip_history_trip_id ON public.driver_trip_history(trip_id);
+
+-- Enable RLS for driver_trip_history
+ALTER TABLE public.driver_trip_history ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "driver_trip_history_select_authenticated" ON public.driver_trip_history;
+CREATE POLICY "driver_trip_history_select_authenticated" ON public.driver_trip_history
+  FOR SELECT TO authenticated USING (true);
+
+DROP POLICY IF EXISTS "driver_trip_history_insert_service" ON public.driver_trip_history;
+CREATE POLICY "driver_trip_history_insert_service" ON public.driver_trip_history
+  FOR INSERT TO service_role WITH CHECK (true);
+
+DROP POLICY IF EXISTS "driver_trip_history_delete_service" ON public.driver_trip_history;
+CREATE POLICY "driver_trip_history_delete_service" ON public.driver_trip_history
+  FOR DELETE TO service_role USING (true);
+
+-- active_trips table (live trip records for runtime lock management ONLY)
 CREATE TABLE IF NOT EXISTS public.active_trips (
   trip_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   bus_id TEXT NOT NULL,
@@ -719,7 +554,7 @@ CREATE TABLE IF NOT EXISTS public.active_trips (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW(),
   
-  CONSTRAINT active_trips_status_check CHECK (status IN ('active', 'ended'))
+  CONSTRAINT active_trips_status_check CHECK (status IN ('active'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_active_trips_bus_id ON public.active_trips(bus_id);
@@ -826,13 +661,21 @@ DECLARE
   v_trip RECORD;
 BEGIN
   FOR v_trip IN
-    SELECT at.trip_id, at.bus_id, at.driver_id
+    SELECT at.trip_id, at.bus_id, at.driver_id, at.route_id, at.shift, at.start_time
     FROM public.active_trips at
     WHERE at.status = 'active'
       AND at.last_heartbeat < NOW() - (p_heartbeat_timeout_seconds || ' seconds')::INTERVAL
   LOOP
-    UPDATE public.active_trips
-    SET status = 'ended', end_time = NOW()
+    INSERT INTO public.driver_trip_history (
+      trip_id, bus_id, driver_id, route_id, shift, status, ended_reason, start_time, end_time, duration_seconds
+    ) VALUES (
+      v_trip.trip_id, v_trip.bus_id, v_trip.driver_id, v_trip.route_id, v_trip.shift,
+      'completed', 'completed_stale', v_trip.start_time, NOW(),
+      GREATEST(0, EXTRACT(EPOCH FROM (NOW() - v_trip.start_time))::INTEGER)
+    )
+    ON CONFLICT (trip_id) DO NOTHING;
+
+    DELETE FROM public.active_trips
     WHERE active_trips.trip_id = v_trip.trip_id;
     
     RETURN QUERY SELECT v_trip.trip_id, v_trip.bus_id, v_trip.driver_id;
@@ -908,11 +751,65 @@ CREATE POLICY "device_sessions_delete_own" ON public.device_sessions
 
 
 -- =====================================================
+-- SECTION 10.5: TRIP ATOMICITY RPCs
+-- =====================================================
+
+-- Function: end_trip_atomically
+-- Atomically archives trip history and removes the active lock in one transaction.
+-- Returns: { success, tripId, alreadyEnded }
+CREATE OR REPLACE FUNCTION public.end_trip_atomically(
+  p_trip_id TEXT,
+  p_bus_id  TEXT,
+  p_driver_id TEXT
+)
+RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_trip    RECORD;
+  v_now     TIMESTAMPTZ := NOW();
+  v_dur_sec INTEGER;
+BEGIN
+  -- Lock the row to prevent concurrent end-trip races
+  SELECT trip_id, bus_id, driver_id, route_id, shift, start_time
+    INTO v_trip
+    FROM active_trips
+   WHERE trip_id    = p_trip_id::uuid
+     AND bus_id     = p_bus_id
+     AND driver_id  = p_driver_id
+     AND status     = 'active'
+     FOR UPDATE;
+
+  IF NOT FOUND THEN
+    -- Trip already ended or never existed — idempotent success
+    RETURN jsonb_build_object('success', true, 'alreadyEnded', true);
+  END IF;
+
+  v_dur_sec := GREATEST(0, EXTRACT(EPOCH FROM (v_now - v_trip.start_time))::INTEGER);
+
+  -- Insert history (ON CONFLICT (trip_id) DO NOTHING makes this safe on duplicate calls)
+  INSERT INTO driver_trip_history (
+    trip_id, bus_id, driver_id, route_id, shift,
+    status, ended_reason, start_time, end_time, duration_seconds
+  ) VALUES (
+    v_trip.trip_id, v_trip.bus_id, v_trip.driver_id, v_trip.route_id, v_trip.shift,
+    'completed', 'completed', v_trip.start_time, v_now, v_dur_sec
+  )
+  ON CONFLICT (trip_id) DO NOTHING;
+
+  -- Remove the active lock
+  DELETE FROM active_trips WHERE trip_id = v_trip.trip_id;
+
+  RETURN jsonb_build_object('success', true, 'tripId', p_trip_id, 'alreadyEnded', false);
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.end_trip_atomically(TEXT, TEXT, TEXT) TO authenticated, service_role;
+
+
+-- =====================================================
 -- SECTION 11: DOCUMENTATION
 -- =====================================================
 
 COMMENT ON TABLE bus_locations IS 'Real-time GPS coordinates of buses during active trips';
-COMMENT ON TABLE driver_status IS 'Current operational status of drivers';
 COMMENT ON TABLE waiting_flags IS 'Student waiting signals at bus stops';
 COMMENT ON TABLE driver_location_updates IS 'Historical location breadcrumbs for audit/replay';
 COMMENT ON TABLE public.reassignment_logs IS 'Audit logs for driver/student/route reassignment operations';

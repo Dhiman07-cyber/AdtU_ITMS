@@ -1,4 +1,4 @@
-﻿/**
+/**
  * POST /api/notifications/create
  * 
  * Create a notification and save it to the `notifications` collection.
@@ -215,6 +215,25 @@ async function sendFCMNotifications(
       data: {
         type: 'broadcast_notification',
         notificationId,
+      },
+      android: {
+        priority: 'high' as const,
+        notification: {
+          channelId: 'announcements',
+          sound: 'default',
+        },
+      },
+      webpush: {
+        headers: { Urgency: 'high' },
+        notification: {
+          title,
+          body: bodyText || 'You have a new notification',
+          icon: '/icons/icon-192x192.png',
+          badge: '/icons/icon-72x72.png',
+        },
+        fcmOptions: {
+          link: '/student',
+        },
       },
     };
 

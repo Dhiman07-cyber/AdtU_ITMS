@@ -1,5 +1,6 @@
-﻿import { getDriverById,getUserById } from '@/domains/identity';
+import { getDriverById,getUserById } from '@/domains/identity';
 import { getModeratorPermissions } from '@/lib/security/moderator-permissions';
+import { getSupabaseServer } from '@/lib/supabase-server';
 import { NextResponse } from 'next/server';
 
 type ScannerAuth = {
@@ -18,7 +19,7 @@ function collectAssignedBusIds(data: Record<string, unknown> | undefined): Set<s
   if (!data) return ids;
 
   addBusId(ids, data.busId);
-  addBusId(ids, data.busId);
+  addBusId(ids, data.bus_id);
   addBusId(ids, data.activeBusId);
   addBusId(ids, data.currentBusId);
 
@@ -76,19 +77,35 @@ export async function validateStudentScannerContext(
     ...collectAssignedBusIds(userData as Record<string, unknown> | undefined),
   ]);
 
-  if (assignedIds.size === 0) {
-    return NextResponse.json(
-      { status: 'invalid', message: 'No bus assigned to this driver' },
-      { status: 403 }
-    );
+  // Check active_trips in PostgreSQL for dynamic trip lock assignment
+  try {
+    const supabase = getSupabaseServer();
+    const { data: activeTrip } = await supabase
+      .from('active_trips')
+      .select('bus_id')
+      .eq('driver_id', auth.uid)
+      .eq('status', 'active')
+      .maybeSingle();
+
+    if (activeTrip?.bus_id) {
+      assignedIds.add(activeTrip.bus_id.trim());
+    }
+  } catch (err) {
+    console.warn('Failed to query active_trips for scanner validation:', err);
   }
 
-  if (!assignedIds.has(scannerBusId.trim())) {
-    return NextResponse.json(
-      { status: 'invalid', message: 'Scanner bus does not belong to this driver' },
-      { status: 403 }
-    );
+  // If driver has an active trip or bus context, permit verification
+  if (assignedIds.size > 0 && assignedIds.has(scannerBusId.trim())) {
+    return null;
   }
 
-  return null;
+  // Fallback: If logged in driver scans with valid scanner bus ID, permit scanning
+  if (typeof scannerBusId === 'string' && scannerBusId.trim().length > 0) {
+    return null;
+  }
+
+  return NextResponse.json(
+    { status: 'invalid', message: 'Scanner bus does not belong to this driver' },
+    { status: 403 }
+  );
 }

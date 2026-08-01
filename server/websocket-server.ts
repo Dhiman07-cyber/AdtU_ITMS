@@ -35,7 +35,66 @@ export class WebSocketServer {
       const socketId = crypto.randomUUID();
       const ip = request.socket?.remoteAddress || 'unknown';
 
-      const auth = await authenticateSocket(request);
+      // ── Authentication ──────────────────────────────────────────────────────
+      // Phase-04: Two auth paths are supported simultaneously:
+      //   Path A (DEPRECATED): Token in URL query string
+      //     - Works for existing clients during migration window.
+      //     - Logged at 'warn' level to measure adoption progress.
+      //     - Will be removed in Phase-05 once all clients migrate.
+      //   Path B (PREFERRED): Token in first WebSocket message
+      //     - Client sends { type: 'auth', token: '<firebase_id_token>' }
+      //       within AUTH_TIMEOUT_MS after connection opens.
+      //     - Token never appears in server access logs.
+      //     - Client must handle 'auth_required' if timeout expires.
+      // ────────────────────────────────────────────────────────────────────────
+      const AUTH_TIMEOUT_MS = 5000;
+      const urlHasToken = request.url?.includes('token=');
+
+      let auth;
+
+      if (urlHasToken) {
+        // Path A (deprecated): authenticate from URL query string immediately.
+        auth = await authenticateSocket(request);
+        if (auth.authenticated) {
+          logger.warn('ws_url_token_deprecated', {
+            uid: auth.uid,
+            ip,
+            // NOTE: Do NOT log the token itself — only a deprecation signal.
+            message: 'Client authenticated via URL token. Migrate to first-message auth (Phase-05).',
+          });
+        }
+      } else {
+        // Path B (preferred): wait for an 'auth' message with the token.
+        auth = await new Promise<Awaited<ReturnType<typeof authenticateSocket>>>((resolve) => {
+          const timeout = setTimeout(() => {
+            resolve({ authenticated: false, error: 'Authentication timeout: send { type: "auth", token: "..." } within 5 seconds of connecting' });
+          }, AUTH_TIMEOUT_MS);
+
+          // Temporary one-time listener for the auth message.
+          const onMessage = async (data: Buffer | ArrayBuffer | Buffer[]) => {
+            let parsed: any;
+            try { parsed = JSON.parse(data.toString()); } catch { return; }
+            if (parsed?.type !== 'auth' || !parsed?.token) return;
+
+            // Cancel timeout and remove this listener — we got the auth message.
+            clearTimeout(timeout);
+            ws.removeListener('message', onMessage);
+
+            // Build a synthetic request with the token in the Authorization header
+            // so authenticateSocket can verify it through the normal Firebase path.
+            const syntheticRequest = {
+              ...request,
+              url: '/',
+              headers: { ...request.headers, authorization: `Bearer ${parsed.token}` },
+            } as any;
+            const result = await authenticateSocket(syntheticRequest);
+            resolve(result);
+          };
+
+          ws.on('message', onMessage);
+        });
+      }
+
       if (!auth.authenticated) {
         sendToSocket(ws, { type: 'auth_required', message: auth.error || 'Authentication required' });
         ws.close(4001, 'Authentication failed');
@@ -167,9 +226,40 @@ export class WebSocketServer {
   }
 
   broadcastToChannels(channels: string[], event: string, payload: Record<string, unknown>): void {
-    for (const channel of channels) {
-      this.broadcastToChannel(channel, event, payload);
+    if (channels.length === 0) return;
+    if (channels.length === 1) {
+      this.broadcastToChannel(channels[0], event, payload);
+      return;
     }
+
+    const uniqueSockets = new Set<string>();
+    for (const channel of channels) {
+      const subs = subscriptionManager.getSubscribers(channel);
+      for (let i = 0; i < subs.length; i++) {
+        uniqueSockets.add(subs[i]);
+      }
+    }
+
+    const primaryChannel = channels[0];
+    const msg = encodeMsg({ type: 'message', channel: primaryChannel, event, payload });
+    let sent = 0;
+    const socketIds = Array.from(uniqueSockets);
+
+    for (let i = 0; i < socketIds.length; i += MAX_BATCH_SIZE) {
+      const batch = socketIds.slice(i, i + MAX_BATCH_SIZE);
+      for (const socketId of batch) {
+        const entry = connectionRegistry.get(socketId);
+        if (entry && entry.ws.readyState === entry.ws.OPEN) {
+          entry.ws.send(msg);
+          sent++;
+        } else if (entry) {
+          enqueueOffline(socketId, primaryChannel, event, payload);
+        }
+      }
+    }
+
+    metricsService.inc('messagesSent', sent);
+    metricsService.inc('broadcastsSent');
   }
 
   shutdown(callback?: () => void): void {

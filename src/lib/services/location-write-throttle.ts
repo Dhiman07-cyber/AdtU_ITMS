@@ -16,3 +16,7 @@ export function shouldWriteLocationBreadcrumb(tripId: string, nowMs: number): bo
 
   return true;
 }
+
+export function clearTripBreadcrumbCache(tripId: string): void {
+  breadcrumbWriteCache.delete(tripId);
+}

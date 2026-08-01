@@ -95,7 +95,7 @@ export const AckWaitingSchema = z.object({
 });
 
 export const FirestoreCleanupSchema = z.object({
-    cleanupType: z.enum(['active_trips', 'reassignment_logs', 'driver_location_updates', 'waiting_flags', 'all']),
+    cleanupType: z.enum(['active_trips', 'reassignment_logs', 'driver_trip_history', 'waiting_flags', 'all']),
     daysOld: z.number().int().min(1).max(3650).optional(),
 });
 
@@ -105,7 +105,8 @@ export const DebugDriverBusLinkSchema = z.object({
 
 export const SaveFCMTokenSchema = z.object({
     userUid: z.string().min(1).max(128),
-    token: z.string().min(100).max(512).regex(/^\S+$/, 'Token must not contain whitespace'),
+    // FCM web push tokens can be up to ~4096 chars; the old 512 limit silently rejected all web tokens
+    token: z.string().min(100).max(4096).regex(/^\S+$/, 'Token must not contain whitespace'),
     platform: z.enum(['web', 'android', 'ios']).default('web'),
 });
 
@@ -396,7 +397,7 @@ export const WaitingFlagDeleteSchema = z.object({
 
 export const LocationUpdateBodySchema = z.object({
     busId: z.string().min(1).max(100),
-    routeId: z.string().min(1).max(100),
+    routeId: z.string().max(100).optional(),
     lat: z.union([z.number(), z.string().transform(Number)]).optional(),
     lng: z.union([z.number(), z.string().transform(Number)]).optional(),
     accuracy: z.union([z.number(), z.string().transform(Number)]).optional(),

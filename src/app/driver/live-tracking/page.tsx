@@ -8,6 +8,8 @@ import { Card,CardContent,CardHeader,CardTitle } from "@/components/ui/card";
 import { useAuth } from "@/contexts/auth-context";
 import { useToast } from "@/contexts/toast-context";
 import { WebSocketClient } from '@/domains/realtime/ws-client';
+import { authApiFetch } from "@/lib/secure-api-client";
+import { supabase } from "@/lib/supabase-client";
 import { getBusById,getDriverById,getRouteById } from "@/lib/dataService";
 import {
 	checkDeviceSession,
@@ -17,7 +19,7 @@ import {
 	releaseDeviceSession
 } from "@/lib/session-device-service";
 import { formatIdForDisplay } from "@/lib/utils";
-import { Activity,AlertCircle,Bus,CheckCircle,Clock,Flag,Loader2,MapPin,Navigation,PlayCircle,StopCircle } from "lucide-react";
+import { Activity,AlertCircle,Bus,CheckCircle,Clock,Flag,Loader2,MapPin,Moon,Navigation,PlayCircle,StopCircle,Sun,XCircle } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useCallback,useEffect,useRef,useState } from "react";
@@ -146,6 +148,47 @@ export default function DriverLiveTrackingPage() {
   } | null>(null);
   const [waitRequestTimer, setWaitRequestTimer] = useState(10);
   const [sendingResponse, setSendingResponse] = useState(false);
+
+  // START TRIP SELECTION MODAL STATE
+  const [showStartTripModal, setShowStartTripModal] = useState(false);
+  const [availableBuses, setAvailableBuses] = useState<any[]>([]);
+  const [selectedBusId, setSelectedBusId] = useState<string>('');
+  const [selectedShift, setSelectedShift] = useState<'Morning' | 'Evening'>('Morning');
+  const [initiatingTrip, setInitiatingTrip] = useState(false);
+  const [fetchingBuses, setFetchingBuses] = useState(false);
+
+  // Fetch available buses for selection card
+  const fetchAvailableBusesForSelection = useCallback(async () => {
+    if (!currentUser) return;
+    setFetchingBuses(true);
+    try {
+      const res = await authApiFetch(currentUser, '/api/driver/available-buses');
+      if (res.ok) {
+        const data = await res.json();
+        const list = data.buses || [];
+        setAvailableBuses(list);
+        if (list.length > 0) {
+          const match = list.find((b: any) => b.id === busData?.busId || b.id === busData?.id);
+          setSelectedBusId(match ? match.id : list[0].id);
+        }
+      }
+    } catch (e) {
+      console.error('Failed to fetch available buses for selection:', e);
+    } finally {
+      setFetchingBuses(false);
+    }
+  }, [currentUser, busData]);
+
+  // Open modal if URL contains ?initiate=true
+  useEffect(() => {
+    if (typeof window !== 'undefined' && currentUser && !tripActive) {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('initiate') === 'true') {
+        setShowStartTripModal(true);
+        fetchAvailableBusesForSelection();
+      }
+    }
+  }, [currentUser, tripActive, fetchAvailableBusesForSelection]);
 
   // Helper to handle wait request response
   const handleRespondToWaitRequest = async (response: 'accepted' | 'rejected') => {
@@ -467,45 +510,36 @@ export default function DriverLiveTrackingPage() {
       }
 
       try {
-        const driver = await getDriverById(currentUser.uid);
-        if (!driver) {
-          addToast("Driver profile not found", "error");
-          router.push("/driver");
-          return;
-        }
-
-        setDriverData(driver);
-
-        if (driver.busId || driver.busId) {
-          const busId = driver.busId || driver.busId;
-          if (busId) {
-            const bus = await getBusById(busId);
-            if (bus) {
-              if (bus.status === 'inactive') {
-                addToast("Your assigned bus is currently Inactive. You cannot start a trip.", "error");
-                router.push("/driver");
-                return;
-              }
-              setBusData(bus);
-
-              // Get route data
-              if (driver.routeId || driver.routeId) {
-                const routeId = driver.routeId || driver.routeId;
-                if (routeId) {
-                  const route = await getRouteById(routeId);
-                  if (route) {
-                    setRouteData(route);
-                  }
-                }
+        const response = await authApiFetch(currentUser, '/api/driver/dashboard-data');
+        if (response.ok) {
+          const result = await response.json();
+          if (result.driver) setDriverData(result.driver);
+          if (result.bus) {
+            if (result.bus.status === 'inactive') {
+              addToast("Your assigned bus is currently Inactive. You cannot start a trip.", "error");
+              router.push("/driver");
+              return;
+            }
+            setBusData(result.bus);
+          }
+          if (result.route) setRouteData(result.route);
+          if (result.tripActive) {
+            setTripActive(true);
+            setTripId(result.tripData?.tripId || result.tripData?.trip_id || null);
+            if (result.tripData?.current_location) {
+              const loc = result.tripData.current_location;
+              if (loc.lat && loc.lng) {
+                setCurrentLocation({ lat: loc.lat, lng: loc.lng, accuracy: loc.accuracy || 10 });
+                setMapCenter([loc.lat, loc.lng]);
               }
             }
+            startLocationTracking();
           }
         }
-
-        setLoading(false);
       } catch (error) {
-        console.error("Error fetching data:", error);
+        console.error("Error fetching driver live tracking data:", error);
         addToast("Failed to load driver data", "error");
+      } finally {
         setLoading(false);
       }
     };
@@ -555,13 +589,13 @@ export default function DriverLiveTrackingPage() {
     };
   }, [tripActive]);
 
-  // Check for active trip when busData is available
+  // Check for active trip on mount / page refresh
   useEffect(() => {
-    if (!currentUser || !busData) return;
+    if (!currentUser) return;
 
     const checkActiveTrip = async () => {
-      if (!currentUser?.uid || !busData?.busId) {
-        console.log("⚠️ Cannot check active trip - missing user or bus data");
+      if (!currentUser?.uid) {
+        console.log("⚠️ Cannot check active trip - missing user");
         return;
       }
 
@@ -582,7 +616,7 @@ export default function DriverLiveTrackingPage() {
           },
           body: JSON.stringify({
             idToken,
-            busId: busData.busId,
+            busId: busData?.busId || busData?.id || undefined,
           }),
         });
 
@@ -661,16 +695,18 @@ export default function DriverLiveTrackingPage() {
       }
     };
 
-    // Run the check immediately
+    // Run the check once on mount / bus change to resume active trip or check lock
     checkActiveTrip();
 
-    // Also set up periodic checks every 10 seconds to catch any state changes.
-    // Deps are intentionally limited to STABLE values so this 10s interval is created
-    // ONCE per bus/session rather than torn down + recreated (and re-fired) on every GPS
-    // tick. Fresh tripActive/tripId/busLockedByOther/currentLocation are read via refs.
-    const interval = setInterval(checkActiveTrip, 10000);
+    // Only set up periodic checks when a trip is active or locked, avoiding unnecessary polling when idle.
+    let interval: NodeJS.Timeout | null = null;
+    if (tripActiveRef.current || busLockedByOtherRef.current) {
+      interval = setInterval(checkActiveTrip, 15000);
+    }
 
-    return () => clearInterval(interval);
+    return () => {
+      if (interval) clearInterval(interval);
+    };
   }, [currentUser, busData?.busId, startLocationTracking, stopLocationTracking]);
 
   // ==========================================
@@ -798,7 +834,7 @@ export default function DriverLiveTrackingPage() {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${idToken}`,
           },
-          body: JSON.stringify({ tripId, busId: busData.busId }),
+          body: JSON.stringify({ tripId, busId: busData?.busId }),
         });
       } catch (err) {
         console.warn('⚠️ Trip heartbeat failed (will retry next tick):', err);
@@ -1012,8 +1048,8 @@ export default function DriverLiveTrackingPage() {
         },
         body: JSON.stringify({
           idToken,
-          busId: busData.busId,
-          routeId: routeData.routeId,
+          busId: busData?.busId || busData?.id || selectedBusId,
+          routeId: routeData?.routeId || routeData?.id || busData?.route_id || 'unassigned',
           lat: currentLocation.lat,
           lng: currentLocation.lng,
           accuracy: accuracy,
@@ -1104,169 +1140,84 @@ export default function DriverLiveTrackingPage() {
     }
   }, [tripActive, currentLocation, waitingFlags, currentUser, addToast]);
 
-  // Start trip
-  const handleStartTrip = async () => {
-    if (loading) return;
-    if (!busData || !routeData || !currentUser) return;
+  // Start trip button click -> opens selection card
+  const handleStartTrip = () => {
+    if (loading || tripActive) return;
+    setShowStartTripModal(true);
+    fetchAvailableBusesForSelection();
+  };
 
-    if (busData.status === 'inactive') {
-      addToast("Cannot start trip: Bus is Inactive", "error");
-      router.push("/driver");
-      return;
-    }
+  // Confirm selection in small card -> initiates trip directly on live location page
+  const handleConfirmInitiateTrip = async () => {
+    if (!currentUser || !selectedBusId || initiatingTrip) return;
+    setInitiatingTrip(true);
 
     try {
-      setLoading(true);
-
-      // TODO (QR Runtime): Add pre-trip validation rules here.
-      // The upcoming QR runtime will enforce: "driver may only operate after Start Trip."
-      // ========================================
-      // DEVICE SESSION CHECK (Multi-Device Protection)
-      // ========================================
-      // Check if another device is currently sharing location
+      // Session check
       const sessionCheck = await checkDeviceSession(currentUser.uid, 'driver_location_share');
       if (sessionCheck.hasActiveSession && !sessionCheck.isCurrentDevice) {
-        // Another device is active - show conflict UI
         setDeviceConflict({
           hasConflict: true,
           otherDeviceId: sessionCheck.otherDeviceId,
           sessionAge: sessionCheck.sessionAge
         });
-        setLoading(false);
+        setInitiatingTrip(false);
         addToast('Another device is currently sharing location. Take over or go back.', 'warning');
         return;
       }
 
-      // Register this device as the active broadcaster
-      const regResult = await registerDeviceSession(currentUser.uid, 'driver_location_share');
-      if (!regResult.success) {
-        console.error('Failed to register device session:', regResult.error);
-        // Continue anyway - location sharing is critical
-      }
+      await registerDeviceSession(currentUser.uid, 'driver_location_share');
 
-      // Reset the manually ended flag (allow active trip checks again)
-      manuallyEndedTripRef.current = false;
+      const res = await authApiFetch(currentUser, '/api/driver/initiate-trip', {
+        method: 'POST',
+        body: JSON.stringify({ busId: selectedBusId, shift: selectedShift }),
+      });
 
-      // CRITICAL FIX: Set default location BEFORE starting trip to prevent map from appearing broken
-      // Use default campus location if no GPS yet
-      const defaultLat = 26.1445;
-      const defaultLng = 91.7362;
-      const initialLocation = currentLocation || {
-        lat: defaultLat,
-        lng: defaultLng,
-        accuracy: 500
-      };
+      if (res.ok) {
+        const data = await res.json();
+        manuallyEndedTripRef.current = false;
+        setTripActive(true);
+        setTripId(data.tripId);
+        setShowStartTripModal(false);
 
-      // Set the location immediately if we don't have one yet (prevents map from appearing empty)
-      if (!currentLocation) {
-        console.log("📍 Setting default location before trip start to prevent empty map");
-        setCurrentLocation(initialLocation);
-        setMapCenter([initialLocation.lat, initialLocation.lng]);
-        setAccuracy(initialLocation.accuracy);
-      }
-
-      console.log("🚀 Starting trip with location:", initialLocation);
-
-      // Start location tracking (async - will update with real GPS when ready)
-      // GPS will update location when ready
-      startLocationTracking();
-
-      const idToken = await currentUser.getIdToken();
-      let response;
-      try {
-        response = await fetch("/api/driver/start-journey-v2", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${idToken}`,
-          },
-          body: JSON.stringify({
-            idToken,
-            busId: busData.busId,
-            routeId: routeData.routeId,
-          }),
-        });
-      } catch (networkError) {
-        throw new Error("Network error starting trip. Please check your connection.");
-      }
-
-      if (!response.ok) {
-        // Try to parse error message if possible, otherwise use status text
-        let errorMessage;
-        let errorCode;
-        try {
-          const errorData = await response.json();
-          errorMessage = errorData.error || errorData.message;
-          errorCode = errorData.errorCode;
-        } catch (e) {
-          errorMessage = `Server error (${response.status}: ${response.statusText})`;
+        // Sync bus and route details
+        const dashRes = await authApiFetch(currentUser, '/api/driver/dashboard-data');
+        if (dashRes.ok) {
+          const dashData = await dashRes.json();
+          if (dashData.bus) setBusData(dashData.bus);
+          if (dashData.route) setRouteData(dashData.route);
         }
 
-        // Handle 409 conflict - bus is locked by another driver
-        if (response.status === 409 || errorCode === 'LOCKED_BY_OTHER') {
-          console.log("🔒 Bus is locked by another driver - cannot start trip");
-          setBusLockedByOther(true);
-          stopLocationTracking();
-          addToast("This bus is currently being operated by another driver.", "error");
-          return; // Exit early - blocking UI will be shown
+        const defaultLat = 26.1445;
+        const defaultLng = 91.7362;
+        const initialLocation = currentLocation || { lat: defaultLat, lng: defaultLng, accuracy: 500 };
+        if (!currentLocation) {
+          setCurrentLocation(initialLocation);
+          setMapCenter([initialLocation.lat, initialLocation.lng]);
+          setAccuracy(initialLocation.accuracy);
         }
 
-        throw new Error(errorMessage || "Failed to start trip");
+        startLocationTracking();
+        addToast(`🚀 Trip started successfully for ${selectedShift} shift!`, 'success');
+      } else {
+        const err = await res.json();
+        addToast(err.error || 'Failed to start trip', 'error');
       }
-
-      // Safe JSON parsing
-      const result = await response.json();
-
-      setTripActive(true);
-      setTripId(result.tripId);
-      addToast(`Trip started for ${formatIdForDisplay(routeData.routeId)}! 🚀`, "success");
-
-      // Re-check active trip to ensure state is synchronized
-      setTimeout(async () => {
-        try {
-          const recheckIdToken = await currentUser.getIdToken();
-          const recheckResponse = await fetch("/api/driver/check-active-trip", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "Authorization": `Bearer ${recheckIdToken}`,
-            },
-            body: JSON.stringify({
-              idToken: recheckIdToken,
-              busId: busData.busId,
-            }),
-          });
-
-          const recheckResult = await recheckResponse.json();
-          console.log("🔄 Trip state recheck:", recheckResult);
-
-          if (recheckResult.hasActiveTrip) {
-            setTripActive(true);
-            setTripId(recheckResult.tripData?.tripId || result.tripId);
-            console.log("✅ Trip state synchronized");
-          }
-        } catch (recheckError) {
-          console.error("❌ Error rechecking trip state:", recheckError);
-        }
-      }, 1000); // Wait 1 second for trip to be fully created
-
-      // FCM notifications are sent automatically by start-journey-v2
-
-      console.log("✅ Trip started:", result);
-    } catch (error: any) {
-      console.error("❌ Error starting trip:", error);
-      addToast("Failed to start trip: " + error.message, "error");
-      stopLocationTracking();
+    } catch (e) {
+      console.error('Error starting trip:', e);
+      addToast('Network error starting trip', 'error');
     } finally {
-      setLoading(false);
+      setInitiatingTrip(false);
     }
   };
 
   // End trip
   const handleEndTrip = async () => {
     if (loading) return;
-    if (!busData || !routeData || !currentUser) {
-      addToast("Missing required data to end trip", "error");
+    const targetBusId = busData?.busId || busData?.id || selectedBusId;
+
+    if (!currentUser || !targetBusId) {
+      addToast("Missing required bus or user session to end trip", "error");
       return;
     }
 
@@ -1276,8 +1227,8 @@ export default function DriverLiveTrackingPage() {
 
       const idToken = await currentUser.getIdToken();
       console.log("🏁 Ending trip with data:", {
-        busId: busData.busId,
-        routeId: routeData.routeId,
+        busId: targetBusId,
+        routeId: routeData?.routeId || routeData?.id,
         driverUid: currentUser.uid
       });
 
@@ -1286,7 +1237,7 @@ export default function DriverLiveTrackingPage() {
       const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
 
       try {
-        const response = await fetch("/api/driver/end-journey-v2", {
+        const response = await fetch("/api/driver/end-trip", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -1294,8 +1245,9 @@ export default function DriverLiveTrackingPage() {
           },
           body: JSON.stringify({
             idToken,
-            busId: busData.busId,
-            routeId: routeData.routeId,
+            busId: targetBusId,
+            tripId: tripId || undefined,
+            routeId: routeData?.routeId || routeData?.id,
           }),
           signal: controller.signal,
         });
@@ -1331,7 +1283,7 @@ export default function DriverLiveTrackingPage() {
         // Auto-exit fullscreen when trip ends
         setIsFullScreenMap(false);
 
-        addToast(`Trip for ${formatIdForDisplay(busData.busId)} ended successfully! 🏁`, "success");
+        addToast(`Trip for ${formatIdForDisplay(busData?.busId || 'Bus')} ended successfully! 🏁`, "success");
 
         // Clear the bus marker
         console.log("🗺️ Clearing map markers and resetting view");
@@ -1573,93 +1525,7 @@ export default function DriverLiveTrackingPage() {
     );
   }
 
-  // Show message if no bus/route assigned (Reserved driver)
-  if (!busData || !routeData) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-teal-50 to-cyan-50 dark:from-gray-950 dark:via-emerald-950 dark:to-teal-950 flex items-center justify-center p-4">
-        <Card className="max-w-2xl w-full border-0 shadow-2xl bg-white/80 dark:bg-gray-900/80 backdrop-blur-xl">
-          <CardHeader className="text-center space-y-4 pb-6">
-            <div className="flex justify-center">
-              <div className="relative">
-                <div className="absolute inset-0 bg-gradient-to-r from-green-400 to-emerald-600 rounded-full blur-2xl opacity-30 animate-pulse"></div>
-                <div className="relative p-6 bg-gradient-to-br from-green-500 to-emerald-600 rounded-full shadow-xl">
-                  <svg
-                    className="w-16 h-16 text-white"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"
-                    />
-                  </svg>
-                </div>
-              </div>
-            </div>
-            <div className="space-y-2">
-              <CardTitle className="text-3xl font-bold bg-gradient-to-r from-green-600 to-emerald-600 bg-clip-text text-transparent">
-                Reserved Driver
-              </CardTitle>
-              <p className="text-lg text-muted-foreground">
-                You're available for assignment
-              </p>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <div className="p-6 bg-gradient-to-br from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20 rounded-2xl border border-green-200 dark:border-green-800">
-              <div className="flex items-start gap-4">
-                <div className="p-3 bg-green-100 dark:bg-green-900/40 rounded-xl">
-                  <AlertCircle className="h-6 w-6 text-green-600 dark:text-green-400" />
-                </div>
-                <div className="space-y-2 flex-1">
-                  <h3 className="font-semibold text-foreground">No Active Bus Assignment</h3>
-                  <p className="text-sm text-muted-foreground">
-                    You are currently a <strong className="text-green-600 dark:text-green-400">Reserved Driver</strong> and not assigned to any bus route.
-                  </p>
-                </div>
-              </div>
-            </div>
 
-            <div className="space-y-4">
-              <h4 className="font-semibold text-foreground flex items-center gap-2">
-                <span className="p-1.5 bg-blue-100 dark:bg-blue-900/40 rounded-lg">
-                  <CheckCircle className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-                </span>
-                How to Get Assigned
-              </h4>
-              <div className="space-y-3 pl-9">
-                <div className="flex items-start gap-3">
-                  <div className="mt-1 h-2 w-2 rounded-full bg-blue-500 flex-shrink-0"></div>
-                  <p className="text-sm text-muted-foreground">
-                    <strong>Start Driving:</strong> Once assigned, you can start tracking trips on this page
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div className="pt-4 flex flex-col sm:flex-row gap-3">
-              <Button
-                onClick={() => router.push('/driver')}
-                variant="outline"
-                className="flex-1 h-12 border-2 hover:bg-gray-50 dark:hover:bg-gray-800 transition-all duration-300"
-              >
-                Back to Dashboard
-              </Button>
-            </div>
-
-            <div className="pt-4 border-t border-gray-200 dark:border-gray-700">
-              <p className="text-xs text-center text-muted-foreground">
-                Need help? Contact your supervisor or administrator
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
 
   return (
     <ErrorBoundary>
@@ -1815,7 +1681,7 @@ export default function DriverLiveTrackingPage() {
                   </div>
                   <p className="text-[10px] font-bold text-blue-400/80 uppercase tracking-[0.1em] whitespace-nowrap">Bus Number</p>
                 </div>
-                <p className="text-[13px] md:text-sm font-black text-white">{busData.busNumber || 'AS-01-PC-9095'}</p>
+                <p className="text-[13px] md:text-sm font-black text-white">{busData?.busNumber || busData?.bus_number || 'Select Bus'}</p>
               </div>
 
               {/* Route Card */}
@@ -1826,7 +1692,7 @@ export default function DriverLiveTrackingPage() {
                   </div>
                   <p className="text-[10px] font-bold text-purple-400/80 uppercase tracking-[0.1em] whitespace-nowrap">Route</p>
                 </div>
-                <p className="text-[13px] md:text-sm font-black text-white">{routeData.routeName || 'Route-2'}</p>
+                <p className="text-[13px] md:text-sm font-black text-white">{routeData?.routeName || routeData?.route_name || 'Select Route'}</p>
               </div>
 
               {/* Speed Card */}
@@ -2058,6 +1924,133 @@ export default function DriverLiveTrackingPage() {
           // Toast removed as per request
         }}
       />
+
+      {/* START TRIP SELECTION MODAL / CARD */}
+      {showStartTripModal && !tripActive && (
+        <div className="fixed inset-0 z-[10000] flex items-center justify-center p-4 bg-black/60">
+          <Card className="w-full max-w-md bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 shadow-lg rounded-2xl overflow-hidden">
+            <CardHeader className="bg-emerald-600 text-white p-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-white/20 rounded-xl">
+                    <Bus className="h-5 w-5 text-white" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-lg font-bold text-white">Start New Trip</CardTitle>
+                    <p className="text-xs text-emerald-100 font-normal">Select bus & shift to begin tracking</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowStartTripModal(false)}
+                  className="p-1 rounded-full hover:bg-white/20 text-white/80 hover:text-white transition-colors"
+                >
+                  <XCircle className="h-5 w-5" />
+                </button>
+              </div>
+            </CardHeader>
+
+            <CardContent className="p-5 space-y-5">
+              {/* BUS SELECTION */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
+                  <Bus className="h-4 w-4 text-emerald-600" />
+                  Select Bus
+                </label>
+
+                {fetchingBuses ? (
+                  <div className="flex items-center justify-center p-3 bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
+                    <Loader2 className="h-4 w-4 text-emerald-600 animate-spin mr-2" />
+                    <span className="text-xs text-gray-500">Loading buses...</span>
+                  </div>
+                ) : availableBuses.length > 0 ? (
+                  <select
+                    value={selectedBusId}
+                    onChange={(e) => setSelectedBusId(e.target.value)}
+                    className="w-full px-3 py-2.5 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-sm font-medium text-gray-900 dark:text-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  >
+                    {availableBuses.map((bus: any) => (
+                      <option key={bus.id} value={bus.id}>
+                        Bus {bus.bus_number || bus.busNumber} — {bus.route_name || bus.routeName || 'Standard Route'}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <div className="p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl text-xs text-amber-700 dark:text-amber-400">
+                    No active buses found. Defaulting to assigned bus.
+                  </div>
+                )}
+              </div>
+
+              {/* SHIFT SELECTION */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
+                  <Clock className="h-4 w-4 text-emerald-600" />
+                  Select Shift
+                </label>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedShift('Morning')}
+                    className={`flex items-center justify-center gap-2 p-3 rounded-xl font-medium text-sm border ${
+                      selectedShift === 'Morning'
+                        ? 'bg-amber-500 text-white border-amber-500 font-semibold'
+                        : 'bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700'
+                    }`}
+                  >
+                    <Sun className="h-4 w-4" />
+                    Morning Shift
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setSelectedShift('Evening')}
+                    className={`flex items-center justify-center gap-2 p-3 rounded-xl font-medium text-sm border ${
+                      selectedShift === 'Evening'
+                        ? 'bg-indigo-600 text-white border-indigo-600 font-semibold'
+                        : 'bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700'
+                    }`}
+                  >
+                    <Moon className="h-4 w-4" />
+                    Evening Shift
+                  </button>
+                </div>
+              </div>
+
+              {/* ACTION BUTTONS */}
+              <div className="flex items-center gap-3 pt-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setShowStartTripModal(false)}
+                  className="flex-1 py-5 rounded-xl font-medium border-gray-300 dark:border-gray-700"
+                >
+                  Cancel
+                </Button>
+
+                <Button
+                  type="button"
+                  onClick={handleConfirmInitiateTrip}
+                  disabled={initiatingTrip || !selectedBusId}
+                  className="flex-1 py-5 rounded-xl font-semibold bg-emerald-600 hover:bg-emerald-700 text-white"
+                >
+                  {initiatingTrip ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                      Initiating...
+                    </>
+                  ) : (
+                    <>
+                      <PlayCircle className="h-4 w-4 mr-2" />
+                      Confirm & Start
+                    </>
+                  )}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
     </div>
     </ErrorBoundary>
   );

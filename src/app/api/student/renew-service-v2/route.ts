@@ -20,7 +20,11 @@ export const POST = withSecurity<RenewServiceBody>(
     const userId = auth.uid;
     const { durationYears, paymentMode, transactionId, receiptImageUrl, paidAt } = body;
 
-    const student = await getById(userId);
+    const [student, busFeeData] = await Promise.all([
+      getById(userId),
+      getCurrentBusFee(),
+    ]);
+
     if (!student) {
       return NextResponse.json({ error: 'Student not found' }, { status: 404 });
     }
@@ -28,7 +32,6 @@ export const POST = withSecurity<RenewServiceBody>(
     const enrollmentId = student.enrollmentId || '';
     const studentName = student.fullName || student.name || auth.name || 'Student';
 
-    const busFeeData = await getCurrentBusFee();
     const currentBusFee = Number(busFeeData.amount || 0);
     const totalFee = currentBusFee * durationYears;
 

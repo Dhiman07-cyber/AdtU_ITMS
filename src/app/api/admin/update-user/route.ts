@@ -1,4 +1,4 @@
-﻿import { decrementBusCapacity,incrementBusCapacity } from '@/domains/fleet';
+import { decrementBusCapacity,incrementBusCapacity } from '@/domains/fleet';
 import { getStudentById,updateStudent } from '@/domains/identity';
 import { wasSeatReleased } from '@/lib/config/capacity-flags';
 import { getDeadlineConfig } from '@/lib/deadline-config-service';
@@ -7,6 +7,7 @@ import { RateLimits } from '@/lib/security/rate-limiter';
 import { safeErrorMessage } from '@/lib/security/safe-error';
 import { UpdateStudentSchema } from '@/lib/security/validation-schemas';
 import { computeBlockDatesFromValidUntil } from '@/lib/utils/deadline-computation';
+import { normalizeShift } from '@/lib/utils/shift-utils';
 import { NextResponse } from 'next/server';
 
 /**
@@ -51,10 +52,10 @@ export const POST = withSecurity(
             }
 
             const oldBusId = currentData.busId || currentData.busId;
-            const oldShift = currentData.shift || 'Morning';
+            const oldShift = currentData.shift ? normalizeShift(currentData.shift) : null;
 
             const newBusId = updateData.busId !== undefined ? updateData.busId : oldBusId;
-            const newShift = updateData.shift !== undefined ? updateData.shift : oldShift;
+            const newShift = updateData.shift !== undefined ? (normalizeShift(updateData.shift) || updateData.shift) : oldShift;
 
             const busChanged = oldBusId !== newBusId;
             const shiftChanged = oldShift !== newShift;

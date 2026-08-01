@@ -3,12 +3,11 @@ FROM node:22-alpine AS builder
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm ci
+RUN npm ci && \
+    rm -rf node_modules/puppeteer node_modules/puppeteer-core node_modules/next node_modules/@next node_modules/vitest node_modules/tailwindcss node_modules/@tailwindcss node_modules/maplibre-gl node_modules/leaflet node_modules/recharts node_modules/framer-motion node_modules/exceljs node_modules/jspdf node_modules/cloudinary
 
 COPY server ./server
-COPY src/lib/observability ./src/lib/observability
-COPY src/lib/firebase-admin.ts ./src/lib/
-COPY src/lib/supabase-server.ts ./src/lib/
+COPY src ./src
 COPY tsconfig.json ./
 
 # Stage 2: Production runtime stage
@@ -23,7 +22,7 @@ RUN addgroup -S -g 10001 itms && adduser -S -u 10001 -G itms itms
 
 COPY --from=builder --chown=itms:itms /app/node_modules ./node_modules
 COPY --from=builder --chown=itms:itms /app/server ./server
-COPY --from=builder --chown=itms:itms /app/src/lib ./src/lib
+COPY --from=builder --chown=itms:itms /app/src ./src
 COPY --from=builder --chown=itms:itms /app/tsconfig.json ./
 
 USER itms

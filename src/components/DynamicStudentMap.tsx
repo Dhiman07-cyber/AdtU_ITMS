@@ -185,22 +185,6 @@ function DynamicStudentMap({
   useEffect(() => {
     const fetchInitialData = async () => {
       try {
-        // Get current bus location (optional - table might not exist)
-        try {
-          const { data: busData, error: busError } = await supabase
-            .from('bus_locations')
-            .select('*')
-            .eq('bus_id', busId)
-            .maybeSingle(); // Use maybeSingle() instead of single() to avoid 406 errors
-
-          if (busError && busError.code !== 'PGRST116') {
-            console.warn('⚠️ Bus location table might not exist:', busError);
-          } else if (busData) {
-            setBusLocation(busData);
-          }
-        } catch (error) {
-          console.warn('⚠️ Bus location query failed (table might not exist):', error);
-        }
 
         // Get current waiting flags (optional - table might not exist)
         try {

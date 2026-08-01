@@ -80,10 +80,12 @@ export async function GET(request: Request) {
             } else if (cleanedLocks && cleanedLocks.length > 0) {
                 stats.staleLocksCleaned = cleanedLocks.length;
 
-                // For each cleaned lock, comprehensive cleanup
-                for (const lock of cleanedLocks) {
-                    try {
-                        // Broadcast trip end via WebSocket
+                // Process ALL expired locks in parallel — each is independent.
+                // Under mass-expiry (network outage knocking out many buses at once),
+                // the old serial loop would take N × 2 DB round-trips before completing.
+                const cleanupResults = await Promise.allSettled(
+                    cleanedLocks.map(async (lock: any) => {
+                        // Non-critical broadcast — fire and forget
                         emitEvent(`trip-status-${lock.cleaned_bus_id}`, 'trip_ended', {
                             busId: lock.cleaned_bus_id,
                             tripId: lock.cleaned_trip_id,
@@ -91,37 +93,26 @@ export async function GET(request: Request) {
                             timestamp: new Date().toISOString()
                         }).catch(() => {});
 
-                        // Comprehensive cleanup of ALL trip-related tables.
-                        // Scoped by trip_id (not just bus_id) to avoid deleting data
-                        // from a new trip that may have started on the same bus between
-                        // the Supabase RPC cleanup and these deletes.
+                        // Scoped cleanup — trip_id ensures we don't affect a new trip
+                        // that may have started on the same bus between RPC and these deletes
                         await Promise.allSettled([
-                            // Delete driver_status — scoped to this trip's driver
-                            supabase.from('driver_status').delete()
-                                .eq('driver_uid', lock.cleaned_driver_id)
-                                .eq('bus_id', lock.cleaned_bus_id),
-                            // Delete bus_locations — scoped to this trip
-                            supabase.from('bus_locations').delete()
-                                .eq('bus_id', lock.cleaned_bus_id)
-                                .eq('trip_id', lock.cleaned_trip_id),
-                            // Delete driver_location_updates — scoped to this trip's driver
-                            supabase.from('driver_location_updates').delete()
-                                .eq('driver_uid', lock.cleaned_driver_id)
-                                .eq('trip_id', lock.cleaned_trip_id),
-                            // Delete waiting_flags — scoped to this trip's bus
                             supabase.from('waiting_flags').delete()
                                 .eq('bus_id', lock.cleaned_bus_id)
                                 .eq('trip_id', lock.cleaned_trip_id)
                                 .in('status', ['raised', 'acknowledged']),
-                            // Clean device sessions for this driver
                             supabase.from('device_sessions').delete().eq('user_id', lock.cleaned_driver_id),
                         ]);
-                        stats.comprehensiveCleanups++;
-                        console.log(`✅ Comprehensive cleanup done for stale bus ${lock.cleaned_bus_id}`);
 
-                    } catch (err: any) {
-                        console.error(`Error in comprehensive cleanup for ${lock.cleaned_bus_id}:`, err);
+                        return lock.cleaned_bus_id;
+                    })
+                );
+
+                for (const r of cleanupResults) {
+                    if (r.status === 'fulfilled') {
+                        stats.comprehensiveCleanups++;
+                    } else {
                         stats.errors.push(`comprehensive_cleanup_error`);
+                        console.error(`Error in comprehensive cleanup:`, r.reason);
                     }
                 }
 

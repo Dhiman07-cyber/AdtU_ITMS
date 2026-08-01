@@ -1,8 +1,8 @@
-export { checkActiveTrip,getLastLocation,persistLocation } from './services/gps-persistence.service';
+export { checkActiveTrip } from './services/gps-persistence.service';
 export { validateLocationUpdate } from './services/gps-validation.service';
 export type { ValidationResult } from './services/gps-validation.service';
 export {
-	clearHistory,filterUpdate,processUpdate,validateLocation,validateUpdate
+	clearHistory,filterUpdate,getLastLocationForBus,processUpdate,validateLocation,validateUpdate
 } from './services/gps.service';
 export type {
 	GPSCoordinate,GPSFilterResult,GPSLocation,GPSUpdate,
@@ -10,3 +10,4 @@ export type {
 	LocationUpdateNormalized,
 	PipelineResult
 } from './services/types';
+

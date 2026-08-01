@@ -1,57 +1,67 @@
 groups:
   - name: itms_infrastructure_alerts
     rules:
-      - alert: WebSocketServerDown
-        expr: sum(websocket_connections_active) == 0
-        for: 2m
+      - alert: RedisDown
+        expr: up{job="redis"} == 0
+        for: 1m
         labels:
-          severity: P0
+          severity: critical
           category: INFRASTRUCTURE
         annotations:
-          summary: "WebSocket server runtime appears offline"
+          summary: "Redis Cache Service Down"
+          description: "Redis instance is unreachable. Location cache and Pub/Sub message routing is impaired."
+
+      - alert: PostgreSQLDown
+        expr: up{job="postgres"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          category: INFRASTRUCTURE
+        annotations:
+          summary: "PostgreSQL Database Down"
+          description: "Primary PostgreSQL database container is unreachable."
+
+      - alert: WebSocketClusterDown
+        expr: sum(itms_ws_connections_active) == 0
+        for: 2m
+        labels:
+          severity: critical
+          category: INFRASTRUCTURE
+        annotations:
+          summary: "WebSocket Cluster Down"
           description: "Active WebSocket connections dropped to 0 across all instances."
 
       - alert: HighMemoryUsage
         expr: (nodejs_process_resident_memory_bytes / 1024 / 1024) > 800
         for: 5m
         labels:
-          severity: P1
+          severity: warning
           category: CAPACITY
         annotations:
           summary: "High Node.js process RSS memory consumption"
           description: "Process memory consumption exceeded 800 MB threshold."
 
-      - alert: HighEventLoopLag
-        expr: (nodejs_event_loop_delay_p95_seconds * 1000) > 100
-        for: 2m
-        labels:
-          severity: P1
-          category: PERFORMANCE
-        annotations:
-          summary: "High event loop delay detected"
-          description: "P95 event loop delay exceeds 100ms threshold."
-
   - name: itms_application_alerts
     rules:
-      - alert: APIHighErrorRate
+      - alert: HighApiErrorRate
         expr: (sum(rate(itms_api_errors_total[5m])) / sum(rate(itms_api_requests_total[5m]))) * 100 > 5
         for: 3m
         labels:
-          severity: P0
+          severity: warning
           category: APPLICATION
         annotations:
           summary: "API Error rate exceeds 5%"
           description: "HTTP 5xx server error rate is currently high."
 
-      - alert: HighAPILatencyP95
-        expr: histogram_quantile(0.95, sum(rate(itms_api_request_duration_seconds_bucket[5m])) by (le)) * 1000 > 2000
-        for: 5m
+      - alert: HighApiLatencyP95
+        expr: histogram_quantile(0.95, sum(rate(itms_api_request_duration_seconds_bucket[5m])) by (le)) * 1000 > 300
+        for: 3m
         labels:
-          severity: P1
+          severity: warning
           category: PERFORMANCE
         annotations:
-          summary: "High API response latency (P95 > 2000ms)"
-          description: "API response latency P95 exceeds 2 seconds."
+          summary: "High API response latency (P95 > 300ms)"
+          description: "API response latency P95 exceeds 300ms SLA threshold."
 
   - name: itms_business_alerts
     rules:
@@ -59,17 +69,17 @@ groups:
         expr: (sum(rate(itms_payments_completed_total[1h])) / sum(rate(itms_payments_initiated_total[1h]))) * 100 < 90
         for: 15m
         labels:
-          severity: P1
+          severity: warning
           category: PAYMENT
         annotations:
           summary: "Payment success rate dropped below 90%"
           description: "Ratio of completed payments to initiated orders has degraded significantly."
 
       - alert: GPSPipelineHighRejectionRate
-        expr: (sum(rate(itms_gps_updates_rejected_total[5m])) / sum(rate(itms_gps_updates_received_total[5m]))) * 100 > 15
+        expr: (sum(rate(itms_gps_rejected[5m])) / sum(rate(itms_gps_accepted[5m]) + rate(itms_gps_rejected[5m]))) * 100 > 15
         for: 5m
         labels:
-          severity: P1
+          severity: warning
           category: GPS
         annotations:
           summary: "GPS coordinate rejection rate exceeds 15%"
@@ -78,20 +88,20 @@ groups:
   - name: itms_security_alerts
     rules:
       - alert: MassAuthFailures
-        expr: sum(rate(itms_auth_failures_total[5m])) > 10
+        expr: sum(rate(itms_ws_auth_failures[5m])) > 10
         for: 2m
         labels:
-          severity: P0
+          severity: critical
           category: SECURITY
         annotations:
           summary: "Mass authentication failures detected"
           description: "Potential credential stuffing or brute-force authentication attack in progress."
 
       - alert: RateLimitExceededSpike
-        expr: sum(rate(websocket_rate_limit_blocks_total[5m])) > 50
+        expr: sum(rate(itms_ws_rate_limit_blocks[5m])) > 50
         for: 2m
         labels:
-          severity: P1
+          severity: warning
           category: SECURITY
         annotations:
           summary: "High rate limit enforcement rate"

@@ -56,6 +56,7 @@
  * audit_logs is NOT stored here — Audit domain owns audit trail.
  */
 import { getSupabaseServer } from '@/lib/supabase-server';
+import { normalizeShift } from '@/lib/utils/shift-utils';
 import type { Application,ApplicationState,ApplicationType } from '@/lib/types/application';
 
 // ─── Field Map ───────────────────────────────────────────────────────────────
@@ -176,7 +177,7 @@ function pgRowToApplication(row: Record<string, any>): Application {
     bus_id: row.bus_id || fd.busId || fd.bus_id || fd.selectedBus,
     route_id: row.route_id || fd.routeId || fd.route_id || fd.selectedRoute,
     stop_name: row.stop_name || fd.stop_name || fd.stop_name || fd.selected_stop_name || fd.selectedStop || fd.stop_name || fd.stop_name,
-    shift: row.shift || fd.shift || fd.selectedShift || 'Morning',
+    shift: normalizeShift(row.shift || fd.shift || fd.selectedShift) || (row.shift || fd.shift || fd.selectedShift || null),
     busId: row.bus_id || fd.busId || fd.bus_id || fd.selectedBus,
     routeId: row.route_id || fd.routeId || fd.route_id || fd.selectedRoute,
     sessionStartYear: row.session_start_year || fd.sessionStartYear || fd.startYear,

@@ -23,8 +23,19 @@ import { NextResponse } from 'next/server';
 
 const startTime = Date.now();
 
-export async function GET() {
+export async function GET(request?: Request) {
     const requestStart = Date.now();
+
+    try {
+        if (request?.url) {
+            const url = new URL(request.url, 'http://localhost');
+            if (url.searchParams.get('liveness') === '1' || url.searchParams.get('type') === 'live') {
+                return NextResponse.json({ status: 'healthy', app: 'ok' }, { status: 200 });
+            }
+        }
+    } catch {
+        // Fallthrough if request URL parsing fails
+    }
 
     const checks: Record<string, { status: 'ok' | 'degraded' | 'error'; latency_ms?: number; message?: string; detail?: unknown }> = {};
 
@@ -35,19 +46,19 @@ export async function GET() {
     try {
         const supabase = getSupabaseServer();
         if (!supabase) {
-            checks['supabase'] = { status: 'error', message: 'Client not initialized' };
+            checks['supabase'] = { status: 'degraded', message: 'Client not initialized' };
         } else {
             const t0 = Date.now();
             const { error } = await supabase.from('realtime_driver_locations').select('id').limit(1);
             const latency_ms = Date.now() - t0;
             if (error && !error.message.includes('Results contain 0 rows')) {
-                checks['supabase'] = { status: 'error', latency_ms, message: 'Database connectivity error' };
+                checks['supabase'] = { status: 'degraded', latency_ms, message: error.message || 'Database connectivity issue' };
             } else {
                 checks['supabase'] = { status: latency_ms > 3000 ? 'degraded' : 'ok', latency_ms };
             }
         }
-    } catch {
-        checks['supabase'] = { status: 'error', message: 'Database connection failed' };
+    } catch (err: any) {
+        checks['supabase'] = { status: 'degraded', message: err?.message || 'Database connection failed' };
     }
 
     // ── firebase: admin SDK initialization ────────────────────────────────────

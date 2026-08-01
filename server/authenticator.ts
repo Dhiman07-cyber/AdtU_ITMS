@@ -44,18 +44,8 @@ export async function authenticateSocket(request: IncomingMessage): Promise<Auth
       const { getSupabaseServer } = await import('@/lib/supabase-server');
       const supabase = getSupabaseServer();
 
-      const [studentRes, driverRes, modRes, adminRes] = await Promise.all([
-        supabase.from('student_profiles').select('uid').eq('uid', uid).maybeSingle(),
-        supabase.from('driver_profiles').select('uid').eq('uid', uid).maybeSingle(),
-        supabase.from('moderator_profiles').select('uid').eq('uid', uid).maybeSingle(),
-        supabase.from('admin_profiles').select('uid').eq('uid', uid).maybeSingle(),
-      ]);
-
-      const role = studentRes.data ? 'student'
-        : driverRes.data ? 'driver'
-        : modRes.data ? 'moderator'
-        : adminRes.data ? 'admin'
-        : 'student';
+      const { data: userRow } = await supabase.from('users').select('role').eq('uid', uid).maybeSingle();
+      const role = userRow?.role || 'student';
 
       authResult = { authenticated: true, uid, role };
     }
@@ -70,6 +60,7 @@ export async function authenticateSocket(request: IncomingMessage): Promise<Auth
 
     return authResult;
   } catch (err: any) {
+    console.warn('⚠️ [WS Authenticator] Token verification failed:', err.message || err);
     return { authenticated: false, error: err.message || 'Authentication failed' };
   }
 }

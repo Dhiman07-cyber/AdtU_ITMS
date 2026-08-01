@@ -8,7 +8,7 @@ import crypto from 'crypto';
 import { broadcastTripEvent } from './trip-broadcast.service';
 import { cleanupTrip } from './trip-cleanup.service';
 import { dispatchTripNotification } from './trip-notification.service';
-import { checkNoConflict,resolveRouteId,resolveRouteName,verifyDriverBusAssignment } from './trip-validation.service';
+import { checkNoConflict,resolveRouteId,resolveRouteName,tripStartPreflight,verifyDriverBusAssignment } from './trip-validation.service';
 
 type ShiftLower = 'morning' | 'evening' | 'both';
 
@@ -49,27 +49,42 @@ export interface HeartbeatParams {
 
 export async function startTrip(params: StartTripParams): Promise<StartTripOutput> {
   const start = Date.now();
-  const tripShift = (normalizeShift(params.shift).toLowerCase() as ShiftLower) || 'both';
+  const normalized = normalizeShift(params.shift);
+  if (!normalized) {
+    return { success: false, reason: 'Invalid or missing trip shift parameters', errorCode: 'VALIDATION_ERROR' };
+  }
+  const tripShift = normalized.toLowerCase() as ShiftLower;
   const logCtx = { driverId: params.driverId, busId: params.busId };
 
-  const assignment = await verifyDriverBusAssignment(params.driverId, params.busId);
-  if (!assignment.authorized) {
-    appLogger.warn('trip', 'start_rejected', { ...logCtx, reason: assignment.reason, errorClass: ErrorClass.TRIP_VALIDATION_FAILED, latencyMs: Date.now() - start });
-    return { success: false, reason: assignment.reason, errorCode: 'VALIDATION_ERROR' };
+  // Single preflight: fires buses + active_trips in parallel (replaces 3 serial DB calls)
+  const preflight = await tripStartPreflight(params.driverId, params.busId);
+  if (!preflight.authorized) {
+    const errorCode = preflight.conflict ? 'LOCKED_BY_OTHER' : 'VALIDATION_ERROR';
+    const errorClass = preflight.conflict ? ErrorClass.TRIP_LOCK_CONFLICT : ErrorClass.TRIP_VALIDATION_FAILED;
+    appLogger.warn('trip', 'start_rejected', { ...logCtx, reason: preflight.reason, errorClass, latencyMs: Date.now() - start });
+    return { success: false, reason: preflight.reason, errorCode };
   }
 
-  const conflict = await checkNoConflict(params.busId, params.driverId);
-  if (conflict.conflict) {
-    appLogger.warn('trip', 'start_rejected', { ...logCtx, reason: conflict.reason, errorClass: ErrorClass.TRIP_LOCK_CONFLICT, latencyMs: Date.now() - start });
-    return { success: false, reason: conflict.reason, errorCode: 'LOCKED_BY_OTHER' };
+  let effectiveRouteId: string;
+  let routeName: string;
+  try {
+    // Use route_id already fetched from preflight busData when available
+    const rawRouteId = params.routeId || preflight.busData?.route_id || null;
+    if (!rawRouteId) throw new Error(`Bus ${params.busId} is not assigned to a valid route.`);
+    effectiveRouteId = rawRouteId;
+    routeName = await resolveRouteName(effectiveRouteId);
+  } catch (routeErr: any) {
+    appLogger.warn('trip', 'start_rejected', { ...logCtx, reason: routeErr.message, errorClass: ErrorClass.TRIP_VALIDATION_FAILED, latencyMs: Date.now() - start });
+    return { success: false, reason: routeErr?.message || 'Route assignment validation failed', errorCode: 'VALIDATION_ERROR' };
   }
+
+  const conflict = preflight;
+
   if (conflict.existingTripId) {
-    const routeId = await resolveRouteId(params.busId, params.routeId);
-    appLogger.info('trip', 'start_idempotent', { ...logCtx, tripId: conflict.existingTripId, routeId, latencyMs: Date.now() - start });
-    return { success: true, tripId: conflict.existingTripId, routeId, shift: tripShift };
+    appLogger.info('trip', 'start_idempotent', { ...logCtx, tripId: conflict.existingTripId, routeId: effectiveRouteId, latencyMs: Date.now() - start });
+    return { success: true, tripId: conflict.existingTripId, routeId: effectiveRouteId, shift: tripShift };
   }
 
-  const effectiveRouteId = await resolveRouteId(params.busId, params.routeId);
   const tripId = params.tripId || crypto.randomUUID();
 
   const lockResult = await tripLockService.startTrip(params.driverId, params.busId, effectiveRouteId, tripShift, tripId);
@@ -79,9 +94,7 @@ export async function startTrip(params: StartTripParams): Promise<StartTripOutpu
   }
 
   const activeTripId = lockResult.tripId || tripId;
-  const busData = assignment.busData;
-  const busNumber = busData?.bus_number || params.busId;
-  const routeName = await resolveRouteName(effectiveRouteId);
+  const busNumber = preflight.busData?.bus_number || params.busId;
 
   if (!lockResult.alreadyActive) {
     appLogger.info('trip', 'started', { ...logCtx, tripId: activeTripId, routeId: effectiveRouteId, shift: tripShift, latencyMs: Date.now() - start });
@@ -95,11 +108,12 @@ export async function startTrip(params: StartTripParams): Promise<StartTripOutpu
       busNumber,
     });
 
-    dispatchTripNotification({
+    await dispatchTripNotification({
       routeId: effectiveRouteId,
       tripId: activeTripId,
       routeName,
       busId: params.busId,
+      shift: tripShift,
       eventType: 'TRIP_STARTED',
     });
   }
@@ -129,14 +143,17 @@ export async function endTrip(params: EndTripParams): Promise<EndTripOutput> {
     if (!activeTripId) activeTripId = activeTrip.trip_id;
     routeId = activeTrip.route_id || '';
   } else {
+    // Fetch route_id, route_name, and bus_number together (avoids second buses query below)
     const { data: busData } = await supabase
       .from('buses')
-      .select('route_id, route_name')
+      .select('route_id, route_name, bus_number')
       .eq('id', params.busId)
       .maybeSingle();
     if (busData) {
       routeId = busData.route_id || '';
       routeName = busData.route_name || 'your route';
+      // Cache bus_number so the second fetch below is skipped
+      Object.assign(params, { _cachedBusNumber: busData.bus_number || params.busId });
     }
   }
 
@@ -150,19 +167,20 @@ export async function endTrip(params: EndTripParams): Promise<EndTripOutput> {
     return { success: true, reason: 'No active trip found' };
   }
 
-  const endResult = await tripLockService.endTrip(activeTripId, params.driverId, params.busId);
+  // Run endTrip RPC and trip cleanup concurrently — cleanup is non-critical
+  const [endResult] = await Promise.all([
+    tripLockService.endTrip(activeTripId, params.driverId, params.busId),
+    cleanupTrip({ driverId: params.driverId, busId: params.busId, tripId: activeTripId }),
+  ]);
+
   if (!endResult.success) {
     appLogger.error('trip', 'end_failed', { ...logCtx, tripId: activeTripId, reason: endResult.reason, errorClass: ErrorClass.TRIP_LOCK_FAILED, latencyMs: Date.now() - start });
     return { success: false, reason: endResult.reason };
   }
 
-  await cleanupTrip({ driverId: params.driverId, busId: params.busId, tripId: activeTripId });
-
-  const { data: busData } = await supabase
-    .from('buses')
-    .select('bus_number')
-    .eq('id', params.busId)
-    .maybeSingle();
+  // Use bus_number already fetched during route resolution above (avoids a second buses query)
+  const cachedBusNumber = (params as any)._cachedBusNumber;
+  const busNumber = cachedBusNumber || (activeTrip ? (activeTrip as any).bus_number : null) || params.busId;
 
   appLogger.info('trip', 'ended', { ...logCtx, tripId: activeTripId, routeId, latencyMs: Date.now() - start });
 
@@ -170,10 +188,10 @@ export async function endTrip(params: EndTripParams): Promise<EndTripOutput> {
     busId: params.busId,
     tripId: activeTripId,
     event: 'trip_ended',
-    busNumber: busData?.bus_number || params.busId,
+    busNumber,
   });
 
-  dispatchTripNotification({
+  await dispatchTripNotification({
     routeId: routeId || 'unassigned_route',
     tripId: activeTripId,
     routeName,

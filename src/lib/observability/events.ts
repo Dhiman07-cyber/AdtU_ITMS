@@ -51,6 +51,9 @@ class EventBus {
 
     return () => {
       set.delete(handler);
+      if (set.size === 0) {
+        this.handlers.delete(eventName);
+      }
     };
   }
 

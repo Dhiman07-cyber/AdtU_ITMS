@@ -26,7 +26,7 @@ The system is built on **four core invariants**:
     *   **Supabase (PostgreSQL 17)**: The **authoritative single source of truth** for all system data:
         *   Student, Driver, Moderator, and Admin Profiles (`student_profiles`, `driver_profiles`, etc.)
         *   Bus & Route definitions (`buses`, `routes`, `stops`)
-        *   Real-time GPS tracking & trip state (`bus_locations`, `active_trips`, `driver_status`)
+        *   Real-time GPS tracking & trip state (`bus_locations`, `active_trips`)
         *   Student waiting & boarding flags (`waiting_flags`)
         *   **Financial ledger** (`payments` - immutable)
         *   **Applications & Verification** (`applications`)

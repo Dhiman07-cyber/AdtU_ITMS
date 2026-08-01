@@ -131,7 +131,7 @@ export async function GET(
     return NextResponse.json({ error: 'Moderator payment permission not granted' }, { status: 403 });
   }
 
-  const pdfBuffer = await generateReceiptPdf(paymentId);
+  const pdfBuffer = await generateReceiptPdf(payment);
   if (!pdfBuffer) {
     return NextResponse.json({ error: 'Failed to generate receipt' }, { status: 500 });
   }

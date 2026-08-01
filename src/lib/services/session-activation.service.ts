@@ -206,20 +206,26 @@ async function activateOne(
   const formData = app.formData || ({} as any);
 
   // Resolve the bus/route/stop/shift from the original application.
-  const requestedRouteId = formData.routeId || '';
-  const requestedBusId = requestedRouteId ? String(requestedRouteId).replace('route_', 'bus_') : '';
-  const final_stop_name = formData.stop_name || (formData as any).pickupPoint || '';
-  const shift = normalizeShift(formData.shift);
+  const appAny = app as any;
+  const requestedRouteId = appAny.routeId || appAny.route_id || formData.routeId || formData.route_id || '';
+  const requestedBusId = appAny.busId || appAny.bus_id || formData.busId || formData.bus_id || (requestedRouteId ? String(requestedRouteId).replace('route_', 'bus_') : '');
+  const final_stop_name = appAny.stop_name || formData.stop_name || formData.pickupPoint || '';
+  const shift = normalizeShift(appAny.shift || formData.shift);
 
   if (!requestedBusId || !requestedRouteId || !final_stop_name || !shift) {
-    return { failed: 'Application is missing route/bus/stop/shift' };
+    return { failed: 'Application is missing route, bus, stop name, or shift assignment' };
   }
 
-  // Derive session/validity from the FROZEN targetSession on the application.
-  const targetSession = (app as any).targetSession || {};
-  const startYear = Number(targetSession.startYear || formData.sessionInfo?.sessionStartYear);
-  const endYear = Number(targetSession.endYear || formData.sessionInfo?.sessionEndYear || (startYear + 1));
-  const durationYears = Math.max(1, endYear - startYear);
+  // Derive session/validity from the FROZEN targetSession or session fields on the application.
+  const targetSession = appAny.targetSession || {};
+  const startYear = Number(targetSession.startYear || formData.sessionInfo?.sessionStartYear || appAny.sessionStartYear || appAny.session_start_year);
+  const endYear = Number(targetSession.endYear || formData.sessionInfo?.sessionEndYear || appAny.sessionEndYear || appAny.session_end_year);
+
+  if (isNaN(startYear) || isNaN(endYear) || startYear <= 0 || endYear <= startYear) {
+    return { failed: 'Application is missing valid session start or end year data' };
+  }
+
+  const durationYears = endYear - startYear;
 
   const anchorMonth = config.academicYear.anchorMonth;
   const anchorDay = config.academicYear.anchorDay;
@@ -244,6 +250,7 @@ async function activateOne(
       department: formData.department,
       dob: formData.dob,
       durationYears,
+      sessionDuration: String(durationYears),
       email: (app as any).email || formData.email,
       enrollmentId: formData.enrollmentId,
       faculty: formData.faculty,

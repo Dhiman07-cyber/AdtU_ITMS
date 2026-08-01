@@ -38,7 +38,7 @@ export async function GET(request: NextRequest) {
       availableSeats: result.capacity - result.shiftLoad,
       isFull: !result.available,
       shiftLoad: result.shiftLoad,
-      shift: shift || 'Morning',
+      shift: shift ? normalizeShift(shift) : null,
     }, { headers: rl.headers });
   } catch (error: any) {
     return NextResponse.json(handleApiError(error, 'buses-capacity-get', 'Failed to check capacity'), { status: 500 });

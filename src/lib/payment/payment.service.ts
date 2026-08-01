@@ -132,8 +132,23 @@ export async function processCapturedPayment(paymentDetails: {
         // 1. Idempotency Check: check if already processed
         const isProcessed = await isPaymentProcessed(paymentId);
         if (isProcessed) {
-            console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] processCapturedPayment: ${paymentId} is already processed (Supabase lookup).`);
-            return { status: 'already_processed' };
+            console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] processCapturedPayment: ${paymentId} is already in Supabase ledger.`);
+            
+            // SELF-HEALING GUARANTEE: For renewal payments, verify that the renewal application record exists.
+            // If a previous payment capture failed halfway due to a transient database outage or network switch,
+            // recover and create the renewal application now instead of dropping it.
+            const rawPurpose = String(notes.purpose || notes.type || '');
+            const isRenewal = !rawPurpose.toLowerCase().includes('registration') && rawPurpose.toLowerCase() !== 'new_registration';
+            if (isRenewal) {
+                const applicationId = `online_${paymentId}`;
+                const existingRequest = await getApplicationById(applicationId).catch(() => null);
+                if (existingRequest) {
+                    return { status: 'already_processed' };
+                }
+                console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] Self-healing missing renewal application for payment ${paymentId}`);
+            } else {
+                return { status: 'already_processed' };
+            }
         }
 
         const enrollmentId = notes.enrollmentId || notes.studentId;
@@ -202,14 +217,6 @@ export async function processCapturedPayment(paymentDetails: {
             }
 
             console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] PROCESS_CAPTURED[2] Supabase insert SUCCESS: ${result}`);
-            const storedPayment = await paymentsSupabaseService.getPaymentById(result);
-            if (storedPayment) {
-                try {
-                    await ensureReceiptSignature(storedPayment);
-                } catch (sigErr: any) {
-                    console.error(`[processCapturedPayment] Receipt signature failed:`, sigErr.message);
-                }
-            }
 
             return { status: 'success' };
         } else {
@@ -302,14 +309,6 @@ export async function processCapturedPayment(paymentDetails: {
             }
 
             console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] PROCESS_CAPTURED[2] Supabase insert SUCCESS: ${result}`);
-            const storedPayment = await paymentsSupabaseService.getPaymentById(result);
-            if (storedPayment) {
-                try {
-                    await ensureReceiptSignature(storedPayment);
-                } catch (sigErr: any) {
-                    console.error(`[processCapturedPayment] Receipt signature failed:`, sigErr.message);
-                }
-            }
 
             // D8: Create the PENDING renewal application in PostgreSQL instead of Firestore
             const applicationId = `online_${paymentId}`;

@@ -45,4 +45,5 @@ export async function validateUpdate(raw: LocationUpdate): Promise<PipelineResul
   return processLocationUpdateSimple(raw);
 }
 
+export { getLastLocationForBus } from './gps-pipeline.service';
 export type { GPSFilterResult,GPSLocation,LocationUpdate,PipelineResult };

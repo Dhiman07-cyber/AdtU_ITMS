@@ -26,6 +26,9 @@ export const ENV_CATALOG: EnvClassification[] = [
     { name: 'NEXT_PUBLIC_APP_URL', category: 'public', lifecycle: 'build-time', required: true, description: 'Canonical Public Application URL' },
     { name: 'NEXT_PUBLIC_WS_URL', category: 'public', lifecycle: 'build-time', required: true, description: 'Canonical WebSocket Endpoint URL' },
     { name: 'NEXT_PUBLIC_RAZORPAY_KEY_ID', category: 'public', lifecycle: 'build-time', required: true, description: 'Razorpay Public Key ID' },
+    { name: 'NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME', category: 'public', lifecycle: 'build-time', required: false, description: 'Cloudinary Cloud Name' },
+    { name: 'NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET', category: 'public', lifecycle: 'build-time', required: false, description: 'Cloudinary Upload Preset' },
+    { name: 'NEXT_PUBLIC_CLOUDINARY_UPLOAD_ASSET_FOLDER', category: 'public', lifecycle: 'build-time', required: false, description: 'Cloudinary Upload Asset Folder' },
 
     // --- Private / Server Runtime ---
     { name: 'NODE_ENV', category: 'private', lifecycle: 'runtime', required: true, description: 'Node environment (development/production/test)' },
