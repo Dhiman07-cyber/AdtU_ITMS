@@ -1,4 +1,4 @@
-﻿import { upsertMarker } from '@/domains/admin';
+import { upsertMarker } from '@/domains/admin';
 import { createAuditEvent,SYSTEM_ACTOR,type AuditEventInsert } from '@/domains/audit';
 import { getStudentById,getStudentsByStatuses,updateStudent } from '@/domains/identity';
 import * as Notification from '@/domains/notification';
@@ -238,7 +238,18 @@ export async function GET(request: NextRequest) {
                         const freshStudent = await getStudentById(uid);
 
                         const currentStatus = freshStudent?.status || studentData.status;
-                        if (currentStatus !== 'active') {
+                        const freshValidUntil = freshStudent?.validUntil ? (typeof freshStudent.validUntil === 'string' ? freshStudent.validUntil : new Date(freshStudent.validUntil).toISOString()) : validUntilStr;
+                        const freshCheckData = {
+                            softBlock: freshStudent?.softBlock || softBlockStr,
+                            hardBlock: freshStudent?.hardBlock || hardBlockStr,
+                            validUntil: freshValidUntil,
+                            lastRenewalDate: freshStudent?.lastRenewalDate ? String(freshStudent.lastRenewalDate) : lastRenewalDateStr,
+                            status: currentStatus,
+                            sessionEndYear: freshStudent?.sessionEndYear || studentData.sessionEndYear
+                        };
+                        const freshNeedsSoftBlock = shouldBlockAccessFromStoredDates(freshCheckData, null, config);
+
+                        if (currentStatus !== 'active' || !freshNeedsSoftBlock) {
                             didBlock = false;
                         } else {
                             const sbBusId = freshStudent?.busId || freshStudent?.busId || studentData.busId || null;

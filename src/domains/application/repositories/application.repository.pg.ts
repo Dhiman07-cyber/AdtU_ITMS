@@ -219,6 +219,8 @@ export async function pgFindByApplicantUid(applicantUid: string): Promise<Applic
     .from('applications')
     .select('*')
     .eq('applicant_uid', applicantUid)
+    .order('submitted_at', { ascending: false })
+    .limit(1)
     .maybeSingle();
 
   if (error) {

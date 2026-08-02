@@ -64,7 +64,13 @@ function validateJump(n: LocationUpdateNormalized, last: LastLocation): string |
 const inMemoryLastLocations = new Map<string, LastLocation>();
 
 export function clearInMemoryLastLocation(busId: string): void {
-  if (busId) inMemoryLastLocations.delete(busId);
+  if (!busId) return;
+  inMemoryLastLocations.delete(busId);
+  if (busId.startsWith('bus_')) {
+    inMemoryLastLocations.delete(busId.replace('bus_', ''));
+  } else {
+    inMemoryLastLocations.delete(`bus_${busId}`);
+  }
 }
 
 export function setInMemoryLastLocation(busId: string, loc: LastLocation): void {

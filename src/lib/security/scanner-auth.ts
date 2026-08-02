@@ -32,7 +32,7 @@ function collectAssignedBusIds(data: Record<string, unknown> | undefined): Set<s
 }
 
 export function scannerBusMatchesStudent(scannerBusId: unknown, busId: unknown): boolean {
-  if (typeof scannerBusId !== 'string' || !scannerBusId.trim()) return true;
+  if (typeof scannerBusId !== 'string' || !scannerBusId.trim()) return false;
   if (typeof busId !== 'string' || !busId.trim()) return false;
   return scannerBusId.trim() === busId.trim();
 }
@@ -96,11 +96,6 @@ export async function validateStudentScannerContext(
 
   // If driver has an active trip or bus context, permit verification
   if (assignedIds.size > 0 && assignedIds.has(scannerBusId.trim())) {
-    return null;
-  }
-
-  // Fallback: If logged in driver scans with valid scanner bus ID, permit scanning
-  if (typeof scannerBusId === 'string' && scannerBusId.trim().length > 0) {
     return null;
   }
 

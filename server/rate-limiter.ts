@@ -32,9 +32,7 @@ export function checkRateLimit(ip: string, uid: string, socketId: string): boole
 }
 
 export function clearRateLimitsFor(socketId: string): void {
-  for (const [k, _v] of socketBuckets) {
-    if (k === socketId) socketBuckets.delete(k);
-  }
+  socketBuckets.delete(socketId);
 }
 
 const bucketCleanupTimer = setInterval(() => {
@@ -43,6 +41,9 @@ const bucketCleanupTimer = setInterval(() => {
   for (const [k, v] of userBuckets) { if (now > v.resetAt) userBuckets.delete(k); }
   for (const [k, v] of socketBuckets) { if (now > v.resetAt) socketBuckets.delete(k); }
 }, 60000);
+if (bucketCleanupTimer && typeof bucketCleanupTimer.unref === 'function') {
+  bucketCleanupTimer.unref();
+}
 
 export function stopRateLimiter(): void {
   clearInterval(bucketCleanupTimer);

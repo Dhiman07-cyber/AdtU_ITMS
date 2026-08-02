@@ -1,4 +1,4 @@
-﻿-- =============================================================================
+-- =============================================================================
 -- Fix: acquire_fcm_lock RPC idempotency bug
 --
 -- The original function returned acquired=true in BOTH the IF and ELSE
@@ -66,4 +66,4 @@ END;
 $$;
 
 REVOKE ALL ON FUNCTION public.acquire_fcm_lock(TEXT, TEXT, TEXT) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.acquire_fcm_lock(TEXT, TEXT, TEXT) TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.acquire_fcm_lock(TEXT, TEXT, TEXT) TO service_role;

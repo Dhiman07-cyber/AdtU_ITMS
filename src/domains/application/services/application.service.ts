@@ -161,14 +161,14 @@ export async function submitFinal(
   const now = new Date().toISOString();
   const isRenewal = body.applicationType === 'renewal' || body.applicationType === 'renewal_after_soft_block';
 
-  // Check for existing live application — skip for renewals (they may coexist)
-  if (!isRenewal) {
-    const existing = await repository.findByApplicantUid(uid);
-    const LIVE_STATES: ApplicationState[] = [
-      'submitted', 'approved', 'verified', 'awaiting_verification',
-      'verified_upcoming', 'pending_seat_allocation',
-    ];
-    if (existing && LIVE_STATES.includes(existing.state)) {
+  const LIVE_STATES: ApplicationState[] = [
+    'submitted', 'approved', 'verified', 'awaiting_verification',
+    'verified_upcoming', 'pending_seat_allocation',
+  ];
+
+  const existing = await repository.findByApplicantUid(uid);
+  if (existing && LIVE_STATES.includes(existing.state)) {
+    if (!isRenewal || existing.state === 'submitted') {
       return { success: false, error: 'An application is already in progress' };
     }
   }

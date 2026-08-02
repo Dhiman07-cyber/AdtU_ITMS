@@ -50,7 +50,6 @@ public/landing_video/
 
 # Firestore data dump - NEVER commit data exports
 firestore_data.json
-data/
 
 # Gemini/AI config
 .gemini/

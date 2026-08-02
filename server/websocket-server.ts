@@ -1,7 +1,9 @@
 import { WebSocketServer as WsServer } from 'ws';
+import type WebSocket from 'ws';
 import type { Server } from 'http';
 import { authenticateSocket } from './authenticator';
 import { sessionManager } from './session-manager';
+import type { Session } from './session-manager';
 import { connectionRegistry } from './connection-registry';
 import { subscriptionManager } from './subscription-manager';
 import { heartbeatService } from './heartbeat-service';
@@ -10,21 +12,22 @@ import { routeMessage, sendToSocket } from './socket-router';
 import { metricsService } from './metrics-service';
 import { logger } from './structured-logger';
 import { encode as encodeMsg } from './socket-encoder';
-import { decode } from './socket-decoder';
 import { checkRateLimit, clearRateLimitsFor } from './rate-limiter';
-import { validatePayload, checkReplay } from './message-validator';
+import { validatePayload, validateMessage, checkReplay } from './message-validator';
 import { healthService } from './health-service';
 import { enqueueOffline, drainQueue } from './offline-queue';
 import crypto from 'crypto';
 
 const MAX_BATCH_SIZE = parseInt(process.env.BROADCAST_BATCH_SIZE || '100', 10);
+const MAX_PAYLOAD_BYTES = 64 * 1024;
+const PRE_AUTH_BUFFER_LIMIT = 32;
 
 export class WebSocketServer {
   private wss: WsServer | null = null;
   private shuttingDown = false;
 
   start(server: Server): void {
-    this.wss = new WsServer({ server, path: '/ws' });
+    this.wss = new WsServer({ server, path: '/ws', maxPayload: MAX_PAYLOAD_BYTES });
 
     this.wss.on('connection', async (ws, request) => {
       if (healthService.isShuttingDown()) {
@@ -34,6 +37,11 @@ export class WebSocketServer {
 
       const socketId = crypto.randomUUID();
       const ip = request.socket?.remoteAddress || 'unknown';
+
+      ws.on('error', (err) => {
+        metricsService.inc('errors');
+        logger.error('ws_socket_error', { socketId, ip, error: (err as Error).message, errorClass: 'WEBSOCKET_SOCKET_ERROR' });
+      });
 
       // ── Authentication ──────────────────────────────────────────────────────
       // Phase-04: Two auth paths are supported simultaneously:
@@ -49,6 +57,23 @@ export class WebSocketServer {
       // ────────────────────────────────────────────────────────────────────────
       const AUTH_TIMEOUT_MS = 5000;
       const urlHasToken = request.url?.includes('token=');
+
+      // Buffer every message received while authentication is in flight.
+      // Without this, subscribe/presence messages sent immediately after
+      // 'auth' (Path B) or right after the WS handshake (Path A) are silently
+      // dropped while Firebase verification (100-500ms) is running — a real
+      // race: the client sends subscribe on open and never resends it.
+      const preAuthBuffer: any[] = [];
+      const bufferMessage = (data: any) => {
+        if (preAuthBuffer.length >= PRE_AUTH_BUFFER_LIMIT) {
+          // Bound the buffer: a flood of pre-auth messages must not grow
+          // memory unboundedly while token verification is in flight.
+          ws.close(1009, 'Pre-auth message limit exceeded');
+          return;
+        }
+        preAuthBuffer.push(data);
+      };
+      ws.on('message', bufferMessage);
 
       let auth;
 
@@ -109,18 +134,31 @@ export class WebSocketServer {
       let session;
 
       if (isReconnect) {
-        const url = new URL(request.url || '/', 'http://localhost');
-        const reconnectToken = url.searchParams.get('reconnect_token');
+        // Same malformed-URL protection as extractToken: never throw inside
+        // the connection handler.
+        let reconnectToken: string | null = null;
+        try {
+          reconnectToken = new URL(request.url || '/', 'http://localhost').searchParams.get('reconnect_token');
+        } catch {
+          // Malformed URL — fall through without session restore.
+        }
         if (reconnectToken) {
+          // SECURITY: only restore when the token belongs to the authenticated
+          // user. Otherwise a leaked token (shared browser, XSS surface) could
+          // hijack another user's session under their own auth.
           const oldSession = sessionManager.findByReconnectToken(reconnectToken);
-          if (oldSession) {
+          if (oldSession && oldSession.uid === auth.uid) {
+            const savedChannels = new Set(oldSession.subscriptions);
             subscriptionManager.unsubscribeAll(oldSession.socketId, oldSession);
-          }
-          const restored = sessionManager.restoreSession(reconnectToken, socketId);
-          if (restored) {
-            session = restored;
-            metricsService.inc('reconnectsHandled');
-            logger.info('session_restored', { uid: auth.uid, socketId });
+            const restored = sessionManager.restoreSession(reconnectToken, socketId);
+            if (restored) {
+              session = restored;
+              for (const ch of savedChannels) {
+                subscriptionManager.subscribe(socketId, ch, ws, session);
+              }
+              metricsService.inc('reconnectsHandled');
+              logger.info('session_restored', { uid: auth.uid, socketId, restoredChannels: Array.from(savedChannels) });
+            }
           }
         }
       }
@@ -130,54 +168,38 @@ export class WebSocketServer {
       }
 
       connectionRegistry.register(socketId, ws, session);
-      sendToSocket(ws, { type: 'auth_ok', data: { uid: auth.uid, role: auth.role } });
+
+      // Deliver the reconnect token so the client can persist it and restore
+      // this session (subscriptions, busId, tripId) on its next connection.
+      // Previously the token was only ever written into the server's
+      // reconnectTokens map and never sent — session restore was dead code.
+      sendToSocket(ws, {
+        type: 'auth_ok',
+        data: { uid: auth.uid, role: auth.role, reconnect_token: session.reconnectToken },
+      });
 
       logger.info('audit', { action: 'connected', uid: auth.uid!, role: auth.role || 'unknown', socketId, ip });
 
-      drainQueue(socketId, (channel, event, payload) => {
+      drainQueue(session.uid, (channel, event, payload) => {
         sendToSocket(ws, { type: 'message', channel, event, payload });
       });
 
+      // Replace the buffering listener with the real message handler, then
+      // replay everything received during authentication through the normal
+      // pipeline (rate limit, replay check, routing).
+      ws.removeListener('message', bufferMessage);
       ws.on('message', (data) => {
         if (this.shuttingDown) {
           ws.close(4003, 'Server shutting down');
           return;
         }
-
-        const raw = data.toString();
-
-        const validation = validatePayload(raw);
-        if (!validation.valid) {
-          metricsService.inc('invalidMessages');
-          sendToSocket(ws, { type: 'error', message: validation.error || 'Invalid message' });
-          return;
-        }
-
-        if (!checkRateLimit(ip, auth.uid!, socketId)) {
-          metricsService.inc('rateLimitBlocks');
-          metricsService.inc('errors');
-          sendToSocket(ws, { type: 'error', message: 'Rate limit exceeded' });
-          return;
-        }
-
-        const decoded = decode(raw);
-        if (!decoded) {
-          metricsService.inc('invalidMessages');
-          sendToSocket(ws, { type: 'error', message: 'Invalid message' });
-          return;
-        }
-
-        if (decoded.type === 'broadcast' && session.role === 'server') {
-          if (decoded.nonce && !checkReplay(decoded.nonce as string)) {
-            metricsService.inc('replayDetected');
-            sendToSocket(ws, { type: 'error', message: 'Replay detected' });
-            return;
-          }
-        }
-
-        metricsService.inc('messagesReceived');
-        routeMessage(ws, session, raw);
+        this.processMessage(ws, session, ip, data);
       });
+
+      for (const buffered of preAuthBuffer) {
+        if (this.isAuthMessage(buffered)) continue; // consumed by Path B already
+        this.processMessage(ws, session, ip, buffered);
+      }
 
       ws.on('pong', () => {
         sessionManager.updateHeartbeat(socketId);
@@ -203,8 +225,67 @@ export class WebSocketServer {
     heartbeatService.start();
   }
 
+  private isAuthMessage(data: any): boolean {
+    try {
+      const parsed = JSON.parse(data.toString());
+      return parsed?.type === 'auth' && !!parsed?.token;
+    } catch {
+      return false;
+    }
+  }
+
+  // Single parse of each inbound message: size check, shape validation,
+  // rate limit, replay guard, then routing. Used for live messages and for
+  // replay of messages buffered during authentication.
+  private processMessage(ws: WebSocket, session: Session, ip: string, data: any): void {
+    const raw = data.toString();
+
+    const sizeCheck = validatePayload(raw);
+    if (!sizeCheck.valid) {
+      metricsService.inc('invalidMessages');
+      metricsService.inc('payloadTooLarge');
+      sendToSocket(ws, { type: 'error', message: sizeCheck.error || 'Invalid message' });
+      return;
+    }
+
+    let parsed: any;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      metricsService.inc('invalidMessages');
+      sendToSocket(ws, { type: 'error', message: 'Invalid JSON' });
+      return;
+    }
+
+    const validation = validateMessage(parsed);
+    if (!validation.valid) {
+      metricsService.inc('invalidMessages');
+      sendToSocket(ws, { type: 'error', message: validation.error || 'Invalid message' });
+      return;
+    }
+
+    if (!checkRateLimit(ip, session.uid, session.socketId)) {
+      metricsService.inc('rateLimitBlocks');
+      metricsService.inc('errors');
+      sendToSocket(ws, { type: 'error', message: 'Rate limit exceeded' });
+      return;
+    }
+
+    if (parsed.type === 'broadcast' && session.role === 'server') {
+      if (parsed.nonce && !checkReplay(parsed.nonce as string)) {
+        metricsService.inc('replayDetected');
+        sendToSocket(ws, { type: 'error', message: 'Replay detected' });
+        return;
+      }
+    }
+
+    metricsService.inc('messagesReceived');
+    routeMessage(ws, session, parsed);
+  }
+
   broadcastToChannel(channel: string, event: string, payload: Record<string, unknown>): void {
     const subscriberIds = subscriptionManager.getSubscribers(channel);
+    if (subscriberIds.length === 0) return;
     const msg = encodeMsg({ type: 'message', channel, event, payload });
     let sent = 0;
 
@@ -216,7 +297,7 @@ export class WebSocketServer {
           entry.ws.send(msg);
           sent++;
         } else if (entry) {
-          enqueueOffline(socketId, channel, event, payload);
+          enqueueOffline(entry.session.uid, channel, event, payload);
         }
       }
     }
@@ -253,7 +334,7 @@ export class WebSocketServer {
           entry.ws.send(msg);
           sent++;
         } else if (entry) {
-          enqueueOffline(socketId, primaryChannel, event, payload);
+          enqueueOffline(entry.session.uid, primaryChannel, event, payload);
         }
       }
     }

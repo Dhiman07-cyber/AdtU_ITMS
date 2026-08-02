@@ -1,7 +1,7 @@
 import { sessionManager } from './session-manager';
 import { connectionRegistry } from './connection-registry';
 import { subscriptionManager } from './subscription-manager';
-import { clearQueue } from './offline-queue';
+import { heartbeatService } from './heartbeat-service';
 
 export class ConnectionCleanupService {
   cleanup(socketId: string): void {
@@ -9,10 +9,9 @@ export class ConnectionCleanupService {
     if (session) {
       subscriptionManager.unsubscribeAll(socketId, session);
     }
+    heartbeatService.cleanup(socketId);
     sessionManager.delete(socketId);
     connectionRegistry.unregister(socketId);
-    // Immediately free offline queue memory — don't wait for 5-min TTL
-    clearQueue(socketId);
   }
 
   cleanupAll(): void {

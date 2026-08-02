@@ -16,6 +16,7 @@
  */
 
 import { emitEvent } from '@/domains/realtime/event-emitter';
+import { clearInMemoryLastLocation } from '@/domains/gps/services/gps-pipeline.service';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import crypto from 'crypto';
 import { NextResponse } from 'next/server';
@@ -85,6 +86,9 @@ export async function GET(request: Request) {
                 // the old serial loop would take N × 2 DB round-trips before completing.
                 const cleanupResults = await Promise.allSettled(
                     cleanedLocks.map(async (lock: any) => {
+                        // Drop the in-memory GPS anchor so a new trip on this
+                        // bus isn't jump-rejected against a stale position.
+                        clearInMemoryLastLocation(lock.cleaned_bus_id);
                         // Non-critical broadcast — fire and forget
                         emitEvent(`trip-status-${lock.cleaned_bus_id}`, 'trip_ended', {
                             busId: lock.cleaned_bus_id,

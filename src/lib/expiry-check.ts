@@ -86,13 +86,13 @@ export async function checkAndNotifyExpiringStudents(force: boolean = false): Pr
         let title = "Bus Service Renewal Reminder";
         let body = "";
 
-        if (runR1 && currentCount === 0) {
+        if (runR1 && currentCount < 1) {
           shouldSend = true;
           body = `Your bus service (session ${studentData.sessionStartYear}-${studentData.sessionEndYear}) will expire on ${new Date(studentData.validUntil).toLocaleDateString('en-IN', { year: 'numeric', month: 'long', day: 'numeric' })}. Please renew by visiting the Bus Office or apply online to continue your service.`;
-        } else if (runR2 && currentCount === 1) {
+        } else if (runR2 && currentCount < 2) {
           shouldSend = true;
           body = `This is your second reminder that your bus service (session ${studentData.sessionStartYear}-${studentData.sessionEndYear}) will expire on ${new Date(studentData.validUntil).toLocaleDateString('en-IN', { year: 'numeric', month: 'long', day: 'numeric' })}. Please apply online to renew.`;
-        } else if (runFinal && currentCount === 2) {
+        } else if (runFinal && currentCount < 3) {
           shouldSend = true;
           title = "Final Reminder: Bus Service Expiring Soon";
           body = `This is a final reminder that your bus service expires on ${new Date(studentData.validUntil).toLocaleDateString('en-IN', { year: 'numeric', month: 'long', day: 'numeric' })}. Only 15 days left! Renew now to avoid service interruption.`;

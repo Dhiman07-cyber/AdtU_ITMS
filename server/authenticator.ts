@@ -1,6 +1,11 @@
 import type { IncomingMessage } from 'http';
 
-const PRIVILEGED_TOKEN = process.env.WS_PRIVILEGED_TOKEN || '__server__';
+const configuredToken = process.env.WS_PRIVILEGED_TOKEN;
+const PRIVILEGED_TOKEN = configuredToken || '__server__';
+// Fail closed in production: without an explicitly configured WS_PRIVILEGED_TOKEN
+// the well-known '__server__' default must NOT authenticate anyone as the server
+// bridge. In dev the default keeps local setups working.
+const privilegedAuthEnabled = !!configuredToken || process.env.NODE_ENV !== 'production';
 
 export interface AuthResult {
   authenticated: boolean;
@@ -21,7 +26,7 @@ export async function authenticateSocket(request: IncomingMessage): Promise<Auth
   const token = extractToken(request);
   if (!token) return { authenticated: false, error: 'Missing or invalid token' };
 
-  if (token === PRIVILEGED_TOKEN) {
+  if (privilegedAuthEnabled && token === PRIVILEGED_TOKEN) {
     return { authenticated: true, uid: 'server', role: 'server' };
   }
 
@@ -66,7 +71,16 @@ export async function authenticateSocket(request: IncomingMessage): Promise<Auth
 }
 
 function extractToken(request: IncomingMessage): string | null {
-  const url = new URL(request.url || '/', 'http://localhost');
+  // A malformed request.url (e.g. a stray "%zz" in the query string) makes
+  // the URL constructor throw. This runs before any try/catch in
+  // authenticateSocket, so an uncaught throw here would crash the process
+  // via an unhandled rejection in the ws 'connection' handler.
+  let url: URL;
+  try {
+    url = new URL(request.url || '/', 'http://localhost');
+  } catch {
+    return null;
+  }
   const queryToken = url.searchParams.get('token');
   if (queryToken) return queryToken;
 

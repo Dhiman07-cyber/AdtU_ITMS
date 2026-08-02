@@ -1,4 +1,10 @@
-const PRIVILEGED_TOKEN = process.env.WS_PRIVILEGED_TOKEN || '__server__';
+const privilegedToken = process.env.WS_PRIVILEGED_TOKEN;
+// Fail closed in production: without an explicitly configured WS_PRIVILEGED_TOKEN
+// the Next.js process cannot authenticate as the server bridge — connecting with
+// the well-known '__server__' default would work in dev but is a production
+// misconfiguration (anyone guessing the default could impersonate the server).
+const privilegedAuthEnabled = !!privilegedToken || process.env.NODE_ENV !== 'production';
+const PRIVILEGED_TOKEN = privilegedToken || '__server__';
 
 const MAX_QUEUE = 500;
 
@@ -11,6 +17,10 @@ export class WebSocketTransport {
   private sendQueue: string[] = [];
 
   async connect(): Promise<void> {
+    if (!privilegedAuthEnabled) {
+      console.warn('[WebSocketTransport] WS_PRIVILEGED_TOKEN is not configured in production; server bridge disabled. Events will queue.');
+      return;
+    }
     const port = process.env.WS_PORT || '3001';
     const host = process.env.WS_HOST || '127.0.0.1';
     if (this.connected) return;

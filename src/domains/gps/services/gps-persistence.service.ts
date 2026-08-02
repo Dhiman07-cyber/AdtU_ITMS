@@ -12,6 +12,14 @@ const CACHE_TTL_MS = 10_000; // 10 seconds
 export function invalidateActiveTripCache(busId?: string, driverId?: string): void {
   if (busId && driverId) {
     tripLockCache.delete(`${driverId}:${busId}`);
+    tripLockCache.delete(`${busId}:${driverId}`);
+  } else if (busId || driverId) {
+    const target = busId || driverId;
+    for (const key of tripLockCache.keys()) {
+      if (key.includes(target!)) {
+        tripLockCache.delete(key);
+      }
+    }
   } else {
     tripLockCache.clear();
   }
@@ -46,6 +54,11 @@ export async function checkActiveTrip(driverId: string, busId: string, tripId: s
 
   if (tripId && activeTrip.trip_id !== tripId) {
     return { valid: false, reason: 'Trip mismatch for location update' };
+  }
+
+  if (tripLockCache.size > 5000) {
+    const firstKey = tripLockCache.keys().next().value;
+    if (firstKey) tripLockCache.delete(firstKey);
   }
 
   tripLockCache.set(cacheKey, {

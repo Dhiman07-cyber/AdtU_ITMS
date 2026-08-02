@@ -1,4 +1,4 @@
-﻿import { getAllBuses,getBusById } from '@/domains/fleet';
+import { getAllBuses,getBusById } from '@/domains/fleet';
 import { getStudentById,updateStudent } from '@/domains/identity';
 import { db as adminDb } from '@/lib/firebase-admin';
 import { withSecurity } from '@/lib/security/api-security';
@@ -59,9 +59,9 @@ export const POST = withSecurity(
     let isAuthorized = false;
 
     // Check if driver is assigned to student's bus (from PG)
-    const busId = studentData.busId || studentData.busId;
-    if (busId) {
-      const busData = await getBusById(busId);
+    const studentBusId = studentData.busId || studentData.bus_id;
+    if (studentBusId) {
+      const busData = await getBusById(studentBusId);
       if (busData) {
         if ((busData as any).assignedDriverId === driverUid || busData.driverUID === driverUid) {
           isAuthorized = true;
@@ -72,11 +72,11 @@ export const POST = withSecurity(
     // Also check if driver is assigned to any bus that has this student
     if (!isAuthorized) {
       const allBuses = await getAllBuses();
-      const driverBuses = allBuses.filter(b => (b as any).assignedDriverId === driverUid);
+      const driverBuses = allBuses.filter(b => (b as any).assignedDriverId === driverUid || b.driverUID === driverUid);
 
       for (const bus of driverBuses) {
-        const busId = bus.busId || bus.id || '';
-        if (busId === busId) {
+        const bId = bus.busId || bus.id || '';
+        if (bId && studentBusId && bId === studentBusId) {
           isAuthorized = true;
           break;
         }
@@ -90,8 +90,33 @@ export const POST = withSecurity(
       );
     }
 
+    // Perform atomic CAS check on request status in Firestore FIRST
+    const requestRef = adminDb.collection('profile_update_requests').doc(requestId);
+    let casWon = false;
+    try {
+      await adminDb.runTransaction(async (transaction) => {
+        const doc = await transaction.get(requestRef);
+        if (!doc.exists || doc.data()?.status !== 'pending') {
+          return;
+        }
+        transaction.update(requestRef, {
+          status: action === 'approve' ? 'approved' : 'rejected',
+          processedAt: new Date().toISOString(),
+          processedBy: driverUid,
+          updatedAt: new Date().toISOString()
+        });
+        casWon = true;
+      });
+    } catch (casErr) {
+      console.error('CAS transaction error:', casErr);
+    }
+
+    if (!casWon) {
+      return NextResponse.json({ success: true, message: 'Request already processed' });
+    }
+
     if (action === 'approve') {
-      // Delete the old profile photo from Cloudinary if it exists
+      // Delete the old profile photo from Cloudinary if it exists (only after winning CAS)
       if (requestData.currentImageUrl && requestData.currentImageUrl.includes('cloudinary') && cloudinary.config().api_key) {
         try {
           const url = new URL(requestData.currentImageUrl);
@@ -112,31 +137,12 @@ export const POST = withSecurity(
         }
       }
 
-      // Check current status in Firestore
-      const requestRef = adminDb.collection('profile_update_requests').doc(requestId);
-      const freshRequest = await requestRef.get();
-      if (!freshRequest.exists || freshRequest.data()?.status !== 'pending') {
-        return NextResponse.json({ success: true, message: 'Request already processed' });
-      }
-
       // ─── COMMIT TO POSTGRESQL (Canonical Source of Truth) ───
       await updateStudent(requestData.studentUid, {
         profilePhotoUrl: requestData.newImageUrl,
         fullName: requestData.newName,
         pendingProfileUpdate: null
       });
-
-      // Update request status in Firestore
-      try {
-        await requestRef.update({
-          status: 'approved',
-          approvedAt: new Date().toISOString(),
-          approvedBy: driverUid,
-          updatedAt: new Date().toISOString()
-        });
-      } catch (fsErr) {
-        console.error('⚠️ Firestore mirroring failed during approval:', fsErr);
-      }
 
       console.log(`Profile update approved for student ${requestData.studentUid}: ${requestId}`);
 
@@ -146,7 +152,7 @@ export const POST = withSecurity(
       });
     } else {
       // action === 'reject'
-      // Delete the new profile photo from Cloudinary since it's being rejected
+      // Delete the new profile photo from Cloudinary since it's being rejected (only after winning CAS)
       if (requestData.newImageUrl && requestData.newImageUrl.includes('cloudinary') && cloudinary.config().api_key) {
         try {
           const url = new URL(requestData.newImageUrl);
@@ -165,13 +171,6 @@ export const POST = withSecurity(
         } catch (cloudinaryError) {
           console.error('Error deleting rejected profile photo from Cloudinary:', cloudinaryError);
         }
-      }
-
-      // Check current status in Firestore
-      const requestRef = adminDb.collection('profile_update_requests').doc(requestId);
-      const freshRequest = await requestRef.get();
-      if (!freshRequest.exists || freshRequest.data()?.status !== 'pending') {
-        return NextResponse.json({ success: true, message: 'Request already processed' });
       }
 
       // ─── COMMIT TO POSTGRESQL (Canonical Source of Truth) ───

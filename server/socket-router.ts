@@ -17,15 +17,7 @@ export function handle(type: string, handler: MessageHandler): void {
   handlers.set(type, handler);
 }
 
-export function routeMessage(ws: WebSocket, session: Session, raw: string): void {
-  let parsed: any;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    send(ws, { type: 'error', message: 'Invalid JSON' });
-    return;
-  }
-
+export function routeMessage(ws: WebSocket, session: Session, parsed: any): void {
   const { type, ...payload } = parsed;
   if (!type || typeof type !== 'string') {
     send(ws, { type: 'error', message: 'Message must have a "type" field' });
@@ -70,7 +62,14 @@ export function clearLiveBusLocation(busId: string): void {
 }
 
 export function getLiveBusLocation(busId: string): Record<string, unknown> | undefined {
-  return liveBusLocations.get(busId);
+  const loc = liveBusLocations.get(busId);
+  if (!loc) return undefined;
+  const ts = new Date(loc.timestamp as string || 0).getTime();
+  if (ts > 0 && Date.now() - ts > 60000) {
+    liveBusLocations.delete(busId);
+    return undefined;
+  }
+  return loc;
 }
 
 handle('subscribe', (ws, session, payload) => {
@@ -101,6 +100,10 @@ handle('unsubscribe', (ws, session, payload) => {
 
 handle('pong', (ws, session) => {
   sessionManager.updateHeartbeat(session.socketId);
+  metricsService.inc('heartbeatsSent');
+  // Reply so the client can detect a silently-dead server: the client closes
+  // and reconnects when no message (incl. this ack) arrives for >3 ping cycles.
+  send(ws, { type: 'pong_ack' });
 });
 
 handle('presence', (ws, session, payload) => {
@@ -116,6 +119,7 @@ handle('location_update', (ws, session, payload) => {
   // Students, moderators and other roles are rejected immediately.
   if (session.role !== 'driver') {
     send(ws, { type: 'error', message: 'Only drivers may publish location updates' });
+    metricsService.inc('gpsRejected');
     metricsService.inc('errors');
     logger.warn('location_update_unauthorized', {
       uid: session.uid,
@@ -134,6 +138,7 @@ handle('location_update', (ws, session, payload) => {
 
   if (!busId) {
     send(ws, { type: 'error', message: 'location_update requires a busId. Send a presence message first.' });
+    metricsService.inc('gpsRejected');
     return;
   }
 
@@ -144,6 +149,7 @@ handle('location_update', (ws, session, payload) => {
 
   if (claimedBusId && session.busId && claimedBusId !== session.busId) {
     send(ws, { type: 'error', message: 'busId mismatch: claimed bus does not match your active trip bus' });
+    metricsService.inc('gpsRejected');
     metricsService.inc('errors');
     logger.warn('location_update_bus_mismatch', {
       uid: session.uid,
@@ -169,8 +175,12 @@ handle('location_update', (ws, session, payload) => {
   wsServer.broadcastToChannel(`bus:${busId}`, 'bus_location_update', locPayload);
   wsServer.broadcastToChannel(`bus_location_${busId}`, 'bus_location_update', locPayload);
   // Cross-node relay: publish to Redis so other WS nodes broadcast to their local subscribers.
+  // The channel must match what subscribers actually listen on (bus_location_${busId}).
+  // Publishing only `bus:${busId}` here meant cross-node location updates never reached
+  // any subscriber — only single-node deployments worked by luck.
   // publishToRedis is fire-and-forget; gracefully no-ops when Redis is not configured.
-  publishToRedis(`bus:${busId}`, 'bus_location_update', locPayload);
+  publishToRedis(`bus_location_${busId}`, 'bus_location_update', locPayload);
+  metricsService.inc('gpsAccepted');
 });
 
 handle('broadcast', (ws, session, payload) => {
@@ -186,13 +196,19 @@ handle('broadcast', (ws, session, payload) => {
   }
   const eventPayload = (payload.payload || {}) as Record<string, unknown>;
   const busIdMatch = channel.match(/^(?:bus:|bus_location_)(.+)$/);
-  if (busIdMatch && event === 'bus_location_update') {
-    updateLiveBusLocation(busIdMatch[1], eventPayload);
+  if (busIdMatch) {
+    if (event === 'bus_location_update') {
+      updateLiveBusLocation(busIdMatch[1], eventPayload);
+    } else if (event === 'trip_ended') {
+      clearLiveBusLocation(busIdMatch[1]);
+    }
   }
   wsServer.broadcastToChannel(channel, event, eventPayload);
   // Cross-node relay: server-originated events (trip_started, trip_ended, etc.)
   // must also reach subscribers on other WS nodes.
   publishToRedis(channel, event, eventPayload);
+  if (event === 'trip_started') metricsService.inc('tripsStarted');
+  if (event === 'trip_ended') metricsService.inc('tripsEnded');
 });
 
 export { send as sendToSocket };

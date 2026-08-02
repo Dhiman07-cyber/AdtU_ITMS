@@ -37,6 +37,14 @@ export function getSupabaseServer(): SupabaseClient {
         autoRefreshToken: false,
         persistSession: false,
       },
+      global: {
+        fetch: (input, init) => {
+          return fetch(input, {
+            ...init,
+            signal: init?.signal || AbortSignal.timeout(10000),
+          });
+        },
+      },
       // Disable realtime on server — we only need REST
       realtime: { params: { eventsPerSecond: 0 } },
     });

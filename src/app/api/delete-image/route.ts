@@ -58,6 +58,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // SECURITY: Ownership check for non-admin/moderator users
+    const { resolveUserRole } = await import('@/lib/security/role-cache');
+    const userRole = await resolveUserRole(user.uid);
+    if (!['admin', 'moderator'].includes(userRole.role)) {
+      if (!publicId.includes(user.uid)) {
+        return NextResponse.json(
+          { error: 'Forbidden: You can only delete your own uploaded images' },
+          { status: 403 }
+        );
+      }
+    }
+
     // ── 4. Delete via SDK (never send api_secret in a form) ───────────────
     const deleted = await deleteAsset(publicId);
 

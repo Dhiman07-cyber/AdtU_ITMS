@@ -43,6 +43,7 @@ export class WebSocketClient {
   private pendingSubscriptions = new Set<string>();
   private currentToken: string;
   private visibilityHandler: (() => void) | null = null;
+  private lastActivity = 0;
 
   constructor(config: WsClientConfig) {
     this.config = {
@@ -78,6 +79,7 @@ export class WebSocketClient {
         }
       } else {
         this.paused = false;
+        this.lastActivity = Date.now();
         if (this.isConnected()) {
           this.startPing();
         } else if (!this.destroyed) {
@@ -131,11 +133,15 @@ export class WebSocketClient {
       // compatibility. When Phase-05 removes URL token support, remove the URL
       // param from connectInternal() and rely solely on this message.
       this.send({ type: 'auth', token: this.currentToken });
-      for (const ch of this.pendingSubscriptions) this.send({ type: 'subscribe', channel: ch });
+      // Resend ALL active channel subscriptions registered in handlers to ensure no dropped channels on reconnect
+      for (const ch of this.handlers.keys()) {
+        this.send({ type: 'subscribe', channel: ch });
+      }
     };
 
     this.ws.onmessage = (event) => {
       try {
+        this.lastActivity = Date.now();
         const msg = JSON.parse(event.data);
         if (msg.type === 'message' && msg.channel) {
           const channelHandlers = this.handlers.get(msg.channel);
@@ -148,6 +154,10 @@ export class WebSocketClient {
           const store = getStorage();
           if (msg.data?.reconnect_token && store) {
             store.setItem(STORAGE_KEY, msg.data.reconnect_token);
+          }
+          // Re-affirm channel subscriptions on auth_ok
+          for (const ch of this.handlers.keys()) {
+            this.send({ type: 'subscribe', channel: ch });
           }
         } else if (msg.type === 'auth_required') {
           this.handleAuthRequired();
@@ -163,12 +173,7 @@ export class WebSocketClient {
       this.stopPing();
       this.emitStatus('disconnected');
       if (event.code === 4001 || event.reason === 'Authentication failed') {
-        if (this.config.getNewToken) {
-          this.handleAuthRequired();
-        } else {
-          console.warn('[WS Client] WebSocket closed due to auth failure (4001). Reconnect stopped.');
-          this.emitStatus('error');
-        }
+        this.handleAuthRequired();
       } else {
         this.scheduleReconnect();
       }
@@ -180,15 +185,25 @@ export class WebSocketClient {
   }
 
   private async handleAuthRequired(): Promise<void> {
-    if (this.config.getNewToken) {
-      try {
-        const newToken = await this.config.getNewToken();
+    try {
+      let newToken: string | null = null;
+      if (this.config.getNewToken) {
+        newToken = await this.config.getNewToken();
+      } else {
+        const { auth } = await import('@/lib/firebase');
+        if (auth.currentUser) {
+          newToken = await auth.currentUser.getIdToken(true);
+        }
+      }
+      if (newToken) {
         this.currentToken = newToken;
         this.reconnectAttempts = 0;
         this.connectInternal();
-      } catch {
+      } else {
         this.emitStatus('error');
       }
+    } catch {
+      this.emitStatus('error');
     }
   }
 
@@ -265,8 +280,21 @@ export class WebSocketClient {
 
   private startPing(): void {
     this.stopPing();
+    this.lastActivity = Date.now();
+    // Watchdog: the server replies pong_ack to every app-level pong, so a
+    // healthy connection sees a message at least once per ping cycle. If
+    // nothing arrives for 3 cycles the server (or network path) is dead —
+    // the browser would keep the socket OPEN forever without this. Force a
+    // close; onclose triggers the normal reconnect path.
+    const watchTimeout = Math.max(30000, (this.config.pingInterval || 25000) * 3);
     this.pingTimer = setInterval(() => {
-      if (this.isConnected()) this.send({ type: 'pong' });
+      if (!this.isConnected()) return;
+      if (Date.now() - this.lastActivity > watchTimeout) {
+        console.warn('[WS Client] Server heartbeat timeout - reconnecting');
+        this.ws?.close();
+        return;
+      }
+      this.send({ type: 'pong' });
     }, this.config.pingInterval || 25000);
   }
 

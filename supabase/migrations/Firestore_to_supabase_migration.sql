@@ -1178,9 +1178,6 @@ CREATE INDEX IF NOT EXISTS idx_student_profiles_bus_shift ON student_profiles(bu
 CREATE INDEX IF NOT EXISTS idx_student_profiles_seat_released_at ON student_profiles(seat_released_at) WHERE seat_released_at IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_driver_profiles_email ON driver_profiles(email);
-CREATE INDEX IF NOT EXISTS idx_driver_profiles_bus_id ON driver_profiles(bus_id);
-CREATE INDEX IF NOT EXISTS idx_driver_profiles_route_id ON driver_profiles(route_id);
-CREATE INDEX IF NOT EXISTS idx_driver_profiles_shift ON driver_profiles(shift);
 CREATE INDEX IF NOT EXISTS idx_driver_profiles_status ON driver_profiles(status);
 CREATE INDEX IF NOT EXISTS idx_driver_profiles_is_reserved ON driver_profiles(is_reserved);
 

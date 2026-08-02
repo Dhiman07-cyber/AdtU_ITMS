@@ -24,6 +24,10 @@ export class HeartbeatService {
     }
   }
 
+  cleanup(socketId: string): void {
+    this.missedCount.delete(socketId);
+  }
+
   private check(): void {
     const now = Date.now();
     const threshold = PING_INTERVAL + TIMEOUT_GRACE;

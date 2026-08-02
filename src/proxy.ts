@@ -35,6 +35,10 @@ function checkGlobalRateLimit(ip: string): { allowed: boolean; remaining: number
         for (const [key, entry] of ipRequestCounts) {
             if (now > entry.resetTime) ipRequestCounts.delete(key);
         }
+        if (ipRequestCounts.size >= IP_CACHE_MAX) {
+            const keys = Array.from(ipRequestCounts.keys()).slice(0, 1000);
+            for (const k of keys) ipRequestCounts.delete(k);
+        }
     }
 
     const entry = ipRequestCounts.get(ip);

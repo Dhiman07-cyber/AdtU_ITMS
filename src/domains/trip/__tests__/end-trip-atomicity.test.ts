@@ -50,6 +50,9 @@ describe('Trip end — atomicity and idempotency', () => {
             maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
           })),
         })),
+        delete: vi.fn(() => ({
+          eq: vi.fn().mockResolvedValue({ data: null, error: null }),
+        })),
       };
     });
   });

@@ -57,11 +57,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    if (userData.role === 'moderator') {
+      const { requireModeratorPermission } = await import('@/lib/security/moderator-permissions');
+      const authObj = { uid: decodedToken.uid, email: decodedToken.email || '', role: 'moderator', name: userData.fullName || '' };
+      const permDenied = await requireModeratorPermission(authObj, 'students', 'canEdit');
+      if (permDenied) return permDenied;
+    }
+
     // Fetch deadline configuration
     const config = await getDeadlineConfig();
 
     const body = await request.json();
-    const { renewals, paymentMode, transactionId, adminUid } = body;
+    const { renewals, paymentMode, transactionId } = body;
+    const actorUid = decodedToken.uid; // Always use authenticated token UID instead of untrusted body parameter
 
     // Validate input
     if (!renewals || !Array.isArray(renewals) || renewals.length === 0) {
@@ -91,12 +99,21 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: 'Database connection failed' }, { status: 500 });
     }
 
-    const opKey = (body.idempotencyKey as string) || crypto
-      .createHash('sha256')
-      .update(JSON.stringify({ actor: decodedToken.uid, paymentMode, transactionId: transactionId || null, renewals }))
-      .digest('hex');
+    if (transactionId && paymentMode === 'manual') {
+      const { data: existingTx } = await supabase
+        .from('payment_ledger')
+        .select('payment_id')
+        .eq('payment_id', `manual_${transactionId}`)
+        .maybeSingle();
 
-    const operationKey = `renew_${opKey}`;
+      if (existingTx) {
+        return NextResponse.json({
+          success: true,
+          message: 'Transaction already processed (idempotent duplicate)',
+          alreadyProcessed: true
+        });
+      }
+    }
 
     // Process renewals
     const results: Array<{

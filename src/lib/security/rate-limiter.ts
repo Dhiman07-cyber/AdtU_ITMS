@@ -185,7 +185,9 @@ export const RateLimits = {
     DELETE: { maxRequests: 10, windowMs: 60000 },   // 10 per minute
 
     // Real-time tracking
-    LOCATION_UPDATE: { maxRequests: 60, windowMs: 60000 },  // 1 per second max
+    // 240/min allows a 2s GPS cadence (30/min) with headroom for retries and
+    // faster device intervals; 60/min blocked phones that sent every 1-1.5s.
+    LOCATION_UPDATE: { maxRequests: 240, windowMs: 60000 },
     WAITING_FLAG: { maxRequests: 10, windowMs: 60000 },     // 10 per minute (tightened)
     /** Authenticated Maps JS bootstrap (avoid hammering while key stays server-side). */
     MAPS_CLIENT_CONFIG: { maxRequests: 20, windowMs: 60000 },

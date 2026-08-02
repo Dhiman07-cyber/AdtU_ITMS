@@ -21,6 +21,12 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     const driver = await getDriverById(id);
     if (!driver) return NextResponse.json({ error: 'Driver not found' }, { status: 404 });
 
+    const isStaffOrOwner = ['admin', 'moderator'].includes(auth.role) || auth.uid === id;
+    if (!isStaffOrOwner) {
+      const { aadharNumber, licenseNumber, dob, address, emergencyContact, bankDetails, ...safeDriver } = driver as any;
+      return NextResponse.json({ driver: safeDriver });
+    }
+
     return NextResponse.json({ driver });
   } catch (error) {
     console.error('Error fetching driver:', error);

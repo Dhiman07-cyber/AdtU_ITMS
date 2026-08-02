@@ -1237,7 +1237,7 @@ export default function DriverLiveTrackingPage() {
       const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
 
       try {
-        const response = await fetch("/api/driver/end-trip", {
+        const response = await fetch("/api/driver/end-journey-v2", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",

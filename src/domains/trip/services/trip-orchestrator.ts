@@ -9,6 +9,8 @@ import { broadcastTripEvent } from './trip-broadcast.service';
 import { cleanupTrip } from './trip-cleanup.service';
 import { dispatchTripNotification } from './trip-notification.service';
 import { checkNoConflict,resolveRouteId,resolveRouteName,tripStartPreflight,verifyDriverBusAssignment } from './trip-validation.service';
+import { invalidateActiveTripCache } from '@/domains/gps/services/gps-persistence.service';
+import { clearInMemoryLastLocation } from '@/domains/gps/services/gps-pipeline.service';
 
 type ShiftLower = 'morning' | 'evening' | 'both';
 
@@ -93,6 +95,11 @@ export async function startTrip(params: StartTripParams): Promise<StartTripOutpu
     return { success: false, reason: lockResult.reason, errorCode: lockResult.errorCode };
   }
 
+  // Drop any cached trip-lock entries for this driver/bus — the GPS pipeline's
+  // 10s checkActiveTrip cache would otherwise reject (trip mismatch) or accept
+  // updates against the previous trip after a quick restart.
+  invalidateActiveTripCache(params.busId, params.driverId);
+
   const activeTripId = lockResult.tripId || tripId;
   const busNumber = preflight.busData?.bus_number || params.busId;
 
@@ -167,16 +174,26 @@ export async function endTrip(params: EndTripParams): Promise<EndTripOutput> {
     return { success: true, reason: 'No active trip found' };
   }
 
-  // Run endTrip RPC and trip cleanup concurrently — cleanup is non-critical
+  // Run endTrip RPC and trip cleanup concurrently — cleanup is non-critical.
+  // Also drop the persisted bus_locations row so the next trip can never
+  // surface this trip's stale position (harmless if the trip stays active:
+  // the next throttled GPS write re-persists within 30s).
   const [endResult] = await Promise.all([
     tripLockService.endTrip(activeTripId, params.driverId, params.busId),
     cleanupTrip({ driverId: params.driverId, busId: params.busId, tripId: activeTripId }),
+    supabase.from('bus_locations').delete().eq('bus_id', params.busId),
   ]);
 
   if (!endResult.success) {
     appLogger.error('trip', 'end_failed', { ...logCtx, tripId: activeTripId, reason: endResult.reason, errorClass: ErrorClass.TRIP_LOCK_FAILED, latencyMs: Date.now() - start });
     return { success: false, reason: endResult.reason };
   }
+
+  // The trip is over: the GPS pipeline must not compare the next trip's first
+  // update against this trip's last position (jump rejection for 5+ minutes on
+  // restart), and the 10s active-trip cache must not gate it on the old trip.
+  invalidateActiveTripCache(params.busId, params.driverId);
+  clearInMemoryLastLocation(params.busId);
 
   // Use bus_number already fetched during route resolution above (avoids a second buses query)
   const cachedBusNumber = (params as any)._cachedBusNumber;

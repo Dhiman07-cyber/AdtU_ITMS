@@ -17,8 +17,17 @@ route:
 
 receivers:
   - name: 'default-receiver'
+    webhook_configs:
+      - url: 'http://nextjs:3000/api/admin/alerts'
+        send_resolved: true
   - name: 'p0-critical-receiver'
+    webhook_configs:
+      - url: 'http://nextjs:3000/api/admin/alerts'
+        send_resolved: true
   - name: 'p1-urgent-receiver'
+    webhook_configs:
+      - url: 'http://nextjs:3000/api/admin/alerts'
+        send_resolved: true
 
 inhibit_rules:
   - source_match:

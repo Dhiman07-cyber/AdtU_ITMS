@@ -12,9 +12,12 @@ export const POST = withSecurity(
     const result = await tripService.heartbeat({ driverId, busId, tripId });
 
     if (!result.success) {
+      // Business-level failure (trip not found, ownership mismatch, bus
+      // mismatch) — 409, not 500: the client must not treat this as a
+      // retryable server error.
       return NextResponse.json(
         { success: false, reason: result.reason },
-        { status: 500 }
+        { status: 409 }
       );
     }
 

@@ -1,7 +1,6 @@
 import 'dotenv/config';
 import { createServer } from 'http';
 import { wsServer } from './websocket-server';
-import { transportManager } from './transport-manager';
 import { logger } from './structured-logger';
 import { healthService } from './health-service';
 import { metricsService } from './metrics-service';
@@ -109,7 +108,7 @@ async function main() {
       stopOfflineQueue();
       stopRateLimiter();
       stopMessageValidator();
-      transportManager.shutdown().then(() => forceExit());
+      forceExit();
     });
   };
 
@@ -120,6 +119,12 @@ async function main() {
 
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));
+  process.on('uncaughtException', (err) => {
+    logger.error('uncaught_exception', { error: err.message, stack: err.stack });
+  });
+  process.on('unhandledRejection', (reason) => {
+    logger.error('unhandled_rejection', { reason: String(reason) });
+  });
 }
 
 main().catch(err => {

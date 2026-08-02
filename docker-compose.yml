@@ -4,13 +4,19 @@ services:
     image: redis:7.2-alpine
     command: redis-server --save 60 1 --loglevel notice
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis-data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 3
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
     networks:
       - itms
 
@@ -20,7 +26,7 @@ services:
       context: .
       dockerfile: server/Dockerfile
     ports:
-      - "3001:3001"
+      - "127.0.0.1:3001:3001"
     environment:
       - NODE_ENV=production
       - WS_PORT=3001
@@ -37,8 +43,13 @@ services:
       interval: 15s
       timeout: 5s
       retries: 3
-      start_period: 10s
+      start_period: 15s
+    stop_grace_period: 40s
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 2048M
     networks:
       - itms
 
@@ -48,7 +59,7 @@ services:
       context: .
       dockerfile: server/Dockerfile
     ports:
-      - "3003:3001"
+      - "127.0.0.1:3003:3001"
     environment:
       - NODE_ENV=production
       - WS_PORT=3001
@@ -65,8 +76,13 @@ services:
       interval: 15s
       timeout: 5s
       retries: 3
-      start_period: 10s
+      start_period: 15s
+    stop_grace_period: 40s
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 2048M
     networks:
       - itms
 
@@ -91,7 +107,7 @@ services:
         NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET: ${NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET}
         NEXT_PUBLIC_CLOUDINARY_UPLOAD_ASSET_FOLDER: ${NEXT_PUBLIC_CLOUDINARY_UPLOAD_ASSET_FOLDER}
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     environment:
       - NODE_ENV=production
       - PORT=3000
@@ -106,6 +122,10 @@ services:
       retries: 3
       start_period: 15s
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1024M
     networks:
       - itms
 
@@ -133,7 +153,7 @@ services:
     container_name: itms-prometheus
     image: prom/prometheus:v2.54.0
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9090:9090"
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./prometheus/alerts:/etc/prometheus/alerts:ro
@@ -145,7 +165,7 @@ services:
     container_name: itms-alertmanager
     image: prom/alertmanager:v0.27.0
     ports:
-      - "9093:9093"
+      - "127.0.0.1:9093:9093"
     volumes:
       - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
     restart: unless-stopped
@@ -156,11 +176,8 @@ services:
     container_name: itms-grafana
     image: grafana/grafana:11.1.0
     ports:
-      - "3002:3000"
+      - "127.0.0.1:3002:3000"
     environment:
-      # Admin credentials — MUST be overridden via .env in production.
-      # GF_ADMIN_USER defaults to 'admin' for local dev (acceptable).
-      # GF_ADMIN_PASSWORD has NO default — production must set it.
       - GF_SECURITY_ADMIN_USER=${GF_ADMIN_USER:-admin}
       - GF_SECURITY_ADMIN_PASSWORD=${GF_ADMIN_PASSWORD:?GF_ADMIN_PASSWORD must be set in .env}
       - GF_USERS_ALLOW_SIGN_UP=false
@@ -174,6 +191,9 @@ services:
     restart: unless-stopped
     networks:
       - itms
+
+volumes:
+  redis-data:
 
 networks:
   itms:

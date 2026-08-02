@@ -60,20 +60,22 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       }
     }
 
+    const isSelfOrAdmin = auth.role === 'admin' || auth.uid === id;
+
     const moderator: Moderator = {
       id,
       name: modData.fullName || modData.name || '',
       email: modData.email || '',
-      phone: modData.phone || '',
-      alternatePhone: modData.alternatePhone || '',
+      phone: isSelfOrAdmin ? (modData.phone || '') : '',
+      alternatePhone: isSelfOrAdmin ? (modData.alternatePhone || '') : '',
       faculty: modData.faculty || '',
       assignedFaculty: modData.assignedFaculty || modData.faculty || '',
       joinDate: formattedJoiningDate,
       joiningDate: formattedJoiningDate,
       profilePhotoUrl: modData.profilePhotoUrl || '',
-      dob: formattedDob,
-      aadharNumber: modData.aadharNumber || '',
-      employeeId: modData.employeeId || '',
+      dob: isSelfOrAdmin ? formattedDob : '',
+      aadharNumber: isSelfOrAdmin ? (modData.aadharNumber || '') : '',
+      employeeId: isSelfOrAdmin ? (modData.employeeId || '') : '',
       createdAt: modData.createdAt || '',
     };
 

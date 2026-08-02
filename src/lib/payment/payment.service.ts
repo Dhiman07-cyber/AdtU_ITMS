@@ -129,6 +129,8 @@ export async function processCapturedPayment(paymentDetails: {
     console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] processCapturedPayment ENTER. paymentId:`, paymentId, `orderId:`, orderId, `amount:`, amount, `source:`, source);
 
     try {
+        const deadlineConfig = await getDeadlineConfig();
+
         // 1. Idempotency Check: check if already processed
         const isProcessed = await isPaymentProcessed(paymentId);
         if (isProcessed) {
@@ -146,6 +148,64 @@ export async function processCapturedPayment(paymentDetails: {
                     return { status: 'already_processed' };
                 }
                 console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] Self-healing missing renewal application for payment ${paymentId}`);
+                try {
+                    const enrollmentId = notes.enrollmentId || notes.studentId;
+                    const userId = notes.userId;
+                    const durationYears = parseInt(notes.durationYears || '1', 10) || 1;
+                    const studentName = notes.studentName || notes.userName || 'Unknown';
+                    let studentUid = userId || '';
+                    let actualStudentName = studentName;
+                    let studentEmail = '';
+                    let studentPhone = '';
+                    let studentData: any = null;
+                    if (studentUid) {
+                        const student = await getStudentByUid(studentUid);
+                        if (student) studentData = student as any;
+                    }
+                    if (studentData) {
+                        actualStudentName = studentData.fullName || studentName;
+                        studentEmail = studentData.email || '';
+                        studentPhone = studentData.phone || studentData.phoneNumber || '';
+                    }
+                    const existingValidUntil = studentData?.validUntil;
+                    let baseYear = new Date().getUTCFullYear();
+                    const now = new Date();
+                    if (existingValidUntil) {
+                        const existingDate = new Date(existingValidUntil);
+                        if (existingDate > now) {
+                            baseYear = studentData?.sessionEndYear || baseYear;
+                        }
+                    }
+                    const newValidUntil = calculateValidUntilDate(baseYear, durationYears, deadlineConfig);
+                    const { submitFinal } = await import('@/domains/application');
+                    await submitFinal(
+                        studentUid,
+                        studentEmail || '',
+                        {
+                            studentId: studentUid,
+                            enrollmentId: enrollmentId || studentData?.enrollmentId || '',
+                            studentName: actualStudentName,
+                            studentEmail,
+                            studentPhone,
+                            durationYears,
+                            totalFee: amount,
+                            paymentMode: 'online',
+                            paymentId,
+                            razorpayOrderId: orderId,
+                            paymentStatus: 'paid',
+                            requestedValidUntil: newValidUntil.toISOString(),
+                            phoneNumber: studentPhone,
+                        },
+                        {
+                            applicationId,
+                            applicationType: 'renewal',
+                        }
+                    );
+                    return { status: 'success' };
+                } catch (healError: any) {
+                    console.error(`[PAYMENT_TRACE] Self-heal failed for payment ${paymentId}:`, healError);
+                    return { status: 'error', error: `Self-heal failed: ${healError?.message || String(healError)}` };
+                }
             } else {
                 return { status: 'already_processed' };
             }
@@ -163,8 +223,6 @@ export async function processCapturedPayment(paymentDetails: {
 
         const rawPurpose = String(notes.purpose || notes.type || '');
         const isNewRegistration = rawPurpose.toLowerCase().includes('registration') || rawPurpose.toLowerCase() === 'new_registration';
-
-        const deadlineConfig = await getDeadlineConfig();
 
         if (isNewRegistration) {
             let sessionStartYear: number | undefined;

@@ -81,26 +81,37 @@ export async function GET(request: NextRequest) {
         sessionEndYear: row.session_end_year,
       }));
     } else {
-      studentRows = await getStudentsByStatus('active');
+      const db = getSupabaseServer();
+      const { data, error } = await db
+        .from('student_profiles')
+        .select('*')
+        .eq('status', 'active')
+        .order('full_name', { ascending: true })
+        .range(offset, offset + limit - 1);
+
+      if (error) throw error;
+      studentRows = data || [];
     }
+
+    const isStaff = ['admin', 'moderator'].includes(auth.role);
 
     const students = studentRows.map((row: any) => ({
       id: row.uid || row.id,
       name: row.fullName || row.full_name || row.name || '',
       fullName: row.fullName || row.full_name || row.name || '',
-      email: row.email || '',
-      phone: row.phone || '',
-      altPhone: row.altPhone || row.alt_phone || '',
+      email: isStaff ? (row.email || '') : '',
+      phone: isStaff ? (row.phone || '') : '',
+      altPhone: isStaff ? (row.altPhone || row.alt_phone || '') : '',
       enrollmentId: row.enrollmentId || row.enrollment_id || '',
       gender: row.gender || '',
-      dob: row.dob || '',
+      dob: isStaff ? (row.dob || '') : '',
       faculty: row.faculty || '',
       department: row.department || '',
-      parentName: row.parentName || row.parent_name || '',
-      parentPhone: row.parentPhone || row.parent_phone || '',
+      parentName: isStaff ? (row.parentName || row.parent_name || '') : '',
+      parentPhone: isStaff ? (row.parentPhone || row.parent_phone || '') : '',
       busId: row.busId || row.bus_id || '',
       routeId: row.routeId || row.route_id || '',
-      stop_name: row.stop_name || row.stop_name || '',
+      stop_name: row.stop_name || '',
       profilePhotoUrl: row.profilePhotoUrl || row.profile_photo_url || '',
       status: row.status || 'active',
       shift: row.shift || '',

@@ -61,7 +61,10 @@ const nextConfig: NextConfig = {
 
   // Compiler optimizations
   compiler: {
-    removeConsole: process.env.NODE_ENV === 'production',
+    // Keep error/warn output in production builds: removeConsole: true strips
+    // ALL console calls including error()/warn(), which silenced every server
+    // error log in prod and made the WS server and cron routes undebuggable.
+    removeConsole: process.env.NODE_ENV === 'production' ? { exclude: ['error', 'warn'] } : undefined,
   },
 
   // Webpack optimizations

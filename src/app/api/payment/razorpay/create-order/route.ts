@@ -37,6 +37,14 @@ export const POST = withSecurity<CreateOrderBody>(
         const trustedEnrollmentId = studentData?.enrollmentId || enrollmentId || notes?.enrollmentId || '';
         const trustedStudentName = studentData?.fullName || studentData?.name || userName || auth.name || 'Unknown';
 
+        // SECURITY: 'type' is derived server-side, never from the client body.
+        // A client claiming 'renewal' vs 'new_registration' at will could route
+        // the payment through whichever funnel is cheaper to pass. A renewal is
+        // a student who already holds transport validity (paid a prior session);
+        // everyone else is a first-time registration.
+        const isRenewal = !!(studentData?.validUntil) || !!(studentData?.sessionEndYear);
+        const orderType = isRenewal ? 'renewal' : 'new_registration';
+
         // Generate unique receipt ID
         const receipt = generateReceiptId('ADTU_BUS');
 
@@ -51,7 +59,7 @@ export const POST = withSecurity<CreateOrderBody>(
             userName: trustedStudentName,
             durationYears: trustedDurationYears.toString(),
             purpose: purpose || 'Bus Service Payment',
-            type: purpose === 'renewal' ? 'renewal' : 'new_registration',
+            type: orderType,
             timestamp: new Date().toISOString(),
         };
 

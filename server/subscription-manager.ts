@@ -24,7 +24,13 @@ export class SubscriptionManager {
 
   unsubscribeAll(socketId: string, session: Session): void {
     for (const channel of session.subscriptions) {
-      channelSubscriptions.get(channel)?.delete(socketId);
+      const set = channelSubscriptions.get(channel);
+      if (set) {
+        set.delete(socketId);
+        if (set.size === 0) {
+          channelSubscriptions.delete(channel);
+        }
+      }
     }
     session.subscriptions.clear();
   }

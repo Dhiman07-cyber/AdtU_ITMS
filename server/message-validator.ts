@@ -9,6 +9,9 @@ const nonceCleanupTimer = setInterval(() => {
   const now = Date.now();
   for (const [k, t] of seenNonces) { if (now - t > NONCE_EXPIRY) seenNonces.delete(k); }
 }, 60000);
+if (nonceCleanupTimer && typeof nonceCleanupTimer.unref === 'function') {
+  nonceCleanupTimer.unref();
+}
 
 export function stopMessageValidator(): void {
   clearInterval(nonceCleanupTimer);
@@ -23,12 +26,12 @@ export function validatePayload(raw: string): ValidationResult {
   if (raw.length > MAX_PAYLOAD_SIZE) {
     return { valid: false, error: `Payload exceeds ${MAX_PAYLOAD_SIZE} bytes` };
   }
+  return { valid: true };
+}
 
-  let parsed: any;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return { valid: false, error: 'Invalid JSON' };
+export function validateMessage(parsed: any): ValidationResult {
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return { valid: false, error: 'Message must be a JSON object' };
   }
 
   if (!parsed.type || typeof parsed.type !== 'string') {

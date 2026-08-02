@@ -47,9 +47,10 @@ export const GET = withSecurity(
         // Query active_trips for active trips in PostgreSQL lock table.
         const { data: rows, error } = await supabase
             .from('active_trips')
-            .select('trip_id, bus_id, driver_id, route_id, shift, status, start_time, last_heartbeat')
+            .select('trip_id, bus_id, driver_id, route_id, shift, status, start_time, last_heartbeat, expires_at')
             .in('bus_id', busVariations)
             .eq('status', 'active')
+            .gt('expires_at', new Date().toISOString())
             .order('start_time', { ascending: false })
             .limit(1);
 
@@ -88,6 +89,37 @@ export const GET = withSecurity(
             const { getLastLocationForBus } = await import('@/domains/gps');
             const lastLoc = getLastLocationForBus(busId);
 
+            let currentLocation = null;
+            if (lastLoc) {
+                currentLocation = {
+                    busId,
+                    driverUid: data.driver_id,
+                    lat: lastLoc.lat,
+                    lng: lastLoc.lng,
+                    timestamp: lastLoc.timestamp,
+                };
+            } else {
+                // WS cache miss (e.g. right after a WS server restart) — fall
+                // back to the throttled persisted position. The row is deleted
+                // when the trip ends, so it cannot leak a previous trip's spot.
+                const { data: dbLoc } = await supabase
+                    .from('bus_locations')
+                    .select('lat, lng, timestamp')
+                    .eq('bus_id', data.bus_id)
+                    .order('timestamp', { ascending: false })
+                    .limit(1)
+                    .maybeSingle();
+                if (dbLoc) {
+                    currentLocation = {
+                        busId,
+                        driverUid: data.driver_id,
+                        lat: dbLoc.lat,
+                        lng: dbLoc.lng,
+                        timestamp: dbLoc.timestamp,
+                    };
+                }
+            }
+
             return NextResponse.json({
                 tripActive: true,
                 tripData: {
@@ -98,13 +130,7 @@ export const GET = withSecurity(
                     shift: data.shift,
                     startedAt: data.start_time,
                     lastUpdated: data.last_heartbeat,
-                    current_location: lastLoc ? {
-                        busId,
-                        driverUid: data.driver_id,
-                        lat: lastLoc.lat,
-                        lng: lastLoc.lng,
-                        timestamp: lastLoc.timestamp,
-                    } : null
+                    current_location: currentLocation
                 }
             });
         }
