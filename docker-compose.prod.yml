@@ -1,10 +1,10 @@
+version: '3.8'
+
 services:
   redis:
     container_name: itms-redis
     image: redis:7.2-alpine
     command: redis-server --save 60 1 --loglevel notice
-    ports:
-      - "127.0.0.1:6379:6379"
     volumes:
       - redis-data:/data
     healthcheck:
@@ -22,9 +22,7 @@ services:
 
   ws1:
     container_name: itms-ws1
-    build:
-      context: .
-      dockerfile: server/Dockerfile
+    image: ${ECR_WS_IMAGE_URL:-itms-ws:latest}
     ports:
       - "127.0.0.1:3001:3001"
     environment:
@@ -49,15 +47,13 @@ services:
     deploy:
       resources:
         limits:
-          memory: 2048M
+          memory: 1536M
     networks:
       - itms
 
   ws2:
     container_name: itms-ws2
-    build:
-      context: .
-      dockerfile: server/Dockerfile
+    image: ${ECR_WS_IMAGE_URL:-itms-ws:latest}
     ports:
       - "127.0.0.1:3003:3001"
     environment:
@@ -82,30 +78,13 @@ services:
     deploy:
       resources:
         limits:
-          memory: 2048M
+          memory: 1536M
     networks:
       - itms
 
   nextjs:
     container_name: itms-nextjs
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        NEXT_PUBLIC_FIREBASE_API_KEY: ${NEXT_PUBLIC_FIREBASE_API_KEY:-ci-placeholder}
-        NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: ${NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN:-ci.firebaseapp.com}
-        NEXT_PUBLIC_FIREBASE_PROJECT_ID: ${NEXT_PUBLIC_FIREBASE_PROJECT_ID:-ci}
-        NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: ${NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET:-ci.appspot.com}
-        NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: ${NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID:-000000000000}
-        NEXT_PUBLIC_FIREBASE_APP_ID: ${NEXT_PUBLIC_FIREBASE_APP_ID:-1:000000000000:web:ci}
-        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL:-https://ci.supabase.co}
-        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY:-ci}
-        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
-        NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-ws://localhost:3001}
-        NEXT_PUBLIC_RAZORPAY_KEY_ID: ${NEXT_PUBLIC_RAZORPAY_KEY_ID:-ci}
-        NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME: ${NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME}
-        NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET: ${NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET}
-        NEXT_PUBLIC_CLOUDINARY_UPLOAD_ASSET_FOLDER: ${NEXT_PUBLIC_CLOUDINARY_UPLOAD_ASSET_FOLDER}
+    image: ${ECR_APP_IMAGE_URL:-itms-app:latest}
     ports:
       - "127.0.0.1:3000:3000"
     environment:
@@ -157,6 +136,7 @@ services:
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./prometheus/alerts:/etc/prometheus/alerts:ro
+      - prometheus-data:/prometheus
     restart: unless-stopped
     networks:
       - itms
@@ -185,6 +165,7 @@ services:
       - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
       - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
       - ./grafana/dashboards:/etc/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
     depends_on:
       - prometheus
       - alertmanager
@@ -194,6 +175,8 @@ services:
 
 volumes:
   redis-data:
+  prometheus-data:
+  grafana-data:
 
 networks:
   itms:

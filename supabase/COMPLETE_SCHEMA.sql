@@ -804,6 +804,145 @@ $$;
 
 GRANT EXECUTE ON FUNCTION public.end_trip_atomically(TEXT, TEXT, TEXT) TO authenticated, service_role;
 
+-- Function: acquire_fcm_lock
+-- Idempotency lock for FCM notifications (start/end trip)
+CREATE OR REPLACE FUNCTION public.acquire_fcm_lock(p_trip_id TEXT, p_bus_id TEXT, p_lock_type TEXT)
+RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+    v_column    TEXT;
+    v_updated   INTEGER := 0;
+    v_trip_uuid UUID;
+BEGIN
+    IF p_lock_type = 'start' THEN
+        v_column := 'fcm_start_sent';
+    ELSIF p_lock_type = 'end' THEN
+        v_column := 'fcm_end_sent';
+    ELSE
+        RETURN jsonb_build_object('success', false, 'error', 'Invalid lock_type');
+    END IF;
+
+    BEGIN
+        v_trip_uuid := p_trip_id::uuid;
+    EXCEPTION WHEN OTHERS THEN
+        RETURN jsonb_build_object('success', true, 'acquired', true);
+    END;
+
+    BEGIN
+        IF v_column = 'fcm_start_sent' THEN
+            UPDATE active_trips
+            SET fcm_start_sent = true
+            WHERE trip_id = v_trip_uuid
+              AND bus_id   = p_bus_id
+              AND fcm_start_sent = false;
+        ELSE
+            UPDATE active_trips
+            SET fcm_end_sent = true
+            WHERE trip_id = v_trip_uuid
+              AND bus_id   = p_bus_id
+              AND fcm_end_sent = false;
+        END IF;
+    EXCEPTION WHEN OTHERS THEN
+        RETURN jsonb_build_object('success', true, 'acquired', true);
+    END;
+
+    GET DIAGNOSTICS v_updated = ROW_COUNT;
+
+    IF v_updated >= 1 THEN
+        RETURN jsonb_build_object('success', true, 'acquired', true);
+    ELSE
+        RETURN jsonb_build_object('success', true, 'acquired', false);
+    END IF;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.acquire_fcm_lock(TEXT, TEXT, TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.acquire_fcm_lock(TEXT, TEXT, TEXT) TO service_role;
+
+-- Function: bus_increment_capacity
+-- Capacity-guarded bus admission RPC prevents overbooking
+CREATE OR REPLACE FUNCTION public.bus_increment_capacity(p_bus_id TEXT, p_shift TEXT DEFAULT 'Morning')
+RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+    v_normalized TEXT := LOWER(TRIM(COALESCE(p_shift, 'Morning')));
+    v_bus RECORD; v_new_morning INTEGER; v_new_evening INTEGER;
+    v_capacity INTEGER; v_target_load INTEGER;
+BEGIN
+    IF v_normalized NOT IN ('morning', 'evening') THEN
+        RETURN jsonb_build_object('error', 'Invalid student shift: ' || COALESCE(p_shift, 'NULL') || ' (must be Morning or Evening)');
+    END IF;
+    SELECT id, capacity, morning_load, evening_load INTO v_bus FROM buses WHERE id = p_bus_id OR bus_number = p_bus_id FOR UPDATE LIMIT 1;
+    IF NOT FOUND THEN RETURN jsonb_build_object('error', 'Bus ' || p_bus_id || ' not found'); END IF;
+
+    v_target_load := CASE WHEN v_normalized = 'morning' THEN v_bus.morning_load ELSE v_bus.evening_load END;
+    v_capacity := COALESCE(v_bus.capacity, 0);
+    IF v_target_load >= v_capacity THEN
+        RETURN jsonb_build_object('error', 'Bus ' || p_bus_id || ' is at full capacity for ' || v_normalized || ' shift (' || v_target_load || '/' || v_capacity || ')');
+    END IF;
+
+    v_new_morning := v_bus.morning_load + CASE WHEN v_normalized = 'morning' THEN 1 ELSE 0 END;
+    v_new_evening := v_bus.evening_load + CASE WHEN v_normalized = 'evening' THEN 1 ELSE 0 END;
+    UPDATE buses SET morning_load = v_new_morning, evening_load = v_new_evening, current_members = v_new_morning + v_new_evening, updated_at = NOW()
+    WHERE id = v_bus.id;
+    RETURN jsonb_build_object('busId', v_bus.id, 'capacity', v_bus.capacity,
+        'morningLoad', v_new_morning, 'eveningLoad', v_new_evening, 'currentMembers', v_new_morning + v_new_evening,
+        'oldShiftLoad', CASE WHEN v_normalized = 'evening' THEN v_bus.evening_load ELSE v_bus.morning_load END,
+        'newShiftLoad', CASE WHEN v_normalized = 'evening' THEN v_new_evening ELSE v_new_morning END,
+        'shift', p_shift, 'success', true);
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.bus_increment_capacity(TEXT, TEXT) TO service_role;
+
+-- =====================================================
+-- SECTION 10.6: BUS LOCATIONS TABLE
+-- =====================================================
+
+CREATE TABLE IF NOT EXISTS public.bus_locations (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  bus_id TEXT NOT NULL UNIQUE,
+  trip_id UUID,
+  driver_id TEXT,
+  route_id TEXT,
+  shift TEXT,
+  lat DOUBLE PRECISION NOT NULL,
+  lng DOUBLE PRECISION NOT NULL,
+  accuracy DOUBLE PRECISION,
+  speed DOUBLE PRECISION,
+  heading DOUBLE PRECISION,
+  source TEXT NOT NULL DEFAULT 'gps',
+  timestamp TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_bus_locations_trip_id ON public.bus_locations(trip_id);
+CREATE INDEX IF NOT EXISTS idx_bus_locations_updated_at ON public.bus_locations(updated_at DESC);
+
+DROP TRIGGER IF EXISTS bus_locations_updated_at ON public.bus_locations;
+CREATE TRIGGER bus_locations_updated_at
+  BEFORE UPDATE ON public.bus_locations
+  FOR EACH ROW
+  EXECUTE FUNCTION update_updated_at_column();
+
+ALTER TABLE public.bus_locations ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "bus_locations_select_anon" ON public.bus_locations;
+CREATE POLICY "bus_locations_select_anon" ON public.bus_locations
+  FOR SELECT TO anon, authenticated USING (true);
+
+DROP POLICY IF EXISTS "bus_locations_insert_service" ON public.bus_locations;
+CREATE POLICY "bus_locations_insert_service" ON public.bus_locations
+  FOR INSERT TO service_role WITH CHECK (true);
+
+DROP POLICY IF EXISTS "bus_locations_update_service" ON public.bus_locations;
+CREATE POLICY "bus_locations_update_service" ON public.bus_locations
+  FOR UPDATE TO service_role USING (true);
+
+DROP POLICY IF EXISTS "bus_locations_delete_service" ON public.bus_locations;
+CREATE POLICY "bus_locations_delete_service" ON public.bus_locations
+  FOR DELETE TO service_role USING (true);
+
+GRANT SELECT ON public.bus_locations TO anon, authenticated;
 
 -- =====================================================
 -- SECTION 11: DOCUMENTATION
