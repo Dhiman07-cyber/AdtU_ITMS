@@ -95,10 +95,10 @@ export async function startTrip(params: StartTripParams): Promise<StartTripOutpu
     return { success: false, reason: lockResult.reason, errorCode: lockResult.errorCode };
   }
 
-  // Drop any cached trip-lock entries for this driver/bus — the GPS pipeline's
-  // 10s checkActiveTrip cache would otherwise reject (trip mismatch) or accept
-  // updates against the previous trip after a quick restart.
+  // Drop any cached trip-lock entries and in-memory location anchors for this driver/bus —
+  // ensures every new trip begins with a completely clean GPS state.
   invalidateActiveTripCache(params.busId, params.driverId);
+  clearInMemoryLastLocation(params.busId);
 
   const activeTripId = lockResult.tripId || tripId;
   const busNumber = preflight.busData?.bus_number || params.busId;

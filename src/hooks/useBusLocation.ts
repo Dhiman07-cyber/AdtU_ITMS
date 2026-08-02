@@ -23,10 +23,21 @@ export const useBusLocation = (busId: string, token?: string | null, externalCli
   const clientRef = useRef<WebSocketClient | null>(null);
 
   const isTripActiveRef = useRef(true);
+  const lastTimestampRef = useRef<number>(0);
 
   const applyIncomingLocation = useCallback((newLocation: BusLocation) => {
     if (!isValidLatLng(newLocation.lat, newLocation.lng)) return;
     if (!isTripActiveRef.current) return;
+
+    // Monotonic timestamp check: reject stale/older updates
+    const incomingTs = new Date(newLocation.timestamp).getTime();
+    if (Number.isFinite(incomingTs) && incomingTs > 0 && incomingTs <= lastTimestampRef.current) {
+      return;
+    }
+    if (Number.isFinite(incomingTs) && incomingTs > 0) {
+      lastTimestampRef.current = incomingTs;
+    }
+
     setCurrentLocation(newLocation);
     setHistory((prev) => {
       const next = [...prev, newLocation];
@@ -54,6 +65,7 @@ export const useBusLocation = (busId: string, token?: string | null, externalCli
 
   useEffect(() => {
     isMountedRef.current = true;
+    lastTimestampRef.current = 0;
     if (!busId) {
       setCurrentLocation(null); setHistory([]); setLoading(false);
       return;

@@ -333,13 +333,13 @@ export default function DriverLiveTrackingPage() {
         (error) => {
           console.log("💡 Network location unavailable - using default location");
 
-          // Use default location as last resort (ADTU Campus)
+          // Use default location as last resort (ADTU Campus UI display placeholder)
           const defaultLat = 26.1445;
           const defaultLng = 91.7362;
-          setCurrentLocation({ lat: defaultLat, lng: defaultLng, accuracy: 500 });
+          setCurrentLocation({ lat: defaultLat, lng: defaultLng, accuracy: 500, isFallback: true } as any);
           setMapCenter([defaultLat, defaultLng]);
           setAccuracy(500);
-          addToast("⚠️ Location access denied or unavailable. Using campus default. You can still start the trip.", "warning");
+          addToast("⚠️ Location access denied or unavailable. UI showing campus placeholder. Real GPS required to start broadcast.", "warning");
         },
         {
           enableHighAccuracy: false,
@@ -354,8 +354,8 @@ export default function DriverLiveTrackingPage() {
       (initialPosition) => {
         const { latitude, longitude, speed: gpsSpeed, accuracy: gpsAccuracy } = initialPosition.coords;
 
-        // Set initial location
-        setCurrentLocation({ lat: latitude, lng: longitude, accuracy: gpsAccuracy });
+        // Set initial location (real device GPS)
+        setCurrentLocation({ lat: latitude, lng: longitude, accuracy: gpsAccuracy, isFallback: false } as any);
         setSpeed(gpsSpeed || 0);
         setAccuracy(gpsAccuracy);
         setMapCenter([latitude, longitude]);
@@ -368,7 +368,7 @@ export default function DriverLiveTrackingPage() {
           (position) => {
             const { latitude, longitude, speed: gpsSpeed, accuracy: gpsAccuracy } = position.coords;
 
-            setCurrentLocation({ lat: latitude, lng: longitude, accuracy: gpsAccuracy });
+            setCurrentLocation({ lat: latitude, lng: longitude, accuracy: gpsAccuracy, isFallback: false } as any);
             setSpeed(gpsSpeed || 0);
             setAccuracy(gpsAccuracy);
             setMapCenter([latitude, longitude]);
@@ -421,10 +421,10 @@ export default function DriverLiveTrackingPage() {
           console.log(" GPS unavailable, using default location");
           const defaultLat = 26.1445;
           const defaultLng = 91.7362;
-          setCurrentLocation({ lat: defaultLat, lng: defaultLng, accuracy: 500 });
+          setCurrentLocation({ lat: defaultLat, lng: defaultLng, accuracy: 500, isFallback: true } as any);
           setMapCenter([defaultLat, defaultLng]);
           setAccuracy(500);
-          addToast(" GPS timeout. Using default location. Trip can still be started.", "warning");
+          addToast(" GPS timeout. Map updated to campus default.", "warning");
         }
       },
       {
@@ -1036,7 +1036,12 @@ export default function DriverLiveTrackingPage() {
     const inputs = broadcastInputsRef.current;
     if (!inputs) return;
     const { currentLocation, accuracy, speed, busData, routeData, tripId, currentUser } = inputs;
-    if (!currentLocation || !busData || !routeData) return;
+    if (!currentLocation || (currentLocation as any).isFallback || !busData || !routeData) {
+      if ((currentLocation as any)?.isFallback) {
+        console.log("⏳ Skipping location broadcast — waiting for real device GPS fix");
+      }
+      return;
+    }
 
     try {
       const idToken = await currentUser?.getIdToken();
@@ -1057,6 +1062,7 @@ export default function DriverLiveTrackingPage() {
           heading: 0,
           timestamp: Date.now(),
           tripId: tripId,
+          isFallback: false,
         }),
       });
 
@@ -1064,9 +1070,9 @@ export default function DriverLiveTrackingPage() {
         console.warn("⚠️ Location update failed:", response.status);
       }
     } catch (error) {
-      console.error("❌ Error in broadcastLocation:", error);
+      console.error("❌ Error broadcasting location:", error);
     }
-  }, []);
+  }, [selectedBusId]);
 
   // Distance-based auto-pickup: Remove waiting students when bus gets close (within ~50 meters)
   // NEW BEHAVIOR: Markers and cards stay visible until distance closes to zero, regardless of acknowledgment
@@ -1190,15 +1196,19 @@ export default function DriverLiveTrackingPage() {
 
         const defaultLat = 26.1445;
         const defaultLng = 91.7362;
-        const initialLocation = currentLocation || { lat: defaultLat, lng: defaultLng, accuracy: 500 };
         if (!currentLocation) {
-          setCurrentLocation(initialLocation);
-          setMapCenter([initialLocation.lat, initialLocation.lng]);
-          setAccuracy(initialLocation.accuracy);
+          setCurrentLocation({ lat: defaultLat, lng: defaultLng, accuracy: 500, isFallback: true } as any);
+          setMapCenter([defaultLat, defaultLng]);
+          setAccuracy(500);
         }
 
         startLocationTracking();
-        addToast(`🚀 Trip started successfully for ${selectedShift} shift!`, 'success');
+
+        if (!currentLocation || (currentLocation as any).isFallback) {
+          addToast(`🚀 Trip started! Waiting for authentic device GPS fix before broadcasting.`, 'warning');
+        } else {
+          addToast(`🚀 Trip started successfully for ${selectedShift} shift!`, 'success');
+        }
       } else {
         const err = await res.json();
         addToast(err.error || 'Failed to start trip', 'error');

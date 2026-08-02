@@ -102,6 +102,13 @@ export async function processLocationUpdate(raw: LocationUpdate): Promise<Pipeli
     driverId: normalized.driverId,
   };
 
+  // Defensive Guard: Reject synthetic or fallback location payloads
+  if ((raw as any).isFallback || (raw as any).source === 'fallback') {
+    const reason = 'Synthetic or fallback location payload rejected';
+    appLogger.warn('gps', 'location_rejected', { ...logCtx, reason, errorClass: ErrorClass.GPS_INVALID_COORDINATES, latencyMs: Date.now() - start });
+    return { accepted: false, reason, normalized };
+  }
+
   const boundsError = validateBounds(normalized);
   if (boundsError) {
     const errorClass = boundsError.includes('null island')

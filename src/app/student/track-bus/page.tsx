@@ -428,7 +428,15 @@ function TrackBusLive() {
   // Update local busLocation state whenever hook location changes
   useEffect(() => {
     if (hookBusLocation) {
-      setBusLocation(hookBusLocation);
+      setBusLocation((prev: any) => {
+        if (!prev) return hookBusLocation;
+        const prevTs = new Date(prev.timestamp).getTime();
+        const hookTs = new Date(hookBusLocation.timestamp).getTime();
+        if (Number.isFinite(hookTs) && Number.isFinite(prevTs) && hookTs < prevTs) {
+          return prev;
+        }
+        return hookBusLocation;
+      });
     }
   }, [hookBusLocation]);
 
@@ -443,12 +451,11 @@ function TrackBusLive() {
       targetBusId.startsWith('bus_') ? targetBusId.replace('bus_', '') : `bus_${targetBusId}`
     ]));
 
-    console.log(`📍 Subscribing to live location for bus variations:`, busVariations.map(id => `bus_location_${id}`));
     const unsubs = busVariations.map(id =>
       client.subscribe(`bus_location_${id}`, (payload: any) => {
         const data = payload.payload || payload;
         if (data && data.lat && data.lng) {
-          setBusLocation({
+          const newLoc = {
             busId: data.busId || targetBusId,
             driverUid: data.driverUid || '',
             lat: Number(data.lat),
@@ -457,6 +464,15 @@ function TrackBusLive() {
             heading: data.heading !== undefined ? Number(data.heading) : 0,
             accuracy: data.accuracy,
             timestamp: data.timestamp || new Date().toISOString(),
+          };
+          setBusLocation((prev: any) => {
+            if (!prev) return newLoc;
+            const prevTs = new Date(prev.timestamp).getTime();
+            const newTs = new Date(newLoc.timestamp).getTime();
+            if (Number.isFinite(newTs) && Number.isFinite(prevTs) && newTs < prevTs) {
+              return prev;
+            }
+            return newLoc;
           });
         }
       })
@@ -473,27 +489,21 @@ function TrackBusLive() {
 
     const checkActiveTrip = async () => {
       try {
-        console.log('🔍 Checking trip status via API for bus:', targetBusId);
-
         const token = authToken || await currentUser?.getIdToken();
         const response = await fetch(`/api/student/trip-status?busId=${encodeURIComponent(targetBusId)}`, {
           headers: token ? { Authorization: `Bearer ${token}` } : {}
         });
 
-        if (!response.ok) {
-          console.warn('⚠️ Trip status API returned non-OK status:', response.status);
-          return;
-        }
+        if (!response.ok) return;
 
         const result = await response.json();
 
         if (result.tripActive) {
-          console.log('✅ Active trip found via API:', result.tripData);
           setTripActive(true);
           if (result.tripData?.current_location) {
             const loc = result.tripData.current_location;
             if (loc && loc.lat && loc.lng) {
-              setBusLocation({
+              const newLoc = {
                 busId: loc.busId || targetBusId,
                 driverUid: loc.driverUid || result.tripData.driverUid || '',
                 lat: Number(loc.lat),
@@ -502,11 +512,14 @@ function TrackBusLive() {
                 heading: loc.heading !== undefined ? Number(loc.heading) : 0,
                 accuracy: loc.accuracy,
                 timestamp: loc.timestamp || new Date().toISOString(),
+              };
+              setBusLocation((prev: any) => {
+                if (prev) return prev; // Preserve live WebSocket location updates
+                return newLoc;
               });
             }
           }
         } else {
-          console.log('ℹ️ No active trip found via API');
           setTripActive(false);
           setBusLocation(null);
         }
