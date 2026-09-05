@@ -221,3 +221,13 @@ Driver App                 Next.js API Gateway           Supabase PostgreSQL    
 ### 3. Graceful Failure & Offline Behavior
 - **Redis Outage**: If Redis crashes, WebSocket nodes degrade gracefully to in-process broadcasts (students on the same node continue receiving updates).
 - **Socket Disconnection**: If a driver or student disconnects mid-trip, client reconnect logic uses exponential backoff and restores channel subscriptions via `reconnect_token`.
+
+### 4. Real-Time Transport & Adaptive Fallback Resilience
+
+Earlier, client tracking and server-side event bridges were bound to static loopback addresses (`localhost:3001` and `127.0.0.1`), and the student UI discarded incoming HTTP polling snapshots (`if (prev) return prev;`) once an initial location was loaded.
+
+After the new patch, centralized endpoint resolution (`getClientWsUrl()` and `getServerWsUrl()`), first-frame wire authentication, and adaptive monotonic HTTP recovery fallback were ensured. This means:
+- **Dynamic Multi-Device Connectivity**: Client mobile browsers automatically resolve the host LAN IP when testing on physical devices, and auto-upgrade to `wss://` in HTTPS production environments.
+- **Credential Protection**: The Next.js API server connects to dedicated WebSocket nodes without URL tokens, performing wire authentication over the encrypted socket.
+- **Adaptive Fallback**: Student tracking relaxes HTTP polling to 25s when the WebSocket connection is healthy and accelerates to 5s during disconnections, updating the marker monotonically (`newTs > prevTs`) so location updates never freeze or jump backward.
+
