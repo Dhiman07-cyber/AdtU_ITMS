@@ -222,9 +222,11 @@ const STATIC_ALLOWED_ORIGINS: Set<string> = (() => {
 
 function isOriginAllowed(origin: string): boolean {
     if (STATIC_ALLOWED_ORIGINS.has(origin)) return true;
+    if (origin.endsWith('.vercel.app')) return true;
     if (process.env.NODE_ENV === 'development' && origin.startsWith('http://localhost:')) return true;
     return false;
 }
+
 
 /**
  * Validate Origin / Referer for CSRF protection
@@ -311,9 +313,13 @@ export async function proxy(request: NextRequest) {
     }
 
     // ── 4. Global IP rate limiting (DDoS protection) ──
+    const isLoadTestBypass = process.env.STAGING_MODE === 'true' && 
+                             process.env.LOAD_TEST_SECRET && 
+                             request.headers.get('x-load-test-bypass') === process.env.LOAD_TEST_SECRET;
+
     const rateLimit = checkGlobalRateLimit(clientIp);
-    if (!rateLimit.allowed) {
-        console.warn(`🚫 [PROXY] Rate limit exceeded for IP ${clientIp} on ${pathname}`);
+    if (!isLoadTestBypass && !rateLimit.allowed) {
+        console.warn(`[PROXY] Rate limit exceeded for IP ${clientIp} on ${pathname}`);
         return jsonError('Too many requests', 429, {
             'Retry-After': '60',
             'X-RateLimit-Limit': String(IP_RATE_LIMIT),
@@ -326,7 +332,8 @@ export async function proxy(request: NextRequest) {
 
     // Security headers (complement next.config.ts)
     response.headers.set('X-Content-Type-Options', 'nosniff');
-    response.headers.set('X-Frame-Options', 'DENY');
+    response.headers.set('X-Frame-Options', 'SAMEORIGIN');
+    response.headers.set('Cross-Origin-Opener-Policy', 'unsafe-none');
     response.headers.set('X-XSS-Protection', '1; mode=block');
     response.headers.set('X-RateLimit-Remaining', String(rateLimit.remaining));
 

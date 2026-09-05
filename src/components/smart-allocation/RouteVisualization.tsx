@@ -2,9 +2,9 @@
 
 import type { BusData,StudentData } from "@/app/admin/smart-allocation/page";
 import { cn } from "@/lib/utils";
-import { motion } from "framer-motion";
+import { motion } from "motion/react";
 import { Bus,MapPin } from "lucide-react";
-import React,{ useMemo } from "react";
+import React from "react";
 
 interface RouteVisualizationProps {
   bus: BusData;
@@ -33,7 +33,7 @@ export default function RouteVisualization({
 
   // Calculate stats for each stop with case-insensitive stop_name matching
   // Filter students by shift to show only relevant students for the selected tab
-  const stopStats = useMemo(() => {
+  const stopStats = (() => {
     const stats = new Map<
       string,
       { total: number; selected: number; stop_name: string }
@@ -89,7 +89,7 @@ export default function RouteVisualization({
     );
 
     return stats;
-  }, [bus.stops, students, selectedStudents, shiftFilter]);
+  })();
 
   // Helper function to get stats for a stop (case-insensitive)
   const getStopStats = (stop_name: string) => {

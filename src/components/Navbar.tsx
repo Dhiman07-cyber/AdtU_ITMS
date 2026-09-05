@@ -17,7 +17,7 @@ import { useNotifications } from '@/contexts/NotificationContext';
 import { useTransportEntitlement } from "@/hooks/useTransportEntitlement";
 import { safeImageSrc } from "@/lib/security/url-sanitizer";
 import { cn } from "@/lib/utils";
-import { AnimatePresence,motion } from "framer-motion";
+import { AnimatePresence,motion } from "motion/react";
 import {
 	Bell,
 	Bus,
@@ -38,7 +38,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname,useRouter } from "next/navigation";
-import React,{ useCallback,useEffect,useState } from "react";
+import React,{ useEffect,useState } from "react";
 
 interface NavbarProps {
   onMenuToggle?: () => void;
@@ -76,14 +76,14 @@ const Navbar = React.memo(function Navbar({ onMenuToggle, isSidebarOpen = false 
   // However, the user wants to REPLACE the profile dropdown with this menu
   // so we'll use our own state for the profile-triggered menu.
 
-  const getDashboardPath = useCallback(() => {
+  const getDashboardPath = () => {
     if (needsApplication) return "/apply/form";
     if (userData?.role === 'admin') return "/admin";
     if (userData?.role === 'moderator') return "/moderator";
     if (userData?.role === 'driver') return "/driver";
     if (userData?.role === 'student') return "/student";
     return "/";
-  }, [userData?.role, needsApplication]);
+  };
 
   // Define routes for mobile menu
   const getMobileRoutes = (): MobileRoute[] => {

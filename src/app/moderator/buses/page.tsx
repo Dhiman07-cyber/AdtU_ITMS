@@ -1,6 +1,7 @@
-﻿"use client";
+"use client";
 
 import { ExportButton } from '@/components/ExportButton';
+import { PremiumPageLoader } from '@/components/LoadingSpinner';
 import { Button } from "@/components/ui/button";
 import {
 	Card,
@@ -56,7 +57,7 @@ import {
 	Users
 } from "lucide-react";
 import { useRouter } from 'next/navigation';
-import { useMemo,useState } from "react";
+import { useState } from "react";
 // Migrated: Server-side API → PostgreSQL (no Firestore client reads)
 import { PermissionDeniedCard } from '@/components/PermissionDeniedCard';
 import { useAuth } from '@/contexts/auth-context';
@@ -170,11 +171,8 @@ export default function BusesPage() {
     return match ? match[0] : '0';
   };
 
-  // Real-time listeners handle data fetching automatically
-
-  // Memoized so the bus list isn't re-filtered/re-sorted on every unrelated
-  // re-render — only when the data or active filters actually change.
-  const filteredBuses = useMemo(() => buses.filter(bus => {
+  // Direct derivation in render
+  const filteredBuses = buses.filter(bus => {
     const matchesSearch =
       (bus.busNumber && bus.busNumber.toLowerCase().includes(searchTerm.toLowerCase())) ||
       (bus.routeName && bus.routeName.toLowerCase().includes(searchTerm.toLowerCase())) ||
@@ -188,7 +186,7 @@ export default function BusesPage() {
     const numA = extractNumber(a.busId || a.id || '');
     const numB = extractNumber(b.busId || b.id || '');
     return parseInt(numA) - parseInt(numB);
-  }), [buses, searchTerm, colorFilter, statusFilter]);
+  });
 
   // Export buses data from Supabase
   const handleExportBuses = async () => {
@@ -262,7 +260,7 @@ export default function BusesPage() {
     }
   };
 
-  const commonBtnClass = "group h-8 px-4 bg-white hover:bg-gray-50 text-gray-700 hover:text-purple-600 border border-gray-200 hover:border-purple-200 shadow-sm hover:shadow-lg hover:shadow-purple-500/10 font-bold text-[10px] uppercase tracking-widest rounded-lg transition-all duration-300 active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer";
+  const commonBtnClass = "group h-8 px-4 bg-white hover:bg-gray-50 text-gray-600 hover:text-blue-600 border border-gray-200 hover:border-blue-200 shadow-sm hover:shadow-lg hover:shadow-blue-500/10 font-bold text-[10px] uppercase tracking-widest rounded-lg transition-all duration-300 active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer";
 
   // Function to get driver name for a specific bus
   const getDriverNameForBus = (bus: any) => {
@@ -353,7 +351,7 @@ export default function BusesPage() {
   };
 
   if (isLoading) {
-    return <div className="flex justify-center items-center h-64">Loading...</div>;
+    return <PremiumPageLoader message="Loading Bus Fleet..." subMessage="Fetching fleet status and routes..." />;
   }
 
   if (!permsLoading && !canBusView) {
@@ -364,8 +362,8 @@ export default function BusesPage() {
     <div className="mt-12 space-y-6">
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold dark:text-white">Bus Management</h1>
-          <p className="text-muted-foreground">
+          <h1 className="text-3xl font-bold text-foreground">Bus Management</h1>
+          <p className="text-muted-foreground mt-1">
             Manage all buses in the service fleet
           </p>
         </div>
@@ -381,7 +379,7 @@ export default function BusesPage() {
           )}
           {canBusReassign && (
             <Button
-              className="w-full md:w-auto cursor-pointer bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white border-0 transition-all duration-200 hover:scale-105 hover:shadow-lg hover:shadow-purple-500/25 rounded-md px-2.5 py-1.5 text-xs h-8"
+              className="w-full md:w-auto cursor-pointer bg-slate-800 hover:bg-slate-900 text-white dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-100 border border-slate-700 dark:border-slate-600 shadow-sm transition-all duration-200 hover:scale-105 hover:shadow-lg rounded-md px-2.5 py-1.5 text-xs h-8"
               onClick={() => router.push('/moderator/route-allocation')}
               title="Manage route reassignments for buses"
             >

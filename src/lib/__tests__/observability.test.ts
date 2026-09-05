@@ -8,6 +8,9 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
+// Ensure INFO-level logs are emitted (default in test env is WARN which drops INFO).
+process.env.LOG_LEVEL = 'INFO';
+
 // ─── App Logger Format ────────────────────────────────────────────────────────
 
 describe('App Logger — Structured Output', () => {

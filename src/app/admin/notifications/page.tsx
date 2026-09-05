@@ -187,13 +187,12 @@ export default function AdminNotificationsPage() {
     <div className="mt-12 py-4 px-3 sm:px-4 lg:px-6">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
-        <div className="flex justify-between items-center mb-4">
+        <div className="flex justify-between items-center mb-6">
           <div>
-            <h1 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-1.5">
-              <Bell className="h-5 w-5" />
+            <h1 className="text-3xl font-bold text-foreground">
               Notifications
             </h1>
-            <p className="text-xs text-gray-600 dark:text-gray-400 mt-0.5">
+            <p className="text-muted-foreground mt-1">
               Manage and send notifications to all users
             </p>
           </div>
@@ -201,9 +200,9 @@ export default function AdminNotificationsPage() {
             onClick={() => setCreateDialogOpen(true)}
             onMouseEnter={() => { import("@/components/NotificationFormV2"); }}
             onFocus={() => { import("@/components/NotificationFormV2"); }}
-            className="bg-blue-600 hover:bg-blue-700 flex items-center gap-1.5 h-8 text-xs"
+            className="bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-1.5 h-9 text-sm"
           >
-            <Plus className="h-3.5 w-3.5" />
+            <Plus className="h-4 w-4 mr-1" />
             Create Notification
           </Button>
         </div>

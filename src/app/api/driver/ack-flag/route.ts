@@ -1,4 +1,3 @@
-import { getDriverById } from '@/domains/identity';
 import { emitEvent } from '@/domains/realtime/event-emitter';
 import { withSecurity } from '@/lib/security/api-security';
 import { RateLimits } from '@/lib/security/rate-limiter';
@@ -12,7 +11,7 @@ import { NextResponse } from 'next/server';
  * Body: { flagId }
  * 
  * Validates:
- * - Driver is authenticated and assigned to the route/bus
+ * - Driver is authenticated and holds an active trip lock on the flag's bus
  * 
  * Actions:
  * - Update waiting_flags.status = "acknowledged"
@@ -24,17 +23,11 @@ export const POST = withSecurity(
     const { flagId } = body as any;
     const driverUid = auth.uid;
 
-    // Initialize Supabase client
     const supabase = getSupabaseServer();
 
-    // Parallelize: fetch the flag, the active trip lock, and the driver profile in one shot
-    const [flagResult, activeTripResult, driverData] = await Promise.all([
-      supabase.from('waiting_flags').select('*').eq('id', flagId).single(),
-      supabase.from('active_trips').select('trip_id').eq('driver_id', driverUid).eq('status', 'active').maybeSingle(),
-      getDriverById(driverUid),
-    ]);
-
-    const { data: flagData, error: flagError } = flagResult;
+    // 1. Fetch the flag first — we need its bus_id to scope the trip check.
+    const { data: flagData, error: flagError } = await supabase
+      .from('waiting_flags').select('*').eq('id', flagId).single();
 
     if (flagError || !flagData) {
       return NextResponse.json(
@@ -43,11 +36,17 @@ export const POST = withSecurity(
       );
     }
 
-    const activeTrip = activeTripResult.data;
-    const driverBusId = driverData?.bus_id || driverData?.busId;
-    const driverClaimsBus = (activeTrip !== null && activeTrip?.trip_id) || driverBusId === flagData.bus_id;
+    // 2. Verify the driver holds an active trip on THIS bus.
+    //    The trip lock is the authoritative runtime signal of bus ownership.
+    const { data: activeTrip } = await supabase
+      .from('active_trips')
+      .select('trip_id')
+      .eq('driver_id', driverUid)
+      .eq('bus_id', flagData.bus_id)
+      .eq('status', 'active')
+      .maybeSingle();
 
-    if (!driverClaimsBus) {
+    if (!activeTrip) {
       console.error('Driver assignment validation failed:', { driverUid, busId: flagData.bus_id });
       return NextResponse.json(
         { error: 'Driver is not assigned to this bus' },

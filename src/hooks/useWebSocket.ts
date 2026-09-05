@@ -2,7 +2,7 @@
 
 import { WebSocketClient } from '@/domains/realtime/ws-client';
 import { auth } from '@/lib/firebase';
-import { useCallback,useEffect,useState } from 'react';
+import { useEffect,useState } from 'react';
 
 let globalClient: WebSocketClient | null = null;
 let globalRefCount = 0;
@@ -45,9 +45,9 @@ export function useWebSocket(token: string | null, getNewToken?: () => Promise<s
     };
   }, [token]);
 
-  const getClient = useCallback((): WebSocketClient | null => {
+  const getClient = (): WebSocketClient | null => {
     return globalClient;
-  }, []);
+  };
 
   return { connected, getClient };
 }

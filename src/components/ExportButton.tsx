@@ -34,11 +34,7 @@ export function ExportButton({
 
   // If className is provided, use it completely; otherwise use defaults
   const buttonClassName = className ? className : `
-    bg-white hover:bg-gray-100 !text-black border border-gray-300
-    dark:bg-gray-800 dark:hover:bg-gray-700 dark:!text-white dark:border-gray-600
-    rounded-lg px-6 py-2 shadow-md hover:shadow-lg 
-    transition-all duration-200 transform hover:scale-[1.01] active:scale-[0.99]
-    font-medium
+    group h-8 px-4 bg-white hover:bg-gray-50 text-gray-600 hover:text-blue-600 border border-gray-200 hover:border-blue-200 shadow-sm hover:shadow-lg hover:shadow-blue-500/10 font-bold text-[10px] uppercase tracking-widest rounded-lg transition-all duration-300 active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer
   `;
 
   return (

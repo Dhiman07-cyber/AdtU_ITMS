@@ -236,24 +236,6 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
--- Function to get effective driver
-CREATE OR REPLACE FUNCTION get_effective_driver(p_bus_id TEXT)
-RETURNS TEXT AS $$
-DECLARE
-  v_temp_driver TEXT;
-BEGIN
-  SELECT current_driver_uid INTO v_temp_driver
-  FROM temporary_assignments
-  WHERE bus_id = p_bus_id
-    AND active = true
-    AND starts_at <= NOW()
-    AND (ends_at IS NULL OR ends_at > NOW())
-  LIMIT 1;
-  
-  RETURN v_temp_driver;
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
-
 -- Trigger for updated_at columns
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
@@ -278,33 +260,6 @@ CREATE TRIGGER reassignment_logs_updated_at
   BEFORE UPDATE ON public.reassignment_logs
   FOR EACH ROW
   EXECUTE FUNCTION update_reassignment_logs_updated_at();
-
-
-
--- Function to expire temporary assignments
-CREATE OR REPLACE FUNCTION expire_temporary_assignments()
-RETURNS TABLE(expired_count INTEGER) AS $$
-DECLARE
-  v_count INTEGER := 0;
-  v_assignment RECORD;
-BEGIN
-  FOR v_assignment IN
-    SELECT id, bus_id, original_driver_uid, current_driver_uid
-    FROM temporary_assignments
-    WHERE active = true
-      AND ends_at IS NOT NULL
-      AND ends_at <= NOW()
-  LOOP
-    UPDATE temporary_assignments
-    SET active = false
-    WHERE id = v_assignment.id;
-    
-    v_count := v_count + 1;
-  END LOOP;
-  
-  RETURN QUERY SELECT v_count;
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
 -- Function for reassignment logs pagination
 CREATE OR REPLACE FUNCTION get_reassignment_logs(

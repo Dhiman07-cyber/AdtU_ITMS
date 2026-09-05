@@ -2,8 +2,14 @@
 FROM node:22-alpine AS builder
 WORKDIR /app
 
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
+    NPM_CONFIG_LOGLEVEL=error \
+    NPM_CONFIG_FUND=false \
+    NPM_CONFIG_AUDIT=false \
+    NPM_CONFIG_UPDATE_NOTIFIER=false
+
 COPY package*.json ./
-RUN npm ci && \
+RUN --mount=type=cache,target=/root/.npm npm install --legacy-peer-deps --no-fund --no-audit && \
     rm -rf node_modules/puppeteer node_modules/puppeteer-core node_modules/next node_modules/@next node_modules/vitest node_modules/tailwindcss node_modules/@tailwindcss node_modules/maplibre-gl node_modules/leaflet node_modules/recharts node_modules/framer-motion node_modules/exceljs node_modules/jspdf node_modules/cloudinary
 
 COPY server ./server

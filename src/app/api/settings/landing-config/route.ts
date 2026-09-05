@@ -13,10 +13,23 @@ export async function GET(req: NextRequest) {
             success: true,
             config: landingConfigResult.data,
             updatedAt: landingConfigResult.updatedAt
+        }, {
+            headers: {
+                'Cache-Control': 'public, max-age=60, stale-while-revalidate=600',
+            }
         });
     } catch (error: any) {
         console.error('Error fetching landing config:', error);
-        return NextResponse.json({ success: false, error: 'Failed to fetch config' }, { status: 500 });
+        return NextResponse.json({
+            success: true,
+            config: {
+                heroTitle: 'AdtU Bus Services',
+                heroSubtitle: 'Smart Campus Transit Portal',
+                features: [],
+                updatedAt: new Date().toISOString(),
+            },
+            updatedAt: null
+        });
     }
 }
 

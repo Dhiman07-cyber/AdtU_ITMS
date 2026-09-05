@@ -8,7 +8,7 @@ import { WebSocketClient } from '@/domains/realtime/ws-client';
 import { supabase } from '@/lib/supabase-client';
 import { AlertCircle,Bus,Clock,MapPin,Navigation } from 'lucide-react';
 import dynamic from 'next/dynamic';
-import React,{ useEffect,useMemo,useRef,useState } from 'react';
+import React,{ useEffect,useRef,useState } from 'react';
 
 // Dynamic import for vector PMTiles map
 const GuwahatiMap = dynamic(() => import('@/components/maps/GuwahatiMap'), {
@@ -55,6 +55,8 @@ interface DynamicStudentMapProps {
   onTripStateChange?: (active: boolean) => void;
 }
 
+import { useScreenWakeLock } from '@/hooks/useScreenWakeLock';
+
 function DynamicStudentMap({ 
   busId, 
   routeId,
@@ -64,6 +66,9 @@ function DynamicStudentMap({
   onWaitingFlagRemove,
   onTripStateChange
 }: DynamicStudentMapProps) {
+  // Keep student screen awake while viewing dynamic map
+  useScreenWakeLock(true);
+
   const { currentUser } = useAuth();
   const wsRef = useRef<WebSocketClient | null>(null);
   const [busLocation, setBusLocation] = useState<BusLocation | null>(null);
@@ -72,8 +77,8 @@ function DynamicStudentMap({
   const [currentFlagId, setCurrentFlagId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  // Memoized points for Guwahati PMTiles Map
-  const points = useMemo(() => {
+  // Points for Guwahati PMTiles Map
+  const points = (() => {
     const list: any[] = [];
     
     // Student's Own Location
@@ -101,22 +106,34 @@ function DynamicStudentMap({
     }
     
     return list;
-  }, [studentLocation, waitingFlags, journeyActive, currentUser?.uid]);
+  })();
 
-  const busPosition = useMemo(() => {
+  const busPosition = (() => {
     if (journeyActive && busLocation && busLocation.lat && busLocation.lng) {
-      return { lat: busLocation.lat, lng: busLocation.lng };
+      const lat = Number(busLocation.lat);
+      const lng = Number(busLocation.lng);
+      const heading = busLocation.heading !== undefined ? Number(busLocation.heading) : 0;
+      if (!isNaN(lat) && !isNaN(lng) && (lat !== 0 || lng !== 0)) {
+        return { lat, lng, heading };
+      }
     }
     return null;
-  }, [journeyActive, busLocation]);
+  })();
 
   // Subscribe to real-time bus location updates via WebSocket
   useEffect(() => {
-    if (!busId || !routeId || !currentUser) {
+    if (!busId || !currentUser) {
       setBusLocation(null);
       setLoading(false);
       return;
     }
+
+    const busVariations = Array.from(
+      new Set([
+        busId,
+        busId.startsWith('bus_') ? busId.replace('bus_', '') : `bus_${busId}`,
+      ])
+    );
 
     const initWs = async () => {
       const token = await currentUser.getIdToken();
@@ -125,19 +142,30 @@ function DynamicStudentMap({
       wsRef.current = client;
       client.connect();
 
-      client.subscribe(`bus_location_${busId}`, (payload: any) => {
-        setBusLocation(payload.payload || payload);
-      });
+      busVariations.forEach((id) => {
+        client.subscribe(`bus_location_${id}`, (payload: any) => {
+          const data = payload.payload || payload;
+          if (data && data.lat && data.lng) {
+            setBusLocation({
+              ...data,
+              lat: Number(data.lat),
+              lng: Number(data.lng),
+              heading: data.heading !== undefined ? Number(data.heading) : 0,
+            });
+          }
+        });
 
-      client.subscribe(`trip-status-${busId}`, (payload: any) => {
-        const isStarted = payload.event === 'trip_started' || payload.payload?.event === 'trip_started';
-        const isEnded = payload.event === 'trip_ended' || payload.payload?.event === 'trip_ended';
-        if (isEnded) {
-          setBusLocation(null);
-          onTripStateChange?.(false);
-        } else if (isStarted) {
-          onTripStateChange?.(true);
-        }
+        client.subscribe(`trip-status-${id}`, (payload: any) => {
+          const data = payload.payload || payload;
+          const isStarted = data.event === 'trip_started' || payload.event === 'trip_started';
+          const isEnded = data.event === 'trip_ended' || payload.event === 'trip_ended';
+          if (isEnded) {
+            setBusLocation(null);
+            onTripStateChange?.(false);
+          } else if (isStarted) {
+            onTripStateChange?.(true);
+          }
+        });
       });
     };
 
@@ -149,7 +177,7 @@ function DynamicStudentMap({
         wsRef.current = null;
       }
     };
-  }, [busId, routeId, currentUser]);
+  }, [busId, routeId, currentUser, onTripStateChange]);
 
   // Subscribe to real-time waiting flags via WebSocket
   useEffect(() => {
@@ -185,6 +213,26 @@ function DynamicStudentMap({
   useEffect(() => {
     const fetchInitialData = async () => {
       try {
+        // Fetch initial trip location
+        try {
+          const res = await fetch(`/api/student/trip-status?busId=${encodeURIComponent(busId)}`);
+          if (res.ok) {
+            const data = await res.json();
+            if (data.tripActive && data.tripData?.current_location) {
+              const loc = data.tripData.current_location;
+              if (loc && loc.lat && loc.lng) {
+                setBusLocation({
+                  ...loc,
+                  lat: Number(loc.lat),
+                  lng: Number(loc.lng),
+                  heading: loc.heading ? Number(loc.heading) : 0,
+                });
+              }
+            }
+          }
+        } catch (err) {
+          console.warn('Failed to fetch initial trip location:', err);
+        }
 
         // Get current waiting flags (optional - table might not exist)
         try {

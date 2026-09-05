@@ -9,7 +9,7 @@ import { useMemo,useState } from 'react';
 // Migrated: Server-side API → PostgreSQL (no Firestore client reads)
 import { useApiCollection } from '@/hooks/useApiCollection';
 import { cn } from '@/lib/utils';
-import { AnimatePresence,motion } from 'framer-motion';
+import { AnimatePresence,motion } from "motion/react";
 
 interface OverloadInfo {
   busId: string;

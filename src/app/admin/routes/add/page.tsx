@@ -1,5 +1,6 @@
 "use client";
 
+import { PremiumPageLoader } from '@/components/LoadingSpinner';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -235,11 +236,7 @@ export default function AddRoutePage() {
   };
 
   if (authLoading || dataLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-[#010717]">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
-      </div>
-    );
+    return <PremiumPageLoader message="Loading Route Registration..." subMessage="Setting up form..." />;
   }
 
   if (!currentUser || !userData || !['admin', 'moderator'].includes(userData.role)) return null;
@@ -249,13 +246,14 @@ export default function AddRoutePage() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-white mb-1">Add Route</h1>
-            <p className="text-gray-400 text-xs">Create a new bus route with stops</p>
+            <h1 className="text-3xl font-bold text-foreground">Add Route</h1>
+            <p className="text-muted-foreground mt-1">Create a new bus route with stops</p>
           </div>
           <Link
             href="/admin/routes"
-            className="inline-flex items-center px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white text-sm border border-white/20 hover:border-white/30 rounded-lg transition-all duration-200 hover:shadow-lg"
+            className="inline-flex items-center px-3.5 py-1.5 bg-white/10 hover:bg-white/20 text-white text-sm border border-white/20 hover:border-white/30 rounded-lg transition-all duration-200 hover:shadow-md"
           >
+            <span className="mr-1.5 text-sm">←</span>
             Back
           </Link>
         </div>

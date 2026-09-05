@@ -1,5 +1,6 @@
 "use client";
 
+import { PremiumPageLoader } from '@/components/LoadingSpinner';
 import EnhancedDatePicker from "@/components/enhanced-date-picker";
 import FacultyDepartmentSelector from '@/components/faculty-department-selector';
 import { Button } from '@/components/ui/button';
@@ -289,6 +290,11 @@ export default function AddStudentForm() {
 
     const endYear = validStartYear + validDuration;
 
+    // If deadline config not yet loaded from server, return empty validUntil until fetched
+    if (!academicDeadline) {
+      return { endYear, validUntil: '' };
+    }
+
     // Calculate validUntil using the utility and dynamic deadline
     const validUntilDate = calculateValidUntilDate(validStartYear, validDuration, academicDeadline);
 
@@ -297,12 +303,14 @@ export default function AddStudentForm() {
 
   // Trigger recalculation when academicDeadline changes (if fetched late)
   useEffect(() => {
+    if (!academicDeadline) return;
+
     if (formData.sessionStartYear && formData.sessionDuration) {
       const durationNum = parseInt(formData.sessionDuration) || 1;
       const { validUntil } = calculateSessionEnd(formData.sessionStartYear, durationNum);
 
       // Only update if different to avoid loops
-      if (validUntil !== formData.validUntil) {
+      if (validUntil && validUntil !== formData.validUntil) {
         setFormData(prev => ({ ...prev, validUntil }));
       }
     }
@@ -657,18 +665,22 @@ export default function AddStudentForm() {
     addToast('Form reset successfully', 'info');
   };
 
+  if (loading) {
+    return <PremiumPageLoader message="Loading Student Registration..." subMessage="Setting up form..." />;
+  }
+
   return (
     <div className="mt-10 py-4">
       {/* Header */}
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-white mb-1">Add Student</h1>
-            <p className="text-gray-400 text-xs text-left">Register a new student in the system</p>
+            <h1 className="text-3xl font-bold text-foreground">Add Student</h1>
+            <p className="text-muted-foreground mt-1 text-left">Register a new student in the system</p>
           </div>
           <Link
             href="/admin/students"
-            className="inline-flex items-center px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white text-sm border border-white/20 hover:border-white/30 rounded-lg transition-all duration-200 hover:shadow-lg"
+            className="inline-flex items-center px-3.5 py-1.5 bg-white/10 hover:bg-white/20 text-white text-sm border border-white/20 hover:border-white/30 rounded-lg transition-all duration-200 hover:shadow-md"
           >
             <span className="mr-1.5 text-sm">←</span>
             Back

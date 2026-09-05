@@ -141,7 +141,7 @@ export async function POST(req: NextRequest) {
  */
 async function syncSystemConfigDates(deadlineConfig: DeadlineConfig, uid: string) {
     // Concrete lifecycle dates are queried directly from canonical deadline config endpoint.
-    console.log('ℹ️ syncSystemConfigDates is bypassed to maintain a single canonical source of truth.');
+    // syncSystemConfigDates is intentionally bypassed to maintain a single source of truth.
 }
 
 /**

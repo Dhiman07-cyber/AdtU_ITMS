@@ -48,7 +48,7 @@ import {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { QRCodeCanvas } from 'qrcode.react';
-import { use,useCallback,useEffect,useRef,useState } from "react";
+import { use,useEffect,useRef,useState } from "react";
 
 const formatDate = formatDateFlexible;
 
@@ -219,7 +219,7 @@ export default function ViewStudentPage({ params }: { params: Promise<{ id: stri
   };
 
   // QR Code Download Handler
-  const handleDownloadQR = useCallback(async () => {
+  const handleDownloadQR = async () => {
     if (!student) return;
 
     try {
@@ -346,25 +346,32 @@ export default function ViewStudentPage({ params }: { params: Promise<{ id: stri
       ctx.lineTo(cardWidth - 30, footerY - 10);
       ctx.stroke();
 
-      ctx.textAlign = 'center';
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
-      ctx.font = '600 9px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
-      ctx.fillText('Official Digital Authorization • Keep this pass with you', cardWidth / 2, footerY + 8);
+      const qrCanvas = document.querySelector('.qr-canvas-container canvas') as HTMLCanvasElement;
+      if (qrCanvas) {
+        ctx.drawImage(qrCanvas, 30, 80, 340, 340);
+      }
 
-      // Download
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 16px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+      ctx.fillText(student.fullName || student.name || 'Student', 30, 450);
+
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+      ctx.font = '500 12px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+      ctx.fillText(`ID: ${student.enrollmentId || 'N/A'} • Bus: ${student.busNumber || 'N/A'}`, 30, 470);
+
       const link = document.createElement('a');
-      link.download = `BusPass_${(student.fullName || student.name)?.replace(/\s+/g, '_')}.png`;
-      link.href = canvas.toDataURL('image/png', 1.0);
+      link.download = `bus-pass-${student.enrollmentId || student.id || 'student'}.png`;
+      link.href = canvas.toDataURL('image/png');
       link.click();
-      addToast('Bus pass saved successfully!', 'success');
+      addToast('Bus pass downloaded!', 'success');
     } catch (e) {
       console.error(e);
       addToast('Failed to save bus pass', 'error');
     }
-  }, [student]);
+  };
 
   // QR Code Share Handler
-  const handleShareQR = useCallback(async () => {
+  const handleShareQR = async () => {
     if (!student) return;
 
     try {
@@ -378,7 +385,7 @@ export default function ViewStudentPage({ params }: { params: Promise<{ id: stri
     } catch (e) {
       if ((e as Error).name !== 'AbortError') addToast('Sharing failed', 'error');
     }
-  }, [student]);
+  };
 
   if (loading) {
     return <PremiumPageLoader message="Loading student profile..." subMessage="Fetching details..." />;
@@ -483,7 +490,7 @@ export default function ViewStudentPage({ params }: { params: Promise<{ id: stri
                 })()}
               </div>
               <div className="md:hidden mt-2 text-center">
-                <h2 className="text-2xl font-black bg-gradient-to-r from-blue-400 to-pink-500 bg-clip-text text-transparent mb-1 leading-tight break-words">{student.fullName || student.name}</h2>
+                <h2 className="text-2xl font-bold text-foreground mb-1 leading-tight break-words">{student.fullName || student.name}</h2>
                 <div className="mt-2 flex flex-col gap-1.5 items-center">
                   <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full border border-primary/20 bg-gradient-to-r from-primary/5 to-primary/10 shadow-sm w-fit">
                     <Mail className="w-3 h-3 text-primary" />
@@ -525,7 +532,7 @@ export default function ViewStudentPage({ params }: { params: Promise<{ id: stri
           <div className="hidden md:block space-y-4">
             {/* Name & Title */}
             <div>
-              <h2 className="text-2xl font-black bg-gradient-to-r from-blue-400 to-pink-500 bg-clip-text text-transparent mb-1 leading-tight">{student.fullName || student.name}</h2>
+              <h2 className="text-2xl font-bold text-foreground mb-1 leading-tight">{student.fullName || student.name}</h2>
               <p className="text-sm text-primary font-medium mb-0.5">{student.department || 'Department'}</p>
               {student.faculty && (
                 <p className="text-xs text-muted-foreground">{student.faculty}</p>
@@ -590,7 +597,7 @@ export default function ViewStudentPage({ params }: { params: Promise<{ id: stri
           <div className="relative inline-flex items-center gap-4">
             <div className="w-16 h-[2px] bg-gradient-to-r from-transparent to-primary/40"></div>
             <div className="px-6 py-2.5 rounded-xl bg-blue-500/5 dark:bg-blue-500/10 border border-blue-500/20">
-              <span className="text-sm font-bold bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 dark:from-blue-400 dark:via-purple-400 dark:to-pink-400 bg-clip-text text-transparent">Detailed Information</span>
+              <span className="text-sm font-bold text-foreground">Detailed Information</span>
             </div>
             <div className="w-16 h-[2px] bg-gradient-to-l from-transparent to-primary/40"></div>
           </div>

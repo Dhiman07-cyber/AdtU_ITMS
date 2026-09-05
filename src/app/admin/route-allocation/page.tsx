@@ -22,7 +22,7 @@ import {
 } from "@/components/ui/tooltip";
 import { useAuth } from "@/contexts/auth-context";
 import { cn } from "@/lib/utils";
-import { motion } from "framer-motion";
+import { motion } from "motion/react";
 import {
 	ArrowRightLeft,
 	Bus,
@@ -57,13 +57,13 @@ import {
 // DESIGN TOKENS
 // ============================================
 const tokens = {
-    primaryPurple: "#9333EA",
-    primaryPink: "#DB2777",
+    primaryPurple: "#2563EB",
+    primaryPink: "#4F46E5",
     primaryOrange: "#F97316",
-    deepPurple: "#6B46C1",
+    deepPurple: "#4338CA",
     darkBg: "#020617",
     cardBg: "#0B1222",
-    cardHeader: "linear-gradient(to right, rgba(147, 51, 234, 0.1), rgba(219, 39, 119, 0.1))",
+    cardHeader: "linear-gradient(to right, rgba(37, 99, 235, 0.08), rgba(79, 70, 229, 0.08))",
     success: "#10B981",
     reserved: "#F59E0B",
     occupied: "#F59E0B",
@@ -592,24 +592,13 @@ export default function SmartRouteAllocationPage() {
             <div className="mt-20 sm:mt-8 space-y-6 px-2 sm:px-4">
                 {/* Header */}
                 <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4 flex-shrink-0">
-                    <div className="flex items-center gap-2.5">
-                        <div
-                            className="w-10 h-10 rounded-xl flex items-center justify-center shadow-lg bg-gradient-to-br from-purple-500 to-pink-500"
-                        >
-                            <RouteIcon className="w-5 h-5 text-white" />
-                        </div>
-                        <div>
-                            <motion.h1
-                                initial={{ opacity: 0, x: -20 }}
-                                animate={{ opacity: 1, x: 0 }}
-                                className="text-2xl font-bold bg-gradient-to-r from-purple-400 via-pink-400 to-purple-500 bg-clip-text text-transparent"
-                            >
-                                Smart Route Allocation
-                            </motion.h1>
-                            <p className="mt-0.5 text-xs text-muted-foreground">
-                                Reassign buses to different routes permanently
-                            </p>
-                        </div>
+                    <div>
+                        <h1 className="text-3xl font-bold text-foreground">
+                            Smart Route Allocation
+                        </h1>
+                        <p className="text-muted-foreground mt-1">
+                            Reassign buses to different routes permanently
+                        </p>
                     </div>
                     <div className="flex items-center gap-3">
                         <Button
@@ -624,7 +613,6 @@ export default function SmartRouteAllocationPage() {
                     </div>
                 </div>
 
-                {/* Main Grid - Two Equal Cards with Fixed Height */}
                 {/* Main Grid - Two Equal Cards with Fixed Height */}
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 items-stretch w-full">
 
@@ -641,7 +629,7 @@ export default function SmartRouteAllocationPage() {
                             <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-2">
                                     <div
-                                        className="w-8 h-8 rounded-lg flex items-center justify-center bg-gradient-to-br from-purple-500 to-pink-500"
+                                        className="w-8 h-8 rounded-lg flex items-center justify-center bg-gradient-to-br from-blue-500 to-indigo-500"
                                     >
                                         <Bus className="w-4 h-4 text-white" />
                                     </div>
@@ -887,7 +875,7 @@ export default function SmartRouteAllocationPage() {
                                                         >
                                                             {/* Interactive Glow Effect */}
                                                             {!isInactive && (
-                                                                <div className="absolute -inset-1 opacity-0 group-hover:opacity-10 transition-opacity duration-500 bg-gradient-to-r from-purple-500 via-pink-500 to-orange-500 blur-xl" />
+                                                                <div className="absolute -inset-1 opacity-0 group-hover:opacity-10 transition-opacity duration-500 bg-gradient-to-r from-blue-500 via-indigo-500 to-cyan-500 blur-xl" />
                                                             )}
 
                                                             <div className="flex items-start justify-between mb-3 relative z-10">

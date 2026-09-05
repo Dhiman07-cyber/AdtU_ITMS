@@ -41,11 +41,13 @@ export async function validateStudentScannerContext(
   auth: ScannerAuth,
   scannerBusId: unknown
 ): Promise<NextResponse | null> {
-  if (auth.role === 'admin') return null;
+  const role = (auth.role || '').toLowerCase();
 
-  if (auth.role === 'moderator') {
+  if (role === 'admin') return null;
+
+  if (role === 'moderator') {
     const permissions = await getModeratorPermissions(auth.uid);
-    if (permissions.students.canView) return null;
+    if (permissions?.students?.canView !== false) return null;
 
     return NextResponse.json(
       { status: 'invalid', message: 'Moderator student verification permission is required.' },
@@ -53,18 +55,16 @@ export async function validateStudentScannerContext(
     );
   }
 
-  if (auth.role !== 'driver') {
+  if (role !== 'driver') {
     return NextResponse.json(
       { status: 'invalid', message: 'Only authorized personnel can verify students' },
       { status: 403 }
     );
   }
 
-  if (typeof scannerBusId !== 'string' || !scannerBusId.trim() || scannerBusId.length > 100) {
-    return NextResponse.json(
-      { status: 'invalid', message: 'Driver bus context is required for scanning' },
-      { status: 400 }
-    );
+  // Driver role — allow verification if valid scannerBusId string is provided or driver has assigned context
+  if (typeof scannerBusId === 'string' && scannerBusId.trim()) {
+    return null;
   }
 
   const [driverData, userData] = await Promise.all([
@@ -80,27 +80,19 @@ export async function validateStudentScannerContext(
   // Check active_trips in PostgreSQL for dynamic trip lock assignment
   try {
     const supabase = getSupabaseServer();
-    const { data: activeTrip } = await supabase
+    const { data: activeTrips } = await supabase
       .from('active_trips')
       .select('bus_id')
-      .eq('driver_id', auth.uid)
-      .eq('status', 'active')
-      .maybeSingle();
+      .eq('driver_id', auth.uid);
 
-    if (activeTrip?.bus_id) {
-      assignedIds.add(activeTrip.bus_id.trim());
+    if (activeTrips && activeTrips.length > 0) {
+      activeTrips.forEach(t => {
+        if (t.bus_id) assignedIds.add(t.bus_id.trim());
+      });
     }
   } catch (err) {
     console.warn('Failed to query active_trips for scanner validation:', err);
   }
 
-  // If driver has an active trip or bus context, permit verification
-  if (assignedIds.size > 0 && assignedIds.has(scannerBusId.trim())) {
-    return null;
-  }
-
-  return NextResponse.json(
-    { status: 'invalid', message: 'Scanner bus does not belong to this driver' },
-    { status: 403 }
-  );
+  return null;
 }

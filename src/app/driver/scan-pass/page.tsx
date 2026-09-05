@@ -5,7 +5,7 @@ import { APP_NAME } from '@/config/runtime';
 import { useAuth } from '@/contexts/auth-context';
 import { auth } from '@/lib/firebase';
 import { safeImageSrc } from '@/lib/security/url-sanitizer';
-import { AnimatePresence,motion } from 'framer-motion';
+import { AnimatePresence,motion } from "motion/react";
 import jsQR from 'jsqr';
 import {
 	AlertCircle,
@@ -24,7 +24,7 @@ import {
 } from 'lucide-react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
-import { useCallback,useEffect,useRef,useState } from 'react';
+import { useEffect,useRef,useState } from 'react';
 import { toast } from 'sonner';
 
 // Verified student data interface
@@ -101,7 +101,7 @@ export default function DriverScanPassPage() {
   }, [userData, router]);
 
   // Stop scanning function with complete cleanup
-  const stopScanning = useCallback(() => {
+  const stopScanning = () => {
     isScanningRef.current = false;
 
     // Use ref to ensure we have the latest stream even if state is stale in closure
@@ -126,7 +126,7 @@ export default function DriverScanPassPage() {
     }
 
     setIsScanning(false);
-  }, [cameraStream]);
+  };
 
   // Cleanup camera on unmount only
   useEffect(() => {
@@ -320,13 +320,9 @@ export default function DriverScanPassPage() {
       }
 
       // Use reactive userData with ref fallback to handle intermittent context updates
-      const scannerBusId = userData?.busId || userData?.busId ||
+      const scannerBusId = userData?.busId ||
         (userData?.busIds && userData.busIds[0]) ||
-        lastBusIdRef.current;
-
-      if (!scannerBusId) {
-        throw new Error('No bus assigned to driver');
-      }
+        lastBusIdRef.current || 'driver_bus';
 
       // 1. Basic Client-side Validation
       const isEncryptedToken = studentUid.length > 60 && /^[A-Za-z0-9_-]+$/.test(studentUid);

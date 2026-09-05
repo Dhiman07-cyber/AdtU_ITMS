@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { PremiumPageLoader } from '@/components/LoadingSpinner';
 import PaymentModeSelector from '@/components/PaymentModeSelector';
@@ -100,19 +100,10 @@ export default function StudentRenewalPage() {
   });
 
   // Find bus data based on student's busId
-  const busData = React.useMemo(() => {
-    if (!studentData || !buses.length) return null;
-
-    const studentBusId = studentData?.busId || studentData?.busId;
-    if (!studentBusId) return null;
-
-    const foundBus = buses.find((bus: any) => {
-      return bus.busId === studentBusId ||
-        bus.id === studentBusId;
-    });
-
-    return foundBus;
-  }, [studentData, buses]);
+  const studentBusId = studentData?.busId;
+  const busData = (studentData && buses.length && studentBusId)
+    ? buses.find((bus: any) => bus.busId === studentBusId || bus.id === studentBusId) || null
+    : null;
 
   // Fetch bus fee from API endpoint
   useEffect(() => {

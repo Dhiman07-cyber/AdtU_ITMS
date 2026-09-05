@@ -21,6 +21,10 @@ import crypto from 'crypto';
 const MAX_BATCH_SIZE = parseInt(process.env.BROADCAST_BATCH_SIZE || '100', 10);
 const MAX_PAYLOAD_BYTES = 64 * 1024;
 const PRE_AUTH_BUFFER_LIMIT = 32;
+/** Maximum buffered bytes per socket before we enqueue offline instead of sending.
+ *  Prevents backpressure-induced silent drops in ws.send(). GPS payloads are ~200 bytes,
+ *  so 16KB == ~80 queued events before we start shedding. */
+const MAX_BUFFERED_AMOUNT = 16 * 1024;
 
 export class WebSocketServer {
   private wss: WsServer | null = null;
@@ -36,7 +40,9 @@ export class WebSocketServer {
       }
 
       const socketId = crypto.randomUUID();
-      const ip = request.socket?.remoteAddress || 'unknown';
+      const xff = request.headers['x-forwarded-for'];
+      const clientIp = (Array.isArray(xff) ? xff[0] : xff)?.split(',')[0]?.trim();
+      const ip = clientIp || request.socket?.remoteAddress || 'unknown';
 
       ws.on('error', (err) => {
         metricsService.inc('errors');
@@ -56,7 +62,14 @@ export class WebSocketServer {
       //     - Client must handle 'auth_required' if timeout expires.
       // ────────────────────────────────────────────────────────────────────────
       const AUTH_TIMEOUT_MS = 5000;
-      const urlHasToken = request.url?.includes('token=');
+      // Substring `includes('token=')` would also match `reconnect_token=` — a
+      // reconnect URL then wrongly took Path A, authenticateSocket found no
+      // `token` param, and the socket was closed before Path B auth ever ran.
+      // Test for a real `token` query param instead.
+      const urlHasToken = (() => {
+        try { return !!request.url && new URL(request.url, 'http://localhost').searchParams.has('token'); }
+        catch { return false; }
+      })();
 
       // Buffer every message received while authentication is in flight.
       // Without this, subscribe/presence messages sent immediately after
@@ -187,18 +200,39 @@ export class WebSocketServer {
       // Replace the buffering listener with the real message handler, then
       // replay everything received during authentication through the normal
       // pipeline (rate limit, replay check, routing).
+      //
+      // PER-SOCKET ASYNC QUEUE: Each WebSocket connection gets its own
+      // promise chain (messageQueue).  When a new message arrives the handler
+      // is chained onto the tail of that promise, so messages for the SAME
+      // socket are processed strictly in arrival order even when a handler is
+      // async (e.g. the presence handler awaits a DB query).
+      //
+      // This fixes the race:
+      //   Client sends: presence { busId }  →  subscribe { channel }
+      //   Without ordering: subscribe sees session.busId===undefined → REJECTED
+      //   With ordering:    subscribe only starts after presence DB query resolves
+      //
+      // Cross-socket concurrency is unaffected: each socket has its own
+      // independent queue, so GPS from Driver A is never blocked by
+      // Student B's slow presence query.
+      let messageQueue: Promise<void> = Promise.resolve();
       ws.removeListener('message', bufferMessage);
       ws.on('message', (data) => {
         if (this.shuttingDown) {
           ws.close(4003, 'Server shutting down');
           return;
         }
-        this.processMessage(ws, session, ip, data);
+        // Chain onto the per-socket queue; swallow errors so the queue
+        // never stalls — processMessage already sends an error frame and
+        // increments the error metric on any failure.
+        messageQueue = messageQueue.then(() => this.processMessage(ws, session, ip, data));
       });
 
       for (const buffered of preAuthBuffer) {
         if (this.isAuthMessage(buffered)) continue; // consumed by Path B already
-        this.processMessage(ws, session, ip, buffered);
+        // Replay buffered messages through the same per-socket queue so
+        // ordering is preserved even for messages sent before auth resolved.
+        messageQueue = messageQueue.then(() => this.processMessage(ws, session, ip, buffered));
       }
 
       ws.on('pong', () => {
@@ -237,7 +271,8 @@ export class WebSocketServer {
   // Single parse of each inbound message: size check, shape validation,
   // rate limit, replay guard, then routing. Used for live messages and for
   // replay of messages buffered during authentication.
-  private processMessage(ws: WebSocket, session: Session, ip: string, data: any): void {
+  // Returns a Promise so the per-socket queue can await it.
+  private async processMessage(ws: WebSocket, session: Session, ip: string, data: any): Promise<void> {
     const raw = data.toString();
 
     const sizeCheck = validatePayload(raw);
@@ -264,9 +299,11 @@ export class WebSocketServer {
       return;
     }
 
-    if (!checkRateLimit(ip, session.uid, session.socketId)) {
+    // Rate limiting: normal clients are throttled; authenticated internal server role is strictly exempt.
+    if (session.role !== 'server' && !checkRateLimit(ip, session.uid, session.socketId)) {
       metricsService.inc('rateLimitBlocks');
       metricsService.inc('errors');
+      logger.warn('rate_limit_blocked', { uid: session.uid, role: session.role, ip, socketId: session.socketId });
       sendToSocket(ws, { type: 'error', message: 'Rate limit exceeded' });
       return;
     }
@@ -280,12 +317,21 @@ export class WebSocketServer {
     }
 
     metricsService.inc('messagesReceived');
-    routeMessage(ws, session, parsed);
+    await routeMessage(ws, session, parsed);
   }
 
   broadcastToChannel(channel: string, event: string, payload: Record<string, unknown>): void {
     const subscriberIds = subscriptionManager.getSubscribers(channel);
-    if (subscriberIds.length === 0) return;
+    if (subscriberIds.length === 0) {
+      // Critical diagnostic: if we reach here for a bus_location channel, the
+      // broadcast was received but NO subscriber was registered — either the
+      // student's subscription was never registered server-side, or it was
+      // removed on reconnect without re-subscribe.
+      if (channel.startsWith('bus_location_')) {
+        logger.warn('broadcast_zero_subscribers', { channel, event });
+      }
+      return;
+    }
     const msg = encodeMsg({ type: 'message', channel, event, payload });
     let sent = 0;
 
@@ -293,8 +339,22 @@ export class WebSocketServer {
       const batch = subscriberIds.slice(i, i + MAX_BATCH_SIZE);
       for (const socketId of batch) {
         const entry = connectionRegistry.get(socketId);
-        if (entry && entry.ws.readyState === entry.ws.OPEN) {
-          entry.ws.send(msg);
+        // Send only to sockets that are OPEN and not already saturated. A socket
+        // whose writable buffer is full will silently drop (or delay) additional
+        // frames — enqueueOffline gives the message a durable retry path instead.
+        if (entry && entry.ws.readyState === entry.ws.OPEN && entry.ws.bufferedAmount < MAX_BUFFERED_AMOUNT) {
+          entry.ws.send(msg, (err: Error | undefined) => {
+            if (err) {
+              metricsService.inc('errors');
+              logger.warn('broadcast_send_error', {
+                socketId,
+                uid: entry.session.uid,
+                channel,
+                event,
+                error: err.message,
+              });
+            }
+          });
           sent++;
         } else if (entry) {
           enqueueOffline(entry.session.uid, channel, event, payload);

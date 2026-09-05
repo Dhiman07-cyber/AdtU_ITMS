@@ -136,6 +136,7 @@ export async function endTrip(params: EndTripParams): Promise<EndTripOutput> {
   let activeTripId = params.tripId;
   let routeId = '';
   let routeName = 'your route';
+  let tripDurationMinutes = 0;
 
   const activeTrip = await tripLockService.getActiveTrip(params.busId);
   if (activeTrip) {
@@ -149,6 +150,15 @@ export async function endTrip(params: EndTripParams): Promise<EndTripOutput> {
     }
     if (!activeTripId) activeTripId = activeTrip.trip_id;
     routeId = activeTrip.route_id || '';
+
+    // Calculate trip duration in minutes from active_trips start_time/created_at
+    const startTimeStr = (activeTrip as any).start_time || (activeTrip as any).created_at;
+    if (startTimeStr) {
+      const startTimeMs = new Date(startTimeStr).getTime();
+      if (Number.isFinite(startTimeMs) && startTimeMs > 0) {
+        tripDurationMinutes = (Date.now() - startTimeMs) / (1000 * 60);
+      }
+    }
   } else {
     // Fetch route_id, route_name, and bus_number together (avoids second buses query below)
     const { data: busData } = await supabase
@@ -159,7 +169,6 @@ export async function endTrip(params: EndTripParams): Promise<EndTripOutput> {
     if (busData) {
       routeId = busData.route_id || '';
       routeName = busData.route_name || 'your route';
-      // Cache bus_number so the second fetch below is skipped
       Object.assign(params, { _cachedBusNumber: busData.bus_number || params.busId });
     }
   }
@@ -174,33 +183,72 @@ export async function endTrip(params: EndTripParams): Promise<EndTripOutput> {
     return { success: true, reason: 'No active trip found' };
   }
 
-  // Run endTrip RPC and trip cleanup concurrently — cleanup is non-critical.
-  // Also drop the persisted bus_locations row so the next trip can never
-  // surface this trip's stale position (harmless if the trip stays active:
-  // the next throttled GPS write re-persists within 30s).
-  const [endResult] = await Promise.all([
-    tripLockService.endTrip(activeTripId, params.driverId, params.busId),
-    cleanupTrip({ driverId: params.driverId, busId: params.busId, tripId: activeTripId }),
-    supabase.from('bus_locations').delete().eq('bus_id', params.busId),
-  ]);
+  // Enforce 10-minute minimum duration rule:
+  // If driver accidentally started and immediately ended trip (<10 minutes),
+  // do NOT save to driver_trip_history and delete the accidental trip row.
+  const IS_ACCIDENTAL_SHORT_TRIP = tripDurationMinutes > 0 && tripDurationMinutes < 10;
+
+  if (IS_ACCIDENTAL_SHORT_TRIP) {
+    appLogger.info('trip', 'short_duration_discarded', {
+      ...logCtx,
+      tripId: activeTripId,
+      durationMinutes: Math.round(tripDurationMinutes * 10) / 10,
+      reason: 'Trip duration < 10 minutes — discarded from history',
+    });
+  }
+
+  // 1. Authoritative state transition FIRST — no side effects until this succeeds.
+  const endResult = await tripLockService.endTrip(activeTripId, params.driverId, params.busId);
 
   if (!endResult.success) {
+    if (IS_ACCIDENTAL_SHORT_TRIP) {
+      // The RPC failed (e.g. lock conflict). Do NOT force-delete — that
+      // bypasses the lock. Return failure so the driver can retry.
+      appLogger.error('trip', 'short_trip_end_failed', { ...logCtx, tripId: activeTripId, reason: endResult.reason, errorClass: ErrorClass.TRIP_LOCK_FAILED, latencyMs: Date.now() - start });
+      return { success: false, reason: endResult.reason };
+    }
     appLogger.error('trip', 'end_failed', { ...logCtx, tripId: activeTripId, reason: endResult.reason, errorClass: ErrorClass.TRIP_LOCK_FAILED, latencyMs: Date.now() - start });
     return { success: false, reason: endResult.reason };
   }
 
-  // The trip is over: the GPS pipeline must not compare the next trip's first
-  // update against this trip's last position (jump rejection for 5+ minutes on
-  // restart), and the 10s active-trip cache must not gate it on the old trip.
+  // 2. RPC succeeded — now safe to record history and clean up transient state.
+  // History write AFTER authoritative end to avoid stale rows on RPC failure.
+  if (!IS_ACCIDENTAL_SHORT_TRIP && tripDurationMinutes >= 10) {
+    const { error: historyErr } = await supabase
+      .from('driver_trip_history')
+      .upsert(
+        {
+          trip_id: activeTripId,
+          driver_id: params.driverId,
+          bus_id: params.busId,
+          route_id: routeId || null,
+          shift: (activeTrip as any)?.shift || null,
+          start_time: (activeTrip as any)?.start_time || new Date(Date.now() - tripDurationMinutes * 60000).toISOString(),
+          end_time: new Date().toISOString(),
+          duration_minutes: Math.round(tripDurationMinutes * 10) / 10,
+        },
+        { onConflict: 'trip_id' }
+      );
+    if (historyErr) {
+      console.warn('Optional driver_trip_history insert note:', historyErr.message);
+    }
+  }
+
+  // 2. RPC succeeded — now safe to clean up transient state.
+  await Promise.allSettled([
+    cleanupTrip({ driverId: params.driverId, busId: params.busId, tripId: activeTripId }),
+    supabase.from('bus_locations').delete().eq('bus_id', params.busId),
+  ]);
+
   invalidateActiveTripCache(params.busId, params.driverId);
   clearInMemoryLastLocation(params.busId);
 
-  // Use bus_number already fetched during route resolution above (avoids a second buses query)
   const cachedBusNumber = (params as any)._cachedBusNumber;
   const busNumber = cachedBusNumber || (activeTrip ? (activeTrip as any).bus_number : null) || params.busId;
 
-  appLogger.info('trip', 'ended', { ...logCtx, tripId: activeTripId, routeId, latencyMs: Date.now() - start });
+  appLogger.info('trip', 'ended', { ...logCtx, tripId: activeTripId, routeId, durationMinutes: Math.round(tripDurationMinutes * 10) / 10, latencyMs: Date.now() - start });
 
+  // 3. Broadcast only after authoritative success.
   broadcastTripEvent({
     busId: params.busId,
     tripId: activeTripId,

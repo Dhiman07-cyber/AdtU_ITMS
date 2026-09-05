@@ -5,7 +5,7 @@ import { Card,CardContent,CardHeader,CardTitle } from '@/components/ui/card';
 import { useAuth } from '@/contexts/auth-context';
 import { exportToExcel } from '@/lib/export-helpers';
 import { cn } from '@/lib/utils';
-import { AnimatePresence,motion } from 'framer-motion';
+import { AnimatePresence,motion } from "motion/react";
 import {
 	BarChart3,
 	Calendar,
@@ -105,7 +105,7 @@ export default function TransactionalAnalytics({
       const isRevenue = role === 'admin' && metricType === 'revenue';
       return (
         <div className="bg-[#0f101f] border border-white/10 p-4 rounded-xl shadow-2xl">
-          <p className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2 border-b border-white/5 pb-2">
+          <p className="text-xs font-bold text-slate-500 tracking-widest mb-2 border-b border-white/5 pb-2">
             {label}
           </p>
           <div className="space-y-1.5">
@@ -136,7 +136,7 @@ export default function TransactionalAnalytics({
             <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 shadow-inner">
               <TrendingUp className="w-5 h-5" />
             </div>
-            <CardTitle className="text-xl font-black text-white tracking-tight">
+            <CardTitle className="text-xl font-bold text-white">
               {role === 'moderator' ? 'Collection & Volumetric Trends' : 'Transactional Insights'}
             </CardTitle>
           </div>
@@ -150,7 +150,7 @@ export default function TransactionalAnalytics({
             <Button
               size="sm"
               variant={viewMode === 'days' ? 'default' : 'ghost'}
-              className={cn("text-[10px] font-bold uppercase tracking-widest px-4 h-9 rounded-lg transition-all", viewMode === 'days' ? "bg-indigo-600 shadow-indigo-600/20" : "text-slate-500 hover:text-slate-300")}
+              className={cn("text-[10px] font-bold px-4 h-9 rounded-lg transition-all", viewMode === 'days' ? "bg-indigo-600 shadow-indigo-600/20" : "text-slate-500 hover:text-slate-300")}
               onClick={() => setViewMode('days')}
             >
               Last 7 Days
@@ -158,7 +158,7 @@ export default function TransactionalAnalytics({
             <Button
               size="sm"
               variant={viewMode === 'months' ? 'default' : 'ghost'}
-              className={cn("text-[10px] font-bold uppercase tracking-widest px-4 h-9 rounded-lg transition-all", viewMode === 'months' ? "bg-indigo-600 shadow-indigo-600/20" : "text-slate-500 hover:text-slate-300")}
+              className={cn("text-[10px] font-bold px-4 h-9 rounded-lg transition-all", viewMode === 'months' ? "bg-indigo-600 shadow-indigo-600/20" : "text-slate-500 hover:text-slate-300")}
               onClick={() => setViewMode('months')}
             >
               Monthly
@@ -183,9 +183,9 @@ export default function TransactionalAnalytics({
               >
                 <div className="flex items-center gap-2 mb-1">
                   <Wallet className="w-3.5 h-3.5" />
-                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Revenue</span>
+                  <span className="text-[10px] font-bold text-slate-500">Revenue</span>
                 </div>
-                <div className="text-lg font-black text-white leading-tight break-words text-left w-full text-wrap">
+                <div className="text-lg font-bold text-white leading-tight break-words text-left w-full text-wrap">
                   {viewMode === 'days' ? 'Past 7 days Analytics Chart' : 'Monthwise Comparison Chart'}
                 </div>
               </Button>
@@ -193,7 +193,7 @@ export default function TransactionalAnalytics({
               <div className="w-full h-[116px] p-4 flex flex-col items-start justify-start gap-1 rounded-2xl border bg-indigo-500/10 border-indigo-500/30 text-indigo-400 shadow-lg shadow-indigo-600/5 ring-1 ring-white/5 hover:cursor-pointer">
                 <div className="flex items-center gap-2 mb-1">
                   <BarChart3 className="w-3.5 h-3.5" />
-                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Transaction Volume</span>
+                  <span className="text-[10px] font-bold text-slate-500">Transaction Volume</span>
                 </div>
                 <div className="grid grid-cols-2 gap-2 w-full mt-1">
                   <div className="flex flex-col">
@@ -213,10 +213,10 @@ export default function TransactionalAnalytics({
                 <>
                   <div className="flex items-center gap-2 mb-2">
                     <TrendingUp className="w-3 h-3 text-emerald-500" />
-                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Earnings</span>
+                    <span className="text-[10px] font-bold text-slate-500">Earnings</span>
                   </div>
                   <div className="space-y-2">
-                    <div className="text-lg font-black text-emerald-400">
+                    <div className="text-lg font-bold text-emerald-400">
                       {(() => {
                         if (viewMode === 'days') {
                           const sum = (paymentTrends.days || []).reduce((acc, curr) => acc + (curr.amount || 0), 0);
@@ -237,7 +237,7 @@ export default function TransactionalAnalytics({
                 <>
                   <div className="flex items-center gap-2 mb-1">
                     <PieChart className="w-3 h-3 text-emerald-500" />
-                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest text-wrap leading-tight">Preference Trend</span>
+                    <span className="text-[10px] font-bold text-slate-500 text-wrap leading-tight">Preference Trend</span>
                   </div>
                   <div className="flex-1 w-full mt-1 flex items-center justify-center">
                     {methodTrend.length > 0 ? (
@@ -274,7 +274,7 @@ export default function TransactionalAnalytics({
             {currentData.length === 0 ? (
               <div className="w-full h-full flex flex-col items-center justify-center border border-white/5 rounded-3xl bg-white/[0.01]">
                 <BarChart3 className="w-12 h-12 text-slate-700 mb-4 opacity-20" />
-                <p className="text-slate-500 font-bold uppercase tracking-widest text-xs">Not enough data to show</p>
+                <p className="text-slate-500 font-bold text-xs">Not enough data to show</p>
               </div>
             ) : (
               <AnimatePresence mode="wait">
@@ -337,8 +337,8 @@ export default function TransactionalAnalytics({
               <Calendar className="w-4 h-4" />
             </div>
             <div className="flex flex-col">
-              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Collection Point</span>
-              <span className="text-sm font-black text-white">
+              <span className="text-[10px] font-bold text-slate-500">Collection Point</span>
+              <span className="text-sm font-bold text-white">
                 {role === 'moderator' ? 'Daily Average: ' : ''}
                 {role === 'moderator'
                   ? Math.round(currentData.reduce((acc, curr) => acc + curr.count, 0) / (currentData.length || 1))
@@ -354,8 +354,8 @@ export default function TransactionalAnalytics({
               <CreditCard className="w-4 h-4" />
             </div>
             <div className="flex flex-col">
-              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Currency</span>
-              <span className="text-sm font-black text-white">INR</span>
+              <span className="text-[10px] font-bold text-slate-500">Currency</span>
+              <span className="text-sm font-bold text-white">INR</span>
             </div>
           </div>
 
@@ -364,19 +364,18 @@ export default function TransactionalAnalytics({
               <CreditCard className="w-4 h-4" />
             </div>
             <div className="flex flex-col">
-              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Gateway</span>
-              <span className="text-sm font-black text-white">Razorpay (Active)</span>
+              <span className="text-[10px] font-bold text-slate-500">Gateway</span>
+              <span className="text-sm font-bold text-white">Razorpay (Active)</span>
             </div>
           </div>
 
           <div className="flex justify-end items-center col-span-1 lg:col-span-1">
             <Button
-              variant="outline"
               onClick={handleExport}
               disabled={isExporting}
-              className="h-10 px-4 border-slate-700 hover:bg-slate-800 text-slate-300 text-[10px] font-black uppercase tracking-widest group"
+              className="h-8 px-4 bg-white hover:bg-gray-50 text-gray-600 hover:text-blue-600 border border-gray-200 hover:border-blue-200 shadow-sm hover:shadow-lg hover:shadow-blue-500/10 font-bold text-[10px] uppercase tracking-widest rounded-lg transition-all duration-300 active:scale-95 disabled:opacity-50 flex items-center justify-center"
             >
-              <Download className="w-3.5 h-3.5 mr-2 group-hover:translate-y-0.5 transition-transform" />
+              <Download className="mr-2 h-3.5 w-3.5" />
               {isExporting ? 'Exporting...' : 'Export'}
             </Button>
           </div>

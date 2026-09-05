@@ -17,7 +17,7 @@ import {
 	RECOVERY_MAX_ATTEMPTS,
 	RECOVERY_POLL_INTERVAL_MS,
 } from '@/lib/payment/payment-state';
-import { useCallback,useEffect,useRef,useState } from 'react';
+import { useEffect,useRef,useState } from 'react';
 
 export interface RecoveryState {
   status: PaymentFrontendStatus | null; // null = not yet run
@@ -62,7 +62,7 @@ export function usePaymentRecovery(opts: UsePaymentRecoveryOptions) {
     };
   }, []);
 
-  const runOnce = useCallback(async (): Promise<void> => {
+  const runOnce = async (): Promise<void> => {
     if (!mountedRef.current) return;
 
     const token = await getToken();
@@ -148,9 +148,9 @@ export function usePaymentRecovery(opts: UsePaymentRecoveryOptions) {
     timerRef.current = setTimeout(() => {
       if (mountedRef.current) runOnce();
     }, RECOVERY_POLL_INTERVAL_MS);
-  }, [getToken, onSuccess, orderId, paymentId]); // eslint-disable-line react-hooks/exhaustive-deps
+  };
 
-  const start = useCallback(() => {
+  const start = () => {
     if (timerRef.current) clearTimeout(timerRef.current);
     attemptsRef.current = 0;
     setState({
@@ -161,19 +161,19 @@ export function usePaymentRecovery(opts: UsePaymentRecoveryOptions) {
       rawApiStatus: null,
     });
     runOnce();
-  }, [runOnce]);
+  };
 
   /** Trigger a single manual check without resetting the attempt counter */
-  const triggerManualCheck = useCallback(() => {
+  const triggerManualCheck = () => {
     if (timerRef.current) clearTimeout(timerRef.current);
     setState(prev => ({ ...prev, isPolling: true }));
     runOnce();
-  }, [runOnce]);
+  };
 
   // Auto-start when autoStart transitions to true
   useEffect(() => {
     if (autoStart) start();
-  }, [autoStart, start]);
+  }, [autoStart]);
 
   return { state, start, triggerManualCheck };
 }

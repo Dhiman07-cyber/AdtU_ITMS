@@ -36,7 +36,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 export default function DriverDashboard() {
   const { userData, currentUser } = useAuth();
@@ -91,10 +91,7 @@ export default function DriverDashboard() {
   // Use Firestore data
   const driverData = driverDataFirestore;
 
-  const busData = useMemo(() => {
-    if (assignedBusData) return assignedBusData;
-    return null;
-  }, [assignedBusData]);
+  const busData = assignedBusData || null;
 
   // Sync hasActiveTrip with Supabase and API (Robust Version)
   useEffect(() => {
@@ -160,7 +157,7 @@ export default function DriverDashboard() {
     };
   }, [currentUser?.uid, busData?.busId, busData?.id]);
 
-  const routeData = useMemo(() => {
+  const routeData = (() => {
     // First try to use directly fetched assigned route data
     if (assignedRouteData) {
       if (typeof window !== 'undefined') console.log('🗺️ Using directly fetched assigned route data:', assignedRouteData);
@@ -226,11 +223,11 @@ export default function DriverDashboard() {
 
     if (typeof window !== 'undefined') console.log('❌ No route data found');
     return null;
-  }, [driverData, routes, busData, assignedRouteData]);
+  })();
 
 
   // Calculate bus capacity information
-  const busCapacityInfo = useMemo(() => {
+  const busCapacityInfo = (() => {
     if (!busData) return { current: 0, total: 50, percentage: 0, capacityString: '0%' };
 
     const current = busData?.currentMembers || studentCount || 0;
@@ -239,14 +236,12 @@ export default function DriverDashboard() {
     const capacityString = `${percentage.toFixed(0)}%`;
 
     return { current, total, percentage, capacityString };
-  }, [busData, studentCount]);
+  })();
 
-  const routeStopCount = useMemo(() => {
-    return routeData?.totalStops ?? (Array.isArray(routeData?.stops) ? routeData.stops.length : 0);
-  }, [routeData]);
+  const routeStopCount = routeData?.totalStops ?? (Array.isArray(routeData?.stops) ? routeData.stops.length : 0);
 
   // Calculate route distance information
-  const routeDistanceInfo = useMemo(() => {
+  const routeDistanceInfo = (() => {
     if (!busData && !routeData) return { distance: 0, percentage: 0, distanceString: '0km' };
 
     // Try multiple sources for distance in order of preference
@@ -264,7 +259,7 @@ export default function DriverDashboard() {
     const distanceString = `${distance}km`;
 
     return { distance, percentage, distanceString };
-  }, [busData, routeData]);
+  })();
 
 
   // Extract key information with better fallbacks

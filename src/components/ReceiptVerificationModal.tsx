@@ -3,7 +3,7 @@
 import { Button } from '@/components/ui/button';
 import { Dialog,DialogContent,DialogHeader,DialogTitle } from '@/components/ui/dialog';
 import { safeImageSrc } from '@/lib/security/url-sanitizer';
-import { motion } from 'framer-motion';
+import { motion } from "motion/react";
 import {
 	Calendar,
 	Check,

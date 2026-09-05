@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Card,CardContent } from '@/components/ui/card';
 import { Tooltip,TooltipContent,TooltipProvider,TooltipTrigger } from '@/components/ui/tooltip';
 import { deriveAcademicLifecycle } from '@/lib/utils/deadline-computation';
-import { motion } from 'framer-motion';
+import { motion } from "motion/react";
 import {
 	Calendar,
 	Clock,
@@ -15,7 +15,7 @@ import {
 	UserPlus
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { useEffect,useMemo,useState } from 'react';
+import { useEffect,useState } from 'react';
 import { DashboardStats } from './types';
 
 interface SystemLifecycleIntelligenceProps {
@@ -62,7 +62,7 @@ export default function SystemLifecycleIntelligence({ stats }: SystemLifecycleIn
       return () => { isMounted = false; };
    }, []);
 
-   const lifecycleDates = useMemo(() => {
+   const lifecycleDates = (() => {
       const startMonth = deadlineConfig?.academicSessionStart?.month ?? 6; // default July (0-indexed 6)
       const startDay = deadlineConfig?.academicSessionStart?.day ?? 1;
       const currentYear = new Date().getFullYear();
@@ -126,14 +126,14 @@ export default function SystemLifecycleIntelligence({ stats }: SystemLifecycleIn
             description: 'Verified students for the upcoming academic session are automatically assigned seats if available. If no suitable seat is available, their application is moved for manual review.'
          }
       ];
-   }, [deadlineConfig]);
+   })();
 
    // Derived Analytics
    const reservedCount = stats.activeStudents;
    const expiredCount = stats.expiredStudents;
 
    return (
-      <Card className="relative overflow-hidden bg-[#0a0b14] border-white/5 shadow-2xl h-full transition-colors duration-300 hover:bg-[#0f101f] font-sans">
+      <Card className="relative overflow-hidden bg-[#0a0b14] border-white/5 shadow-2xl h-full transition-colors duration-300 hover:bg-[#0f101f]">
          <CardContent className="p-4 pt-2 md:p-6 md:pt-2 h-full flex flex-col">
             {/* Header Row */}
             <div className="flex items-center justify-between mb-5">
@@ -142,14 +142,14 @@ export default function SystemLifecycleIntelligence({ stats }: SystemLifecycleIn
                      <Hourglass className="w-5 h-5 animate-pulse" />
                   </div>
                   <div className="flex flex-col">
-                     <h3 className="text-sm font-bold text-white tracking-tight uppercase leading-tight">System Lifecycle Intelligence</h3>
-                     <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest leading-none mt-1">Academic Compliance Matrix</p>
+                     <h3 className="text-sm font-bold text-white leading-tight">System Lifecycle Intelligence</h3>
+                     <p className="text-[10px] text-slate-500 font-bold leading-none mt-1">Academic Compliance Matrix</p>
                   </div>
                </div>
                <Button
                   variant="ghost"
                   size="sm"
-                  className="text-[10px] font-black text-indigo-400 hover:text-white uppercase tracking-widest px-0 h-auto"
+                  className="text-[10px] font-bold text-indigo-400 hover:text-white px-0 h-auto"
                   onClick={() => router.push('/admin/setup-admin')}
                >
                   Edit Config <ExternalLink className="w-3 h-3 ml-1.5" />
@@ -161,7 +161,7 @@ export default function SystemLifecycleIntelligence({ stats }: SystemLifecycleIn
                {/* Section 1: Lifecycle Timeline */}
                <div className="space-y-4">
                   <div className="flex justify-between items-center mb-2">
-                     <span className="text-[11px] font-black text-slate-500 uppercase tracking-widest">Active Cycle Milestones</span>
+                     <span className="text-[11px] font-bold text-slate-500">Active Cycle Milestones</span>
                   </div>
 
                   {/* Desktop Horizontal Timeline */}
@@ -184,7 +184,7 @@ export default function SystemLifecycleIntelligence({ stats }: SystemLifecycleIn
                                     </div>
                                     <div className="flex flex-col items-center text-center w-full mt-1">
                                        <div className="h-8 flex items-center justify-center px-1 w-full">
-                                          <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider leading-tight text-center max-w-[85px] group-hover:text-indigo-400 transition-colors">
+                                          <span className="text-[9px] font-bold text-slate-400 leading-tight text-center max-w-[85px] group-hover:text-indigo-400 transition-colors">
                                              {milestone.label}
                                           </span>
                                        </div>
@@ -220,7 +220,7 @@ export default function SystemLifecycleIntelligence({ stats }: SystemLifecycleIn
                               <milestone.icon className={`w-3.5 h-3.5 ${milestone.color}`} />
                            </div>
                            <div className="flex flex-col">
-                              <span className="text-[9px] font-black text-slate-500 uppercase tracking-wider">{milestone.label}</span>
+                              <span className="text-[9px] font-bold text-slate-500">{milestone.label}</span>
                               <span className="text-xs font-bold text-white mt-0.5">{milestone.date}</span>
                               <p className="text-[10px] text-slate-400 mt-1 leading-normal max-w-sm">{milestone.description}</p>
                            </div>
@@ -236,11 +236,11 @@ export default function SystemLifecycleIntelligence({ stats }: SystemLifecycleIn
                         <div className="w-8 h-8 rounded-xl bg-emerald-500/10 flex items-center justify-center">
                            <UserPlus className="w-4 h-4 text-emerald-400" />
                         </div>
-                        <div className="px-2 py-0.5 bg-emerald-500/20 text-emerald-400 rounded-full text-[8px] font-black uppercase">RESERVED</div>
+                        <div className="px-2 py-0.5 bg-emerald-500/20 text-emerald-400 rounded-full text-[8px] font-bold">Reserved</div>
                      </div>
                      <div className="flex flex-col">
-                        <span className="text-3xl font-black text-white">{reservedCount}</span>
-                        <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest mt-1">Confirmed Seats</span>
+                        <span className="text-3xl font-bold text-white">{reservedCount}</span>
+                        <span className="text-[9px] font-bold text-slate-500 mt-1">Confirmed Seats</span>
                      </div>
                   </div>
 
@@ -249,11 +249,11 @@ export default function SystemLifecycleIntelligence({ stats }: SystemLifecycleIn
                         <div className="w-8 h-8 rounded-xl bg-red-500/10 flex items-center justify-center">
                            <ShieldAlert className="w-4 h-4 text-red-500" />
                         </div>
-                        <div className="px-2 py-0.5 bg-red-500/20 text-red-500 rounded-full text-[8px] font-black uppercase">RENEWAL RISK</div>
+                        <div className="px-2 py-0.5 bg-red-500/20 text-red-500 rounded-full text-[8px] font-bold">Renewal Risk</div>
                      </div>
                      <div className="flex flex-col">
-                        <span className="text-3xl font-black text-white">{expiredCount}</span>
-                        <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest mt-1">Status: Expired</span>
+                        <span className="text-3xl font-bold text-white">{expiredCount}</span>
+                        <span className="text-[9px] font-bold text-slate-500 mt-1">Status: Expired</span>
                      </div>
                   </div>
                </div>

@@ -23,6 +23,7 @@ import { Activity,AlertCircle,Bus,CheckCircle,Clock,Flag,Loader2,MapPin,Moon,Nav
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useCallback,useEffect,useRef,useState } from "react";
+import { useScreenWakeLock } from "@/hooks/useScreenWakeLock";
 
 // Dynamically import components to avoid SSR issues
 const BrowserCompatibilityBanner = dynamic(() => import('@/components/BrowserCompatibilityBanner'), {
@@ -46,9 +47,14 @@ const BusPassScannerModal = dynamic(() => import('@/components/BusPassScannerMod
 interface WaitingFlag {
   id: string;
   student_uid: string;
+  studentUid?: string;
   student_name: string;
+  studentName?: string;
   student_profile_photo?: string | null; // Cloudinary profile photo URL
   bus_id: string;
+  busId?: string;
+  route_id?: string;
+  routeId?: string;
   stop_lat?: number;  // Supabase uses stop_lat/stop_lng
   stop_lng?: number;
   lat?: number;  // Keep for backward compatibility
@@ -57,8 +63,10 @@ interface WaitingFlag {
   message?: string;
   status: 'waiting' | 'acknowledged' | 'boarded' | 'raised' | 'picked_up';
   created_at: string;
+  createdAt?: string;
   queue_number?: number; // Assigned queue number (1, 2, 3, etc.)
   distance?: number; // Distance from bus in km
+  ackByDriverUid?: string;
 }
 
 
@@ -93,6 +101,8 @@ export default function DriverLiveTrackingPage() {
   const broadcastInputsRef = useRef<any>(null);
   const lastBroadcastSampleRef = useRef<{ lat: number; lng: number; t: number } | null>(null);
   const manuallyEndedTripRef = useRef<boolean>(false); // Track if trip was manually ended
+  // Ref to track resolved busId so WS subscription can read latest value without stale closure
+  const resolvedBusIdRef = useRef<string | null>(null);
   const wakeLockRef = useRef<any>(null); // Screen wake lock to prevent screen from turning off
 
   // Map center
@@ -366,9 +376,9 @@ export default function DriverLiveTrackingPage() {
         // Now start continuous tracking
         watchIdRef.current = navigator.geolocation.watchPosition(
           (position) => {
-            const { latitude, longitude, speed: gpsSpeed, accuracy: gpsAccuracy } = position.coords;
+            const { latitude, longitude, speed: gpsSpeed, accuracy: gpsAccuracy, heading: gpsHeading } = position.coords;
 
-            setCurrentLocation({ lat: latitude, lng: longitude, accuracy: gpsAccuracy, isFallback: false } as any);
+            setCurrentLocation({ lat: latitude, lng: longitude, accuracy: gpsAccuracy, heading: gpsHeading ?? 0 } as any);
             setSpeed(gpsSpeed || 0);
             setAccuracy(gpsAccuracy);
             setMapCenter([latitude, longitude]);
@@ -395,7 +405,7 @@ export default function DriverLiveTrackingPage() {
               // Notify user if it's a persistent issue (optional, maybe skip to avoid spam)
               // addToast("GPS signal weak, switching to network location...", "warning");
             } else {
-              addToast("GPS tracking error: " + error.message, "warning");
+              console.warn("⚠️ GPS watch transient pause:", error.message);
             }
           },
           {
@@ -523,6 +533,10 @@ export default function DriverLiveTrackingPage() {
             setBusData(result.bus);
           }
           if (result.route) setRouteData(result.route);
+          if (result.waitingFlags) setWaitingFlags(result.waitingFlags);
+          // Sync resolved busId ref so the WS subscription effect can pick it up
+          const resolvedBusId = result.bus?.busId || result.bus?.id || result.driver?.busId || null;
+          if (resolvedBusId) resolvedBusIdRef.current = resolvedBusId;
           if (result.tripActive) {
             setTripActive(true);
             setTripId(result.tripData?.tripId || result.tripData?.trip_id || null);
@@ -695,19 +709,43 @@ export default function DriverLiveTrackingPage() {
       }
     };
 
-    // Run the check once on mount / bus change to resume active trip or check lock
+    // Run the check once on mount / bus change to resume active trip or check lock.
+    // Periodic polling is managed by the effect below which reacts to tripActive
+    // and busLockedByOther state so the interval arms/disarms correctly.
     checkActiveTrip();
 
-    // Only set up periodic checks when a trip is active or locked, avoiding unnecessary polling when idle.
-    let interval: NodeJS.Timeout | null = null;
-    if (tripActiveRef.current || busLockedByOtherRef.current) {
-      interval = setInterval(checkActiveTrip, 15000);
-    }
-
-    return () => {
-      if (interval) clearInterval(interval);
-    };
+    return () => {};
   }, [currentUser, busData?.busId, startLocationTracking, stopLocationTracking]);
+
+  // Periodic active-trip poll: arms/disarms as state changes so the interval is
+  // always correct regardless of when the trip starts relative to mount.
+  useEffect(() => {
+    if (!currentUser || (!tripActive && !busLockedByOther)) return;
+    const interval = setInterval(() => {
+      // Re-use the same checkActiveTrip defined in the effect above by calling
+      // the driver check-active-trip API directly here (tiny duplication is
+      // better than hoisting the whole async function out of its scope).
+      if (!currentUser?.uid) return;
+      (async () => {
+        try {
+          const idToken = await currentUser.getIdToken();
+          const res = await fetch('/api/driver/check-active-trip', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+            body: JSON.stringify({ idToken, busId: busData?.busId || busData?.id || undefined }),
+          });
+          if (!res.ok) return;
+          const result = await res.json();
+          if (!result.hasActiveTrip && tripActiveRef.current) {
+            setTripActive(false);
+            setTripId(null);
+            stopLocationTracking();
+          }
+        } catch { /* network blip — keep state */ }
+      })();
+    }, 15000);
+    return () => clearInterval(interval);
+  }, [currentUser, busData?.busId, tripActive, busLockedByOther, stopLocationTracking]);
 
   // ==========================================
   // DEVICE SESSION MANAGEMENT (Multi-Device Conflict Detection)
@@ -871,135 +909,118 @@ export default function DriverLiveTrackingPage() {
     }
   };
 
-  // Dynamic centering when location changes during active trip
+  // NOTE: mapCenter is set directly inside watchPosition/getCurrentPosition callbacks above.
+  // It must NOT be reset to a hardcoded constant here — doing so would override the
+  // real GPS coordinate with a fixed campus placeholder on every location update.
+  // This effect is intentionally empty; it exists only as a comment guard.
+
+  // ===================================================
+  // WAITING FLAGS — WebSocket subscription
+  // Runs whenever wsClientReady flips true AND a busId is resolved.
+  // busId is synced into resolvedBusIdRef by fetchData so it is always
+  // available even when busData state hasn't propagated yet.
+  // ===================================================
+  const targetBusId = busData?.busId || busData?.id || driverData?.busId || selectedBusId || resolvedBusIdRef.current;
+
   useEffect(() => {
-    if (!tripActive || !currentLocation) return;
+    if (!wsClientReady || !targetBusId || !currentUser) return;
 
-    // Update map center when location changes during active trip
-    setMapCenter([26.1445, 91.7362]); // Guwahati campus coordinates
-  }, [tripActive, currentLocation]);
+    const wsClient = wsClientRef.current;
+    if (!wsClient) return;
 
-  // Subscribe to waiting flags via WebSocket
-  useEffect(() => {
-    if (!tripActive || !busData?.busId || !currentUser) return;
+    // Queue presence before subscribing — server requires busId set
+    // before a driver can subscribe to bus-scoped channels.
+    wsClient.setPresence({ busId: targetBusId });
 
-    console.log("🔄 Subscribing to waiting flags via WS for bus:", busData.busId);
+    const handleWaitingFlagPayload = (payload: any) => {
+      const evt = payload.event ||
+        (payload.status === 'raised' || payload.status === 'waiting'
+          ? 'waiting_flag_created'
+          : payload.status === 'acknowledged'
+            ? 'waiting_flag_acknowledged'
+            : payload.status === 'cancelled' || payload.status === 'boarded' || payload.status === 'picked_up'
+              ? 'waiting_flag_removed'
+              : 'unknown');
 
-    // Load initial flags via API
-    const fetchInitialFlags = async () => {
+      if (evt === 'waiting_flag_created') {
+        setWaitingFlags((prev) => {
+          const flagId = payload.id || payload.flagId;
+          if (!flagId) return prev;
+          if (prev.some(f => f.id === flagId)) return prev;
+          const newFlag: WaitingFlag = {
+            id: flagId,
+            student_uid: payload.student_uid || payload.studentUid,
+            studentUid: payload.student_uid || payload.studentUid,
+            student_name: payload.student_name || payload.studentName || 'Student',
+            studentName: payload.student_name || payload.studentName || 'Student',
+            student_profile_photo: payload.student_profile_photo || null,
+            bus_id: payload.bus_id || payload.busId || targetBusId,
+            busId: payload.bus_id || payload.busId || targetBusId,
+            route_id: payload.route_id || payload.routeId,
+            stop_name: payload.stop_name || 'Pickup Point',
+            stop_lat: payload.stop_lat || payload.stopLat || payload.lat,
+            stop_lng: payload.stop_lng || payload.stopLng || payload.lng,
+            lat: payload.stop_lat || payload.stopLat || payload.lat,
+            lng: payload.stop_lng || payload.stopLng || payload.lng,
+            status: payload.status || 'raised',
+            created_at: payload.created_at || payload.createdAt || new Date().toISOString(),
+            message: payload.message || null,
+          };
+          return [...prev, newFlag];
+        });
+        addToast(
+          `🚩 ${payload.student_name || payload.studentName || 'A student'} is waiting for pickup!`,
+          "info"
+        );
+      } else if (evt === 'waiting_flag_acknowledged') {
+        const targetId = payload.flagId || payload.id;
+        setWaitingFlags((prev) =>
+          prev.map((f) =>
+            f.id === targetId ? { ...f, status: 'acknowledged', ackByDriverUid: payload.driverUid } : f
+          )
+        );
+      } else if (evt === 'waiting_flag_removed') {
+        const targetId = payload.flagId || payload.id;
+        setWaitingFlags((prev) => prev.filter((f) => f.id !== targetId));
+      }
+    };
+
+    // Subscribe and keep the unsubscribe function
+    const unsubscribe = wsClient.subscribe(`waiting_flags_${targetBusId}`, handleWaitingFlagPayload);
+
+    // Also reload flags from API periodically (every 8s) as safety fallback
+    const fetchFlags = async () => {
       try {
         const idToken = await currentUser.getIdToken();
-        const res = await fetch(`/api/driver/dashboard-data`, {
+        const res = await fetch('/api/driver/dashboard-data', {
           headers: { Authorization: `Bearer ${idToken}` },
         });
         if (res.ok) {
           const data = await res.json();
-          if (data.waitingFlags) setWaitingFlags(data.waitingFlags);
+          if (Array.isArray(data.waitingFlags)) {
+            setWaitingFlags(data.waitingFlags);
+          }
         }
       } catch (err) {
-        console.warn("Failed to fetch initial waiting flags:", err);
+        console.warn('[WaitingFlags] Failed to poll flags:', err);
       }
     };
-    fetchInitialFlags();
 
-    const wsClient = wsClientRef.current;
-    if (wsClient) {
-      wsClient.subscribe(`waiting_flags_${busData.busId}`, (payload: any) => {
-        console.log("🚩 Waiting flag event:", payload.event, payload);
-
-        if (payload.event === 'waiting_flag_created') {
-          setWaitingFlags((prev) => {
-            if (prev.some(f => f.id === payload.id)) return prev;
-            return [...prev, payload];
-          });
-          addToast(
-            `${payload.student_name || payload.studentName || 'A student'} is waiting for pickup`,
-            "info"
-          );
-        } else if (payload.event === 'waiting_flag_removed') {
-          setWaitingFlags((prev) => prev.filter((f) => f.id !== payload.flagId));
-        } else if (payload.event === 'waiting_flag_acknowledged') {
-          setWaitingFlags((prev) =>
-            prev.map((f) =>
-              f.id === payload.flagId ? { ...f, status: 'acknowledged', ackByDriverUid: payload.driverUid } : f
-            )
-          );
-        } else if (payload.event === 'waiting_flag_boarded' || payload.event === 'waiting_flag_cancelled' || payload.status === 'cancelled' || payload.status === 'picked_up' || payload.status === 'boarded') {
-          setWaitingFlags((prev) => prev.filter((f) => f.id !== payload.id));
-        }
-      });
-    }
+    fetchFlags();
+    const pollInterval = setInterval(fetchFlags, 8000);
 
     return () => {
-      if (wsClient) wsClient.unsubscribe(`waiting_flags_${busData.busId}`);
+      console.log("🔕 [WAITING_FLAG_PIPELINE Step 6/6] Unsubscribing from:", `waiting_flags_${targetBusId}`);
+      clearInterval(pollInterval);
+      unsubscribe();
     };
-  }, [busData?.busId, tripActive, currentUser, wsClientReady]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wsClientReady, targetBusId, currentUser]);
 
-  // Screen Wake Lock - Keep screen on during active trip
-  useEffect(() => {
-    const requestWakeLock = async () => {
-      // Don't request if document is hidden (will fail with NotAllowedError)
-      if (document.hidden) return;
-
-      try {
-        if ('wakeLock' in navigator && tripActive) {
-          const wakeLock = await (navigator as any).wakeLock.request('screen');
-          wakeLockRef.current = wakeLock;
-          console.log('🔒 Screen wake lock acquired - screen will stay on');
-
-          // Listen for wake lock release
-          wakeLock.addEventListener('release', () => {
-            // Only log, re-acquisition handled by visibilitychange listener
-            console.log('🔓 Screen wake lock released');
-          });
-        }
-      } catch (err: any) {
-        // Suppress known error when page is not visible or user denied
-        if (err.name !== 'NotAllowedError') {
-          console.error('❌ Failed to acquire wake lock:', err);
-        }
-      }
-    };
-
-    // Re-acquire lock when page becomes visible again
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible' && tripActive) {
-        // Only request if we don't have it (though requestWakeLock handles that mostly, it's safer to check ref if possible, 
-        // but the ref might be stale or not updated if release happened externally. 
-        // Simplest is to just call requestWakeLock which can be robust.)
-        requestWakeLock();
-      }
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-
-    const releaseWakeLock = async () => {
-      if (wakeLockRef.current) {
-        try {
-          await wakeLockRef.current.release();
-          wakeLockRef.current = null;
-          console.log('🔓 Screen wake lock released on trip end');
-        } catch (err) {
-          console.error('❌ Error releasing wake lock:', err);
-        }
-      }
-    };
-
-    if (tripActive) {
-      requestWakeLock();
-    } else {
-      releaseWakeLock();
-    }
-
-    // Cleanup
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      releaseWakeLock();
-    };
-  }, [tripActive]);
+  // Screen Wake Lock - Keep screen on during driver tracking
+  useScreenWakeLock(true);
 
   // Auto pickup logic is handled below in the "Distance-based auto-pickup" effect.
-
 
   // Keep the latest broadcast inputs in a ref every render. This lets the broadcast
   // interval read fresh GPS values WITHOUT the effect (and its setInterval) being
@@ -1043,6 +1064,12 @@ export default function DriverLiveTrackingPage() {
       return;
     }
 
+    const resolvedBus = busData?.busId || busData?.id || selectedBusId;
+    const currentHeading = (currentLocation as any).heading ?? 0;
+    const currentIsoTimestamp = new Date().toISOString();
+
+    // Authoritative HTTP path for GPS pipeline, DB breadcrumbs, and PostgreSQL heartbeat
+    // (Bypassing direct WS location stream to prevent unvalidated duplicate broadcasts)
     try {
       const idToken = await currentUser?.getIdToken();
       const response = await fetch("/api/location/update", {
@@ -1053,14 +1080,16 @@ export default function DriverLiveTrackingPage() {
         },
         body: JSON.stringify({
           idToken,
-          busId: busData?.busId || busData?.id || selectedBusId,
+          busId: resolvedBus,
           routeId: routeData?.routeId || routeData?.id || busData?.route_id || 'unassigned',
           lat: currentLocation.lat,
           lng: currentLocation.lng,
           accuracy: accuracy,
           speed: speed,
-          heading: 0,
-          timestamp: Date.now(),
+          // Prefer real GPS heading from device; falls back to 0 when unavailable
+          // (e.g. stationary or desktop browser). Never fabricate a heading.
+          heading: currentHeading,
+          timestamp: currentIsoTimestamp,
           tripId: tripId,
           isFallback: false,
         }),
@@ -1074,12 +1103,48 @@ export default function DriverLiveTrackingPage() {
     }
   }, [selectedBusId]);
 
-  // Distance-based auto-pickup: Remove waiting students when bus gets close (within ~50 meters)
-  // NEW BEHAVIOR: Markers and cards stay visible until distance closes to zero, regardless of acknowledgment
+  // Comprehensive Mobile App Resume & Lock/Unlock Auto-Recovery
+  useEffect(() => {
+    const handleResume = () => {
+      if (document.visibilityState === 'visible') {
+        console.log("📱 [MobileResume] Screen turned ON / App back in foreground — restoring state");
+
+        // Reconnect WebSocket if disconnected during phone sleep
+        if (wsClientRef.current) {
+          try {
+            wsClientRef.current.connect();
+          } catch (_) {}
+        }
+
+        // Restart GPS watch if OS dropped it during screen off
+        if (tripActiveRef.current) {
+          if (watchIdRef.current === null) {
+            console.log("🔄 Re-starting location tracking after screen wake...");
+            startLocationTracking();
+          }
+          // Send immediate location update
+          broadcastLocation();
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleResume);
+    window.addEventListener('focus', handleResume);
+    window.addEventListener('online', handleResume);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleResume);
+      window.removeEventListener('focus', handleResume);
+      window.removeEventListener('online', handleResume);
+    };
+  }, [broadcastLocation, startLocationTracking]);
+
+  // Distance-based auto-pickup: Automatically board student when bus gets within ~50 meters.
+  // CRITICAL RULE: Applies ONLY to flags that have been explicitly ACKNOWLEDGED by the driver.
   const PICKUP_THRESHOLD_KM = 0.05; // 50 meters threshold for auto-pickup
 
   useEffect(() => {
-    if (!tripActive || !currentLocation || waitingFlags.length === 0) return;
+    if (!tripActive || !currentLocation || (currentLocation as any).isFallback || waitingFlags.length === 0) return;
 
     // Calculate distances and check for pickups
     const flagsToRemove: string[] = [];
@@ -1091,8 +1156,8 @@ export default function DriverLiveTrackingPage() {
 
       if (!targetLat || !targetLng) return;
 
-      // NEW: Remove status check - pickup happens for ANY status when distance closes to zero
-      // This ensures marker stays visible until bus reaches the student
+      // Auto-pickup only applies to flags that have been acknowledged by driver
+      if (flag.status !== 'acknowledged') return;
 
       // Haversine formula for distance calculation
       const R = 6371; // Radius of earth in km
@@ -1108,7 +1173,7 @@ export default function DriverLiveTrackingPage() {
       console.log(`📍 Distance to ${flag.student_name}: ${(distance * 1000).toFixed(0)}m (status: ${flag.status})`);
 
       if (distance < PICKUP_THRESHOLD_KM) {
-        console.log(`✅ Auto-pickup triggered for ${flag.student_name} (${(distance * 1000).toFixed(0)}m away)`);
+        console.log(`✅ Auto-pickup triggered for acknowledged student ${flag.student_name} (${(distance * 1000).toFixed(0)}m away)`);
         flagsToRemove.push(flag.id);
       }
     });
@@ -1869,7 +1934,6 @@ export default function DriverLiveTrackingPage() {
                 status: flag.status as 'waiting' | 'acknowledged' | 'boarded' | 'raised'
               };
             })
-              .filter(f => f.stop_lat && f.stop_lng)
               .sort((a, b) => (a.distance ?? 9999) - (b.distance ?? 9999))}
             tripActive={tripActive}
             busNumber={busData?.busNumber}

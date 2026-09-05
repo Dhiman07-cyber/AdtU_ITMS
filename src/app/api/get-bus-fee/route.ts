@@ -10,8 +10,6 @@ export async function GET(request: NextRequest) {
   try {
     const feeData = await getCurrentBusFee();
     
-    console.log('🔍 Bus fee service returned:', feeData);
-    
     return NextResponse.json({
       success: true,
       data: {

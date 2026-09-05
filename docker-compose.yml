@@ -22,6 +22,7 @@ services:
 
   ws1:
     container_name: itms-ws1
+    image: itms-ws:latest
     build:
       context: .
       dockerfile: server/Dockerfile
@@ -55,6 +56,7 @@ services:
 
   ws2:
     container_name: itms-ws2
+    image: itms-ws:latest
     build:
       context: .
       dockerfile: server/Dockerfile
@@ -88,6 +90,7 @@ services:
 
   nextjs:
     container_name: itms-nextjs
+    image: itms-nextjs:latest
     build:
       context: .
       dockerfile: Dockerfile
@@ -106,6 +109,7 @@ services:
         NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME: ${NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME}
         NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET: ${NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET}
         NEXT_PUBLIC_CLOUDINARY_UPLOAD_ASSET_FOLDER: ${NEXT_PUBLIC_CLOUDINARY_UPLOAD_ASSET_FOLDER}
+        NEXT_PUBLIC_E2E_STAGING: "true"
     ports:
       - "127.0.0.1:3000:3000"
     environment:
@@ -113,6 +117,20 @@ services:
       - PORT=3000
       - HOSTNAME=0.0.0.0
       - REDIS_URL=redis://redis:6379
+      # The WebSocket transport (emitEvent -> WebSocketTransport) runs inside the
+      # Next.js container and must reach the WS server. Use the Docker service name
+      # (ws1), not 127.0.0.1, since the container's loopback does not expose the
+      # WS port. The WS_PORT is 3001 inside the container (same as the ws1 service).
+      - WS_HOST=ws1
+      - WS_PORT=3001
+      # Staging load-test harness (scripts/staging/master-simulation.ts):
+      # STAGING_MODE + LOAD_TEST_SECRET enable the proxy-level IP rate-limit
+      # bypass (x-load-test-bypass header) so high-volume simulated users are
+      # NOT throttled by the global per-IP DDoS guard. The per-user route-level
+      # rate limits (api-security.ts) remain ACTIVE — the harness never bypasses
+      # per-user auth/RBAC/business rules.
+      - STAGING_MODE=true
+      - LOAD_TEST_SECRET=${LOAD_TEST_SECRET:-itms-staging-sim-secret}
     env_file:
       - .env
     healthcheck:

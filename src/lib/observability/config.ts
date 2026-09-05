@@ -34,7 +34,7 @@ export const observabilityConfig: ObservabilityConfig = {
   serviceName: process.env.SERVICE_NAME || 'itms-platform',
   hostname: typeof window === 'undefined' ? (process.env.HOSTNAME || 'localhost') : 'browser',
   processId: typeof process !== 'undefined' && process.pid ? process.pid : 1,
-  logLevel: (process.env.LOG_LEVEL?.toUpperCase() as ObservabilityConfig['logLevel']) || (isProd ? 'INFO' : 'DEBUG'),
+  logLevel: (process.env.LOG_LEVEL?.toUpperCase() as ObservabilityConfig['logLevel']) || (isProd ? 'INFO' : 'WARN'),
   logFormat: (process.env.LOG_FORMAT as ObservabilityConfig['logFormat']) || 'json',
   samplingRate: parseFloat(process.env.TRACE_SAMPLING_RATE || '1.0'),
   tracingEnabled: process.env.TRACING_ENABLED === 'true' || true,

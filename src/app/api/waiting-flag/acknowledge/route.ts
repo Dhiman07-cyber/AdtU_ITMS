@@ -101,7 +101,7 @@ export async function POST(request: Request) {
 
     if (!driverIsAuthorized) {
       return NextResponse.json(
-        { error: 'Driver is not assigned to this bus' },
+        { error: 'Driver is not authorized for this bus' },
         { status: 403 }
       );
     }

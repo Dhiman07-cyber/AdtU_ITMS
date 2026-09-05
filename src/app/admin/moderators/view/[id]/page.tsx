@@ -239,7 +239,7 @@ export default function ViewModeratorPage({ params }: { params: Promise<{ id: st
                     />
                   ) : (
                     <Avatar className="w-full aspect-square rounded-full">
-                      <AvatarFallback className="text-4xl font-bold bg-gradient-to-br from-purple-500 to-pink-600 text-white rounded-full">
+                      <AvatarFallback className="text-4xl font-bold bg-gradient-to-br from-blue-600 to-indigo-600 text-white rounded-full">
                         {(moderator.fullName || moderator.name).charAt(0)}
                       </AvatarFallback>
                     </Avatar>
@@ -308,8 +308,8 @@ export default function ViewModeratorPage({ params }: { params: Promise<{ id: st
         <div className="my-4 flex items-center justify-center">
           <div className="relative inline-flex items-center gap-3">
             <div className="w-12 h-[1.5px] bg-gradient-to-r from-transparent to-primary/40"></div>
-            <div className="px-4 py-1.5 rounded-lg bg-gradient-to-r from-blue-500/10 via-purple-500/10 to-pink-500/10 border border-purple-400/30 shadow-md">
-              <span className="text-xs font-bold bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 dark:from-blue-400 dark:via-purple-400 dark:to-pink-400 bg-clip-text text-transparent">Detailed Information</span>
+            <div className="px-4 py-1.5 rounded-lg bg-blue-500/10 border border-blue-500/20 shadow-sm">
+              <span className="text-xs font-bold text-foreground">Detailed Information</span>
             </div>
             <div className="w-12 h-[1.5px] bg-gradient-to-l from-transparent to-primary/40"></div>
           </div>

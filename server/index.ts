@@ -12,10 +12,21 @@ import { redisClient } from './redis-client';
 import { initRedisBroadcastRelay } from './redis-broadcast';
 import { updateLiveBusLocation } from './socket-router';
 
+import { assertPrivilegedTokenSafe } from './authenticator';
+
 const WS_PORT = parseInt(process.env.WS_PORT || '3001', 10);
 const HEALTH_PORT = parseInt(process.env.HEALTH_PORT || '9090', 10);
 
 async function main() {
+  if (process.env.NODE_ENV === 'production') {
+    try {
+      assertPrivilegedTokenSafe();
+    } catch (err: any) {
+      logger.error('startup_blocked_insecure_token', { error: err.message });
+      process.exit(1);
+    }
+  }
+
   const envCheck = validateEnvironment({ isWebSocketServer: true });
   if (!envCheck.valid && process.env.NODE_ENV === 'production') {
     logger.error('startup_blocked_invalid_environment', { missing: envCheck.missing });

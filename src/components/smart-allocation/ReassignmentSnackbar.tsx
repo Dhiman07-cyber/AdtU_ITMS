@@ -2,9 +2,9 @@
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { AnimatePresence,motion } from "framer-motion";
+import { AnimatePresence,motion } from "motion/react";
 import { AlertCircle,Check,Clock,RotateCcw } from "lucide-react";
-import { useCallback,useEffect,useRef,useState } from "react";
+import { useEffect,useRef,useState } from "react";
 
 /**
  * Revert buffer data structure for storing reassignment state
@@ -103,7 +103,7 @@ export default function ReassignmentSnackbar({
   }, [isVisible, autoDismissSeconds, onConfirm]);
 
   // Handle revert action
-  const handleRevert = useCallback(async () => {
+  const handleRevert = async () => {
     if (timerRef.current) {
       clearInterval(timerRef.current);
     }
@@ -115,15 +115,15 @@ export default function ReassignmentSnackbar({
       setIsReverting(false);
       onDismiss();
     }
-  }, [onRevert, onDismiss]);
+  };
 
   // Handle confirm action
-  const handleConfirm = useCallback(() => {
+  const handleConfirm = () => {
     if (timerRef.current) {
       clearInterval(timerRef.current);
     }
     onConfirm();
-  }, [onConfirm]);
+  };
 
   // Calculate progress percentage
   const progressPercentage = (secondsRemaining / autoDismissSeconds) * 100;

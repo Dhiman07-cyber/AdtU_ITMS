@@ -44,10 +44,42 @@ export function register(): void {
   const result = validateEnvironment();
   if (!result.valid) {
     const msg = `❌ Missing required server env vars: ${result.missing.join(', ')}`;
-    if (process.env.NODE_ENV === 'production') {
-      throw new Error(msg);
-    }
     console.warn(msg);
   }
+
+  // Only pre-warm WS bridge transport in non-serverless environments where a local daemon runs
+  if (process.env.VERCEL !== '1' && process.env.WS_HOST) {
+    import('@/domains/realtime/transport-manager')
+      .then(({ initializeTransport }) => initializeTransport())
+      .catch((err) => console.warn('[instrumentation] WS transport pre-warm failed:', err));
+  }
 }
+
+
+/**
+ * Next.js 16 Global Server Error Instrumentation Hook
+ * Captures all unhandled server errors with request context and telemetry.
+ */
+export async function onRequestError(
+  err: Error & { digest?: string },
+  request: {
+    path: string;
+    method: string;
+    headers: Record<string, string>;
+  },
+  context: {
+    routerKind: 'Pages' | 'App';
+    routePath: string;
+    dir: string;
+    renderType: 'render' | 'action';
+  }
+): Promise<void> {
+  console.error(`[Instrumentation Error] ${request.method} ${request.path}`, {
+    digest: err.digest,
+    message: err.message,
+    routePath: context.routePath,
+    renderType: context.renderType,
+  });
+}
+
 

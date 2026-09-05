@@ -9,32 +9,13 @@ import {
 	saveFCMToken
 } from "@/lib/fcm-service";
 import { usePathname } from "next/navigation";
-import { useCallback,useEffect,useRef,useState } from "react";
+import { useEffect,useRef,useState } from "react";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 const TOKEN_REFRESH_INTERVAL_MS = 12 * 60 * 60 * 1000; // 12 hours
 const LS_TOKEN_KEY_PREFIX = 'fcm_device_token_';
 const LS_LAST_SYNC_PREFIX = 'fcm_last_sync_';
 
-/**
- * FCMTokenManager — Production-grade FCM token lifecycle manager
- * 
- * Ensures 100% reliable push notification delivery for STUDENTS ONLY by:
- * 
- * 1. Registering the FCM token on first login (persisted in Firestore subcollection)
- * 2. Periodically refreshing the token (every 12h) to prevent staleness
- * 3. Re-syncing the token when the app regains visibility (tab focus)
- * 4. Listening for foreground messages and showing user-facing toasts
- * 5. Caching the token in localStorage to avoid redundant server writes
- * 6. Handling token rotation gracefully (Firebase SDK may rotate tokens)
- * 7. SECURITY: Only allows student users to register FCM tokens
- * 
- * Firebase's getToken() returns a STABLE token for the same browser+SW pair.
- * It only changes when:
- *   - User deletes the service worker registration
- *   - User clears browser storage/IndexedDB
- *   - Firebase rotates the token (rare, weeks/months apart)
- */
 export function FCMTokenManager() {
   const { currentUser, userData } = useAuth();
   const pathname = usePathname();
@@ -49,7 +30,7 @@ export function FCMTokenManager() {
   }, [addToast]);
 
   // ── Core Token Sync ──────────────────────────────────────────────────────
-  const syncToken = useCallback(async (force = false): Promise<void> => {
+  const syncToken = async (force = false): Promise<void> => {
     if (!currentUser?.uid || !userData) return;
     
     // SECURITY: Only allow students to register FCM tokens
@@ -131,7 +112,7 @@ export function FCMTokenManager() {
     } finally {
       isSyncing.current = false;
     }
-  }, [currentUser, userData]);
+  };
 
   // ── Initial Registration + Periodic Refresh ──────────────────────────────
   useEffect(() => {
@@ -151,7 +132,7 @@ export function FCMTokenManager() {
         refreshTimerRef.current = null;
       }
     };
-  }, [currentUser?.uid, userData, syncToken]);
+  }, [currentUser?.uid, userData]);
 
   // ── Visibility-Based Re-Sync ─────────────────────────────────────────────
   // When user returns to app after being away, re-sync the token
@@ -177,7 +158,7 @@ export function FCMTokenManager() {
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [currentUser?.uid, userData, syncToken]);
+  }, [currentUser?.uid, userData]);
 
   // ── Foreground Message Listener ──────────────────────────────────────────
   // When the app is in the foreground, FCM delivers messages here instead of

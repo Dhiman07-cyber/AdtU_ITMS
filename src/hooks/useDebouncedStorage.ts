@@ -9,7 +9,7 @@
 
 "use client";
 
-import { useCallback,useEffect,useMemo,useRef } from 'react';
+import { useEffect,useRef } from 'react';
 
 interface StorageOptions {
   debounceMs?: number;
@@ -31,7 +31,7 @@ export function useDebouncedStorage<T extends Record<string, any>>(
    */
   const idleCallbackRef = useRef<ReturnType<typeof requestIdleCallback> | ReturnType<typeof setTimeout> | null>(null);
 
-  const flush = useCallback(() => {
+  const flush = () => {
     if (!pendingData.current) return;
 
     const dataToSave = { ...pendingData.current };
@@ -94,12 +94,12 @@ export function useDebouncedStorage<T extends Record<string, any>>(
     }
 
     pendingData.current = null;
-  }, [key, excludeFields]);
+  };
 
   /**
    * Save data with debouncing
    */
-  const save = useCallback((data: Partial<T>) => {
+  const save = (data: Partial<T>) => {
     // Update pending data
     pendingData.current = { ...pendingData.current, ...data };
 
@@ -115,12 +115,12 @@ export function useDebouncedStorage<T extends Record<string, any>>(
         flush();
       }
     }, debounceMs);
-  }, [debounceMs, flush]);
+  };
 
   /**
    * Load data from localStorage
    */
-  const load = useCallback((): T | null => {
+  const load = (): T | null => {
     try {
       const stored = localStorage.getItem(key);
       if (!stored) {
@@ -134,12 +134,12 @@ export function useDebouncedStorage<T extends Record<string, any>>(
       console.warn(`[useDebouncedStorage] Failed to read from localStorage:`, error);
       return null;
     }
-  }, [key]);
+  };
 
   /**
    * Clear storage
    */
-  const clear = useCallback(() => {
+  const clear = () => {
     try {
       localStorage.removeItem(key);
       pendingData.current = null;
@@ -149,7 +149,7 @@ export function useDebouncedStorage<T extends Record<string, any>>(
     } catch (error) {
       console.warn(`[useDebouncedStorage] Failed to clear localStorage:`, error);
     }
-  }, [key]);
+  };
 
   /**
    * Cleanup on unmount
@@ -180,6 +180,5 @@ export function useDebouncedStorage<T extends Record<string, any>>(
     };
   }, [key]);
 
-  // Return stable object reference using useMemo
-  return useMemo(() => ({ save, load, clear }), [save, load, clear]);
+  return { save, load, clear };
 }

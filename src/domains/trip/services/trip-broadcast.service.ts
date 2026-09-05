@@ -16,10 +16,10 @@ export async function broadcastTripEvent(params: {
   busNumber?: string;
 }) {
   const transport = await getTransport();
-  const channels = [
-    `trip-status-${params.busId}`,
-    `bus_location_${params.busId}`,
-  ];
+  // Trip lifecycle events belong on trip-status only.
+  // bus_location_ is location-data-only; mixing events there breaks its contract
+  // and would send trip_started/trip_ended noise to any location consumer.
+  const channel = `trip-status-${params.busId}`;
 
   const payload: Record<string, string> = {
     busId: params.busId,
@@ -34,8 +34,5 @@ export async function broadcastTripEvent(params: {
   if (params.routeName) payload.routeName = params.routeName;
   if (params.busNumber) payload.busNumber = params.busNumber;
 
-  // Broadcast to both channels concurrently — they are independent SSE streams
-  await Promise.all(
-    channels.map(channelName => transport.broadcast(channelName, params.event, payload))
-  );
+  await transport.broadcast(channel, params.event, payload);
 }

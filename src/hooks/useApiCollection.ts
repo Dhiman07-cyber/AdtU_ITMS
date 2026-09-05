@@ -17,7 +17,7 @@ import {
 } from '@/config/runtime';
 import { useAuth } from '@/contexts/auth-context';
 import { useVisibilityAwareListener } from '@/utils/useVisibilityAwareListener';
-import { useCallback,useEffect,useRef,useState } from 'react';
+import { useEffect,useRef,useState } from 'react';
 import {
 	dataCache,
 	type CacheEntry
@@ -173,7 +173,7 @@ export function useApiCollection<T = Record<string, any>>(
         console.warn(`[useApiCollection] No API route configured for collection: ${collectionName}`);
     }
 
-    const fetchPage = useCallback(async (bypassCache: boolean = false) => {
+    const fetchPage = async (bypassCache: boolean = false) => {
         if (!currentUser || !enabled || !routeConfig) {
             setLoading(false);
             return;
@@ -241,18 +241,18 @@ export function useApiCollection<T = Record<string, any>>(
         } finally {
             if (isMountedRef.current) setLoading(false);
         }
-    }, [currentUser, enabled, routeConfig, collectionName, orderByField, orderDirection, ttl]);
+    };
 
     fetchPageRef.current = fetchPage;
 
-    const fetchNextPage = useCallback(async () => {
+    const fetchNextPage = async () => {
         // API routes return full datasets — no cursor pagination needed
         // This is a no-op for compatibility with usePaginatedCollection interface
-    }, []);
+    };
 
-    const refresh = useCallback(async () => {
+    const refresh = async () => {
         await fetchPage(true);
-    }, [fetchPage]);
+    };
 
     // Initial fetch
     useEffect(() => {

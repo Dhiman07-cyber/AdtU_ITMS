@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { normalizeShift } from "@/lib/utils/shift-utils";
-import { AnimatePresence,motion } from "framer-motion";
+import { AnimatePresence,motion } from "motion/react";
 import {
 	ArrowRightLeft,
 	Bookmark,
@@ -22,7 +22,7 @@ import {
 	X,
 	Zap
 } from "lucide-react";
-import { useEffect,useMemo,useState } from "react";
+import { useEffect,useState } from "react";
 
 // ============================================
 // DESIGN TOKENS
@@ -158,11 +158,11 @@ export function ShiftSlotPrompt({
     }, [isOpen, isSimpleAssign, busShift, existingDrivers]);
 
     // Available shift options for this bus
-    const shiftOptions = useMemo(() => {
+    const shiftOptions = (() => {
         if (busShift === "Morning") return ["Morning"] as const;
         if (busShift === "Evening") return ["Evening"] as const;
         return ["Morning", "Evening"] as const;
-    }, [busShift]);
+    })();
 
     const isSingleShiftBus = busShift !== "Both";
 

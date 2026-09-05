@@ -7,6 +7,7 @@
  * and payment receipts - matches driver's bus pass scanner UI exactly.
  */
 
+import { PremiumPageLoader } from '@/components/LoadingSpinner';
 import { PermissionDeniedCard } from "@/components/PermissionDeniedCard";
 import ReceiptVerificationModal from '@/components/ReceiptVerificationModal';
 import { Button } from '@/components/ui/button';
@@ -14,7 +15,7 @@ import { useAuth } from '@/contexts/auth-context';
 import { useModeratorPermissions } from "@/hooks/useModeratorPermissions";
 import { auth } from '@/lib/firebase';
 import { safeImageSrc } from '@/lib/security/url-sanitizer';
-import { AnimatePresence,motion } from 'framer-motion';
+import { AnimatePresence,motion } from "motion/react";
 import jsQR from 'jsqr';
 import {
 	AlertCircle,
@@ -34,7 +35,7 @@ import {
 } from 'lucide-react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
-import { useCallback,useEffect,useRef,useState } from 'react';
+import { useEffect,useRef,useState } from 'react';
 import { toast } from 'sonner';
 
 // Result interfaces
@@ -120,7 +121,7 @@ export default function ModeratorVerificationPage() {
     };
 
     // Stop scanning function
-    const stopScanning = useCallback(() => {
+    const stopScanning = () => {
         isScanningRef.current = false;
         const stream = cameraStreamRef.current;
         if (stream) {
@@ -137,7 +138,7 @@ export default function ModeratorVerificationPage() {
             animationRef.current = null;
         }
         setIsScanning(false);
-    }, [cameraStream]);
+    };
 
     // Cleanup on unmount
     useEffect(() => {
@@ -400,12 +401,8 @@ export default function ModeratorVerificationPage() {
         setCameraError(null);
     };
 
-    if (authLoading) {
-        return (
-            <div className="min-h-screen flex items-center justify-center">
-                <Loader2 className="h-12 w-12 animate-spin text-purple-600" />
-            </div>
-        );
+    if (authLoading || permsLoading) {
+        return <PremiumPageLoader message="Loading Verification Scanner..." subMessage="Preparing scanner..." />;
     }
 
     if (!permsLoading && !canGenerateVerificationCode) {

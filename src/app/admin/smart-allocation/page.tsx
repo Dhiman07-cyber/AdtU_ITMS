@@ -3,39 +3,39 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
-	Card,
-	CardContent,
-	CardDescription,
-	CardHeader,
-	CardTitle,
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
 } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Slider } from "@/components/ui/slider";
 import { useAuth } from "@/contexts/auth-context";
 import { cn } from "@/lib/utils";
-import { motion } from "framer-motion";
+import { motion } from "motion/react";
 import {
-	Activity,
-	ArrowRightLeft,
-	Bus,
-	ChevronRight,
-	Download,
-	History,
-	Sparkles,
-	Target,
-	Users,
+  Activity,
+  ArrowRightLeft,
+  Bus,
+  ChevronRight,
+  Download,
+  History,
+  Sparkles,
+  Target,
+  Users,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useCallback,useEffect,useMemo,useRef,useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "react-hot-toast";
 
 // Premium UI Components
 import { ReassignmentHistoryModal } from "@/components/assignment/ReassignmentHistoryModal";
 import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import ReassignmentPanel from "@/components/smart-allocation/ReassignmentPanel";
-import ReassignmentSnackbar,{
-	type RevertBufferData,
+import ReassignmentSnackbar, {
+  type RevertBufferData,
 } from "@/components/smart-allocation/ReassignmentSnackbar";
 import RouteVisualization from "@/components/smart-allocation/RouteVisualization";
 import StudentRoster from "@/components/smart-allocation/StudentRoster";
@@ -49,9 +49,9 @@ import { AllocationRanker } from "@/lib/services/allocation-ranker";
 import { StopBusMapper } from "@/lib/services/stop-bus-mapper";
 
 import {
-	detectOverloadedShift,
-	getShiftDisplayName,
-	type OverloadedShift
+  detectOverloadedShift,
+  getShiftDisplayName,
+  type OverloadedShift
 } from "@/lib/utils/overload-detection";
 import { type CanonicalShift } from "@/lib/utils/shift-utils";
 
@@ -683,39 +683,30 @@ export default function SmartAllocationPage() {
   };
 
   if (loading) {
-    return <PremiumPageLoader fullScreen message="Smart Stop Allocation" subMessage="Loading allocation system..." />;
+    return <PremiumPageLoader fullScreen message="Student Reassignment" subMessage="Loading allocation system..." />;
   }
 
   return (
     <div className="mt-20 sm:mt-10 space-y-6 overflow-x-hidden max-w-full px-2 sm:px-0">
       {/* Header */}
       <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4">
-        <div className="flex items-center gap-2.5">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center shadow-lg">
-            <Sparkles className="w-5 h-5 text-white" />
-          </div>
-          <div>
-            <motion.h1
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              className="text-2xl font-bold bg-gradient-to-r from-purple-400 via-pink-400 to-purple-500 bg-clip-text text-transparent"
-            >
-              Smart Stop Allocation
-            </motion.h1>
-            <p className="text-muted-foreground mt-0.5 text-xs">
-              AI-Powered Bus Management System
-            </p>
-          </div>
+        <div>
+          <h1 className="text-3xl font-bold text-foreground">
+            Student Reassignment
+          </h1>
+          <p className="text-muted-foreground mt-1">
+            Smart stop allocation and bus management system
+          </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
           {/* Desktop Layout (Hidden on Mobile) */}
           <div className="hidden sm:flex flex-wrap items-center gap-3">
-            <div className="flex items-center gap-2 px-3 py-1.5 border rounded-lg bg-white dark:bg-zinc-900 shadow-sm hover:shadow-purple-500/20 hover:border-purple-400/50 transition-all duration-300 group">
+            <div className="flex items-center gap-2 px-3 py-1.5 border rounded-lg bg-white dark:bg-zinc-900 shadow-sm hover:shadow-blue-500/20 hover:border-blue-400/50 transition-all duration-300 group">
               <Label className="text-xs font-medium whitespace-nowrap">
                 Threshold:
               </Label>
               <div className="w-24 relative">
-                <div className="absolute inset-0 bg-purple-500/10 blur-md opacity-0 group-hover:opacity-100 transition-opacity duration-300 rounded-lg" />
+                <div className="absolute inset-0 bg-blue-500/10 blur-md opacity-0 group-hover:opacity-100 transition-opacity duration-300 rounded-lg" />
                 <Slider
                   value={[overloadThreshold]}
                   onValueChange={([value]) => setOverloadThreshold(value)}
@@ -725,14 +716,14 @@ export default function SmartAllocationPage() {
                   className="cursor-pointer relative z-10"
                 />
               </div>
-              <span className="text-xs font-mono font-bold min-w-[2.5rem] text-right bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent">
+              <span className="text-xs font-mono font-bold min-w-[2.5rem] text-right text-blue-600 dark:text-blue-400">
                 {overloadThreshold}%
               </span>
             </div>
 
             <Button
               size="default"
-              className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 h-9 text-sm shadow-lg"
+              className="bg-blue-600 hover:bg-blue-700 text-white h-9 text-sm shadow-md"
               onClick={openReassignmentPanel}
               disabled={selectedStudents.size === 0}
               title="Get AI-powered reassignment suggestions"
@@ -768,7 +759,7 @@ export default function SmartAllocationPage() {
               /* Moderator Mobile Layout: Threshold | Reassign | Export Icon */
               <div className="flex items-center justify-between gap-2 w-full">
                 <div className="flex flex-1 items-center gap-2 px-2 py-1.5 border rounded-lg bg-white dark:bg-zinc-900 shadow-sm">
-                  <span className="text-[10px] font-mono font-bold bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent">
+                  <span className="text-[10px] font-mono font-bold text-blue-600 dark:text-blue-400">
                     {overloadThreshold}%
                   </span>
                   <div className="flex-1">
@@ -784,7 +775,7 @@ export default function SmartAllocationPage() {
                 </div>
                 <Button
                   size="sm"
-                  className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 h-9 text-xs px-2"
+                  className="bg-blue-600 hover:bg-blue-700 text-white h-9 text-xs px-2"
                   onClick={openReassignmentPanel}
                   disabled={selectedStudents.size === 0}
                 >
@@ -804,7 +795,7 @@ export default function SmartAllocationPage() {
               <div className="flex flex-col gap-2 w-full">
                 <div className="flex items-center gap-2 w-full">
                   <div className="flex-1 flex items-center gap-2 px-2 py-1.5 border rounded-lg bg-white dark:bg-zinc-900 shadow-sm">
-                    <span className="text-[10px] font-mono font-bold bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent">
+                    <span className="text-[10px] font-mono font-bold text-blue-600 dark:text-blue-400">
                       {overloadThreshold}%
                     </span>
                     <div className="flex-1">
@@ -820,7 +811,7 @@ export default function SmartAllocationPage() {
                   </div>
                   <Button
                     size="sm"
-                    className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 h-9 text-xs"
+                    className="bg-blue-600 hover:bg-blue-700 text-white h-9 text-xs"
                     onClick={openReassignmentPanel}
                     disabled={selectedStudents.size === 0}
                   >
@@ -861,9 +852,9 @@ export default function SmartAllocationPage() {
           {/* Left Column - Buses */}
           <div className="lg:col-span-4 flex min-w-0">
             <Card className="bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 shadow-lg pt-0 flex-1 flex flex-col">
-              <CardHeader className="pb-2 pt-3 bg-gradient-to-r from-purple-50 to-pink-50 dark:from-purple-950/20 dark:to-pink-950/20">
+              <CardHeader className="pb-2 pt-3 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/20 dark:to-indigo-950/20">
                 <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center">
+                  <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-500 flex items-center justify-center">
                     <Bus className="w-4 h-4 text-white" />
                   </div>
                   <div>
@@ -889,9 +880,9 @@ export default function SmartAllocationPage() {
                 <button
                   onClick={() => setShiftFilter("morning")}
                   className={cn(
-                    "flex-1 py-2 px-3 text-sm font-semibold text-center transition-all duration-300 rounded-lg",
+                    "flex-1 py-2 px-3 text-sm font-semibold text-center transition-all duration-300 rounded-lg cursor-pointer",
                     shiftFilter === "morning"
-                      ? "bg-gradient-to-r from-orange-500 to-amber-600 text-white shadow-lg shadow-orange-500/30"
+                      ? "bg-blue-600 hover:bg-blue-700 text-white shadow-md shadow-blue-500/20"
                       : "bg-white dark:bg-zinc-700/50 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-600/80",
                   )}
                 >
@@ -900,9 +891,9 @@ export default function SmartAllocationPage() {
                 <button
                   onClick={() => setShiftFilter("evening")}
                   className={cn(
-                    "flex-1 py-2 px-3 text-sm font-semibold text-center transition-all duration-300 rounded-lg",
+                    "flex-1 py-2 px-3 text-sm font-semibold text-center transition-all duration-300 rounded-lg cursor-pointer",
                     shiftFilter === "evening"
-                      ? "bg-gradient-to-r from-orange-500 to-amber-600 text-white shadow-lg shadow-orange-500/30"
+                      ? "bg-blue-600 hover:bg-blue-700 text-white shadow-md shadow-blue-500/20"
                       : "bg-white dark:bg-zinc-700/50 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-600/80",
                   )}
                 >
@@ -942,13 +933,13 @@ export default function SmartAllocationPage() {
                           className={cn(
                             "relative p-2 rounded-lg cursor-pointer transition-all border-2 shadow-sm hover:shadow-md",
                             isSelected
-                              ? "bg-gradient-to-br from-red-50 to-orange-50 dark:from-red-950/30 dark:to-orange-950/30 border-red-500 dark:border-red-400 shadow-red-200 dark:shadow-red-900"
-                              : "bg-white dark:bg-zinc-800 hover:bg-red-50/30 dark:hover:bg-zinc-800/80 border-zinc-200 dark:border-zinc-700 hover:border-red-300 dark:hover:border-red-800",
+                              ? "bg-blue-50/70 dark:bg-blue-950/30 border-blue-500 dark:border-blue-400 shadow-blue-200/50 dark:shadow-blue-950"
+                              : "bg-white dark:bg-zinc-800/90 hover:bg-blue-50/30 dark:hover:bg-zinc-800/80 border-zinc-200 dark:border-zinc-700 hover:border-blue-300 dark:hover:border-blue-700",
                           )}
                         >
                           {isRefreshingCards && (
                             <div className="absolute inset-0 bg-white/70 dark:bg-zinc-900/70 backdrop-blur-[1px] rounded-lg flex items-center justify-center z-10">
-                              <div className="w-4 h-4 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />
+                              <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
                             </div>
                           )}
                           <div className="flex items-center justify-between mb-1.5">
@@ -957,8 +948,8 @@ export default function SmartAllocationPage() {
                                 className={cn(
                                   "w-7 h-7 rounded-lg flex items-center justify-center shadow-sm",
                                   isSelected
-                                    ? "bg-gradient-to-br from-red-500 to-orange-500"
-                                    : "bg-red-100 dark:bg-red-900/30",
+                                    ? "bg-blue-600 text-white"
+                                    : "bg-blue-100 dark:bg-blue-900/30",
                                 )}
                               >
                                 <Bus
@@ -966,7 +957,7 @@ export default function SmartAllocationPage() {
                                     "w-3.5 h-3.5",
                                     isSelected
                                       ? "text-white"
-                                      : "text-red-600 dark:text-red-400",
+                                      : "text-blue-600 dark:text-blue-400",
                                   )}
                                 />
                               </div>
@@ -1016,7 +1007,9 @@ export default function SmartAllocationPage() {
                                   "h-2 rounded-full",
                                   loadPercentage > 95
                                     ? "bg-gradient-to-r from-red-500 to-red-600"
-                                    : "bg-gradient-to-r from-orange-500 to-orange-600",
+                                    : loadPercentage > 75
+                                    ? "bg-gradient-to-r from-amber-500 to-amber-600"
+                                    : "bg-gradient-to-r from-blue-500 to-blue-600",
                                 )}
                               />
                             </div>
@@ -1028,7 +1021,7 @@ export default function SmartAllocationPage() {
                               animate={{ opacity: 1, x: 0 }}
                               className="absolute right-3 top-3"
                             >
-                              <ChevronRight className="w-4 h-4 text-red-600 dark:text-red-400 animate-pulse" />
+                              <ChevronRight className="w-4 h-4 text-blue-600 dark:text-blue-400 animate-pulse" />
                             </motion.div>
                           )}
                         </motion.div>
@@ -1102,7 +1095,7 @@ export default function SmartAllocationPage() {
                     <div className="w-20 h-20 mx-auto mb-5 rounded-full bg-gradient-to-br from-zinc-100 to-zinc-200 dark:from-zinc-800 dark:to-zinc-700 flex items-center justify-center">
                       <Target className="w-10 h-10 text-muted-foreground" />
                     </div>
-                    <p className="text-xl font-bold mb-2 bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent">
+                    <p className="text-xl font-bold mb-2 text-foreground">
                       Select a bus to manage
                     </p>
                     <p className="text-sm text-muted-foreground max-w-md mx-auto">
@@ -1110,7 +1103,7 @@ export default function SmartAllocationPage() {
                       route visualization and student roster
                     </p>
                     <div className="mt-6 flex items-center justify-center gap-2">
-                      <div className="w-1.5 h-1.5 rounded-full bg-purple-500 animate-pulse" />
+                      <div className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
                       <p className="text-xs text-muted-foreground">
                         Choose from{" "}
                         <span className="font-bold">
@@ -1130,10 +1123,10 @@ export default function SmartAllocationPage() {
         {selectedBus && (
           <div className="grid grid-cols-1">
             <Card className="bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 shadow-lg pt-0">
-              <CardHeader className="pb-3 pt-3 bg-gradient-to-r from-purple-50 to-pink-50 dark:from-purple-950/20 dark:to-pink-950/20">
+              <CardHeader className="pb-3 pt-3 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/20 dark:to-indigo-950/20">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div className="flex items-center gap-2.5">
-                    <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center">
+                    <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-500 flex items-center justify-center">
                       <Users className="w-4 h-4 text-white" />
                     </div>
                     <div>

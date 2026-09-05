@@ -1,13 +1,13 @@
 /**
- * OptimizedSelect - Prevents parent re-renders for Select components
- * Uses internal state for immediate feedback, syncs to parent on change
+ * OptimizedSelect - React 19 / Next.js 16 Component
+ * Leverages React Compiler automatic memoization.
  */
 
 "use client";
 
 import { Label } from '@/components/ui/label';
-import { Select,SelectContent,SelectTrigger,SelectValue } from '@/components/ui/select';
-import { memo,ReactNode,useCallback,useEffect,useState } from 'react';
+import { Select, SelectContent, SelectTrigger, SelectValue } from '@/components/ui/select';
+import React, { ReactNode, useEffect, useState } from 'react';
 
 interface OptimizedSelectProps {
   id: string;
@@ -22,7 +22,7 @@ interface OptimizedSelectProps {
   children: ReactNode;
 }
 
-export const OptimizedSelect = memo(function OptimizedSelect({
+export function OptimizedSelect({
   id,
   label,
   value: externalValue,
@@ -32,20 +32,19 @@ export const OptimizedSelect = memo(function OptimizedSelect({
   className,
   labelClassName,
   disabled,
-  children
+  children,
 }: OptimizedSelectProps) {
   const [internalValue, setInternalValue] = useState(externalValue);
 
-  // Sync external value changes (e.g., from hydration)
+  // Sync external value changes
   useEffect(() => {
     setInternalValue(externalValue);
   }, [externalValue]);
 
-  const handleValueChange = useCallback((newValue: string) => {
+  const handleValueChange = (newValue: string) => {
     setInternalValue(newValue);
-    // For selects, update immediately since it's a deliberate action
     onChange(newValue);
-  }, [onChange]);
+  };
 
   return (
     <div>
@@ -68,4 +67,4 @@ export const OptimizedSelect = memo(function OptimizedSelect({
       </Select>
     </div>
   );
-});
+}

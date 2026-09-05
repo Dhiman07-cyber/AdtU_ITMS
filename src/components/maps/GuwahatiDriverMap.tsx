@@ -3,7 +3,7 @@
 import { useTheme } from "@/components/theme-provider";
 import { Button } from "@/components/ui/button";
 import { Bell,MapPin,Maximize2,Minimize2,Moon,ScanLine,Sun,Users,X } from "lucide-react";
-import { useCallback,useEffect,useMemo,useRef,useState } from "react";
+import { useEffect,useRef,useState } from "react";
 import GuwahatiMap,{ type MapPoint } from "./GuwahatiMap";
 import MapFallbackUI from "./MapFallbackUI";
 
@@ -25,7 +25,7 @@ interface WaitingStudent {
 }
 
 interface GuwahatiDriverMapProps {
-  driverLocation: { lat: number; lng: number; accuracy: number } | null;
+  driverLocation: { lat: number; lng: number; accuracy: number; heading?: number } | null;
   waitingStudents: WaitingStudent[];
   tripActive: boolean;
   busNumber?: string;
@@ -106,7 +106,7 @@ export default function GuwahatiDriverMap({
     }
   }, [tripActive, fatal]);
 
-  const points: MapPoint[] = useMemo(() => {
+  const points: MapPoint[] = (() => {
     const list: MapPoint[] = [];
     waitingStudents.forEach((s) => {
       if (s.stop_lat && s.stop_lng) {
@@ -121,46 +121,41 @@ export default function GuwahatiDriverMap({
       }
     });
     return list;
-  }, [waitingStudents]);
+  })();
 
-  const handleFatal = useCallback((msg: string) => {
+  const handleFatal = (msg: string) => {
     setFatal(true);
     setFatalMsg(msg);
-  }, []);
+  };
+
+
 
   if (!tripActive) {
     return (
-      <div className="dark w-full h-full bg-[#0a0f1e] rounded-3xl flex items-center justify-center relative overflow-hidden border border-white/5 group">
-        {/* Decorative Background Elements */}
-        <div className="absolute -top-[20%] -right-[10%] w-[60%] h-[60%] bg-emerald-500/5 rounded-full blur-[120px] animate-pulse" />
-        <div className="absolute -bottom-[20%] -left-[10%] w-[60%] h-[60%] bg-blue-500/5 rounded-full blur-[120px] animate-pulse" style={{ animationDelay: '3s' }} />
+      <div className="dark w-full h-full min-h-[400px] bg-[#0a0f1e] rounded-3xl flex items-center justify-center relative overflow-hidden border border-white/5 group p-6">
+        {/* Animated Background Gradients */}
+        <div className="absolute -top-[20%] -left-[10%] w-[60%] h-[60%] bg-blue-500/10 rounded-full blur-[120px] animate-pulse" />
+        <div className="absolute -bottom-[20%] -right-[10%] w-[60%] h-[60%] bg-indigo-500/10 rounded-full blur-[120px] animate-pulse" style={{ animationDelay: "2s" }} />
 
-        <div className="text-center p-8 relative z-10">
+        <div className="text-center p-6 relative z-10 max-w-sm mx-auto">
           <div className="relative w-20 h-20 mx-auto mb-6">
-            {/* Spinning decorative orbit */}
-            <div className="absolute inset-0 rounded-full border border-white/5 border-t-emerald-500/30 animate-spin" />
-            {/* Pulse effect */}
-            <div className="absolute inset-0 rounded-full bg-emerald-500/5 animate-pulse" />
-            {/* Main Icon Container */}
-            <div className="absolute inset-1.5 rounded-[1.5rem] bg-gradient-to-br from-[#1a2236] to-[#0a0f1e] border border-white/10 flex items-center justify-center shadow-2xl group-hover:scale-105 transition-transform duration-500">
-              <Users className="w-8 h-8 text-emerald-500" />
+            <div className="absolute inset-0 rounded-full border-2 border-dashed border-blue-500/20 animate-[spin_10s_linear_infinite]" />
+            <div className="absolute inset-4 rounded-full bg-blue-500/10 animate-pulse" />
+            <div className="absolute inset-3 rounded-[1.5rem] bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-xl shadow-blue-500/20 group-hover:scale-110 transition-transform duration-500">
+              <MapPin className="w-8 h-8 text-white" />
             </div>
           </div>
 
-          <h3 className="text-2xl font-black text-white mb-2 tracking-tight">
-            Standby Mode
+          <h3 className="text-xl font-black text-white mb-2 tracking-tight">
+            No Active Trip
           </h3>
-          <p className="text-slate-400 text-[11px] font-bold uppercase tracking-[0.2em] opacity-60">
-            System ready for trip signals
+          <p className="text-slate-400 text-xs font-medium leading-relaxed">
+            Live GPS tracking is currently offline. Click &quot;Start Trip&quot; above to initialize live tracking and route map.
           </p>
 
-          <div className="mt-8 flex flex-col items-center gap-3">
-            <div className="px-5 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[9px] font-black uppercase tracking-widest animate-pulse">
-              Waiting for Departure
-            </div>
-            <p className="text-slate-500 text-[10px] max-w-[180px] leading-relaxed mx-auto">
-              Start your trip from the main panel to begin real-time broadcasting.
-            </p>
+          <div className="mt-6 inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/5 border border-white/10">
+            <div className="w-1.5 h-1.5 rounded-full bg-slate-500" />
+            <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Trip Inactive</span>
           </div>
         </div>
       </div>
@@ -170,7 +165,6 @@ export default function GuwahatiDriverMap({
   if (fatal) {
     return (
       <div className="dark relative w-full h-full min-h-[400px] rounded-3xl overflow-hidden bg-slate-950">
-
         <MapFallbackUI onRetry={() => window.location.reload()} message={fatalMsg ?? undefined} />
       </div>
     );
@@ -185,11 +179,12 @@ export default function GuwahatiDriverMap({
           ref={mapRef}
           theme={mapTheme}
 
-          busPosition={(driverLocation && (driverLocation.lat !== 0 || driverLocation.lng !== 0)) ? { lat: driverLocation.lat, lng: driverLocation.lng } : null}
+          busPosition={(driverLocation && (driverLocation.lat !== 0 || driverLocation.lng !== 0)) ? { lat: driverLocation.lat, lng: driverLocation.lng, heading: driverLocation.heading } : null}
           primaryKind="driver"
           points={points}
           restrictToGuwahati={true}
           onFatalError={handleFatal}
+          followBus={tripActive}
           className="w-full h-full !rounded-none"
         />
       </div>
@@ -281,10 +276,15 @@ export default function GuwahatiDriverMap({
           <div className="absolute top-4 left-4 right-4 z-20 flex justify-between items-start pointer-events-none">
             <button onClick={handleToggleTheme} className="pointer-events-auto w-10 h-10 bg-white/90 dark:bg-slate-800/90 backdrop-blur-md rounded-2xl shadow-lg border border-black/5 dark:border-white/10 flex items-center justify-center hover:scale-105 active:scale-95 transition-all outline-none">
               {mapTheme === "dark" ? <Sun className="w-5 h-5 text-amber-400" /> : <Moon className="w-5 h-5 text-indigo-500" />}
-
             </button>
-            <div className="pointer-events-auto px-3 py-1.5 bg-white/90 dark:bg-slate-800/90 backdrop-blur-md shadow-lg border border-black/5 dark:border-white/10 rounded-xl text-xs font-black text-slate-700 dark:text-slate-200 uppercase tracking-widest">
-              AdtU ITMS
+            <div className="flex items-center gap-2 pointer-events-auto">
+              <button title="Notifications" onClick={() => setPanelOpen(true)} className="w-10 h-10 bg-white/90 dark:bg-slate-800/90 backdrop-blur-md rounded-2xl shadow-lg border border-black/5 dark:border-white/10 flex items-center justify-center hover:scale-105 active:scale-95 transition-all relative text-slate-600 dark:text-slate-100 group">
+                <Bell className="w-5 h-5 group-hover:animate-swing" />
+                {waitingStudents.length > 0 && <span className="absolute -top-1 -right-1 flex h-5 w-5 bg-emerald-500 text-white rounded-full text-[10px] items-center justify-center font-black shadow-lg shadow-emerald-500/40 border-2 border-white dark:border-[#1a2236]">{waitingStudents.length}</span>}
+              </button>
+              <div className="px-3 py-1.5 bg-white/90 dark:bg-slate-800/90 backdrop-blur-md shadow-lg border border-black/5 dark:border-white/10 rounded-xl text-xs font-black text-slate-700 dark:text-slate-200 uppercase tracking-widest">
+                AdtU ITMS
+              </div>
             </div>
           </div>
 
@@ -301,8 +301,8 @@ export default function GuwahatiDriverMap({
         </>
       )}
 
-      {/* Student Panel Overlay (Only for full screen) */}
-      {panelOpen && isFullScreen && (
+      {/* Student Panel Overlay (Both Small & Full Screen Mode) */}
+      {panelOpen && (
         <div
           role="presentation"
           className="absolute inset-0 bg-slate-950/60 z-[100] backdrop-blur-sm transition-all duration-300"
@@ -357,7 +357,7 @@ export default function GuwahatiDriverMap({
                         : "bg-blue-600 hover:bg-blue-700 text-white"
                         }`}
                     >
-                      {student.status === "acknowledged" ? "Picked" : "Recieved"}
+                      {student.status === "acknowledged" ? "Mark Boarded" : "Acknowledge"}
                     </Button>
                   </div>
                 ))

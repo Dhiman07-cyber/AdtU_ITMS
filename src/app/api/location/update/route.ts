@@ -4,23 +4,9 @@ import { withSecurity } from '@/lib/security/api-security';
 import { RateLimits } from '@/lib/security/rate-limiter';
 import { LocationUpdateBodySchema } from '@/lib/security/validation-schemas';
 import { getSupabaseServer } from '@/lib/supabase-server';
-import { shouldWriteLocationBreadcrumb } from '@/lib/services/location-write-throttle';
+import { shouldWriteLocationBreadcrumb, shouldWriteHeartbeat } from '@/lib/services/location-write-throttle';
 import { NextResponse } from 'next/server';
 
-const lastHeartbeatWrites = new Map<string, number>();
-
-function shouldWriteHeartbeat(busId: string, now: number): boolean {
-  const last = lastHeartbeatWrites.get(busId) || 0;
-  if (now - last > 20000) {
-    lastHeartbeatWrites.set(busId, now);
-    if (lastHeartbeatWrites.size > 1000) {
-      const first = lastHeartbeatWrites.keys().next().value;
-      if (first) lastHeartbeatWrites.delete(first);
-    }
-    return true;
-  }
-  return false;
-}
 
 export const POST = withSecurity(
   async (_request, { auth, body, requestId }) => {
@@ -61,17 +47,26 @@ export const POST = withSecurity(
       busId, driverUid,
       lat: Number(lat), lng: Number(lng),
       accuracy, speed, heading: heading || 0,
-      timestamp: new Date().toISOString(),
+      tripId: result.normalized?.tripId || tripId || undefined,
+      timestamp: result.normalized?.timestamp?.toISOString() || (timestamp ? String(timestamp) : new Date().toISOString()),
     }).catch((err: Error) => console.warn('Location broadcast failed:', err));
 
-    // Persist heartbeat to PostgreSQL active_trips (throttled to 1 write/bus/20s)
+
+    // Persist heartbeat to PostgreSQL active_trips (throttled to 1 write/bus/20s).
+    // CRITICAL: must also extend expires_at, not just last_heartbeat.
+    // trip-status filters .gt('expires_at', now) — if we only write last_heartbeat
+    // the trip lock expires 10 minutes after start and the student sees "Trip Inactive"
+    // even though GPS HTTP 200 continues. The 600s TTL matches acquire_trip_lock /
+    // extend_trip_lock RPCs (LOCK_TTL_SECONDS = 600 in trip-lock-service.ts).
     const supabase = getSupabaseServer();
     const nowMs = Date.now();
     if (shouldWriteHeartbeat(busId, nowMs)) {
+      const extendedExpiresAt = new Date(nowMs + 600 * 1000).toISOString();
       const { error: heartbeatError } = await supabase
         .from('active_trips')
         .update({
-          last_heartbeat: new Date().toISOString()
+          last_heartbeat: new Date(nowMs).toISOString(),
+          expires_at: extendedExpiresAt,
         })
         .eq('bus_id', busId)
         .eq('driver_id', driverUid)

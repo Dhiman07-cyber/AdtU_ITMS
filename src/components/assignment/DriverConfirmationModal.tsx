@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/table";
 import type { ConfirmationTableRow } from "@/lib/services/net-assignment-service";
 import { cn } from "@/lib/utils";
-import { AnimatePresence,motion } from "framer-motion";
+import { AnimatePresence,motion } from "motion/react";
 import {
 	AlertTriangle,
 	Bus,

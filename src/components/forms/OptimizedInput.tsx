@@ -1,13 +1,13 @@
 /**
- * OptimizedInput - Prevents parent re-renders during typing
- * Uses internal state for immediate feedback, syncs to parent on blur
+ * OptimizedInput - React 19 / Next.js 16 Component
+ * Leverages React Compiler automatic memoization for smooth typing & state synchronization.
  */
 
 "use client";
 
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { memo,useCallback,useEffect,useState } from 'react';
+import React, { useEffect, useState } from 'react';
 
 interface OptimizedInputProps {
   id: string;
@@ -23,7 +23,7 @@ interface OptimizedInputProps {
   transform?: (value: string) => string;
 }
 
-export const OptimizedInput = memo(function OptimizedInput({
+export function OptimizedInput({
   id,
   label,
   type = 'text',
@@ -34,34 +34,36 @@ export const OptimizedInput = memo(function OptimizedInput({
   disabled,
   className,
   labelClassName,
-  transform
+  transform,
 }: OptimizedInputProps) {
   const [internalValue, setInternalValue] = useState(externalValue);
 
-  // Sync external value changes (e.g., from hydration)
+  // Sync external value changes
   useEffect(() => {
     setInternalValue(externalValue);
   }, [externalValue]);
 
-  const handleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     let newValue = e.target.value;
     if (transform) {
       newValue = transform(newValue);
     }
     setInternalValue(newValue);
-  }, [transform]);
+  };
 
-  const handleBlur = useCallback(() => {
-    // Only call onChange if value actually changed
+  const handleBlur = () => {
     if (internalValue !== externalValue) {
       onChange(internalValue);
     }
-  }, [internalValue, externalValue, onChange]);
+  };
 
   return (
     <div>
       {label && (
-        <Label htmlFor={id} className={labelClassName || "block text-xs font-medium text-gray-700 dark:text-gray-300 mb-0.5"}>
+        <Label
+          htmlFor={id}
+          className={labelClassName || "block text-xs font-medium text-gray-700 dark:text-gray-300 mb-0.5"}
+        >
           {label} {required && <span className="text-red-500">*</span>}
         </Label>
       )}
@@ -78,5 +80,4 @@ export const OptimizedInput = memo(function OptimizedInput({
       />
     </div>
   );
-});
-
+}

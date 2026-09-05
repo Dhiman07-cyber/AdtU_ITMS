@@ -23,7 +23,7 @@ import {
 } from '@/lib/payment/application-payment.service';
 import type { PaymentFrontendStatus } from '@/lib/payment/payment-state';
 import { uploadImage } from '@/lib/upload';
-import { AnimatePresence,motion } from 'framer-motion';
+import { AnimatePresence,motion } from "motion/react";
 import {
 	AlertCircle,
 	ArrowLeft,
@@ -44,7 +44,7 @@ import {
 	X,
 	Zap
 } from 'lucide-react';
-import React,{ useCallback,useEffect,useRef,useState } from 'react';
+import React,{ useEffect,useRef,useState } from 'react';
 import { toast } from 'sonner';
 
 interface PaymentModeSelectorProps {
@@ -272,15 +272,15 @@ export default function PaymentModeSelector({
   }, [initialReceiptPreview, paymentCompleted]);
 
   // ── Recovery hook (drives automatic polling & manual check) ──────────────
-  const getToken = useCallback(async (): Promise<string | null> => {
+  const getToken = async (): Promise<string | null> => {
     try {
       return (await currentUser?.getIdToken()) ?? null;
     } catch {
       return null;
     }
-  }, [currentUser]);
+  };
 
-  const handleRecoverySuccess = useCallback(() => {
+  const handleRecoverySuccess = () => {
     const session = getCurrentPaymentSession();
     const verifiedDetails = {
       paymentId: session?.razorpayPaymentId || sessionPaymentId,
@@ -298,7 +298,7 @@ export default function PaymentModeSelector({
     setPaymentDetails(verifiedDetails);
     setOnlinePaymentStatus('success');
     if (onPaymentComplete) onPaymentComplete(verifiedDetails);
-  }, [sessionPaymentId, sessionOrderId, amount, onPaymentComplete]);
+  };
 
   // Determine whether there is an unfinished online session that warrants polling
   const [hasOnlineSession, setHasOnlineSession] = useState(false);

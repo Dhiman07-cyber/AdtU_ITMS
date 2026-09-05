@@ -3,7 +3,7 @@
 import { useTheme } from "@/components/theme-provider";
 import { Button } from "@/components/ui/button";
 import { MapPin,Maximize2,Minimize2,Moon,QrCode,Sun } from "lucide-react";
-import { useCallback,useEffect,useMemo,useRef,useState } from "react";
+import { useEffect,useRef,useState } from "react";
 import GuwahatiMap,{ type MapPoint } from "./GuwahatiMap";
 import MapFallbackUI from "./MapFallbackUI";
 
@@ -23,7 +23,7 @@ interface GuwahatiBusMapProps {
   primaryActionDisabled?: boolean;
   studentLocation?: { lat: number; lng: number; accuracy?: number } | null;
   onShowQrCode?: () => void;
-  currentLocation?: { lat: number; lng: number; accuracy?: number; timestamp?: string; busId?: string } | null;
+  currentLocation?: { lat: number; lng: number; accuracy?: number; heading?: number; timestamp?: string; busId?: string } | null;
   loading?: boolean;
 }
 
@@ -90,7 +90,7 @@ export default function GuwahatiBusMap({
     }
   }, [journeyActive, fatal]);
 
-  const points: MapPoint[] = useMemo(() => {
+  const points: MapPoint[] = (() => {
     const list: MapPoint[] = [];
     const lat = Number(studentLocation?.lat);
     const lng = Number(studentLocation?.lng);
@@ -98,12 +98,12 @@ export default function GuwahatiBusMap({
       list.push({ id: "student", lat, lng, kind: "student", label: "Me" });
     }
     return list;
-  }, [studentLocation?.lat, studentLocation?.lng]);
+  })();
 
-  const handleFatal = useCallback((msg: string) => {
+  const handleFatal = (msg: string) => {
     setFatal(true);
     setFatalMsg(msg);
-  }, []);
+  };
 
   if (!journeyActive) {
     return (
@@ -162,7 +162,7 @@ export default function GuwahatiBusMap({
               ? [studentLocation.lat, studentLocation.lng]
               : undefined
           }
-          busPosition={(busLocation && (busLocation.lat !== 0 || busLocation.lng !== 0)) ? { lat: busLocation.lat, lng: busLocation.lng } : null}
+          busPosition={(busLocation && (busLocation.lat !== 0 || busLocation.lng !== 0)) ? { lat: busLocation.lat, lng: busLocation.lng, heading: busLocation.heading } : null}
           points={points}
           restrictToGuwahati={true}
           onFatalError={handleFatal}

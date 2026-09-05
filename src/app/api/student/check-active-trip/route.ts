@@ -1,3 +1,4 @@
+import { requireTransportEntitlement } from '@/lib/entitlement/require-transport-entitlement';
 import { withSecurity } from '@/lib/security/api-security';
 import { RateLimits } from '@/lib/security/rate-limiter';
 import { BusIdSchema } from '@/lib/security/validation-schemas';
@@ -17,6 +18,21 @@ export const POST = withSecurity(
     const { busId } = body as any;
 
     try {
+      // SECURITY: Transport entitlement check (students only)
+      if (auth.role === 'student') {
+        const gate = await requireTransportEntitlement(auth.uid);
+        if (!gate.ok) return (gate as any).response;
+      }
+
+      // SECURITY: Students may only query their own assigned bus.
+      if (auth.role === 'student') {
+        const resolved = await getStudentProfileAndShift(auth.uid);
+        const studentBusId = resolved?.busId;
+        if (studentBusId && studentBusId !== busId && studentBusId !== busId.replace('bus_', '') && `bus_${studentBusId}` !== busId) {
+          return NextResponse.json({ success: false, error: 'Forbidden: You are not assigned to this bus', requestId }, { status: 403 });
+        }
+      }
+
       console.log(`🔍 [${requestId}] Querying for active trip and bus status for bus: ${busId}`);
 
       const supabase = getSupabaseServer();

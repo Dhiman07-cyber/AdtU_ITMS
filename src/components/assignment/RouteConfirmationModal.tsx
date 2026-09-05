@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/table";
 import type { RouteConfirmationTableRow } from "@/lib/services/net-route-assignment-service";
 import { cn } from "@/lib/utils";
-import { AnimatePresence,motion } from "framer-motion";
+import { AnimatePresence,motion } from "motion/react";
 import {
 	AlertTriangle,
 	Bus,

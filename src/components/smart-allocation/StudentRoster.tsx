@@ -9,7 +9,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { safeImageSrc } from '@/lib/security/url-sanitizer';
 import { cn } from '@/lib/utils';
 import { ChevronRight,Filter,MapPin,Search,Users,Zap } from 'lucide-react';
-import { useMemo,useState } from 'react';
+import { useState } from 'react';
 
 interface StudentRosterProps {
   students: StudentData[];
@@ -28,7 +28,7 @@ export default function StudentRoster({
   const [stopFilter, setStopFilter] = useState<string>('all');
 
   // Group students by stop
-  const stopGroups = useMemo(() => {
+  const stopGroups = (() => {
     const groups = new Map<string, StudentData[]>();
 
     students.forEach(student => {
@@ -38,10 +38,10 @@ export default function StudentRoster({
     });
 
     return groups;
-  }, [students]);
+  })();
 
   // Filter students
-  const filteredStudents = useMemo(() => {
+  const filteredStudents = (() => {
     let filtered = [...students];
 
     // Apply search filter
@@ -60,16 +60,16 @@ export default function StudentRoster({
     }
 
     return filtered;
-  }, [students, searchQuery, stopFilter]);
+  })();
 
   // Unique stops
-  const uniqueStops = useMemo(() => {
+  const uniqueStops = (() => {
     const stops = new Map<string, string>();
     students.forEach(student => {
       stops.set(student.stop_name, student.stop_name);
     });
     return Array.from(stops.entries()).map(([id, name]) => ({ id, name }));
-  }, [students]);
+  })();
 
   // Render student row
   const renderStudentRow = (student: StudentData) => {

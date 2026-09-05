@@ -1,12 +1,12 @@
 /**
- * OptimizedOTPInput - High-performance OTP input with zero lag
- * Uses internal state and only syncs to parent on blur (like OptimizedInput)
+ * OptimizedOTPInput - React 19 / Next.js 16 Component
+ * High-performance OTP input leveraging React Compiler automatic memoization.
  */
 
 "use client";
 
 import { cn } from '@/lib/utils';
-import { memo,useCallback,useEffect,useRef,useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 interface OptimizedOTPInputProps {
   length?: number;
@@ -16,49 +16,43 @@ interface OptimizedOTPInputProps {
   onComplete?: (value: string) => void;
 }
 
-export const OptimizedOTPInput = memo(function OptimizedOTPInput({
+export function OptimizedOTPInput({
   length = 6,
   value: externalValue,
   onChange,
   disabled = false,
-  onComplete
+  onComplete,
 }: OptimizedOTPInputProps) {
   const [internalValue, setInternalValue] = useState(externalValue);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Sync external value changes (e.g., from reset)
+  // Sync external value changes
   useEffect(() => {
     setInternalValue(externalValue);
   }, [externalValue]);
 
-  // Handle input change - update internal state immediately, no parent update
-  const handleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (disabled) return;
     
     const newValue = e.target.value.replace(/[^0-9]/g, '').slice(0, length);
-    
-    // Update internal state immediately for instant visual feedback
     setInternalValue(newValue);
     
-    // Auto-blur when complete to trigger sync
     if (newValue.length === length) {
       setTimeout(() => {
         inputRef.current?.blur();
       }, 0);
     }
-  }, [disabled, length]);
+  };
 
-  // Sync to parent only on blur (like OptimizedInput)
-  const handleBlur = useCallback(() => {
+  const handleBlur = () => {
     if (internalValue !== externalValue) {
       onChange(internalValue);
       
-      // Call onComplete if provided and value is complete
       if (onComplete && internalValue.length === length) {
         onComplete(internalValue);
       }
     }
-  }, [internalValue, externalValue, onChange, onComplete, length]);
+  };
 
   return (
     <div className="relative w-full cursor-text" onClick={() => inputRef.current?.focus()}>
@@ -97,4 +91,4 @@ export const OptimizedOTPInput = memo(function OptimizedOTPInput({
       </div>
     </div>
   );
-});
+}

@@ -4,7 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card,CardContent } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
-import { motion } from 'framer-motion';
+import { motion } from "motion/react";
 import {
 	Activity,
 	AlertTriangle,
@@ -128,7 +128,7 @@ export default function SmartInsights({ stats, busUtilization, routeOccupancy }:
 
   const getTypeStyles = (type: Insight['type']) => {
     switch (type) {
-      case 'urgent': return 'bg-red-500/10 border-red-500/20 text-red-400 font-black';
+      case 'urgent': return 'bg-red-500/10 border-red-500/20 text-red-400 font-bold';
       case 'warning': return 'bg-amber-500/10 border-amber-500/20 text-amber-400 font-bold';
       case 'optimal': return 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400 font-bold';
       case 'info': return 'bg-blue-500/10 border-blue-500/20 text-blue-400 font-bold';
@@ -153,8 +153,8 @@ export default function SmartInsights({ stats, busUtilization, routeOccupancy }:
            <Zap className="w-6 h-6" />
         </div>
         <div className="space-y-0.5">
-           <h3 className="text-2xl font-black text-white tracking-tight">System Smart Insights</h3>
-           <p className="text-slate-500 text-sm font-medium tracking-tight">AI-assisted operational recommendations based on real-time telemetry</p>
+           <h3 className="text-2xl font-bold text-white">System Smart Insights</h3>
+           <p className="text-slate-500 text-sm font-medium">AI-assisted operational recommendations based on real-time telemetry</p>
         </div>
       </div>
 
@@ -177,20 +177,20 @@ export default function SmartInsights({ stats, busUtilization, routeOccupancy }:
                   )}>
                     <insight.icon className="w-5 h-5" />
                   </div>
-                  <Badge className={cn("text-[8px] font-black tracking-widest px-2 py-0.5 border uppercase", getTypeStyles(insight.type))}>
+                  <Badge className={cn("text-[8px] font-bold px-2 py-0.5 border uppercase", getTypeStyles(insight.type))}>
                     {insight.type}
                   </Badge>
                 </div>
 
                 <div className="space-y-2 flex-grow">
-                  <h4 className="text-sm font-black text-white tracking-wide group-hover:text-indigo-300 transition-colors">{insight.title}</h4>
+                  <h4 className="text-sm font-bold text-white group-hover:text-indigo-300 transition-colors">{insight.title}</h4>
                   <p className="text-[11px] font-medium leading-relaxed text-slate-400 group-hover:text-slate-300 transition-colors">
                     {insight.description}
                   </p>
                 </div>
 
                 <div className="mt-6 pt-4 border-t border-white/5 flex items-center justify-between">
-                   <span className="text-[9px] font-bold text-slate-600 uppercase tracking-widest">Recommended Action</span>
+                   <span className="text-[9px] font-bold text-slate-600">Recommended Action</span>
                    <Button variant="ghost" className="h-6 px-0 text-slate-400 hover:text-white group/action">
                       <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
                    </Button>

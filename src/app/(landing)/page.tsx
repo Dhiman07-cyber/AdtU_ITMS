@@ -33,29 +33,26 @@ function LandingVideo() {
     try {
       setError(null);
       const response = await fetch('/api/landing-video', {
-        cache: 'no-store' // Prevent caching issues during auth transitions
+        cache: 'no-store'
       });
 
       if (response.ok) {
         const data = await response.json();
         if (data.success && data.url) {
           setVideoUrl(data.url);
-          retryCountRef.current = 0; // Reset retry count on success
-        } else {
-          throw new Error(data.error || 'Invalid video URL response');
+          retryCountRef.current = 0;
+          return;
         }
-      } else {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
-    } catch (error) {
-      console.error(`Failed to fetch video URL (attempt ${retryCount + 1}):`, error);
 
-      // Retry logic for transient errors
       if (retryCount < maxRetries) {
-        const delay = Math.pow(2, retryCount) * 1000; // Exponential backoff
+        const delay = Math.pow(2, retryCount) * 1000;
         setTimeout(() => fetchVideoUrl(retryCount + 1), delay);
-      } else {
-        setError('Unable to load video. Please refresh the page.');
+      }
+    } catch {
+      if (retryCount < maxRetries) {
+        const delay = Math.pow(2, retryCount) * 1000;
+        setTimeout(() => fetchVideoUrl(retryCount + 1), delay);
       }
     } finally {
       setIsLoading(false);

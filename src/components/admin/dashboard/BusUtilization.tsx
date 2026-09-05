@@ -4,7 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card,CardContent,CardHeader,CardTitle } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
-import { motion } from 'framer-motion';
+import { motion } from "motion/react";
 import {
 	ArrowRight,
 	Bus,
@@ -13,7 +13,7 @@ import {
 	TrendingUp
 } from 'lucide-react';
 import Link from 'next/link';
-import { useMemo,useState } from 'react';
+import { useState } from 'react';
 import { BusUtilizationData } from './types';
 
 interface BusUtilizationProps {
@@ -23,15 +23,13 @@ interface BusUtilizationProps {
 export default function BusUtilization({ busUtilization }: BusUtilizationProps) {
   const [isExpanded, setIsExpanded] = useState(false);
 
-  const sortedBuses = useMemo(() => {
-    return [...busUtilization].sort((a, b) => {
-      const peakA = Math.max(a.morningCount, a.eveningCount);
-      const peakB = Math.max(b.morningCount, b.eveningCount);
-      const remA = a.capacity - peakA;
-      const remB = b.capacity - peakB;
-      return remA - remB; // Least remaining space (most loaded) first
-    });
-  }, [busUtilization]);
+  const sortedBuses = [...busUtilization].sort((a, b) => {
+    const peakA = Math.max(a.morningCount, a.eveningCount);
+    const peakB = Math.max(b.morningCount, b.eveningCount);
+    const remA = a.capacity - peakA;
+    const remB = b.capacity - peakB;
+    return remA - remB; // Least remaining space (most loaded) first
+  });
 
   const getStatusColor = (utilization: number) => {
     if (utilization > 90) return 'text-red-400 bg-red-400/10 border-red-400/20';
@@ -53,7 +51,7 @@ export default function BusUtilization({ busUtilization }: BusUtilizationProps) 
             <div className="w-10 h-10 rounded-xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400">
               <Bus className="w-5 h-5" />
             </div>
-            <CardTitle className="text-xl font-black text-white tracking-tight">Fleet Utilization Matrix</CardTitle>
+            <CardTitle className="text-xl font-bold text-white">Fleet Utilization Matrix</CardTitle>
           </div>
           <p className="text-slate-400 text-[11px] pl-1.5 border-l border-cyan-500/30 ml-1.5">Load distribution across shifts</p>
         </div>
@@ -62,15 +60,15 @@ export default function BusUtilization({ busUtilization }: BusUtilizationProps) 
           <div className="flex items-center gap-4 bg-[#0c0d1b] p-3 rounded-2xl border border-white/5">
             <div className="flex items-center gap-2">
               <div className="w-2 h-2 rounded-full bg-emerald-500" />
-              <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest">Optimal</span>
+              <span className="text-[10px] font-bold text-emerald-400">Optimal</span>
             </div>
             <div className="flex items-center gap-2">
               <div className="w-2 h-2 rounded-full bg-amber-500" />
-              <span className="text-[10px] font-bold text-amber-400 uppercase tracking-widest">High</span>
+              <span className="text-[10px] font-bold text-amber-400">High</span>
             </div>
             <div className="flex items-center gap-2">
               <div className="w-2 h-2 rounded-full bg-red-500" />
-              <span className="text-[10px] font-bold text-red-400 uppercase tracking-widest">At Risk</span>
+              <span className="text-[10px] font-bold text-red-400">At Risk</span>
             </div>
           </div>
         </div>
@@ -93,14 +91,14 @@ export default function BusUtilization({ busUtilization }: BusUtilizationProps) 
                     <Bus className="w-6 h-6" />
                   </div>
                   <div>
-                    <h4 className="text-base font-black text-white">{bus.name}</h4>
+                    <h4 className="text-base font-bold text-white">{bus.name}</h4>
                     <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Active</span>
+                      <span className="text-[10px] font-bold text-slate-500">Active</span>
                     </div>
                   </div>
                 </div>
-                <Badge className={cn("text-[9px] font-black tracking-widest px-2 py-1 rounded-lg border", getStatusColor(bus.utilization))}>
-                  {bus.utilization > 90 ? 'OVERLOAD' : bus.utilization > 70 ? 'HEAVY' : 'STABLE'}
+                <Badge className={cn("text-[9px] font-bold px-2 py-1 rounded-lg border", getStatusColor(bus.utilization))}>
+                  {bus.utilization > 90 ? 'Overload' : bus.utilization > 70 ? 'Heavy' : 'Stable'}
                 </Badge>
               </div>
 
@@ -108,8 +106,8 @@ export default function BusUtilization({ busUtilization }: BusUtilizationProps) 
               <div className="space-y-3">
                 <div className="flex justify-between items-baseline mb-1">
                   <div className="flex flex-col">
-                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-[0.1em]">Current Utilization</span>
-                    <span className="text-xl font-black text-white">{bus.utilization}%</span>
+                    <span className="text-[10px] font-bold text-slate-500">Current Utilization</span>
+                    <span className="text-xl font-bold text-white">{bus.utilization}%</span>
                   </div>
                   <div className="flex items-center gap-1.5 text-emerald-400">
                     <TrendingUp className="w-3.5 h-3.5" />
@@ -131,17 +129,17 @@ export default function BusUtilization({ busUtilization }: BusUtilizationProps) 
                 <div className="space-y-1">
                   <div className="flex items-center gap-1.5 text-amber-500">
                     <div className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-                    <span className="text-[9px] font-bold uppercase tracking-widest">Morning Shift</span>
+                    <span className="text-[9px] font-bold">Morning Shift</span>
                   </div>
-                  <div className="text-sm font-black text-white pl-3 border-l border-amber-500/20">{bus.morningCount} Pax</div>
+                  <div className="text-sm font-bold text-white pl-3 border-l border-amber-500/20">{bus.morningCount} Pax</div>
                   <div className="text-[9px] font-medium text-slate-500 pl-3">Cap: {bus.capacity}</div>
                 </div>
                 <div className="space-y-1">
                   <div className="flex items-center gap-1.5 text-blue-500">
                     <div className="w-1.5 h-1.5 rounded-full bg-blue-500" />
-                    <span className="text-[9px] font-bold uppercase tracking-widest">Evening Shift</span>
+                    <span className="text-[9px] font-bold">Evening Shift</span>
                   </div>
-                  <div className="text-sm font-black text-white pl-3 border-l border-blue-500/20">{bus.eveningCount} Pax</div>
+                  <div className="text-sm font-bold text-white pl-3 border-l border-blue-500/20">{bus.eveningCount} Pax</div>
                   <div className="text-[9px] font-medium text-slate-500 pl-3">Cap: {bus.capacity}</div>
                 </div>
               </div>
@@ -154,7 +152,7 @@ export default function BusUtilization({ busUtilization }: BusUtilizationProps) 
         <Button
           variant="ghost"
           onClick={() => setIsExpanded(!isExpanded)}
-          className="h-10 px-6 text-slate-400 hover:text-cyan-400 text-[10px] font-black uppercase tracking-widest group"
+          className="h-10 px-6 text-slate-400 hover:text-cyan-400 text-[10px] font-bold group"
         >
           {isExpanded ? (
             <>
@@ -171,7 +169,7 @@ export default function BusUtilization({ busUtilization }: BusUtilizationProps) 
 
         {isExpanded && (
           <Link href="/admin/smart-allocation" target="_blank" rel="noopener noreferrer">
-            <Button variant="outline" className="h-10 px-8 border-slate-700 hover:bg-slate-800 text-slate-300 text-[10px] font-black uppercase tracking-widest rounded-2xl group">
+            <Button variant="outline" className="h-10 px-8 border-slate-700 hover:bg-slate-800 text-slate-300 text-[10px] font-bold rounded-2xl group">
               Detailed View
               <ArrowRight className="w-4 h-4 ml-3 group-hover:translate-x-1 transition-transform" />
             </Button>

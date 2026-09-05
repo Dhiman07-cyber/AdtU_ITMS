@@ -2,7 +2,7 @@
 
 import { Card } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
-import { motion } from 'framer-motion';
+import { motion } from "motion/react";
 import {
 	Activity,
 	ArrowRightLeft,
@@ -100,13 +100,13 @@ export default function QuickActions({ role = 'admin' }: { role?: 'admin' | 'mod
             <Zap className="w-7 h-7" />
           </div>
           <div className="space-y-1">
-            <h3 className="text-2xl md:text-3xl font-black text-white tracking-tight leading-none">Operational Shortcuts</h3>
-            <p className="text-slate-400 text-sm font-medium tracking-tight">Rapid execution matrix for mission-critical tasks</p>
+            <h3 className="text-2xl md:text-3xl font-bold text-white leading-none">Operational Shortcuts</h3>
+            <p className="text-slate-400 text-sm font-medium">Rapid execution matrix for mission-critical tasks</p>
           </div>
         </div>
         <div className="hidden lg:flex items-center gap-2 px-4 py-2 rounded-full bg-white/5 border border-white/10">
            <Activity className="w-4 h-4 text-emerald-400 animate-pulse" />
-           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">System Ready</span>
+           <span className="text-[10px] font-bold text-slate-400">System Ready</span>
         </div>
       </div>
 
@@ -138,8 +138,10 @@ export default function QuickActions({ role = 'admin' }: { role?: 'admin' | 'mod
               </div>
               
               <div className="flex flex-col items-center text-center px-3 z-10">
-                <span className="text-[11px] font-black text-white uppercase tracking-wider group-hover:text-indigo-300 transition-colors">{action.label}</span>
-                <p className="sr-only sm:not-sr-only text-[9px] font-medium text-slate-500 mt-1 line-clamp-1 group-hover:text-slate-300 transition-colors uppercase tracking-widest px-2">{action.id.split('-').join(' ')}</p>
+                <span className="text-[11px] font-bold text-white group-hover:text-indigo-300 transition-colors">{action.label}</span>
+                <p className="sr-only sm:not-sr-only text-[9px] font-medium text-slate-500 mt-1 line-clamp-1 group-hover:text-slate-300 transition-colors px-2">
+                  {action.id.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')}
+                </p>
               </div>
 
 

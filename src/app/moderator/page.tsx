@@ -4,7 +4,7 @@ import { PremiumPageLoader } from '@/components/LoadingSpinner';
 import { useAuth } from '@/contexts/auth-context';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
-import { useCallback,useEffect,useMemo,useState } from 'react';
+import { useEffect,useState } from 'react';
 
 // Lightweight, framer-motion-free header/strip/hero stay in the critical bundle.
 import {
@@ -97,7 +97,7 @@ export default function EnhancedModeratorDashboard() {
   const [allRoutes, setAllRoutes] = useState<any[]>([]);
   const [activeTrips, setActiveTrips] = useState<any[]>([]);
 
-  const fetchRealTotalCounts = useCallback(async () => {
+  const fetchRealTotalCounts = async () => {
     try {
       if (!currentUser) return;
 
@@ -171,11 +171,11 @@ export default function EnhancedModeratorDashboard() {
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
     }
-  }, [currentUser]);
+  };
 
   useEffect(() => {
     fetchRealTotalCounts();
-  }, [fetchRealTotalCounts]);
+  }, [currentUser]);
 
   const handleRefreshAll = async () => {
     setIsRefreshing(true);
@@ -189,43 +189,39 @@ export default function EnhancedModeratorDashboard() {
     }
   };
 
-  const busUtilization = useMemo(() => {
-    return allBuses.map((bus: any) => ({
-      name: `Bus ${bus.busNumber || bus.id}`,
-      students: bus.currentMembers || 0,
-      capacity: bus.totalCapacity || 55,
-      utilization: bus.usagePct || 0,
-      morningCount: bus.load?.morningCount || 0,
-      eveningCount: bus.load?.eveningCount || 0
-    })).sort((a, b) => {
-      const aNum = parseInt(a.name.replace(/\D/g, '')) || 0;
-      const bNum = parseInt(b.name.replace(/\D/g, '')) || 0;
-      return aNum - bNum;
-    });
-  }, [allBuses]);
+  const busUtilization = allBuses.map((bus: any) => ({
+    name: `Bus ${bus.busNumber || bus.id}`,
+    students: bus.currentMembers || 0,
+    capacity: bus.totalCapacity || 55,
+    utilization: bus.usagePct || 0,
+    morningCount: bus.load?.morningCount || 0,
+    eveningCount: bus.load?.eveningCount || 0
+  })).sort((a, b) => {
+    const aNum = parseInt(a.name.replace(/\D/g, '')) || 0;
+    const bNum = parseInt(b.name.replace(/\D/g, '')) || 0;
+    return aNum - bNum;
+  });
 
-  const studentDistribution = useMemo(() => [
+  const studentDistribution = [
     { name: 'Evening', value: realCounts.eveningStudents || 0, color: '#3b82f6' },
     { name: 'Morning', value: realCounts.morningStudents || 0, color: '#f97316' }
-  ], [realCounts]);
+  ];
 
-  const routeOccupancy = useMemo(() => {
-    return allRoutes.map((route: any) => {
-      const routeBuses = allBuses.filter((b: any) => b.routeId === route.id || b.route?.routeId === route.id);
-      let totalCap = 0;
-      let totalLoad = 0;
-      routeBuses.forEach(b => {
-        totalCap += b.totalCapacity || 55;
-        totalLoad += b.currentMembers || 0;
-      });
-      return {
-        name: route.routeName,
-        occupancy: totalCap > 0 ? Math.round((totalLoad / totalCap) * 100) : 0,
-        students: totalLoad,
-        capacity: totalCap
-      };
-    }).filter(r => r.capacity > 0).sort((a, b) => b.occupancy - a.occupancy).slice(0, 8);
-  }, [allRoutes, allBuses]);
+  const routeOccupancy = allRoutes.map((route: any) => {
+    const routeBuses = allBuses.filter((b: any) => b.routeId === route.id || b.route?.routeId === route.id);
+    let totalCap = 0;
+    let totalLoad = 0;
+    routeBuses.forEach(b => {
+      totalCap += b.totalCapacity || 55;
+      totalLoad += b.currentMembers || 0;
+    });
+    return {
+      name: route.routeName,
+      occupancy: totalCap > 0 ? Math.round((totalLoad / totalCap) * 100) : 0,
+      students: totalLoad,
+      capacity: totalCap
+    };
+  }).filter(r => r.capacity > 0).sort((a, b) => b.occupancy - a.occupancy).slice(0, 8);
 
   const stats: DashboardStats = {
     totalStudents: realCounts.totalStudents,

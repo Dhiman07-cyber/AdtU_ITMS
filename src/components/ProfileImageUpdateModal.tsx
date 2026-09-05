@@ -5,7 +5,7 @@ import { Dialog,DialogContent,DialogDescription,DialogHeader,DialogTitle } from 
 import { Slider } from "@/components/ui/slider";
 import { uploadImage } from "@/lib/upload";
 import { AlertCircle,Camera,Check,Loader2,RotateCcw,Upload,X,ZoomIn,ZoomOut } from "lucide-react";
-import { useCallback,useEffect,useRef,useState } from "react";
+import { useEffect,useRef,useState } from "react";
 
 interface ProfileImageUpdateModalProps {
     isOpen: boolean;
@@ -91,7 +91,7 @@ export default function ProfileImageUpdateModal({
         setDragStart({ x: clientX - position.x, y: clientY - position.y });
     };
 
-    const handleDragMove = useCallback((e: MouseEvent | TouchEvent) => {
+    const handleDragMove = (e: MouseEvent | TouchEvent) => {
         if (!isDragging) return;
         const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
         const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
@@ -99,11 +99,11 @@ export default function ProfileImageUpdateModal({
             x: clientX - dragStart.x,
             y: clientY - dragStart.y,
         });
-    }, [isDragging, dragStart]);
+    };
 
-    const handleDragEnd = useCallback(() => {
+    const handleDragEnd = () => {
         setIsDragging(false);
-    }, []);
+    };
 
     useEffect(() => {
         if (isDragging) {
@@ -118,9 +118,9 @@ export default function ProfileImageUpdateModal({
             window.removeEventListener('touchmove', handleDragMove);
             window.removeEventListener('touchend', handleDragEnd);
         };
-    }, [isDragging, handleDragMove, handleDragEnd]);
+    }, [isDragging]);
 
-    const cropImage = useCallback((): string | null => {
+    const cropImage = (): string | null => {
         if (!canvasRef.current || !imageRef.current || !previewUrl) return null;
 
         const canvas = canvasRef.current;
@@ -215,7 +215,7 @@ export default function ProfileImageUpdateModal({
 
         ctx.restore();
         return canvas.toDataURL('image/jpeg', 0.92);
-    }, [previewUrl, zoom, position]);
+    };
 
     const handleCropConfirm = () => {
         const croppedUrl = cropImage();

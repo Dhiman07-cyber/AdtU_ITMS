@@ -3,8 +3,13 @@ FROM node:22-alpine AS deps
 RUN apk add --no-cache libc6-compat
 WORKDIR /app
 
+ENV NPM_CONFIG_LOGLEVEL=error \
+    NPM_CONFIG_FUND=false \
+    NPM_CONFIG_AUDIT=false \
+    NPM_CONFIG_UPDATE_NOTIFIER=false
+
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN --mount=type=cache,target=/root/.npm (npm ci --legacy-peer-deps --no-fund --no-audit || npm install --legacy-peer-deps --no-fund --no-audit)
 
 # Stage 2: Rebuild the source code only when needed
 FROM node:22-alpine AS builder
@@ -29,6 +34,7 @@ ARG NEXT_PUBLIC_RAZORPAY_KEY_ID
 ARG NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME
 ARG NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET
 ARG NEXT_PUBLIC_CLOUDINARY_UPLOAD_ASSET_FOLDER
+ARG NEXT_PUBLIC_E2E_STAGING
 
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_ENV=production
@@ -63,8 +69,9 @@ ENV WS_PRIVILEGED_TOKEN=ci-ws-token
 ENV NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
 ENV NEXT_PUBLIC_WS_URL=${NEXT_PUBLIC_WS_URL:-ws://localhost:3001}
 ENV NEXT_PUBLIC_RAZORPAY_KEY_ID=${NEXT_PUBLIC_RAZORPAY_KEY_ID:-ci}
+ENV NEXT_PUBLIC_E2E_STAGING=${NEXT_PUBLIC_E2E_STAGING:-false}
 
-RUN npm run build
+RUN --mount=type=cache,target=/app/.next/cache npm run build
 
 # Stage 3: Production runner image
 FROM node:22-alpine AS runner

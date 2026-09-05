@@ -10,7 +10,7 @@ import { useNotifications } from "@/contexts/NotificationContext";
 import { useToast } from "@/contexts/toast-context";
 import { Bell,Bus,Clock,Info,MapPin,RefreshCw } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect,useMemo,useState } from "react";
+import { useEffect,useState } from "react";
 
 type TabType = 'all' | 'trip' | 'notice' | 'pickup' | 'dropoff' | 'announcement';
 
@@ -63,14 +63,9 @@ export default function StudentNotificationsPage() {
   }, [loading, allNotifications, currentUser, markAsRead]);
 
   // Filter notifications by type
-  const filteredNotifications = useMemo(() => {
-    if (activeTab === 'all') {
-      return allNotifications;
-    }
-
-    // Filter by type field
-    return allNotifications.filter(n => n.type === activeTab);
-  }, [allNotifications, activeTab]);
+  const filteredNotifications = activeTab === 'all'
+    ? allNotifications
+    : allNotifications.filter(n => n.type === activeTab);
 
   // Count notifications by type
   const getCountByType = (type: TabType) => {
@@ -122,7 +117,7 @@ export default function StudentNotificationsPage() {
                   size="sm"
                   onClick={handleRefresh}
                   disabled={isRefreshing}
-                  className="group h-8 px-3 md:px-4 bg-white hover:bg-gray-50 text-black hover:text-purple-600 border border-gray-200 hover:border-purple-200 shadow-sm hover:shadow-lg hover:shadow-purple-500/10 font-bold text-[9px] md:text-[10px] uppercase tracking-wider md:tracking-widest rounded-lg transition-all duration-300 active:scale-95 whitespace-nowrap"
+                  className="group h-8 px-3 md:px-4 bg-zinc-100 hover:bg-zinc-200/80 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-200 hover:text-blue-600 dark:hover:text-blue-400 border border-zinc-300/80 dark:border-zinc-700 shadow-sm hover:shadow-md hover:border-blue-300 dark:hover:border-blue-500/50 font-bold text-[9px] md:text-[10px] uppercase tracking-wider md:tracking-widest rounded-lg transition-all duration-300 active:scale-95 whitespace-nowrap cursor-pointer"
                 >
                   <RefreshCw className={`mr-1.5 md:mr-2 h-3 w-3 md:h-3.5 md:w-3.5 transition-transform duration-500 ${isRefreshing ? 'animate-spin' : 'group-hover:rotate-180'}`} />
                   Refresh

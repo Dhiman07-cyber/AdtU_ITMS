@@ -288,7 +288,7 @@ export async function pgInsert(student: Partial<Student>): Promise<void> {
 
   const { error } = await db
     .from('student_profiles')
-    .insert(row);
+    .upsert(row, { onConflict: 'uid' });
 
   if (error) {
     throw new Error(`StudentRepository (PG) insert failed: ${error.message}`);

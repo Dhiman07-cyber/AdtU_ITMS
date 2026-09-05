@@ -48,3 +48,10 @@ if (bucketCleanupTimer && typeof bucketCleanupTimer.unref === 'function') {
 export function stopRateLimiter(): void {
   clearInterval(bucketCleanupTimer);
 }
+
+/** Clear all rate limiter state — used in tests between burst scenarios. */
+export function clearAllRateLimits(): void {
+  ipBuckets.clear();
+  userBuckets.clear();
+  socketBuckets.clear();
+}

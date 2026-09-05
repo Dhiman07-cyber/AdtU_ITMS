@@ -4,7 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card,CardContent,CardDescription,CardHeader,CardTitle } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
-import { AnimatePresence,motion } from 'framer-motion';
+import { AnimatePresence,motion } from "motion/react";
 import {
 	AlertTriangle,
 	ArrowRight,
@@ -14,7 +14,7 @@ import {
 	Navigation,
 	TrendingUp
 } from 'lucide-react';
-import { useEffect,useMemo,useState } from 'react';
+import { useEffect,useState } from 'react';
 import {
 	Bar,
 	BarChart,
@@ -42,33 +42,29 @@ export default function RouteOccupancy({ routeOccupancy, busUtilization = [] }: 
       setIsMounted(true);
    }, []);
 
-   const sortedRoutes = useMemo(() => {
-      return [...routeOccupancy].sort((a, b) =>
-         a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
-      );
-   }, [routeOccupancy]);
+   const sortedRoutes = [...routeOccupancy].sort((a, b) =>
+      a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
+   );
 
-   const currentRoutes = useMemo(() => {
+   const currentRoutes = (() => {
       const count = isExpanded ? 7 : 5;
       return sortedRoutes.slice(startIndex, startIndex + count);
-   }, [sortedRoutes, startIndex, isExpanded]);
+   })();
 
-   const topCongestedBuses = useMemo(() => {
+   const topCongestedBuses = (() => {
       const count = isExpanded ? 5 : 3;
       return [...busUtilization]
          .sort((a, b) => b.utilization - a.utilization)
          .slice(0, count);
-   }, [busUtilization, isExpanded]);
+   })();
 
-   const chartData = useMemo(() => {
-      return [...routeOccupancy]
-         .sort((a, b) => b.occupancy - a.occupancy)
-         .slice(0, 10).map(r => ({
-            name: r.name.split(' ')[0],
-            fullName: r.name,
-            occupancy: r.occupancy
-         }));
-   }, [routeOccupancy]);
+   const chartData = [...routeOccupancy]
+      .sort((a, b) => b.occupancy - a.occupancy)
+      .slice(0, 10).map(r => ({
+         name: r.name.split(' ')[0],
+         fullName: r.name,
+         occupancy: r.occupancy
+      }));
 
    const handleNextSection = () => {
       const currentCount = isExpanded ? 7 : 5;
@@ -97,7 +93,7 @@ export default function RouteOccupancy({ routeOccupancy, busUtilization = [] }: 
                      <div className="w-10 h-10 rounded-xl bg-orange-500/10 border border-orange-500/20 flex items-center justify-center text-orange-400">
                         <Navigation className="w-5 h-5 rotate-45" />
                      </div>
-                     <CardTitle className="text-2xl font-black text-white tracking-tight leading-none">Route Performance Matrix</CardTitle>
+                     <CardTitle className="text-2xl font-bold text-white leading-none">Route Performance Matrix</CardTitle>
                   </div>
                   <CardDescription className="text-slate-400 text-[11px] pl-1.5 border-l-2 border-orange-500/30 ml-1.5 h-auto">Pressure analysis and occupancy ranking by transit paths</CardDescription>
                </div>
@@ -114,7 +110,7 @@ export default function RouteOccupancy({ routeOccupancy, busUtilization = [] }: 
                   <button
                      onClick={() => setViewMode('leaderboard')}
                      className={cn(
-                        "relative flex-1 z-10 text-[10px] font-black uppercase tracking-widest transition-colors duration-300",
+                        "relative flex-1 z-10 text-[10px] font-bold transition-colors duration-300",
                         viewMode === 'leaderboard' ? "text-white" : "text-slate-500 hover:text-slate-400"
                      )}
                   >
@@ -123,7 +119,7 @@ export default function RouteOccupancy({ routeOccupancy, busUtilization = [] }: 
                   <button
                      onClick={() => setViewMode('cluster')}
                      className={cn(
-                        "relative flex-1 z-10 text-[10px] font-black uppercase tracking-widest transition-colors duration-300",
+                        "relative flex-1 z-10 text-[10px] font-bold transition-colors duration-300",
                         viewMode === 'cluster' ? "text-white" : "text-slate-500 hover:text-slate-400"
                      )}
                   >
@@ -155,20 +151,20 @@ export default function RouteOccupancy({ routeOccupancy, busUtilization = [] }: 
                                     transition={{ duration: 0.4, delay: idx * 0.05 }}
                                     className="relative group flex items-center gap-4 bg-white/[0.01] hover:bg-white/[0.04] p-3 rounded-2xl border border-white/5 hover:border-orange-500/30 transition-all duration-300 hover:cursor-pointer"
                                  >
-                                    <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-slate-800 flex items-center justify-center text-[10px] font-black text-slate-500 border border-white/5 group-hover:text-orange-400 transition-all shadow-lg">
+                                    <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-slate-800 flex items-center justify-center text-[10px] font-bold text-slate-500 border border-white/5 group-hover:text-orange-400 transition-all shadow-lg">
                                        {String(startIndex + idx + 1).padStart(2, '0')}
                                     </div>
 
                                     <div className="flex-1 space-y-1">
                                        <div className="flex items-center justify-between">
                                           <div className="flex items-center gap-3">
-                                             <h4 className="text-sm font-black text-white tracking-wide uppercase">{route.name}</h4>
+                                             <h4 className="text-sm font-bold text-white">{route.name}</h4>
                                              {route.occupancy > 90 && (
-                                                <Badge className="bg-red-500/20 text-red-500 border-none text-[8px] font-extrabold px-1.5 h-4 flex items-center">AT RISK</Badge>
+                                                <Badge className="bg-red-500/20 text-red-500 border-none text-[8px] font-extrabold px-1.5 h-4 flex items-center">At Risk</Badge>
                                              )}
                                           </div>
                                           <span className={cn(
-                                             "text-[10px] font-bold tracking-tight",
+                                             "text-[10px] font-bold",
                                              route.occupancy > 90 ? "text-red-400" : route.occupancy > 70 ? "text-amber-400" : "text-emerald-400"
                                           )}>{route.occupancy}% Load</span>
                                        </div>
@@ -188,12 +184,12 @@ export default function RouteOccupancy({ routeOccupancy, busUtilization = [] }: 
 
                                     <div className="flex-shrink-0 flex items-center gap-6 pl-4 border-l border-white/5 min-w-[70px] justify-end">
                                        <div className="flex flex-col items-center">
-                                          <span className="text-[11px] font-black text-white whitespace-nowrap">{route.students}</span>
-                                          <span className="text-[8px] font-bold text-slate-500 uppercase tracking-tighter whitespace-nowrap">Pax</span>
+                                          <span className="text-[11px] font-bold text-white whitespace-nowrap">{route.students}</span>
+                                          <span className="text-[8px] font-bold text-slate-500 whitespace-nowrap">Pax</span>
                                        </div>
                                        <div className="flex flex-col items-center border-l border-white/10 pl-4">
-                                          <span className="text-[11px] font-black text-white whitespace-nowrap">{Math.ceil(route.capacity / 40)}</span>
-                                          <span className="text-[8px] font-bold text-slate-500 uppercase tracking-tighter whitespace-nowrap">BUSES</span>
+                                          <span className="text-[11px] font-bold text-white whitespace-nowrap">{Math.ceil(route.capacity / 40)}</span>
+                                          <span className="text-[8px] font-bold text-slate-500 whitespace-nowrap">Buses</span>
                                        </div>
                                     </div>
                                  </motion.div>
@@ -208,9 +204,9 @@ export default function RouteOccupancy({ routeOccupancy, busUtilization = [] }: 
                               <div className="w-8 h-8 rounded-lg bg-orange-500/10 flex items-center justify-center text-orange-400">
                                  <BarChartIcon className="w-4 h-4" />
                               </div>
-                              <span className="text-[10px] font-black text-white uppercase tracking-widest">Occupancy Spread (Top 10)</span>
+                              <span className="text-[10px] font-bold text-white">Occupancy Spread (Top 10)</span>
                            </div>
-                           <div className="text-[9px] font-bold text-slate-500 uppercase">Load Balance Index</div>
+                           <div className="text-[9px] font-bold text-slate-500">Load Balance Index</div>
                         </div>
 
                         <div className="flex-1">
@@ -222,7 +218,7 @@ export default function RouteOccupancy({ routeOccupancy, busUtilization = [] }: 
                                        dataKey="name"
                                        axisLine={false}
                                        tickLine={false}
-                                       tick={{ fill: '#64748b', fontSize: 9, fontWeight: 900 }}
+                                       tick={{ fill: '#64748b', fontSize: 9, fontWeight: 700 }}
                                     />
                                     <YAxis
                                        hide={true}
@@ -235,7 +231,7 @@ export default function RouteOccupancy({ routeOccupancy, busUtilization = [] }: 
                                           border: '1px solid rgba(255,255,255,0.1)',
                                           borderRadius: '12px',
                                           fontSize: '10px',
-                                          fontWeight: '900',
+                                          fontWeight: '700',
                                           padding: '12px'
                                        }}
                                        formatter={(value) => [`${value}% Load`]}
@@ -256,8 +252,8 @@ export default function RouteOccupancy({ routeOccupancy, busUtilization = [] }: 
 
                         <div className="mt-4 flex items-center justify-between pt-4 border-t border-white/5">
                            <div className="flex items-baseline gap-1.5">
-                              <span className="text-xl font-black text-white">{(routeOccupancy.reduce((acc, r) => acc + r.occupancy, 0) / (routeOccupancy.length || 1)).toFixed(1)}%</span>
-                              <span className="text-[8px] font-bold text-slate-500 uppercase tracking-widest">Avg Fleet Load</span>
+                              <span className="text-xl font-bold text-white">{(routeOccupancy.reduce((acc, r) => acc + r.occupancy, 0) / (routeOccupancy.length || 1)).toFixed(1)}%</span>
+                              <span className="text-[8px] font-bold text-slate-500">Avg Fleet Load</span>
                            </div>
                            <TrendingUp className="w-4 h-4 text-emerald-500 opacity-50" />
                         </div>
@@ -268,18 +264,18 @@ export default function RouteOccupancy({ routeOccupancy, busUtilization = [] }: 
                {/* Metrics and Insights Column */}
                <div className="lg:col-span-2">
                   <div className="p-4 rounded-2xl bg-[#0a0b14] border border-white/10 group hover:border-red-500/20 transition-all duration-500 h-full flex flex-col">
-                     <div className="flex items-center gap-4 mb-4 pb-2 border-b border-white/5">
-                        <div className="w-10 h-10 rounded-2xl bg-red-500/10 flex items-center justify-center text-red-500 group-hover:bg-red-500 group-hover:text-white transition-all duration-500 shadow-xl shadow-red-500/10">
-                           <AlertTriangle className="w-5 h-5 animate-pulse" />
-                        </div>
-                        <div>
-                           <div className="text-xs font-black text-white uppercase tracking-widest leading-none mb-1">Heavy Load Alert</div>
-                           <div className="text-[9px] font-bold text-slate-500 uppercase">Critical Unit Snapshot</div>
-                        </div>
-                     </div>
+                      <div className="flex items-center gap-4 mb-4 pb-2 border-b border-white/5">
+                         <div className="w-10 h-10 rounded-2xl bg-red-500/10 flex items-center justify-center text-red-500 group-hover:bg-red-500 group-hover:text-white transition-all duration-500 shadow-xl shadow-red-500/10">
+                            <AlertTriangle className="w-5 h-5 animate-pulse" />
+                         </div>
+                         <div>
+                            <div className="text-xs font-bold text-white leading-none mb-1">Heavy Load Alert</div>
+                            <div className="text-[9px] font-bold text-slate-500">Critical Unit Snapshot</div>
+                         </div>
+                      </div>
 
                      <div className="flex-1 space-y-2">
-                        <div className="flex items-center justify-between text-[9px] font-black text-slate-500 uppercase tracking-widest px-1 mb-1.5">
+                        <div className="flex items-center justify-between text-[9px] font-bold text-slate-500 px-1 mb-1.5">
                            <span>Unit / Shift Context</span>
                            <span>Intensity</span>
                         </div>
@@ -292,8 +288,8 @@ export default function RouteOccupancy({ routeOccupancy, busUtilization = [] }: 
                               className="flex items-center justify-between p-4 rounded-xl bg-white/[0.02] border border-white/5 group/row hover:bg-red-500/5 hover:border-red-500/10 transition-all hover:cursor-pointer"
                            >
                               <div className="flex flex-col">
-                                 <span className="text-[11px] font-black text-white group-hover/row:text-red-400 transition-colors uppercase">{bus.name}</span>
-                                 <span className="text-[8px] font-bold text-slate-600 uppercase tracking-tight">Main Arterial Path</span>
+                                 <span className="text-[11px] font-bold text-white group-hover/row:text-red-400 transition-colors">{bus.name}</span>
+                                 <span className="text-[8px] font-bold text-slate-600">Main Arterial Path</span>
                               </div>
                               <div className="flex items-center gap-4">
                                  <div className="flex flex-col items-center">
@@ -303,15 +299,15 @@ export default function RouteOccupancy({ routeOccupancy, busUtilization = [] }: 
                                           bus.utilization > 90 ? "bg-red-500 animate-ping" : "bg-amber-500"
                                        )} />
                                        <span className={cn(
-                                          "text-[11px] font-black",
+                                          "text-[11px] font-bold",
                                           bus.utilization > 90 ? "text-red-400" : "text-amber-400"
                                        )}>{bus.utilization}%</span>
                                     </div>
-                                    <span className="text-[8px] font-black text-slate-700 uppercase">Load</span>
+                                    <span className="text-[8px] font-bold text-slate-700">Load</span>
                                  </div>
                                  <div className="flex flex-col items-center border-l border-white/10 pl-3">
-                                    <span className="text-[11px] font-black text-white">{bus.students}</span>
-                                    <span className="text-[8px] font-black text-slate-700 uppercase">Pax</span>
+                                    <span className="text-[11px] font-bold text-white">{bus.students}</span>
+                                    <span className="text-[8px] font-bold text-slate-700">Pax</span>
                                  </div>
                               </div>
                            </motion.div>
@@ -330,7 +326,7 @@ export default function RouteOccupancy({ routeOccupancy, busUtilization = [] }: 
                      <Button
                         variant="ghost"
                         onClick={() => setIsExpanded(true)}
-                        className="h-10 px-8 text-slate-400 hover:text-orange-400 text-[10px] font-black uppercase tracking-widest group"
+                        className="h-10 px-8 text-slate-400 hover:text-orange-400 text-[10px] font-bold group"
                      >
                         <ChevronDown className="w-4 h-4 mr-2 group-hover:translate-y-0.5 transition-transform" />
                         View More
@@ -339,7 +335,7 @@ export default function RouteOccupancy({ routeOccupancy, busUtilization = [] }: 
                         <Button
                            variant="outline"
                            onClick={handleNextSection}
-                           className="h-8 px-6 border-slate-700 hover:bg-slate-800 text-slate-300 text-[9px] font-black uppercase tracking-widest rounded-xl transition-all"
+                           className="h-8 px-6 border-slate-700 hover:bg-slate-800 text-slate-300 text-[9px] font-bold rounded-xl transition-all"
                         >
                            Next Section
                         </Button>
@@ -350,7 +346,7 @@ export default function RouteOccupancy({ routeOccupancy, busUtilization = [] }: 
                      <Button
                         variant="ghost"
                         onClick={() => setIsExpanded(false)}
-                        className="h-10 px-8 text-slate-400 hover:text-white text-[10px] font-black uppercase tracking-widest flex items-center"
+                        className="h-10 px-8 text-slate-400 hover:text-white text-[10px] font-bold flex items-center"
                      >
                         <ChevronUp className="w-4 h-4 mr-2" />
                         Collapse
@@ -359,7 +355,7 @@ export default function RouteOccupancy({ routeOccupancy, busUtilization = [] }: 
                         <Button
                            variant="outline"
                            onClick={handleNextSection}
-                           className="h-10 px-8 border-slate-700 hover:bg-slate-800 text-slate-300 text-[10px] font-black uppercase tracking-widest rounded-2xl group flex items-center gap-3"
+                           className="h-10 px-8 border-slate-700 hover:bg-slate-800 text-slate-300 text-[10px] font-bold rounded-2xl group flex items-center gap-3"
                         >
                            Next Section
                            <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
@@ -373,7 +369,7 @@ export default function RouteOccupancy({ routeOccupancy, busUtilization = [] }: 
                   <Button
                      variant="ghost"
                      onClick={handlePrevSection}
-                     className="h-10 px-6 text-slate-400 hover:text-white text-[10px] font-black uppercase tracking-widest flex items-center"
+                     className="h-10 px-6 text-slate-400 hover:text-white text-[10px] font-bold flex items-center"
                   >
                      Previous Section
                   </Button>
@@ -381,7 +377,7 @@ export default function RouteOccupancy({ routeOccupancy, busUtilization = [] }: 
                      <Button
                         variant="outline"
                         onClick={handleNextSection}
-                        className="h-10 px-8 border-slate-700 hover:bg-slate-800 text-slate-300 text-[10px] font-black uppercase tracking-widest rounded-2xl group flex items-center gap-3"
+                        className="h-10 px-8 border-slate-700 hover:bg-slate-800 text-slate-300 text-[10px] font-bold rounded-2xl group flex items-center gap-3"
                      >
                         Next Section
                         <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />

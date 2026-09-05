@@ -23,7 +23,7 @@ import { appLogger } from '@/lib/logger';
 // 5 min was too aggressive and killed active trips during temporary network loss.
 const HEARTBEAT_TIMEOUT_SECONDS = 600;
 const LOCK_TTL_SECONDS = 600;
-const HEARTBEAT_MIN_WRITE_INTERVAL_MS = 20 * 1000;
+const HEARTBEAT_MIN_WRITE_INTERVAL_MS = 45 * 1000;
 const heartbeatWriteCache = new Map<string, number>();
 
 function getErrorMessage(error: unknown): string {

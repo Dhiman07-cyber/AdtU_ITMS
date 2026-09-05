@@ -1,5 +1,6 @@
 "use client";
 
+import { PremiumPageLoader } from '@/components/LoadingSpinner';
 import { Avatar,AvatarFallback,AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -261,70 +262,7 @@ interface ProfileShellProps {
 
 export function ProfileShell({ loading, error, notFound, children }: ProfileShellProps) {
   if (loading) {
-    return (
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-950 py-8 px-4">
-        <div className="max-w-7xl mx-auto space-y-6">
-          {/* Header Skeleton */}
-          <Card className="shadow-lg overflow-hidden">
-            <div className="h-32 bg-gradient-to-r from-gray-300 to-gray-400 dark:from-gray-700 dark:to-gray-800" />
-            <CardContent className="pt-0">
-              <div className="flex items-end gap-6 -mt-16">
-                <Skeleton className="h-32 w-32 rounded-full border-4 border-white dark:border-gray-900" />
-                <div className="flex-1 mb-4 space-y-2">
-                  <Skeleton className="h-8 w-64" />
-                  <Skeleton className="h-4 w-48" />
-                  <Skeleton className="h-6 w-24 mt-2" />
-                </div>
-              </div>
-              <div className="grid grid-cols-4 gap-4 mt-6 pt-6 border-t">
-                {[1, 2, 3, 4].map((i) => (
-                  <div key={i}>
-                    <Skeleton className="h-4 w-20 mb-1" />
-                    <Skeleton className="h-6 w-16" />
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Section Skeletons */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="lg:col-span-2 space-y-6">
-              {[1, 2].map((i) => (
-                <Card key={i}>
-                  <CardHeader>
-                    <Skeleton className="h-6 w-48" />
-                  </CardHeader>
-                  <CardContent className="space-y-3">
-                    {[1, 2, 3, 4].map((j) => (
-                      <div key={j} className="flex justify-between">
-                        <Skeleton className="h-4 w-32" />
-                        <Skeleton className="h-4 w-40" />
-                      </div>
-                    ))}
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-            <div className="space-y-6">
-              <Card>
-                <CardHeader>
-                  <Skeleton className="h-6 w-32" />
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  {[1, 2, 3].map((i) => (
-                    <div key={i} className="flex justify-between">
-                      <Skeleton className="h-4 w-24" />
-                      <Skeleton className="h-4 w-32" />
-                    </div>
-                  ))}
-                </CardContent>
-              </Card>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
+    return <PremiumPageLoader message="Loading Profile..." subMessage="Fetching profile details..." />;
   }
 
   if (error) {

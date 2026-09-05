@@ -475,7 +475,7 @@ export default function ViewStudentPage({ params }: { params: Promise<{ id: stri
                 })()}
               </div>
               <div className="md:hidden mt-2 text-center">
-                <h2 className="text-2xl font-black bg-gradient-to-r from-blue-400 to-pink-500 bg-clip-text text-transparent mb-1 leading-tight break-words">{student.fullName || student.name}</h2>
+                <h2 className="text-2xl font-bold text-foreground mb-1 leading-tight break-words">{student.fullName || student.name}</h2>
                 <div className="mt-2 flex flex-col gap-1.5 items-center">
                   <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full border border-primary/20 bg-gradient-to-r from-primary/5 to-primary/10 shadow-sm w-fit">
                     <Mail className="w-3 h-3 text-primary" />
@@ -517,7 +517,7 @@ export default function ViewStudentPage({ params }: { params: Promise<{ id: stri
           <div className="hidden md:block space-y-4">
             {/* Name & Title */}
             <div>
-              <h2 className="text-2xl font-black bg-gradient-to-r from-blue-400 to-pink-500 bg-clip-text text-transparent mb-1 leading-tight">{student.fullName || student.name}</h2>
+              <h2 className="text-2xl font-bold text-foreground mb-1 leading-tight">{student.fullName || student.name}</h2>
               <p className="text-sm text-primary font-medium mb-0.5">{student.department || 'Department'}</p>
               {student.faculty && (
                 <p className="text-xs text-muted-foreground">{student.faculty}</p>
@@ -582,7 +582,7 @@ export default function ViewStudentPage({ params }: { params: Promise<{ id: stri
           <div className="relative inline-flex items-center gap-3">
             <div className="w-12 h-[1.5px] bg-gradient-to-r from-transparent to-primary/40"></div>
             <div className="px-4 py-1.5 rounded-lg bg-blue-500/5 dark:bg-blue-500/10 border border-blue-500/20">
-              <span className="text-xs font-bold bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 dark:from-blue-400 dark:via-purple-400 dark:to-pink-400 bg-clip-text text-transparent">Detailed Information</span>
+              <span className="text-xs font-bold text-foreground">Detailed Information</span>
             </div>
             <div className="w-12 h-[1.5px] bg-gradient-to-l from-transparent to-primary/40"></div>
           </div>

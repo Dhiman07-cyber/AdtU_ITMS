@@ -67,18 +67,7 @@ export async function verifyDriverRouteBinding(
 
     if (activeTrip?.bus_id === busId) return { authorized: true };
 
-    // 2. Check buses table for assigned driver
-    const { data: busData } = await supabase
-      .from('buses')
-      .select('driver_id, driver_uid')
-      .eq('id', busId)
-      .maybeSingle();
-
-    if (busData && (busData.driver_id === driverId || busData.driver_uid === driverId)) {
-      return { authorized: true };
-    }
-
-    // 3. Check driver profile status (dynamic QR scan system support)
+    // 2. Check driver profile status (dynamic QR scan system support)
     const { data: driverProfile } = await supabase
       .from('driver_profiles')
       .select('id, user_id, status')
@@ -114,7 +103,6 @@ export async function notifyRoute(params: {
     try {
       await acquireNotificationLock(busId, tripId, eventType);
     } catch (error) {
-      console.warn(`[notifyRoute] Skipping push notification for trip ${tripId} (${eventType}):`, error instanceof Error ? error.message : error);
       return {
         success: true,
         successCount: 0,

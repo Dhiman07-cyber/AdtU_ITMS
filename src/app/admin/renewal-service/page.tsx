@@ -701,15 +701,10 @@ export default function AdminRenewalServicePage() {
         {/* Header */}
         <div className="mb-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <div className="flex items-center gap-2 mb-3">
-              <div className="h-8 w-8 bg-gradient-to-br from-blue-500 to-purple-600 rounded-xl flex items-center justify-center shadow-lg">
-                <RefreshCw className="h-4 w-4 text-white" />
-              </div>
-              <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-600 via-purple-600 to-indigo-600 bg-clip-text text-transparent">
-                Renewal Management
-              </h1>
-            </div>
-            <p className="text-sm text-gray-600 dark:text-gray-400">
+            <h1 className="text-3xl font-bold text-foreground">
+              Renewal Management
+            </h1>
+            <p className="text-muted-foreground mt-1">
               Manage student renewal requests and view payment history
             </p>
           </div>
@@ -718,14 +713,14 @@ export default function AdminRenewalServicePage() {
             <Button
               onClick={handleManualRefresh}
               disabled={isManualRefreshing}
-              className="group h-8 px-4 bg-white hover:bg-gray-50 text-gray-600 hover:text-purple-600 border border-gray-200 hover:border-purple-200 shadow-sm hover:shadow-lg hover:shadow-purple-500/10 font-bold text-[10px] uppercase tracking-widest rounded-lg transition-all duration-300 active:scale-95 disabled:opacity-50"
+              className="group h-8 px-4 bg-white hover:bg-gray-50 text-gray-600 hover:text-blue-600 border border-gray-200 hover:border-blue-200 shadow-sm hover:shadow-lg hover:shadow-blue-500/10 font-bold text-[10px] uppercase tracking-widest rounded-lg transition-all duration-300 active:scale-95 disabled:opacity-50"
             >
               <RefreshCw className={`mr-2 h-3.5 w-3.5 transition-transform duration-500 ${isManualRefreshing ? 'animate-spin' : 'group-hover:rotate-180'}`} />
               Refresh
             </Button>
             <Button
               onClick={() => setShowExportDialog(true)}
-              className="h-8 px-4 bg-white hover:bg-gray-50 text-gray-600 hover:text-purple-600 border border-gray-200 hover:border-purple-200 shadow-sm hover:shadow-lg hover:shadow-purple-500/10 font-bold text-[10px] uppercase tracking-widest rounded-lg transition-all duration-300 active:scale-95"
+              className="h-8 px-4 bg-white hover:bg-gray-50 text-gray-600 hover:text-blue-600 border border-gray-200 hover:border-blue-200 shadow-sm hover:shadow-lg hover:shadow-blue-500/10 font-bold text-[10px] uppercase tracking-widest rounded-lg transition-all duration-300 active:scale-95"
             >
               <Download className="mr-2 h-3.5 w-3.5" />
               Export
@@ -733,7 +728,7 @@ export default function AdminRenewalServicePage() {
           </div>
         </div>
 
-        {/* Tabs - Custom Gradient Tabs */}
+        {/* Tabs - Custom Theme Tabs */}
         <div className="mb-4">
           <div className="flex gap-2 border-b border-gray-700/30 px-4">
             {/* Dashboard Tab - Admin Only */}
@@ -741,7 +736,7 @@ export default function AdminRenewalServicePage() {
               <button
                 onClick={() => setActiveTab('dashboard')}
                 className={`flex-1 flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-t-lg font-semibold text-[10px] sm:text-xs transition-all border-b-2 cursor-pointer ${activeTab === 'dashboard'
-                  ? 'bg-gradient-to-r from-purple-600 via-violet-600 to-fuchsia-600 text-white shadow-md shadow-purple-500/30 border-purple-500'
+                  ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-500/25 border-blue-500'
                   : 'bg-transparent text-gray-400 hover:text-gray-200 border-transparent hover:bg-gray-800/30'
                   }`}
               >
@@ -752,7 +747,7 @@ export default function AdminRenewalServicePage() {
             <button
               onClick={() => setActiveTab('approval')}
               className={`flex-1 flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-t-lg font-semibold text-[10px] sm:text-xs transition-all border-b-2 cursor-pointer ${activeTab === 'approval'
-                ? 'bg-gradient-to-r from-purple-600 via-violet-600 to-fuchsia-600 text-white shadow-md shadow-purple-500/30 border-purple-500'
+                ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-500/25 border-blue-500'
                 : 'bg-transparent text-gray-400 hover:text-gray-200 border-transparent hover:bg-gray-800/30'
                 }`}
             >
@@ -767,7 +762,7 @@ export default function AdminRenewalServicePage() {
             <button
               onClick={() => setActiveTab('history')}
               className={`flex-1 flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-t-lg font-semibold text-[10px] sm:text-xs transition-all border-b-2 cursor-pointer ${activeTab === 'history'
-                ? 'bg-gradient-to-r from-purple-600 via-violet-600 to-fuchsia-600 text-white shadow-md shadow-purple-500/30 border-purple-500'
+                ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-500/25 border-blue-500'
                 : 'bg-transparent text-gray-400 hover:text-gray-200 border-transparent hover:bg-gray-800/30'
                 }`}
             >
@@ -849,13 +844,13 @@ export default function AdminRenewalServicePage() {
                     </Card>
 
                     {/* Avg Payment */}
-                    <Card className="bg-gradient-to-br from-purple-500/10 to-fuchsia-500/15 border border-purple-500/25 hover:shadow-lg hover:shadow-purple-500/10 transition-all duration-300 group">
+                    <Card className="bg-gradient-to-br from-indigo-500/10 to-blue-500/15 border border-indigo-500/25 hover:shadow-lg hover:shadow-indigo-500/10 transition-all duration-300 group">
                       <CardContent className="p-4">
                         <div className="flex items-center justify-between mb-2">
-                          <div className="h-8 w-8 rounded-xl bg-purple-500/20 border border-purple-500/30 flex items-center justify-center group-hover:scale-110 transition-transform">
-                            <Wallet className="h-4 w-4 text-purple-400" />
+                          <div className="h-8 w-8 rounded-xl bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center group-hover:scale-110 transition-transform">
+                            <Wallet className="h-4 w-4 text-indigo-400" />
                           </div>
-                          <div className="flex items-center gap-1 text-purple-400">
+                          <div className="flex items-center gap-1 text-indigo-400">
                             <TrendingUp className="h-3 w-3" />
                             <span className="text-[10px] font-bold">Avg</span>
                           </div>
@@ -1048,8 +1043,12 @@ export default function AdminRenewalServicePage() {
               </CardHeader>
               <CardContent className="pt-4 px-4 pb-4">
                 {loadingRequests ? (
-                  <div className="flex justify-center py-6">
-                    <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
+                  <div className="flex flex-col items-center justify-center gap-3 text-center py-12">
+                    <Loader2 className="h-8 w-8 animate-spin text-indigo-500" />
+                    <div className="space-y-1">
+                      <p className="text-sm font-semibold text-slate-300">Loading Renewal Requests...</p>
+                      <p className="text-[10px] text-zinc-500">Fetching pending approvals...</p>
+                    </div>
                   </div>
                 ) : renewalRequests.length === 0 ? (
                   <div className="text-center py-6 text-sm text-gray-500">
@@ -1185,7 +1184,7 @@ export default function AdminRenewalServicePage() {
           {/* Transaction History Tab */}
           <TabsContent value="history" className="mt-0 px-0 py-4 max-w-[90vw] sm:max-w-full mx-auto">
             <Card className="border border-zinc-200 dark:border-zinc-800 shadow-xl bg-white dark:bg-zinc-950 overflow-hidden p-0">
-              <CardHeader className="bg-gradient-to-br from-purple-50 to-pink-50 dark:from-purple-950/50 dark:to-pink-950/50 border-t-2 border-t-purple-500 pb-3 pt-3 m-0 rounded-t-lg px-4">
+              <CardHeader className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/40 dark:to-indigo-950/40 border-t-2 border-t-blue-500 pb-3 pt-3 m-0 rounded-t-lg px-4">
                 <CardTitle className="text-base text-gray-900 dark:text-gray-100 font-bold">Transaction History</CardTitle>
                 <CardDescription className="text-xs text-gray-600 dark:text-gray-400">
                   All payment transactions across the system
@@ -1244,7 +1243,7 @@ export default function AdminRenewalServicePage() {
                         setSearchTrigger(prev => prev + 1);
                         setCurrentPage(1);
                       }}
-                      className="w-full bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 h-8 text-[10px] text-white rounded-md"
+                      className="w-full bg-blue-600 hover:bg-blue-700 h-8 text-[10px] text-white rounded-md"
                     >
                       <Filter className="mr-1.5 h-3 w-3" />
                       Apply Filters
@@ -1253,8 +1252,12 @@ export default function AdminRenewalServicePage() {
                 </div>
 
                 {loadingTransactions ? (
-                  <div className="flex justify-center py-12">
-                    <Loader2 className="h-8 w-8 animate-spin text-purple-600" />
+                  <div className="flex flex-col items-center justify-center gap-3 text-center py-12">
+                    <Loader2 className="h-8 w-8 animate-spin text-indigo-500" />
+                    <div className="space-y-1">
+                      <p className="text-sm font-semibold text-slate-300">Loading Transactions...</p>
+                      <p className="text-[10px] text-zinc-500">Fetching payment records...</p>
+                    </div>
                   </div>
                 ) : enrichedTransactions.length === 0 ? (
                   <div className="text-center py-12 bg-gray-50 dark:bg-zinc-900/50 rounded-xl border border-dashed border-gray-300 dark:border-zinc-800 mx-4">
@@ -1264,38 +1267,38 @@ export default function AdminRenewalServicePage() {
                 ) : (
                   <div className="overflow-x-auto pb-6 -mx-2 no-scrollbar">
                     <div className="w-full space-y-3 px-2 min-w-[800px]">
-                      <div className="grid grid-cols-[repeat(24,minmax(0,1fr))] gap-2 items-center w-full px-4 py-3 bg-gradient-to-r from-purple-50/50 via-pink-50/50 to-purple-50/50 dark:from-purple-950/20 dark:via-pink-950/20 dark:to-purple-950/20 border border-purple-200/50 dark:border-purple-800/30 rounded-xl mb-3 pl-5 shadow-sm">
+                      <div className="grid grid-cols-[repeat(24,minmax(0,1fr))] gap-2 items-center w-full px-4 py-3 bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl mb-3 pl-5 shadow-sm">
                         <div className="col-span-5">
-                          <p className="text-[9px] font-extrabold text-purple-700 dark:text-purple-300 uppercase tracking-wider pl-5">Student Information</p>
+                          <p className="text-[9px] font-extrabold text-gray-600 dark:text-gray-300 uppercase tracking-wider pl-5">Student Information</p>
                         </div>
                         <div className="col-span-2 text-center">
-                          <p className="text-[9px] font-extrabold text-purple-700 dark:text-purple-300 uppercase tracking-wider mr-3">Mode</p>
+                          <p className="text-[9px] font-extrabold text-gray-600 dark:text-gray-300 uppercase tracking-wider mr-3">Mode</p>
                         </div>
                         <div className="col-span-4">
-                          <p className="text-[9px] font-extrabold text-purple-700 dark:text-purple-300 uppercase tracking-wider ml-6">Reference ID</p>
+                          <p className="text-[9px] font-extrabold text-gray-600 dark:text-gray-300 uppercase tracking-wider ml-6">Reference ID</p>
                         </div>
                         <div className="col-span-2">
-                          <p className="text-[9px] font-extrabold text-purple-700 dark:text-purple-300 uppercase tracking-wider ml-2">Date/Time</p>
+                          <p className="text-[9px] font-extrabold text-gray-600 dark:text-gray-300 uppercase tracking-wider ml-2">Date/Time</p>
                         </div>
                         <div className="col-span-3">
-                          <p className="text-[9px] font-extrabold text-purple-700 dark:text-purple-300 uppercase tracking-wider ml-8">Amount</p>
+                          <p className="text-[9px] font-extrabold text-gray-600 dark:text-gray-300 uppercase tracking-wider ml-8">Amount</p>
                         </div>
                         <div className="col-span-4 text-left pl-2">
-                          <p className="text-[9px] font-extrabold text-purple-700 dark:text-purple-300 uppercase tracking-wider whitespace-nowrap ml-2">Approved By</p>
+                          <p className="text-[9px] font-extrabold text-gray-600 dark:text-gray-300 uppercase tracking-wider whitespace-nowrap ml-2">Approved By</p>
                         </div>
                         <div className="col-span-4 text-right pr-2">
-                          <p className="text-[9px] font-extrabold text-purple-700 dark:text-purple-300 uppercase tracking-wider mr-14">Actions</p>
+                          <p className="text-[9px] font-extrabold text-gray-600 dark:text-gray-300 uppercase tracking-wider mr-14">Actions</p>
                         </div>
                       </div>
 
                       {enrichedTransactions.map((transaction, index) => (
                         <div
                           key={index}
-                          className="relative bg-gradient-to-br from-white via-purple-50/20 to-white dark:from-gray-800 dark:via-purple-950/10 dark:to-gray-800 border border-purple-200 dark:border-purple-800/50 rounded-lg shadow-sm hover:shadow-lg hover:border-purple-400 dark:hover:border-purple-500 transition-all duration-300 overflow-hidden"
+                          className="relative bg-white dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800 rounded-lg shadow-sm hover:shadow-lg hover:border-blue-400 dark:hover:border-blue-500 transition-all duration-300 overflow-hidden"
                         >
-                          <div className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-purple-500 via-pink-500 to-purple-500"></div>
+                          <div className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-blue-500 via-indigo-500 to-blue-500"></div>
 
-                          <div className="absolute -left-4 top-1/2 -translate-y-1/2 w-10 h-10 bg-gradient-to-br from-purple-600 via-pink-600 to-purple-600 rounded-full flex items-center justify-center text-white font-bold text-[12px] shadow-xl border-4 border-white dark:border-gray-900 z-10 scale-110">
+                          <div className="absolute -left-4 top-1/2 -translate-y-1/2 w-10 h-10 bg-gradient-to-br from-blue-600 via-indigo-600 to-blue-600 rounded-full flex items-center justify-center text-white font-bold text-[12px] shadow-xl border-4 border-white dark:border-gray-900 z-10 scale-110">
                             #{index + 1}
                           </div>
 
@@ -1306,13 +1309,13 @@ export default function AdminRenewalServicePage() {
                                 <Avatar
                                   name={transaction.studentName}
                                   size="sm"
-                                  className="ring-1 ring-purple-100 dark:ring-purple-900/50 h-8 w-8"
+                                  className="ring-1 ring-blue-100 dark:ring-blue-900/50 h-8 w-8"
                                 />
                                 <div className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-green-500 rounded-full border border-white dark:border-gray-800"></div>
                               </div>
                               <div className="min-w-0">
                                 <p className="text-[11px] font-bold text-gray-900 dark:text-gray-100 truncate">{transaction.studentName}</p>
-                                <p className="text-[9px] font-mono font-medium text-purple-600 dark:text-purple-400 break-all leading-tight mt-0.5">{transaction.studentId}</p>
+                                <p className="text-[9px] font-mono font-medium text-blue-600 dark:text-blue-400 break-all leading-tight mt-0.5">{transaction.studentId}</p>
                               </div>
                             </div>
 
@@ -1328,9 +1331,9 @@ export default function AdminRenewalServicePage() {
 
                             {/* Payment ID */}
                             <div className="col-span-4">
-                              <div className="group/id flex items-center gap-1.5 bg-gray-50 dark:bg-zinc-900/50 rounded-lg px-2 py-0.5 border border-zinc-200 dark:border-zinc-800 hover:border-purple-400 dark:hover:border-purple-500/50 transition-colors h-7 w-fit max-w-[130px]">
+                              <div className="group/id flex items-center gap-1.5 bg-gray-50 dark:bg-zinc-900/50 rounded-lg px-2 py-0.5 border border-zinc-200 dark:border-zinc-800 hover:border-blue-400 dark:hover:border-blue-500/50 transition-colors h-7 w-fit max-w-[130px]">
                                 <p className="text-[8px] font-mono text-gray-500 dark:text-gray-400 truncate flex-1">{transaction.paymentId}</p>
-                                <Copy className="h-2.5 w-2.5 text-gray-400 group-hover/id:text-purple-500 cursor-pointer flex-shrink-0" onClick={(e) => {
+                                <Copy className="h-2.5 w-2.5 text-gray-400 group-hover/id:text-blue-500 cursor-pointer flex-shrink-0" onClick={(e) => {
                                   e.stopPropagation();
                                   navigator.clipboard.writeText(transaction.paymentId);
                                   toast.success('Payment ID copied!');
@@ -1348,10 +1351,9 @@ export default function AdminRenewalServicePage() {
 
                             {/* Amount */}
                             <div className="col-span-3">
-                              <div className="bg-emerald-50 dark:bg-emerald-950/20 rounded-md px-1.5 py-0.5 border border-emerald-100 dark:border-emerald-900/50 shadow-sm inline-block ml-5">
-                                <p className="text-[16px] font-black text-emerald-700 dark:text-emerald-400 leading-tight">₹{transaction.amount}</p>
-                                <p className="text-[8px] text-orange-600 dark:text-orange-500 font-bold whitespace-nowrap ml-2">{transaction.durationYears} Yr Plan</p>
-                              </div>
+                              <p className="text-[11px] font-mono font-bold text-emerald-600 dark:text-emerald-400 ml-8">
+                                ₹{transaction.amount?.toLocaleString('en-IN') || '0'}
+                              </p>
                             </div>
 
                             {/* Approved By */}
@@ -1395,7 +1397,7 @@ export default function AdminRenewalServicePage() {
                                      toast.error('Student profile unavailable');
                                    }
                                 }}
-                                className="h-5 text-[9px] font-bold w-full text-zinc-500 dark:text-zinc-400 hover:text-purple-600 dark:hover:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-900/20"
+                                className="h-5 text-[9px] font-bold w-full text-zinc-500 dark:text-zinc-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20"
                               >
                                 VIEW PROFILE
                               </Button>

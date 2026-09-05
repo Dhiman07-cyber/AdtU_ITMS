@@ -2,7 +2,7 @@
 
 import { useTheme } from '@/components/theme-provider';
 import { cn } from '@/lib/utils';
-import { motion } from 'framer-motion';
+import { motion } from "motion/react";
 import {
 	Bus,
 	MessageSquare as MessageSquareIcon,
@@ -51,15 +51,15 @@ const HealthMetric = ({ icon: Icon, label, value, subValue, color, delay }: Heal
         <Icon className="w-4 h-4" />
       </div>
       <div className="flex flex-col items-center">
-        <span className={cn("text-[9px] font-bold uppercase tracking-[0.12em] mb-0.5", theme === 'dark' ? "text-slate-400/80" : "text-[#6B7280]")}>
+        <span className={cn("text-[9px] font-bold mb-0.5", theme === 'dark' ? "text-slate-400/80" : "text-[#6B7280]")}>
           {label}
         </span>
         <div className="flex flex-col items-center">
-          <span className={cn("text-base font-black tracking-tight leading-none", theme === 'dark' ? "text-white" : "text-[#111827]")}>
+          <span className={cn("text-base font-bold leading-none", theme === 'dark' ? "text-white" : "text-[#111827]")}>
             {value}
           </span>
           {subValue && (
-            <span className={cn("text-[8px] font-bold mt-0.5 tracking-wide uppercase opacity-70", theme === 'dark' ? "text-slate-400" : "text-[#6B7280]")}>
+            <span className={cn("text-[8px] font-bold mt-0.5 opacity-70", theme === 'dark' ? "text-slate-400" : "text-[#6B7280]")}>
               {subValue}
             </span>
           )}
@@ -80,7 +80,7 @@ export default function SystemHealthStrip({ stats }: { stats: DashboardStats }) 
         icon={Zap}
         label="Active Trips"
         value={activeTripsCount}
-        subValue="in motion"
+        subValue="In Motion"
         color="blue"
         delay={0}
       />
@@ -88,7 +88,7 @@ export default function SystemHealthStrip({ stats }: { stats: DashboardStats }) 
         icon={Bus}
         label="Idle Buses"
         value={idleBusesCount}
-        subValue="at stand"
+        subValue="At Stand"
         color="indigo"
         delay={1}
       />
@@ -96,7 +96,7 @@ export default function SystemHealthStrip({ stats }: { stats: DashboardStats }) 
         icon={Users}
         label="Drivers Ready"
         value={stats.totalDrivers}
-        subValue="available"
+        subValue="Available"
         color="purple"
         delay={2}
       />
@@ -105,7 +105,7 @@ export default function SystemHealthStrip({ stats }: { stats: DashboardStats }) 
           icon={MessageSquareIcon}
           label="Feedbacks Received"
           value={stats.feedbacksCount}
-          subValue="Last 7 days"
+          subValue="Last 7 Days"
           color="cyan"
           delay={3}
         />

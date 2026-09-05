@@ -6,10 +6,10 @@
  */
 
 import { Button } from '@/components/ui/button';
-import { AnimatePresence,motion } from 'framer-motion';
+import { AnimatePresence,motion } from "motion/react";
 import { CheckCircle,Copy,Download,QrCode,Share2,ShieldCheck } from 'lucide-react';
 import { QRCodeCanvas } from 'qrcode.react';
-import { useCallback,useRef,useState } from 'react';
+import { useRef,useState } from 'react';
 import { toast } from 'sonner';
 
 interface InlineQRDisplayProps {
@@ -29,7 +29,7 @@ export default function InlineQRDisplay({
     const [copied, setCopied] = useState(false);
     const qrRef = useRef<HTMLDivElement>(null);
 
-    const handleCopyId = useCallback(async () => {
+    const handleCopyId = async () => {
         if (enrollmentId) {
             try {
                 await navigator.clipboard.writeText(enrollmentId);
@@ -40,9 +40,9 @@ export default function InlineQRDisplay({
                 toast.error('Failed to copy');
             }
         }
-    }, [enrollmentId]);
+    };
 
-    const handleDownloadQR = useCallback(async () => {
+    const handleDownloadQR = async () => {
         try {
             const canvas = document.createElement('canvas');
             const ctx = canvas.getContext('2d');
@@ -242,9 +242,9 @@ export default function InlineQRDisplay({
             console.error(e);
             toast.error('Failed to save bus pass');
         }
-    }, [studentName, enrollmentId]);
+    };
 
-    const handleShareQR = useCallback(async () => {
+    const handleShareQR = async () => {
         try {
             const text = `Bus Pass - ${studentName}\nID: ${enrollmentId || 'N/A'}\nStatus: ${isActive ? 'ACTIVE' : 'INACTIVE'}`;
             if (navigator.share) {
@@ -256,7 +256,7 @@ export default function InlineQRDisplay({
         } catch (e) {
             if ((e as Error).name !== 'AbortError') toast.error('Sharing failed');
         }
-    }, [studentName, enrollmentId, isActive]);
+    };
 
     const revealQR = () => {
         if (!isActive) {

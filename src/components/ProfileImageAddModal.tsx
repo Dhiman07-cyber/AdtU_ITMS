@@ -5,7 +5,7 @@ import { Dialog,DialogContent,DialogDescription,DialogHeader,DialogTitle } from 
 import { Slider } from "@/components/ui/slider";
 import { uploadImage } from "@/lib/upload";
 import { AlertCircle,Camera,Check,Loader2,Plus,RotateCcw,X,ZoomIn,ZoomOut } from "lucide-react";
-import { useCallback,useEffect,useRef,useState } from "react";
+import { useEffect,useRef,useState } from "react";
 
 interface ProfileImageAddModalProps {
     isOpen: boolean;
@@ -101,7 +101,7 @@ export default function ProfileImageAddModal({
         setDragStart({ x: clientX - position.x, y: clientY - position.y });
     };
 
-    const handleDragMove = useCallback((e: MouseEvent | TouchEvent) => {
+    const handleDragMove = (e: MouseEvent | TouchEvent) => {
         if (!isDragging) return;
         if ('touches' in e) {
             if (e.cancelable) {
@@ -114,11 +114,11 @@ export default function ProfileImageAddModal({
             x: clientX - dragStart.x,
             y: clientY - dragStart.y,
         });
-    }, [isDragging, dragStart]);
+    };
 
-    const handleDragEnd = useCallback(() => {
+    const handleDragEnd = () => {
         setIsDragging(false);
-    }, []);
+    };
 
     useEffect(() => {
         if (isDragging) {
@@ -133,9 +133,9 @@ export default function ProfileImageAddModal({
             window.removeEventListener('touchmove', handleDragMove);
             window.removeEventListener('touchend', handleDragEnd);
         };
-    }, [isDragging, handleDragMove, handleDragEnd]);
+    }, [isDragging]);
 
-    const cropImage = useCallback(async (): Promise<Blob | null> => {
+    const cropImage = async (): Promise<Blob | null> => {
         if (!canvasRef.current || !imageRef.current || !previewUrl) return null;
 
         const canvas = canvasRef.current;
@@ -206,7 +206,7 @@ export default function ProfileImageAddModal({
         return new Promise((resolve) => {
             canvas.toBlob((blob) => resolve(blob), 'image/jpeg', 0.9);
         });
-    }, [previewUrl, zoom, position]);
+    };
 
     const handleCropConfirm = async () => {
         if (!selectedFile) return;

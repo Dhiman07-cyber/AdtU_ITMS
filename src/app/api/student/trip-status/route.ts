@@ -34,6 +34,19 @@ export const GET = withSecurity(
             }, { status: 400 });
         }
 
+        // SECURITY: Students may only query their own assigned bus.
+        if (auth.role === 'student') {
+            const resolved = await getStudentProfileAndShift(auth.uid);
+            const studentBusId = resolved.busId;
+            if (studentBusId && studentBusId !== busId && studentBusId !== busId.replace('bus_', '') && `bus_${studentBusId}` !== busId) {
+                return NextResponse.json({
+                    tripActive: false,
+                    error: 'Forbidden: You are not assigned to this bus',
+                    tripData: null
+                }, { status: 403 });
+            }
+        }
+
         const busVariations = [busId];
         if (busId.startsWith('bus_')) {
             busVariations.push(busId.replace('bus_', ''));

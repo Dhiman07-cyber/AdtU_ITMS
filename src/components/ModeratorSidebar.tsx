@@ -4,18 +4,22 @@ import { Button } from '@/components/ui/button';
 import { Tooltip,TooltipContent,TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import {
-	ArrowRightLeft,
+	ArrowLeftRight,
 	Bell,
 	Bus,
 	ChevronsLeft,
 	ChevronsRight,
-	ClipboardCheck,
+	ClipboardList,
+	GitCompareArrows,
+	GraduationCap,
+	IdCard,
 	LayoutDashboard,
-	MapPin,
-	MessageCircle,
+	MessageSquareQuote,
 	QrCode,
 	RotateCcw,
+	Route as RouteIcon,
 	Sparkles,
+	UserCheck,
 	UserPlus,
 	Users
 } from 'lucide-react';
@@ -48,34 +52,34 @@ const moderatorNavGroups: NavGroup[] = [
   {
     name: 'STUDENT',
     items: [
-      { href: '/moderator/students', label: 'Student Management', icon: Users, color: 'text-blue-400' },
+      { href: '/moderator/students', label: 'Student Management', icon: GraduationCap, color: 'text-blue-400' },
       { href: '/moderator/students/add', label: 'Add Student', icon: UserPlus, color: 'text-emerald-400' },
-      { href: '/moderator/smart-allocation', label: 'Reassignment', icon: ArrowRightLeft, color: 'text-indigo-400' },
+      { href: '/moderator/smart-allocation', label: 'Student Reassignment', icon: ArrowLeftRight, color: 'text-teal-400' },
       { href: '/moderator/renewal-service', label: 'Renewal', icon: RotateCcw, color: 'text-amber-400' },
-      { href: '/moderator/applications', label: 'Applications', icon: ClipboardCheck, color: 'text-orange-400' },
+      { href: '/moderator/applications', label: 'Applications', icon: ClipboardList, color: 'text-orange-400' },
       { href: '/moderator/verification', label: 'Verification', icon: QrCode, color: 'text-cyan-400' },
     ]
   },
   {
     name: 'DRIVER',
     items: [
-      { href: '/moderator/drivers', label: 'Driver Management', icon: Users, color: 'text-indigo-400' },
-      { href: '/moderator/drivers/add', label: 'Add Driver', icon: UserPlus, color: 'text-emerald-400' },
-      { href: '/moderator/driver-assignment', label: 'Reassignment', icon: ArrowRightLeft, color: 'text-purple-400' },
+      { href: '/moderator/drivers', label: 'Driver Management', icon: IdCard, color: 'text-indigo-400' },
+      { href: '/moderator/drivers/add', label: 'Add Driver', icon: UserCheck, color: 'text-emerald-400' },
+      { href: '/moderator/driver-assignment', label: 'Driver Reassignment', icon: GitCompareArrows, color: 'text-purple-400' },
     ]
   },
   {
     name: 'LOGISTICS',
     items: [
       { href: '/moderator/buses', label: 'Buses', icon: Bus, color: 'text-amber-400' },
-      { href: '/moderator/routes', label: 'Routes', icon: MapPin, color: 'text-emerald-400' },
+      { href: '/moderator/routes', label: 'Routes', icon: RouteIcon, color: 'text-emerald-400' },
     ]
   },
   {
     name: 'SUPPORT',
     items: [
       { href: '/moderator/notifications', label: 'Notifications', icon: Bell, color: 'text-red-400' },
-      { href: '/moderator/feedback', label: 'Feedbacks', icon: MessageCircle, color: 'text-cyan-400' },
+      { href: '/moderator/feedback', label: 'Feedbacks', icon: MessageSquareQuote, color: 'text-cyan-400' },
     ]
   }
 ];
@@ -229,12 +233,9 @@ export default function ModeratorSidebar() {
                       <TooltipContent
                         side="right"
                         sideOffset={10}
-                        className={cn("border text-xs font-medium px-3 py-2 rounded-lg shadow-xl", theme === 'dark' ? "bg-[#090a10] border-slate-700/50 text-slate-100" : "bg-admin-card border-admin-border text-admin-text")}
+                        className={cn("border text-xs font-semibold px-3 py-1.5 rounded-lg shadow-xl", theme === 'dark' ? "bg-[#090a10] border-slate-700/50 text-slate-100" : "bg-admin-card border-admin-border text-admin-text")}
                       >
-                        <div className="flex items-center gap-2">
-                          <Icon className={cn("h-3.5 w-3.5", item.color)} />
-                          <span>{item.label}</span>
-                        </div>
+                        <span>{item.label}</span>
                       </TooltipContent>
                     )}
                   </Tooltip>

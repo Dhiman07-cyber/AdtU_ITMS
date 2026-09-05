@@ -8,8 +8,9 @@ import { logger } from './structured-logger';
 import { perfMonitor } from './performance-monitor';
 import { wsServer } from './websocket-server';
 import { publishToRedis } from './redis-broadcast';
+import { getSupabaseServer } from '@/lib/supabase-server';
 
-type MessageHandler = (ws: WebSocket, session: Session, payload: any) => void;
+type MessageHandler = (ws: WebSocket, session: Session, payload: any) => void | Promise<void>;
 
 const handlers = new Map<string, MessageHandler>();
 
@@ -17,7 +18,22 @@ export function handle(type: string, handler: MessageHandler): void {
   handlers.set(type, handler);
 }
 
-export function routeMessage(ws: WebSocket, session: Session, parsed: any): void {
+/**
+ * Route a single parsed WS message to its registered handler.
+ *
+ * DESIGN: returns a Promise so callers can await it, preserving per-socket
+ * message ordering.  The 'presence' handler is async (DB query) — if the
+ * caller does NOT await this function the next message (e.g. 'subscribe')
+ * may execute before the DB query resolves and before session.busId is set,
+ * producing the observed race:
+ *
+ *   presence → DB query starts → subscribe runs → session.busId unset → REJECTED
+ *
+ * By awaiting routeMessage inside processMessage's per-socket queue, each
+ * socket processes one message at a time.  Cross-socket concurrency is
+ * unaffected: the per-socket queue is independent per WebSocket instance.
+ */
+export async function routeMessage(ws: WebSocket, session: Session, parsed: any): Promise<void> {
   const { type, ...payload } = parsed;
   if (!type || typeof type !== 'string') {
     send(ws, { type: 'error', message: 'Message must have a "type" field' });
@@ -35,7 +51,7 @@ export function routeMessage(ws: WebSocket, session: Session, parsed: any): void
 
   const done = perfMonitor.start(`handler:${type}`);
   try {
-    handler(ws, session, payload);
+    await handler(ws, session, payload);
   } catch (err) {
     metricsService.inc('errors');
     logger.error('handler_error', { type, uid: session.uid, error: (err as Error).message });
@@ -75,6 +91,30 @@ export function getLiveBusLocation(busId: string): Record<string, unknown> | und
 handle('subscribe', (ws, session, payload) => {
   const channel = payload.channel as string | undefined;
   if (!channel) { send(ws, { type: 'error', message: 'subscribe requires "channel"' }); return; }
+
+  // SECURITY: Students may only subscribe to channels for their assigned bus.
+  // Drivers may only subscribe to channels for their active trip's bus.
+  // Admins/moderators/server have unrestricted access.
+  if (session.role === 'student' || session.role === 'driver') {
+    const busIdMatch = channel.match(/^(?:bus:|bus_location_|trip-status-|waiting_flags_)(.+)$/);
+    if (busIdMatch) {
+      const channelBusId = busIdMatch[1];
+      // REJECT if session.busId is not set (presence not sent yet)
+      if (!session.busId) {
+        send(ws, { type: 'error', message: 'Must send presence with busId before subscribing to bus channels' });
+        metricsService.inc('errors');
+        logger.warn('subscribe_unauthorized_no_presence', { uid: session.uid, role: session.role, channel });
+        return;
+      }
+      if (channelBusId !== session.busId) {
+        send(ws, { type: 'error', message: 'Not authorized to subscribe to this bus channel' });
+        metricsService.inc('errors');
+        logger.warn('subscribe_unauthorized', { uid: session.uid, role: session.role, channel, sessionBusId: session.busId, channelBusId });
+        return;
+      }
+    }
+  }
+
   subscriptionManager.subscribe(session.socketId, channel, ws, session);
   logger.debug('subscribe', { uid: session.uid, socketId: session.socketId, channel });
   send(ws, { type: 'subscribed', channel });
@@ -85,7 +125,10 @@ handle('subscribe', (ws, session, payload) => {
     const busId = busIdMatch[1];
     const cachedLoc = getLiveBusLocation(busId);
     if (cachedLoc) {
-      send(ws, { type: 'message', channel, event: 'bus_location_update', payload: cachedLoc });
+      // Observability marker: lets clients/tests distinguish this subscribe-time
+      // cache snapshot from a live bus_location_update broadcast (which carries
+      // no 'source' field). Purely additive — no behavioural change.
+      send(ws, { type: 'message', channel, event: 'bus_location_update', payload: { ...cachedLoc, source: 'snapshot' } });
     }
   }
 });
@@ -106,11 +149,61 @@ handle('pong', (ws, session) => {
   send(ws, { type: 'pong_ack' });
 });
 
-handle('presence', (ws, session, payload) => {
-  if (payload.busId && typeof payload.busId === 'string' && payload.busId.trim()) sessionManager.setBusId(session.socketId, payload.busId.trim());
-  if (payload.tripId && typeof payload.tripId === 'string' && payload.tripId.trim()) sessionManager.setTripId(session.socketId, payload.tripId.trim());
-  if (payload.routeId && typeof payload.routeId === 'string' && payload.routeId.trim()) sessionManager.setRouteId(session.socketId, payload.routeId.trim());
-  logger.debug('presence', { uid: session.uid, socketId: session.socketId, busId: payload.busId, tripId: payload.tripId, routeId: payload.routeId });
+handle('presence', async (ws, session, payload) => {
+  const claimedBusId = payload.busId && typeof payload.busId === 'string' && payload.busId.trim()
+    ? payload.busId.trim()
+    : null;
+
+  if (claimedBusId) {
+    const supabase = getSupabaseServer();
+    let authorized = false;
+
+    if (session.role === 'student') {
+      const { data } = await supabase
+        .from('student_profiles')
+        .select('bus_id')
+        .eq('uid', session.uid)
+        .maybeSingle();
+      if (data?.bus_id === claimedBusId) authorized = true;
+    } else if (session.role === 'driver') {
+      const { data: trip } = await supabase
+        .from('active_trips')
+        .select('bus_id')
+        .eq('driver_id', session.uid)
+        .eq('status', 'active')
+        .maybeSingle();
+      if (trip?.bus_id === claimedBusId) {
+        authorized = true;
+      } else {
+        const { data: profile } = await supabase
+          .from('driver_profiles')
+          .select('bus_id')
+          .eq('uid', session.uid)
+          .maybeSingle();
+        if (profile?.bus_id === claimedBusId) authorized = true;
+      }
+    } else if (session.role === 'admin' || session.role === 'moderator') {
+      authorized = true;
+    }
+
+    if (!authorized) {
+      send(ws, { type: 'error', message: 'Unauthorized: you do not own this bus' });
+      metricsService.inc('errors');
+      logger.warn('presence_unauthorized_bus', { uid: session.uid, role: session.role, claimedBusId });
+      return;
+    }
+
+    sessionManager.setBusId(session.socketId, claimedBusId);
+  }
+
+  if (payload.tripId && typeof payload.tripId === 'string' && payload.tripId.trim()) {
+    sessionManager.setTripId(session.socketId, payload.tripId.trim());
+  }
+  if (payload.routeId && typeof payload.routeId === 'string' && payload.routeId.trim()) {
+    sessionManager.setRouteId(session.socketId, payload.routeId.trim());
+  }
+
+  logger.debug('presence', { uid: session.uid, socketId: session.socketId, busId: claimedBusId, tripId: payload.tripId, routeId: payload.routeId });
   send(ws, { type: 'presence_ok' });
 });
 
@@ -160,26 +253,11 @@ handle('location_update', (ws, session, payload) => {
     return;
   }
 
-  const locPayload = {
-    busId,
-    driverUid: session.uid,
-    lat: Number(payload.lat),
-    lng: Number(payload.lng),
-    speed: Number(payload.speed || 0),
-    heading: Number(payload.heading || 0),
-    accuracy: payload.accuracy ? Number(payload.accuracy) : undefined,
-    timestamp: payload.timestamp || new Date().toISOString(),
-  };
-
-  updateLiveBusLocation(busId, locPayload);
-  wsServer.broadcastToChannel(`bus:${busId}`, 'bus_location_update', locPayload);
-  wsServer.broadcastToChannel(`bus_location_${busId}`, 'bus_location_update', locPayload);
-  // Cross-node relay: publish to Redis so other WS nodes broadcast to their local subscribers.
-  // The channel must match what subscribers actually listen on (bus_location_${busId}).
-  // Publishing only `bus:${busId}` here meant cross-node location updates never reached
-  // any subscriber — only single-node deployments worked by luck.
-  // publishToRedis is fire-and-forget; gracefully no-ops when Redis is not configured.
-  publishToRedis(`bus_location_${busId}`, 'bus_location_update', locPayload);
+  // DEPRECATED: Direct WS location updates bypass the robust validation pipeline
+  // (Kalman filters, spoofing detection) and drop trip metadata.
+  // The authoritative path is now the HTTP API which emits via Redis.
+  // We no longer broadcast or cache from this handler to prevent duplicate packets.
+  // We just increment the metric to track if any legacy clients are still sending this.
   metricsService.inc('gpsAccepted');
 });
 

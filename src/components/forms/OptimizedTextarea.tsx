@@ -1,13 +1,13 @@
 /**
- * OptimizedTextarea - Prevents parent re-renders during typing
- * Uses internal state for immediate feedback, syncs to parent on blur
+ * OptimizedTextarea - React 19 / Next.js 16 Component
+ * Leverages React Compiler automatic memoization for smooth typing & state synchronization.
  */
 
 "use client";
 
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { memo,useCallback,useEffect,useState } from 'react';
+import React, { useEffect, useState } from 'react';
 
 interface OptimizedTextareaProps {
   id: string;
@@ -21,7 +21,7 @@ interface OptimizedTextareaProps {
   rows?: number;
 }
 
-export const OptimizedTextarea = memo(function OptimizedTextarea({
+export function OptimizedTextarea({
   id,
   label,
   value: externalValue,
@@ -30,25 +30,24 @@ export const OptimizedTextarea = memo(function OptimizedTextarea({
   required,
   disabled,
   className,
-  rows = 3
+  rows = 3,
 }: OptimizedTextareaProps) {
   const [internalValue, setInternalValue] = useState(externalValue);
 
-  // Sync external value changes (e.g., from hydration)
+  // Sync external value changes
   useEffect(() => {
     setInternalValue(externalValue);
   }, [externalValue]);
 
-  const handleChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+  const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setInternalValue(e.target.value);
-  }, []);
+  };
 
-  const handleBlur = useCallback(() => {
-    // Only call onChange if value actually changed
+  const handleBlur = () => {
     if (internalValue !== externalValue) {
       onChange(internalValue);
     }
-  }, [internalValue, externalValue, onChange]);
+  };
 
   return (
     <div>
@@ -70,4 +69,4 @@ export const OptimizedTextarea = memo(function OptimizedTextarea({
       />
     </div>
   );
-});
+}

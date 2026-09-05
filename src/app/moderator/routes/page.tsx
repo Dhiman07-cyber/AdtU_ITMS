@@ -1,6 +1,7 @@
-﻿"use client";
+"use client";
 
 import { ExportButton } from '@/components/ExportButton';
+import { PremiumPageLoader } from '@/components/LoadingSpinner';
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -58,7 +59,7 @@ import {
 	Trash2
 } from "lucide-react";
 import { useRouter } from 'next/navigation';
-import { useMemo,useState } from "react";
+import { useState } from "react";
 // Migrated: Server-side API → PostgreSQL (no Firestore client reads)
 import { PermissionDeniedCard } from '@/components/PermissionDeniedCard';
 import { invalidateCollectionCache,useApiCollection } from '@/hooks/useApiCollection';
@@ -133,9 +134,8 @@ export default function RoutesPage() {
     }
   });
 
-  // Process and combine data — memoized so the per-route bus matching (an
-  // O(routes×buses) scan) only runs when routes or buses actually change.
-  const routes = useMemo(() => routesData.map((route: any) => {
+  // Process and combine data — direct derivation in render
+  const routes = routesData.map((route: any) => {
     // Find buses assigned to this route
     const assignedBusesList = buses.filter((bus: any) =>
       bus.routeId === route.id ||
@@ -153,7 +153,7 @@ export default function RoutesPage() {
       stops: route.stops || [],
       assignedBuses: assignedBusesList
     };
-  }), [routesData, buses]);
+  });
 
   const [searchTerm, setSearchTerm] = useState("");
   const [shiftFilter, setShiftFilter] = useState("all");
@@ -184,7 +184,7 @@ export default function RoutesPage() {
     return match ? parseInt(match[1]) : 999;
   };
 
-  const filteredRoutes = useMemo(() => routes.filter((route: any) => {
+  const filteredRoutes = routes.filter((route: any) => {
     const matchesSearch =
       (route.routeName && route.routeName.toLowerCase().includes(searchTerm.toLowerCase())) ||
       (route.assignedBuses && route.assignedBuses.some((bus: any) =>
@@ -198,7 +198,7 @@ export default function RoutesPage() {
     const numA = extractRouteNumber(a.routeName || '');
     const numB = extractRouteNumber(b.routeName || '');
     return numA - numB;
-  }), [routes, searchTerm, shiftFilter]);
+  });
 
   // Export routes data from Supabase
   const handleExportRoutes = async () => {
@@ -271,7 +271,7 @@ export default function RoutesPage() {
     }
   };
 
-  const commonBtnClass = "group h-8 px-4 bg-white hover:bg-gray-50 text-gray-700 hover:text-purple-600 border border-gray-200 hover:border-purple-200 shadow-sm hover:shadow-lg hover:shadow-purple-500/10 font-bold text-[10px] uppercase tracking-widest rounded-lg transition-all duration-300 active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer";
+  const commonBtnClass = "group h-8 px-4 bg-white hover:bg-gray-50 text-gray-600 hover:text-blue-600 border border-gray-200 hover:border-blue-200 shadow-sm hover:shadow-lg hover:shadow-blue-500/10 font-bold text-[10px] uppercase tracking-widest rounded-lg transition-all duration-300 active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer";
 
   const handleDelete = (id: string, name: string) => {
     setDeleteItem({ id, name });
@@ -303,7 +303,7 @@ export default function RoutesPage() {
   };
 
   if (isLoading) {
-    return <div className="flex justify-center items-center h-64">Loading...</div>;
+    return <PremiumPageLoader message="Curating Transit Routes..." subMessage="Fetching route definitions and stops..." />;
   }
 
   if (!permsLoading && !canRouteView) {

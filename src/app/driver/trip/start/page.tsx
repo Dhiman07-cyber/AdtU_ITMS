@@ -19,7 +19,7 @@ import {
 	Sun
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useCallback,useEffect,useRef,useState } from "react";
+import { useEffect,useRef,useState } from "react";
 
 type TripMode = "dev" | "production";
 type Step = "select-bus" | "scan-qr" | "select-shift" | "confirming" | "done" | "error";
@@ -393,7 +393,7 @@ function QRScanner({
   const [scanning, setScanning] = useState(false);
   const [manualInput, setManualInput] = useState("");
 
-  const startCamera = useCallback(async () => {
+  const startCamera = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: "environment" },
@@ -407,15 +407,15 @@ function QRScanner({
     } catch {
       setScanning(false);
     }
-  }, []);
+  };
 
-  const stopCamera = useCallback(() => {
+  const stopCamera = () => {
     if (animationRef.current) cancelAnimationFrame(animationRef.current);
     if (videoRef.current?.srcObject) {
       const tracks = (videoRef.current.srcObject as MediaStream).getTracks();
       tracks.forEach((t) => t.stop());
     }
-  }, []);
+  };
 
   useEffect(() => {
     startCamera();

@@ -5,7 +5,7 @@
 
 import { useAuth } from '@/contexts/auth-context';
 import { mapRazorpayErrorToState,type PaymentFrontendStatus } from '@/lib/payment/payment-state';
-import { useCallback,useEffect,useState } from 'react';
+import { useEffect,useState } from 'react';
 import { toast } from 'sonner';
 
 // Types
@@ -129,7 +129,7 @@ export function useRazorpay() {
   /**
    * Create a payment order
    */
-  const createOrder = useCallback(async (config: PaymentConfig) => {
+  const createOrder = async (config: PaymentConfig) => {
     try {
       const token = await currentUser?.getIdToken();
       const response = await fetch('/api/payment/razorpay/create-order', {
@@ -167,12 +167,12 @@ export function useRazorpay() {
     } catch (error: any) {
       throw error;
     }
-  }, [currentUser]);
+  };
 
   /**
    * Verify payment after successful transaction
    */
-  const verifyPayment = useCallback(async (
+  const verifyPayment = async (
     response: RazorpayResponse,
     config: PaymentConfig
   ): Promise<PaymentResult> => {
@@ -232,12 +232,12 @@ export function useRazorpay() {
         frontendStatus: 'verification_pending',
       };
     }
-  }, [currentUser]);
+  };
 
   /**
    * Process payment
    */
-  const processPayment = useCallback(async (
+  const processPayment = async (
     config: PaymentConfig
   ): Promise<PaymentResult> => {
     // Reset error state
@@ -537,7 +537,7 @@ export function useRazorpay() {
         frontendStatus: 'failed'
       };
     }
-  }, [isScriptLoaded, createOrder, verifyPayment]);
+  };
 
   return {
     isScriptLoaded,

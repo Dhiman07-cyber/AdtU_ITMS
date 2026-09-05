@@ -1,6 +1,7 @@
 "use client";
 
 import Avatar from '@/components/Avatar';
+import { PremiumPageLoader } from '@/components/LoadingSpinner';
 import { Button } from "@/components/ui/button";
 import {
 	Card,
@@ -193,7 +194,7 @@ export default function AdminDrivers() {
     }
   };
 
-  const commonBtnClass = "group h-8 px-4 bg-white hover:bg-gray-50 text-gray-700 hover:text-purple-600 border border-gray-200 hover:border-purple-200 shadow-sm hover:shadow-lg hover:shadow-purple-500/10 font-bold text-[10px] uppercase tracking-widest rounded-lg transition-all duration-300 active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer";
+  const commonBtnClass = "group h-8 px-4 bg-white hover:bg-gray-50 text-gray-600 hover:text-blue-600 border border-gray-200 hover:border-blue-200 shadow-sm hover:shadow-lg hover:shadow-blue-500/10 font-bold text-[10px] uppercase tracking-widest rounded-lg transition-all duration-300 active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer";
 
   // Filter and sort drivers — memoized so the full list isn't re-scanned and
   // re-sorted on every unrelated re-render (only when data/filters change).
@@ -236,14 +237,7 @@ export default function AdminDrivers() {
     }), [drivers, searchTerm, experienceFilter]);
 
   if (authLoading || isLoading) {
-    return (
-      <div className="min-h-[70vh] flex items-center justify-center">
-        <div className="text-center space-y-4">
-          <Loader2 className="h-12 w-12 animate-spin text-blue-600 mx-auto" />
-          <p className="text-gray-600 dark:text-gray-400 text-lg">Loading drivers...</p>
-        </div>
-      </div>
-    );
+    return <PremiumPageLoader message="Loading Drivers..." subMessage="Fetching driver records and assignments..." />;
   }
 
   if (!currentUser || !userData || (userData.role !== 'admin' && userData.role !== 'moderator')) {
@@ -261,13 +255,13 @@ export default function AdminDrivers() {
       {/* Page Header */}
       <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Driver Management</h1>
-          <p className="text-gray-600 dark:text-gray-400 mt-1">View and manage all drivers</p>
+          <h1 className="text-3xl font-bold text-foreground">Driver Management</h1>
+          <p className="text-muted-foreground mt-1">View and manage all drivers</p>
         </div>
         <div className="flex gap-2">
           {canDriverAdd && (
             <Link href="/moderator/drivers/add">
-              <Button className="bg-blue-600 hover:bg-blue-700 text-white border border-blue-700 transition-all duration-200 hover:scale-105 hover:shadow-lg rounded-md px-2.5 py-1.5 text-xs h-8">
+              <Button className="bg-blue-600 hover:bg-blue-700 text-white border border-blue-700 shadow-sm transition-all duration-200 hover:scale-105 hover:shadow-lg rounded-md px-2.5 py-1.5 text-xs h-8">
                 <Plus className="mr-1.5 h-3.5 w-3.5" />
                 Add New Driver
               </Button>
@@ -275,7 +269,7 @@ export default function AdminDrivers() {
           )}
           {canDriverReassign && (
             <Link href="/moderator/driver-assignment">
-              <Button className="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white border-0 transition-all duration-200 hover:scale-105 hover:shadow-lg hover:shadow-purple-500/25 rounded-md px-2.5 py-1.5 text-xs h-8">
+              <Button className="bg-slate-800 hover:bg-slate-900 text-white dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-100 border border-slate-700 dark:border-slate-600 shadow-sm transition-all duration-200 hover:scale-105 hover:shadow-lg rounded-md px-2.5 py-1.5 text-xs h-8">
                 <ArrowRightLeft className="mr-1.5 h-3.5 w-3.5" />
                 Driver Reassignment
               </Button>

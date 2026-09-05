@@ -1,6 +1,6 @@
 import { WebSocketClient } from '@/domains/realtime/ws-client';
 import { supabase } from '@/lib/supabase-client';
-import { useCallback,useEffect,useRef,useState } from 'react';
+import { useEffect,useRef,useState } from 'react';
 
 interface WaitingFlag {
   id: string;
@@ -116,7 +116,7 @@ export const useWaitingFlags = (busId: string, getToken: () => Promise<string | 
   }, [busId, getToken]);
 
   // Acknowledge a waiting flag
-  const acknowledgeFlag = useCallback(async (flagId: string, driverUid: string) => {
+  const acknowledgeFlag = async (flagId: string, driverUid: string) => {
     try {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       const token = await getToken();
@@ -140,10 +140,10 @@ export const useWaitingFlags = (busId: string, getToken: () => Promise<string | 
       console.error('Error acknowledging flag:', err);
       return { success: false, error: err.message || 'Unknown error' };
     }
-  }, [getToken]);
+  };
 
   // Mark a student as boarded
-  const markAsBoarded = useCallback(async (flagId: string) => {
+  const markAsBoarded = async (flagId: string) => {
     try {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       const token = await getToken();
@@ -164,7 +164,7 @@ export const useWaitingFlags = (busId: string, getToken: () => Promise<string | 
       console.error('Error marking as boarded:', err);
       return { success: false, error: err.message || 'Unknown error' };
     }
-  }, [getToken]);
+  };
 
   return {
     flags,

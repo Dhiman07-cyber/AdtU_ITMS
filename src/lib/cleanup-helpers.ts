@@ -12,6 +12,8 @@ import { deleteAsset,extractPublicId } from './cloudinary-server';
 import { wasSeatReleased } from './config/capacity-flags';
 import { adminAuth,adminDb } from './firebase-admin';
 
+import { invalidateCachedRole } from '@/lib/security/role-cache';
+
 /**
  * Delete profile image from Cloudinary
  * Uses the centralised cloudinary-server module (SDK-based, no manual signatures).
@@ -97,14 +99,7 @@ export async function deleteUserAndData(
       }
       console.log(`✅ PostgreSQL database cascade transaction committed for student: ${userId.substring(0,8)}...`);
     } else {
-      // Driver and Moderator - non-cascade deletes
-      try {
-        await deleteUser(userId);
-        console.log(`Deleted user from PostgreSQL:`, userId.substring(0,8)+'...');
-      } catch (pgDeleteError: any) {
-        console.warn(`User with ID ${userId.substring(0,8)}... user table delete warning:`, pgDeleteError.message);
-      }
-
+      // Driver and Moderator - delete profile first, then user table
       if (userType === 'driver') {
         try {
           await deleteDriver(userId);
@@ -120,6 +115,19 @@ export async function deleteUserAndData(
           console.warn(`Moderator profile delete warning:`, pgDeleteError.message);
         }
       }
+
+      try {
+        await deleteUser(userId);
+        console.log(`Deleted user from PostgreSQL:`, userId.substring(0,8)+'...');
+      } catch (pgDeleteError: any) {
+        console.warn(`User with ID ${userId.substring(0,8)}... user table delete warning:`, pgDeleteError.message);
+      }
+    }
+
+    // Invalidate role cache immediately
+    invalidateCachedRole(userId);
+    if (firebaseAuthUid && firebaseAuthUid !== userId) {
+      invalidateCachedRole(firebaseAuthUid);
     }
 
     // 3. Firebase Auth User Deletion & JWT Revocation (External)

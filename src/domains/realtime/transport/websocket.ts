@@ -1,12 +1,15 @@
 const privilegedToken = process.env.WS_PRIVILEGED_TOKEN;
-// Fail closed in production: without an explicitly configured WS_PRIVILEGED_TOKEN
-// the Next.js process cannot authenticate as the server bridge — connecting with
-// the well-known '__server__' default would work in dev but is a production
-// misconfiguration (anyone guessing the default could impersonate the server).
-const privilegedAuthEnabled = !!privilegedToken || process.env.NODE_ENV !== 'production';
-const PRIVILEGED_TOKEN = privilegedToken || '__server__';
+const isProd = process.env.NODE_ENV === 'production';
+const privilegedAuthEnabled = isProd
+  ? Boolean(privilegedToken && privilegedToken.trim() !== '' && privilegedToken !== '__server__')
+  : Boolean(privilegedToken || true);
+const PRIVILEGED_TOKEN = privilegedToken || (isProd ? '' : '__server__');
 
 const MAX_QUEUE = 500;
+/** Cap for the client-side ws buffer before we queue instead of send. At ~200
+ *  bytes/msg, 16KB = ~80 buffered broadcasts — well above a single tick's
+ *  volume, so this only engages under real backpressure. */
+const BACKPRESSURE_BYTES = 16 * 1024;
 
 export class WebSocketTransport {
   readonly name = 'websocket';
@@ -18,7 +21,7 @@ export class WebSocketTransport {
 
   async connect(): Promise<void> {
     if (!privilegedAuthEnabled) {
-      console.warn('[WebSocketTransport] WS_PRIVILEGED_TOKEN is not configured in production; server bridge disabled. Events will queue.');
+      console.warn('[WebSocketTransport] WS_PRIVILEGED_TOKEN is missing or insecure in production; server bridge disabled. Events will queue.');
       return;
     }
     const port = process.env.WS_PORT || '3001';
@@ -37,6 +40,9 @@ export class WebSocketTransport {
       this.ws.on('open', () => {
         this.connected = true;
         this.sendPresence();
+        // Drain synchronously first so callers see an empty queue immediately.
+        // The batched path handles any messages queued during the drain itself.
+        this.drainQueueSync();
         this.drainQueue();
       });
 
@@ -64,7 +70,13 @@ export class WebSocketTransport {
 
   async broadcast(channel: string, event: string, payload: Record<string, unknown>): Promise<void> {
     const msg = JSON.stringify({ type: 'broadcast', channel, event, payload });
-    if (!this.connected || !this.ws) {
+    // Queue unless the socket is genuinely OPEN. Critical: when the socket is
+    // CONNECTING or CLOSING, `connected` is still true but unsafeSend() would
+    // silently drop the frame (readyState !== OPEN). Queuing here gives the
+    // message a retry path on reconnect (drainQueueSync on 'open').
+    const socketOpen = this.ws?.readyState === 1;
+    const saturated = this.ws?.bufferedAmount !== undefined && this.ws.bufferedAmount > BACKPRESSURE_BYTES;
+    if (!this.connected || !this.ws || !socketOpen || saturated) {
       if (this.sendQueue.length >= MAX_QUEUE) this.sendQueue.shift();
       this.sendQueue.push(msg);
       return;
@@ -88,15 +100,32 @@ export class WebSocketTransport {
 
   private unsafeSend(msg: string): void {
     if (this.ws?.readyState === 1) {
-      this.ws.send(msg);
+      this.ws.send(msg, (err: Error | undefined) => {
+        if (err) {
+          console.warn('[WebSocketTransport] send error:', err.message);
+        }
+      });
     }
   }
 
-  private drainQueue(): void {
+  private drainQueueSync(): void {
     while (this.sendQueue.length > 0) {
       const msg = this.sendQueue.shift();
       if (msg) this.unsafeSend(msg);
     }
+  }
+
+  private drainQueue(): void {
+    // ponytail: batch drain — 20 frames per tick avoids saturating server on reconnect
+    const sendBatch = () => {
+      let n = 0;
+      while (this.sendQueue.length > 0 && n < 20) {
+        const msg = this.sendQueue.shift();
+        if (msg) { this.unsafeSend(msg); n++; }
+      }
+      if (this.sendQueue.length > 0) setImmediate(sendBatch);
+    };
+    if (this.sendQueue.length > 0) setImmediate(sendBatch);
   }
 
   private scheduleReconnect(): void {

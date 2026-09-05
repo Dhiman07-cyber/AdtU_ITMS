@@ -3,6 +3,7 @@ import { requireTransportEntitlement } from '@/lib/entitlement/require-transport
 import { withSecurity } from '@/lib/security/api-security';
 import { RateLimits } from '@/lib/security/rate-limiter';
 import { NotifyDriverSchema } from '@/lib/security/validation-schemas';
+import { getStudentProfileAndShift } from '@/lib/student-shift-resolver';
 import { NextResponse } from 'next/server';
 
 /**
@@ -18,6 +19,13 @@ export const POST = withSecurity(
     // Phase 3 — only entitled students may contact the driver.
     const gate = await requireTransportEntitlement(studentUid);
     if (!gate.ok) return (gate as any).response;
+
+    // SECURITY: Students may only notify their own assigned bus's driver.
+    const resolved = await getStudentProfileAndShift(studentUid);
+    const studentBusId = resolved?.busId;
+    if (studentBusId && studentBusId !== busId && studentBusId !== busId.replace('bus_', '') && `bus_${studentBusId}` !== busId) {
+      return NextResponse.json({ success: false, message: 'Forbidden: You are not assigned to this bus' }, { status: 403 });
+    }
 
     console.log('🔔 Student notifying driver:', { studentUid: studentUid.substring(0, 8) + '...', busId });
 

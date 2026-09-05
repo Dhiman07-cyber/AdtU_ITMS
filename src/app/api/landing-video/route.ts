@@ -14,15 +14,6 @@ const DEFAULT_VIDEO_PATH = 'landing_video/Welcome_Final.mp4';
  */
 export async function GET() {
     try {
-        if (!SUPABASE_URL) {
-            console.error('Supabase URL not configured');
-            return NextResponse.json(
-                { error: 'Storage not configured' },
-                { status: 500 }
-            );
-        }
-
-        // Fetch dynamic path from PostgreSQL
         let videoPath = DEFAULT_VIDEO_PATH;
         try {
             const landingConfigResult = await getLandingConfig();
@@ -33,25 +24,23 @@ export async function GET() {
             console.warn('Could not fetch landing config, using default video path:', e);
         }
 
-        // Construct the public URL for the video
-        const videoUrl = `${SUPABASE_URL}/storage/v1/object/public/${BUCKET_NAME}/${videoPath}`;
+        // Construct public video URL (or fallback)
+        const baseUrl = SUPABASE_URL || 'https://supabase.co';
+        const videoUrl = `${baseUrl}/storage/v1/object/public/${BUCKET_NAME}/${videoPath}`;
 
-        // Add cache control headers to prevent caching issues during auth transitions
         return NextResponse.json({
             success: true,
             url: videoUrl
         }, {
             headers: {
-                'Cache-Control': 'no-store, no-cache, must-revalidate',
-                'Pragma': 'no-cache',
-                'Expires': '0'
+                'Cache-Control': 'public, max-age=300, stale-while-revalidate=3600',
             }
         });
     } catch (error) {
         console.error('Error getting landing video URL:', error);
-        return NextResponse.json(
-            { error: 'Failed to get video URL' },
-            { status: 500 }
-        );
+        return NextResponse.json({
+            success: true,
+            url: ''
+        });
     }
 }

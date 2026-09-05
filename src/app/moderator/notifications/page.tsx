@@ -24,7 +24,7 @@ import {
 } from "lucide-react";
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
-import { useCallback,useEffect,useMemo,useRef,useState } from "react";
+import { useEffect,useRef,useState } from "react";
 
 // Deferred: the heavy (~700-line) create/edit form loads only when opened.
 const NotificationFormV2 = dynamic(() => import("@/components/NotificationFormV2"), {
@@ -93,35 +93,25 @@ export default function ModeratorNotificationsPage() {
     }
   }, [activeTab, loading, notifications, currentUser, markAllAsRead]);
 
-  // Bucket notifications in a SINGLE pass instead of 5 separate array scans
-  // on every render. Recomputes only when notifications or the user change.
-  const { receivedNotifications, adminNotificationsCount, driverNotificationsCount, sentNotifications } = useMemo(() => {
-    const uid = currentUser?.uid;
-    const received: typeof notifications = [];
-    const admin: typeof notifications = [];
-    const driver: typeof notifications = [];
-    const sent: typeof notifications = [];
+  // Direct bucket computation in render
+  const uid = currentUser?.uid;
+  const receivedNotifications: typeof notifications = [];
+  const adminNotificationsCount: typeof notifications = [];
+  const driverNotificationsCount: typeof notifications = [];
+  const sentNotifications: typeof notifications = [];
 
-    for (const n of notifications) {
-      if (n.sender.userId === uid) {
-        sent.push(n);
-        continue;
-      }
-      received.push(n);
-      if (n.sender.userRole === 'admin') admin.push(n);
-      else if (n.sender.userRole === 'driver') driver.push(n);
+  for (const n of notifications) {
+    if (n.sender.userId === uid) {
+      sentNotifications.push(n);
+      continue;
     }
+    receivedNotifications.push(n);
+    if (n.sender.userRole === 'admin') adminNotificationsCount.push(n);
+    else if (n.sender.userRole === 'driver') driverNotificationsCount.push(n);
+  }
 
-    return {
-      receivedNotifications: received,
-      adminNotificationsCount: admin,
-      driverNotificationsCount: driver,
-      sentNotifications: sent,
-    };
-  }, [notifications, currentUser?.uid]);
-
-  // Filtered list for the active tab — picks the precomputed bucket.
-  const filteredNotifications = useMemo(() => {
+  // Filtered list for the active tab
+  const filteredNotifications = (() => {
     switch (activeTab) {
       case 'admin': return adminNotificationsCount;
       case 'driver': return driverNotificationsCount;
@@ -129,36 +119,35 @@ export default function ModeratorNotificationsPage() {
       case 'all':
       default: return receivedNotifications;
     }
-  }, [activeTab, receivedNotifications, adminNotificationsCount, driverNotificationsCount, sentNotifications]);
+  })();
 
-  // Handlers — stable identities so memoized NotificationCardV2 instances
-  // don't re-render on every parent update.
-  const handleMarkAsRead = useCallback(async (notificationId: string) => {
+  // Handlers
+  const handleMarkAsRead = async (notificationId: string) => {
     try {
       await markAsRead(notificationId);
       addToast('Marked as read', 'success');
     } catch (error) {
       addToast('Failed to mark as read', 'error');
     }
-  }, [markAsRead, addToast]);
+  };
 
-  const handleEdit = useCallback(async (notificationId: string, updates: { content: string }) => {
+  const handleEdit = async (notificationId: string, updates: { content: string }) => {
     try {
       await editNotification(notificationId, updates);
       addToast('Notification updated successfully', 'success');
     } catch (error) {
       addToast('Failed to update notification', 'error');
     }
-  }, [editNotification, addToast]);
+  };
 
-  const handleDeleteGlobally = useCallback(async (notificationId: string) => {
+  const handleDeleteGlobally = async (notificationId: string) => {
     try {
       await deleteGlobally(notificationId);
       addToast('Notification deleted for everyone', 'success');
     } catch (error) {
       addToast('Failed to delete notification', 'error');
     }
-  }, [deleteGlobally, addToast]);
+  };
 
 
   if (loading) {
@@ -182,13 +171,12 @@ export default function ModeratorNotificationsPage() {
     <div className="flex-1 py-20 px-3 sm:px-4 lg:px-6 pt-15">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
-        <div className="flex justify-between items-center mb-8">
+        <div className="flex justify-between items-center mb-6">
           <div>
-            <h1 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-1.5">
-              <Bell className="h-5 w-5" />
+            <h1 className="text-3xl font-bold text-foreground">
               Notifications
             </h1>
-            <p className="text-xs text-gray-600 dark:text-gray-400 mt-0.5">
+            <p className="text-muted-foreground mt-1">
               Manage and send notifications to all users
             </p>
           </div>
@@ -196,9 +184,9 @@ export default function ModeratorNotificationsPage() {
             onClick={() => setCreateDialogOpen(true)}
             onMouseEnter={() => { import("@/components/NotificationFormV2"); }}
             onFocus={() => { import("@/components/NotificationFormV2"); }}
-            className="bg-blue-600 hover:bg-blue-700 flex items-center gap-1.5 h-8 text-xs"
+            className="bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-1.5 h-9 text-sm"
           >
-            <Plus className="h-3.5 w-3.5" />
+            <Plus className="h-4 w-4 mr-1" />
             Create Notification
           </Button>
         </div>

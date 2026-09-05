@@ -1,11 +1,25 @@
 import type { IncomingMessage } from 'http';
 
-const configuredToken = process.env.WS_PRIVILEGED_TOKEN;
-const PRIVILEGED_TOKEN = configuredToken || '__server__';
-// Fail closed in production: without an explicitly configured WS_PRIVILEGED_TOKEN
-// the well-known '__server__' default must NOT authenticate anyone as the server
-// bridge. In dev the default keeps local setups working.
-const privilegedAuthEnabled = !!configuredToken || process.env.NODE_ENV !== 'production';
+export function assertPrivilegedTokenSafe(
+  token: string | undefined = process.env.WS_PRIVILEGED_TOKEN,
+  env: string = process.env.NODE_ENV || 'development'
+): void {
+  if (env === 'production') {
+    if (!token || token.trim() === '' || token === '__server__') {
+      throw new Error('WS_PRIVILEGED_TOKEN is missing or insecure in production.');
+    }
+  }
+}
+
+export function getPrivilegedAuthConfig(): { token: string; enabled: boolean } {
+  const configured = process.env.WS_PRIVILEGED_TOKEN;
+  const isProd = process.env.NODE_ENV === 'production';
+  const token = configured || (isProd ? '' : '__server__');
+  const enabled = isProd
+    ? Boolean(configured && configured.trim() !== '' && configured !== '__server__')
+    : Boolean(configured || true);
+  return { token, enabled };
+}
 
 export interface AuthResult {
   authenticated: boolean;
@@ -26,7 +40,8 @@ export async function authenticateSocket(request: IncomingMessage): Promise<Auth
   const token = extractToken(request);
   if (!token) return { authenticated: false, error: 'Missing or invalid token' };
 
-  if (privilegedAuthEnabled && token === PRIVILEGED_TOKEN) {
+  const { token: privilegedToken, enabled: privilegedEnabled } = getPrivilegedAuthConfig();
+  if (privilegedEnabled && token === privilegedToken) {
     return { authenticated: true, uid: 'server', role: 'server' };
   }
 

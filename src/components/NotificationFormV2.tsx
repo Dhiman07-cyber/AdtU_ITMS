@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -24,7 +24,7 @@ import {
 	Send
 } from 'lucide-react';
 import dynamic from 'next/dynamic';
-import { useCallback,useEffect,useMemo,useState } from 'react';
+import { useEffect,useState } from 'react';
 
 import {
 	NOTIFICATION_TEMPLATES,
@@ -108,7 +108,7 @@ export default function NotificationFormV2({ open, onClose, onSuccess, mode = 'c
   // Stable element arrays for the template dropdown — built once so typing in
   // the title/message (which re-renders the whole form) doesn't recreate and
   // reconcile ~30 <SelectItem>s every keystroke.
-  const templateItems = useMemo(() => ({
+  const templateItems = {
     notice: NOTICE_TEMPLATE_ENTRIES.map(([key, t]) => (
       <SelectItem key={key} value={key} className="py-1.5 text-xs pl-6">{t.title}</SelectItem>
     )),
@@ -118,16 +118,11 @@ export default function NotificationFormV2({ open, onClose, onSuccess, mode = 'c
     dropoff: DROPOFF_TEMPLATE_ENTRIES.map(([key, t]) => (
       <SelectItem key={key} value={key} className="py-1.5 text-xs pl-6">{t.title}</SelectItem>
     )),
-  }), []);
+  };
 
-  // Filter the specific-users list only when the list or query changes, not on
-  // every form re-render.
-  const filteredUsers = useMemo(
-    () => users.filter(u =>
-      u.name.toLowerCase().includes(userSearchQuery.toLowerCase()) ||
-      u.enrollmentId?.toLowerCase().includes(userSearchQuery.toLowerCase())
-    ),
-    [users, userSearchQuery]
+  const filteredUsers = users.filter(u =>
+    u.name.toLowerCase().includes(userSearchQuery.toLowerCase()) ||
+    u.enrollmentId?.toLowerCase().includes(userSearchQuery.toLowerCase())
   );
 
   useEffect(() => {
@@ -191,7 +186,7 @@ export default function NotificationFormV2({ open, onClose, onSuccess, mode = 'c
     }
   }, [open, targetType, specificUserRoleFilter, currentUser, userRole, userData]);
 
-  const loadFullBuses = useCallback(async () => {
+  const loadFullBuses = async () => {
     try {
       const token = await currentUser?.getIdToken();
       const res = await fetch('/api/buses', {
@@ -212,18 +207,18 @@ export default function NotificationFormV2({ open, onClose, onSuccess, mode = 'c
     } catch (error) {
       console.error('Error loading full buses:', error);
     }
-  }, [currentUser]);
+  };
 
-  const loadFullRoutes = useCallback(async () => {
+  const loadFullRoutes = async () => {
     try {
       const data = await getAllRoutes();
       setFullRoutes(data);
     } catch (error) {
       console.error('Error loading full routes:', error);
     }
-  }, []);
+  };
 
-  const loadOptions = useCallback(async () => {
+  const loadOptions = async () => {
     setLoadingOptions(true);
     try {
       const token = await currentUser?.getIdToken();
@@ -292,7 +287,7 @@ export default function NotificationFormV2({ open, onClose, onSuccess, mode = 'c
     } finally {
       setLoadingOptions(false);
     }
-  }, [targetType, specificUserRoleFilter, userRole, addToast, currentUser]);
+  };
 
   // Update message when dropoff assignments change
   useEffect(() => {
@@ -307,7 +302,7 @@ export default function NotificationFormV2({ open, onClose, onSuccess, mode = 'c
     }
   }, [dropoffAssignments, notificationType, selectedTemplate, mode]);
 
-  const resetForm = useCallback(() => {
+  const resetForm = () => {
     setTargetType('all_users');
     setTargetRole(undefined);
     setSelectedBuses([]);
@@ -336,15 +331,15 @@ export default function NotificationFormV2({ open, onClose, onSuccess, mode = 'c
         setSelectedBuses([driverBus]);
       }
     }
-  }, [userRole, userData]);
+  };
 
-  const handleDiscard = useCallback(() => {
+  const handleDiscard = () => {
     resetForm();
     onClose();
     addToast('Draft discarded and form reset', 'success');
-  }, [resetForm, onClose, addToast]);
+  };
 
-  const applyTemplate = useCallback((key: string) => {
+  const applyTemplate = (key: string) => {
     if (key === 'custom') {
       setSelectedTemplate('custom');
       setNotificationType('notice');
@@ -368,9 +363,9 @@ export default function NotificationFormV2({ open, onClose, onSuccess, mode = 'c
         setDropoffAssignments([]);
       }
     }
-  }, [userData]);
+  };
 
-  const handleSubmit = useCallback(async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title || !message) {
       addToast('Please fill title and message', 'error');
@@ -416,7 +411,7 @@ export default function NotificationFormV2({ open, onClose, onSuccess, mode = 'c
       }
     } catch (error) { addToast('Operation failed', 'error'); }
     finally { setSending(false); }
-  }, [title, message, mode, initialData, onEdit, notificationType, targetType, targetRole, selectedBuses, selectedRoutes, selectedUsers, expiryDate, expiryTime, expiryDays, dropoffTargetRole, dropoffShift, currentUser, userRole, userData, addToast, onSuccess, onClose, resetForm]);
+  };
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>

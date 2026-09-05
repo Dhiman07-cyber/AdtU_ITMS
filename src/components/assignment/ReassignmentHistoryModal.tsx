@@ -29,7 +29,7 @@ import {
 	Users,
 	XCircle
 } from "lucide-react";
-import { useCallback,useEffect,useState } from "react";
+import { useEffect,useState } from "react";
 import { toast } from "react-hot-toast";
 
 // ============================================
@@ -221,7 +221,7 @@ export function ReassignmentHistoryModal({
     const gradient = getTypeGradient(defaultType);
 
     // Fetch logs
-    const fetchLogs = useCallback(async () => {
+    const fetchLogs = async () => {
         if (!currentUser) return;
 
         setLoading(true);
@@ -247,11 +247,11 @@ export function ReassignmentHistoryModal({
         } finally {
             setLoading(false);
         }
-    }, [currentUser, defaultType]);
+    };
 
     useEffect(() => {
         if (open) fetchLogs();
-    }, [open, fetchLogs]);
+    }, [open, defaultType, currentUser]);
 
     const handleRollback = async (operationId: string) => {
         if (!currentUser || !isAdmin) {

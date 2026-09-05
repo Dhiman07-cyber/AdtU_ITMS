@@ -10,7 +10,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { useAuth } from '@/contexts/auth-context';
 import { cn } from '@/lib/utils';
 import { usePathname } from 'next/navigation';
-import { createContext,useCallback,useContext,useEffect,useState } from 'react';
+import { createContext,useContext,useEffect,useState } from 'react';
 
 
 import { FCMTokenManager } from '@/components/FCMTokenManager';
@@ -73,9 +73,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const showSidebar = !authLoading && (isAdminArea || isModeratorArea) && currentUser && userData;
 
   // Handle mobile menu toggle
-  const handleMenuToggle = useCallback(() => {
+  const handleMenuToggle = () => {
     setMobileOpen(prev => !prev);
-  }, []);
+  };
 
   // Close mobile menu on route change
   useEffect(() => {
@@ -115,9 +115,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           mobileOpen,
           setMobileOpen
         }}>
-          <div className="app-shell tabular-nums">
+          <div className="app-shell tabular-nums" suppressHydrationWarning>
             {showGlobalNavbar && (
-              <div id="app-navbar">
+              <div id="app-navbar" suppressHydrationWarning>
                 <Navbar
                   onMenuToggle={handleMenuToggle}
                   isSidebarOpen={mobileOpen}
@@ -129,6 +129,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               // Grid layout for admin/moderator with sidebar
               <>
                 <div
+                  suppressHydrationWarning
                   className={cn("admin-layout", theme === 'dark' ? "bg-theme-bg" : "bg-admin-bg")}
                   style={{
                     display: 'grid',
@@ -158,6 +159,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
                   {/* Main Content Column */}
                   <main
+                    suppressHydrationWarning
                     className="main-content"
                     style={{
                       gridColumn: 2,
@@ -182,7 +184,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             ) : (
               // Standard layout without sidebar
               <>
-                <main className={`flex-grow flex flex-col ${showNavAndFooter ? 'min-h-[calc(100dvh-48px)]' : 'min-h-dvh'}`}>
+                <main suppressHydrationWarning className={`flex-grow flex flex-col ${showNavAndFooter ? 'min-h-[calc(100dvh-48px)]' : 'min-h-dvh'}`}>
                   {children}
                 </main>
                 {showGlobalFooter && (
@@ -197,53 +199,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             <PWAInstallPrompt />
 
             <FCMTokenManager />
-
-            <style jsx global>{`
-          :root {
-            --sidebar-width-expanded: 220px;
-            --sidebar-width-collapsed: 64px;
-          }
-
-          .app-shell {
-            min-height: 100dvh;
-            display: flex;
-            flex-direction: column;
-          }
-
-          /* Mobile: Hide desktop sidebar grid column */
-          @media (max-width: 767px) {
-            .admin-layout {
-              grid-template-columns: 1fr !important;
-            }
-            .admin-layout > *:first-child:not(.main-content) {
-              display: none !important;
-            }
-            .main-content {
-              grid-column: 1 !important;
-            }
-            #app-footer {
-              grid-column: 1 !important;
-            }
-          }
-
-          @media (prefers-reduced-motion: reduce) {
-            .admin-layout {
-              transition: none !important;
-            }
-            .sidebar-drawer {
-              transition: none !important;
-            }
-          }
-
-          /* Smooth transitions for content when sidebar collapses */
-          .main-content {
-            transition: padding 300ms cubic-bezier(0.2, 0.8, 0.2, 1);
-          }
-
-          /* Hide navbar when blocking overlay is active */
-          body.block-overlay #app-navbar { display: none !important; }
-          body.block-overlay #app-footer { display: none !important; }
-        `}</style>
           </div>
         </SidebarContext.Provider>
       </TooltipProvider>

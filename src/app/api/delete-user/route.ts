@@ -1,6 +1,7 @@
 import { getUserById } from '@/domains/identity';
 import { deleteUserAndData } from '@/lib/cleanup-helpers';
 import { withSecurity } from '@/lib/security/api-security';
+import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
 import { UidOnlySchema } from '@/lib/security/validation-schemas';
 import { NextResponse } from 'next/server';
 
@@ -18,6 +19,14 @@ export const DELETE = withSecurity(
         return NextResponse.json({ success: false, error: 'Cannot delete admin users' }, { status: 403 });
       }
 
+      if (auth.role === 'moderator') {
+        if (targetUser.role !== 'student') {
+          return NextResponse.json({ success: false, error: 'Moderators can only delete student accounts' }, { status: 403 });
+        }
+        const permissionDenied = await requireModeratorPermission(auth, 'students', 'canDelete');
+        if (permissionDenied) return permissionDenied;
+      }
+
       const userType = targetUser.role as 'student' | 'driver' | 'moderator';
       const result = await deleteUserAndData(uid, userType);
 
@@ -32,7 +41,7 @@ export const DELETE = withSecurity(
     }
   },
   {
-    requiredRoles: ['admin'],
+    requiredRoles: ['admin', 'moderator'],
     schema: UidOnlySchema,
   }
 );

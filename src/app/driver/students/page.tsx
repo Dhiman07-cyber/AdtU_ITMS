@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import { Badge } from "@/components/ui/badge";
@@ -25,7 +25,7 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { useCallback,useEffect,useState } from "react";
+import { useEffect,useState } from "react";
 
 // Custom Image component with fallback
 const StudentImage = ({
@@ -136,10 +136,10 @@ export default function DriverStudentsPage() {
   const [shiftFilter, setShiftFilter] = useState<string>("all");
 
   // WebSocket hook for waiting flags - uses busId for subscribing to waiting_flags_{busId}
-  const getWaitingFlagToken = useCallback(async () => {
+  const getWaitingFlagToken = async () => {
     if (!currentUser) return null;
     return currentUser.getIdToken();
-  }, [currentUser]);
+  };
   const { flags: waitingFlags, loading: waitingFlagsLoading, error: waitingFlagsError } = useWaitingFlags(driverData?.busId || '', getWaitingFlagToken);
 
   // Fetch driver data and students on assigned bus

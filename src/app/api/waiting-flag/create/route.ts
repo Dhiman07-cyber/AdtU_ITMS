@@ -22,9 +22,21 @@ export const POST = withSecurity(
       busId,
       routeId,
       stop_name,
+      // stop_lat/stop_lng are the student's GPS coordinates at the time of flagging.
+      // stopLat/stopLng are the camelCase aliases sent by the student client.
+      stop_lat: bodyStopLat,
+      stop_lng: bodyStopLng,
+      stopLat,
+      stopLng,
+      lat,
+      lng,
       accuracy,
       message
-    } = body;
+    } = body as any;
+
+    // Resolve coordinates: prefer explicit stop_lat/stop_lng, then camelCase aliases, then raw lat/lng
+    const resolvedStopLat: number | null = bodyStopLat ?? stopLat ?? lat ?? null;
+    const resolvedStopLng: number | null = bodyStopLng ?? stopLng ?? lng ?? null;
 
     try {
       // 1. Validate GPS accuracy (trusted from body)
@@ -93,7 +105,11 @@ export const POST = withSecurity(
         bus_id: busId,
         route_id: routeId,
         stop_name: stop_name || 'Current Location',
-        accuracy,
+        // Persist the student's GPS position so the driver map can show the marker
+        // and calculate distance. These come from the student device at flag-raise time.
+        stop_lat: resolvedStopLat,
+        stop_lng: resolvedStopLng,
+        // NOTE: no `accuracy` column exists on waiting_flags (PGRST204) — broadcast-only.
         status: 'raised',
         message: message || null,
         trip_id: tripId,
@@ -113,13 +129,29 @@ export const POST = withSecurity(
       }
 
       // 7. Real-time Broadcast via WebSocket
+      // IMPORTANT: include id, student_uid, student_name, stop_lat, stop_lng so the
+      // driver's handleWaitingFlagPayload can build a complete WaitingFlag object
+      // with coordinates — without these, the student marker never appears on the map.
       emitEvent(`waiting_flags_${busId}`, 'waiting_flag_created', {
+        id: flag.id,
         flagId: flag.id,
         studentUid,
+        student_uid: studentUid,
         studentName,
+        student_name: studentName,
+        busId,
+        bus_id: busId,
+        routeId: routeId || null,
+        route_id: routeId || null,
         stop_name: flagData.stop_name,
+        stop_lat: resolvedStopLat,
+        stop_lng: resolvedStopLng,
+        lat: resolvedStopLat,
+        lng: resolvedStopLng,
+        status: 'raised',
         accuracy,
         message: flagData.message,
+        created_at: flagData.created_at,
         timestamp: flagData.created_at
       }).catch(err => console.warn(`[${requestId}] Real-time broadcast failed (non-critical):`, err));
 

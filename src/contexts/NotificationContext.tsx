@@ -6,7 +6,7 @@ import {
 import { useAuth } from '@/contexts/auth-context';
 import { UserNotificationView } from '@/lib/notifications/types';
 import { authApiFetch } from '@/lib/secure-api-client';
-import { createContext,ReactNode,useCallback,useContext,useEffect,useMemo,useRef,useState } from 'react';
+import { createContext,ReactNode,useContext,useEffect,useRef,useState } from 'react';
 
 // ============================================================================
 // CONSTANTS
@@ -57,7 +57,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
         return () => document.removeEventListener('visibilitychange', handler);
     }, []);
 
-    const fetchNotifications = useCallback(async (signal?: AbortSignal) => {
+    const fetchNotifications = async (signal?: AbortSignal) => {
         if (!currentUser || !userData) {
             setNotifications([]);
             setUnreadCount(0);
@@ -87,7 +87,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
         } finally {
             if (isMountedRef.current && !signal?.aborted) setLoading(false);
         }
-    }, [currentUser, userData?.role]);
+    };
 
     useEffect(() => {
         isMountedRef.current = true;
@@ -119,7 +119,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
             controller.abort();
             clearInterval(pollIntervalId);
         };
-    }, [currentUser, userData?.role, refreshTrigger, fetchNotifications, isVisible]);
+    }, [currentUser, userData?.role, refreshTrigger, isVisible]);
 
     useEffect(() => {
         return () => {
@@ -128,7 +128,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
         };
     }, []);
 
-    const markAsRead = useCallback(async (notificationId: string) => {
+    const markAsRead = async (notificationId: string) => {
         if (!currentUser) return;
         try {
             const res = await authApiFetch(currentUser, `/api/notifications/${notificationId}/read`, {
@@ -144,9 +144,9 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
             console.error('Error marking as read:', error);
             throw error;
         }
-    }, [currentUser]);
+    };
 
-    const markAllAsRead = useCallback(async (notificationIds: string[]) => {
+    const markAllAsRead = async (notificationIds: string[]) => {
         if (!currentUser || notificationIds.length === 0) return;
         try {
             setNotifications(prev =>
@@ -168,9 +168,9 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
             console.error('Error marking all as read:', error);
             throw error;
         }
-    }, [currentUser, notifications]);
+    };
 
-    const deleteGlobally = useCallback(async (notificationId: string) => {
+    const deleteGlobally = async (notificationId: string) => {
         if (!currentUser || !userData) return;
         try {
             const res = await authApiFetch(currentUser, `/api/notifications/${notificationId}`, {
@@ -183,9 +183,9 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
             console.error('Error deleting globally:', error);
             throw error;
         }
-    }, [currentUser, userData]);
+    };
 
-    const editNotification = useCallback(async (notificationId: string, updates: { title?: string, content: string, metadata?: any }) => {
+    const editNotification = async (notificationId: string, updates: { title?: string, content: string, metadata?: any }) => {
         if (!currentUser || !userData) return;
         try {
             const res = await authApiFetch(currentUser, `/api/notifications/${notificationId}`, {
@@ -199,27 +199,25 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
             console.error('Error editing notification:', error);
             throw error;
         }
-    }, [currentUser, userData]);
+    };
 
-    const refresh = useCallback(() => {
+    const refresh = () => {
         setRefreshTrigger(prev => prev + 1);
-    }, []);
-
-    const value = useMemo<NotificationContextType>(() => ({
-        notifications,
-        unreadCount,
-        loading,
-        error,
-        markAsRead,
-        markAllAsRead,
-        deleteGlobally,
-        editNotification,
-        refresh,
-        isRealtime: false,
-    }), [notifications, unreadCount, loading, error, markAsRead, markAllAsRead, deleteGlobally, editNotification, refresh]);
+    };
 
     return (
-        <NotificationContext.Provider value={value}>
+        <NotificationContext.Provider value={{
+            notifications,
+            unreadCount,
+            loading,
+            error,
+            markAsRead,
+            markAllAsRead,
+            deleteGlobally,
+            editNotification,
+            refresh,
+            isRealtime: false,
+        }}>
             {children}
         </NotificationContext.Provider>
     );

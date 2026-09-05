@@ -19,3 +19,9 @@ loadtests
 README.md
 Dockerfile
 .dockerignore
+.agents
+.claude
+*.tsbuildinfo
+dist
+coverage
+*.log

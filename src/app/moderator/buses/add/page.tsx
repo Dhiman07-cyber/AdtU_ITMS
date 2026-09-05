@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,6 +30,7 @@ type BusFormData = {
   eveningLoad: string;
 };
 
+import { PremiumPageLoader } from '@/components/LoadingSpinner';
 import { PermissionDeniedCard } from "@/components/PermissionDeniedCard";
 import { useModeratorPermissions } from "@/hooks/useModeratorPermissions";
 
@@ -236,12 +237,8 @@ export default function AddBusPage() {
     addToast('Restored', 'info');
   };
 
-  if (authLoading || dataLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-[#010717]">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
-      </div>
-    );
+  if (authLoading || dataLoading || permsLoading) {
+    return <PremiumPageLoader message="Loading Bus Registration..." subMessage="Setting up form..." />;
   }
 
   if (!currentUser || !userData || !['admin', 'moderator'].includes(userData.role)) return null;
@@ -255,13 +252,14 @@ export default function AddBusPage() {
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-white mb-1">Add Bus</h1>
-            <p className="text-gray-400 text-xs">Register a new bus in the fleet</p>
+            <h1 className="text-3xl font-bold text-foreground">Add Bus</h1>
+            <p className="text-muted-foreground mt-1">Register a new bus in the fleet</p>
           </div>
           <Link
             href="/moderator/buses"
-            className="inline-flex items-center px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white text-sm border border-white/20 hover:border-white/30 rounded-lg transition-all duration-200 hover:shadow-lg backdrop-blur-sm"
+            className="inline-flex items-center px-3.5 py-1.5 bg-white/10 hover:bg-white/20 text-white text-sm border border-white/20 hover:border-white/30 rounded-lg transition-all duration-200 hover:shadow-md backdrop-blur-sm"
           >
+            <span className="mr-1.5 text-sm">←</span>
             Back
           </Link>
         </div>

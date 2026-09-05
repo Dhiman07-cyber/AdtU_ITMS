@@ -41,6 +41,7 @@ export class WebSocketClient {
   private destroyed = false;
   private paused = false;
   private pendingSubscriptions = new Set<string>();
+  private currentPresence: Record<string, unknown> | null = null;
   private currentToken: string;
   private visibilityHandler: (() => void) | null = null;
   private lastActivity = 0;
@@ -129,11 +130,13 @@ export class WebSocketClient {
       this.emitStatus('connected');
       this.startPing();
       // Phase-04: Send auth as first message (preferred path).
-      // The server also accepts the URL token (deprecated Path A) for backward
-      // compatibility. When Phase-05 removes URL token support, remove the URL
-      // param from connectInternal() and rely solely on this message.
       this.send({ type: 'auth', token: this.currentToken });
-      // Resend ALL active channel subscriptions registered in handlers to ensure no dropped channels on reconnect
+      // Send presence BEFORE resubscribing — server requires busId set
+      // before a student/driver can subscribe to bus channels.
+      if (this.currentPresence) {
+        this.send({ type: 'presence', ...this.currentPresence });
+      }
+      // Resend ALL active channel subscriptions registered in handlers
       for (const ch of this.handlers.keys()) {
         this.send({ type: 'subscribe', channel: ch });
       }
@@ -146,7 +149,10 @@ export class WebSocketClient {
         if (msg.type === 'message' && msg.channel) {
           const channelHandlers = this.handlers.get(msg.channel);
           if (channelHandlers) {
-            for (const h of channelHandlers) h(msg.payload || msg);
+            const payloadWithEvent = (msg.payload && typeof msg.payload === 'object')
+              ? { ...msg.payload, event: msg.event || (msg.payload as any).event }
+              : (msg.payload || msg);
+            for (const h of channelHandlers) h(payloadWithEvent);
           }
         } else if (msg.type === 'subscribed') {
           this.pendingSubscriptions.delete(msg.channel);
@@ -222,6 +228,14 @@ export class WebSocketClient {
         if (this.isConnected()) this.send({ type: 'unsubscribe', channel });
       }
     };
+  }
+
+  /** Store presence payload to be sent on connection open (before subscriptions) and maintained across reconnects. */
+  setPresence(data: Record<string, unknown>): void {
+    this.currentPresence = data;
+    if (this.isConnected()) {
+      this.send({ type: 'presence', ...data });
+    }
   }
 
   unsubscribe(channel: string): void {

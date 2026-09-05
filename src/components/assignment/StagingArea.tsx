@@ -19,7 +19,7 @@ import {
 } from "@/components/ui/tooltip";
 import type { StagedDriverAssignment,StagedRouteAssignment } from "@/lib/services/assignment-service";
 import { cn } from "@/lib/utils";
-import { AnimatePresence,motion } from "framer-motion";
+import { AnimatePresence,motion } from "motion/react";
 import {
 	ArrowRightLeft,
 	Bus,

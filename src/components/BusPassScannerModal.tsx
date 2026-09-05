@@ -13,7 +13,7 @@ import { useAuth } from '@/contexts/auth-context';
 import { getUserProfile } from '@/lib/profile-service';
 import { safeImageSrc } from '@/lib/security/url-sanitizer';
 import { BusPassVerificationResult } from '@/lib/types';
-import { motion } from 'framer-motion';
+import { motion } from "motion/react";
 import jsQR from 'jsqr';
 import {
 	AlertCircle,
@@ -26,7 +26,7 @@ import {
 	XCircle
 } from 'lucide-react';
 import Image from 'next/image';
-import { useCallback,useEffect,useRef,useState } from 'react';
+import { useEffect,useRef,useState } from 'react';
 
 interface BusPassScannerModalProps {
     isOpen: boolean;
@@ -35,7 +35,7 @@ interface BusPassScannerModalProps {
 }
 
 export default function BusPassScannerModal({ isOpen, onClose, onScanSuccess }: BusPassScannerModalProps) {
-    const { currentUser } = useAuth();
+    const { currentUser, userData } = useAuth();
     const appName = APP_NAME;
     const videoRef = useRef<HTMLVideoElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -51,7 +51,7 @@ export default function BusPassScannerModal({ isOpen, onClose, onScanSuccess }: 
 
     // Auto-start logic moved to bottom
 
-    const stopScanning = useCallback(() => {
+    const stopScanning = () => {
         isScanningRef.current = false;
 
         if (cameraStream) {
@@ -65,7 +65,7 @@ export default function BusPassScannerModal({ isOpen, onClose, onScanSuccess }: 
         }
 
         setIsScanning(false);
-    }, [cameraStream]);
+    };
 
     const startScanning = async () => {
         setError(null);
@@ -215,10 +215,7 @@ export default function BusPassScannerModal({ isOpen, onClose, onScanSuccess }: 
             if (!token) throw new Error('Unable to get authentication token');
 
             // Get driver info for bus ID assignment
-            const driverInfo = await getUserProfile(currentUser.uid, 'driver') as any;
-            const scannerBusId = driverInfo?.busIds?.[0] || driverInfo?.busId || driverInfo?.busId;
-
-            if (!scannerBusId) throw new Error('No bus assigned to driver');
+            const scannerBusId = (userData as any)?.busIds?.[0] || (userData as any)?.busId || 'driver_bus';
 
             // Detect if the scanned data is an encrypted token or a plain UID
             // Encrypted tokens are base64url encoded and typically > 100 chars

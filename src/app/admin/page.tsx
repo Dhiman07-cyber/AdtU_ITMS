@@ -4,7 +4,7 @@ import { PremiumPageLoader } from '@/components/LoadingSpinner';
 import { useAuth } from '@/contexts/auth-context';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
-import { useCallback,useEffect,useState } from 'react';
+import { useEffect,useState } from 'react';
 
 import HighLoadAlert from '@/components/HighLoadAlert';
 
@@ -101,9 +101,6 @@ export default function EnhancedAdminDashboard() {
   const router = useRouter();
 
   // State
-  const [dateRange, setDateRange] = useState('today');
-  const [shift, setShift] = useState('all');
-  const [searchQuery, setSearchQuery] = useState('');
   const [lastUpdated, setLastUpdated] = useState(new Date());
   const [isRefreshing, setIsRefreshing] = useState(false);
 
@@ -147,7 +144,7 @@ export default function EnhancedAdminDashboard() {
   const [allBuses, setAllBuses] = useState<any[]>([]);
   const [allRoutes, setAllRoutes] = useState<any[]>([]);
 
-  const fetchRealTotalCounts = useCallback(async (modeOverride?: 'days' | 'months') => {
+  const fetchRealTotalCounts = async (modeOverride?: 'days' | 'months') => {
     try {
       if (!currentUser) return;
 
@@ -239,44 +236,14 @@ export default function EnhancedAdminDashboard() {
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
     }
-  }, [currentUser]);
+  };
 
   useEffect(() => {
     // Fetch both modes on mount
     fetchRealTotalCounts();
-  }, [fetchRealTotalCounts]);
+  }, [currentUser]);
 
   const allDataLoading = authLoading;
-
-  const [stats, setStats] = useState({
-    totalStudents: 0,
-    activeStudents: 0,
-    expiringStudents: 0,
-    expiredStudents: 0,
-    totalDrivers: 0,
-    activeDrivers: 0,
-    totalBuses: 0,
-    activeBuses: 0,
-    enrouteBuses: 0,
-    operationalBuses: 0,
-    totalRoutes: 0,
-    totalNotifications: 0,
-    unreadNotifications: 0,
-    pendingVerifications: 0,
-    pendingApplications: 0,
-    approvedToday: 0,
-    rejectedToday: 0,
-    morningStudents: 0,
-    eveningStudents: 0,
-    totalRevenue: 0,
-    onlinePayments: 0,
-    offlinePayments: 0,
-    academicYearEnd: null as any,
-    softBlock: null as any,
-    hardBlock: null as any,
-    systemBusFee: 0,
-    feedbacksCount: 0
-  });
 
   // Manual refresh handler
   const handleRefreshAll = async () => {
@@ -291,52 +258,48 @@ export default function EnhancedAdminDashboard() {
     }
   };
 
-  const [busUtilization, setBusUtilization] = useState<any[]>([]);
-  const [studentDistribution, setStudentDistribution] = useState<any[]>([]);
-  const [routeOccupancy, setRouteOccupancy] = useState<any[]>([]);
   const [activeTrips, setActiveTrips] = useState<any[]>([]);
 
+  // Helper function for extracting numbers from strings
+  const extractNumber = (str: string): string => {
+    const match = str?.match(/\d+/);
+    return match ? match[0] : '?';
+  };
 
-  // Memoized calculation functions
-  const calculateStats = useCallback(() => {
-    setStats({
-      totalStudents: realCounts.totalStudents,
-      activeStudents: realCounts.activeStudents,
-      expiringStudents: 0,
-      expiredStudents: realCounts.expiredStudents || 0,
-      totalDrivers: realCounts.totalDrivers,
-      activeDrivers: realCounts.activeDrivers || 0,
-      totalBuses: realCounts.totalBuses,
-      activeBuses: realCounts.enrouteBuses, // Repurposed for trips
-      enrouteBuses: realCounts.enrouteBuses,
-      operationalBuses: realCounts.operationalBuses,
-      totalRoutes: allRoutes.length,
-      totalNotifications: 0,
-      unreadNotifications: 0,
-      pendingVerifications: realCounts.renewalRequests, // Showing Renewal Requests as "Pending Verification" as requested
-      pendingApplications: realCounts.pendingApplications,
-      approvedToday: 0,
-      rejectedToday: 0,
-      morningStudents: realCounts.morningStudents,
-      eveningStudents: realCounts.eveningStudents,
-      totalRevenue: realCounts.totalRevenue,
-      onlinePayments: realCounts.onlinePayments,
-      offlinePayments: realCounts.offlinePayments,
-      academicYearEnd: realCounts.configDates.academicYearEnd,
-      softBlock: realCounts.configDates.softBlock,
-      hardBlock: realCounts.configDates.hardBlock,
-      systemBusFee: realCounts.configDates.busFee,
-      feedbacksCount: realCounts.feedbacksCount
-    });
-  }, [realCounts, allRoutes.length]);
+  // Derived stats — plain render-time computation (React Compiler memoizes)
+  const stats = {
+    totalStudents: realCounts.totalStudents,
+    activeStudents: realCounts.activeStudents,
+    expiringStudents: 0,
+    expiredStudents: realCounts.expiredStudents || 0,
+    totalDrivers: realCounts.totalDrivers,
+    activeDrivers: realCounts.activeDrivers || 0,
+    totalBuses: realCounts.totalBuses,
+    activeBuses: realCounts.enrouteBuses,
+    enrouteBuses: realCounts.enrouteBuses,
+    operationalBuses: realCounts.operationalBuses,
+    totalRoutes: allRoutes.length,
+    totalNotifications: 0,
+    unreadNotifications: 0,
+    pendingVerifications: realCounts.renewalRequests,
+    pendingApplications: realCounts.pendingApplications,
+    approvedToday: 0,
+    rejectedToday: 0,
+    morningStudents: realCounts.morningStudents,
+    eveningStudents: realCounts.eveningStudents,
+    totalRevenue: realCounts.totalRevenue,
+    onlinePayments: realCounts.onlinePayments,
+    offlinePayments: realCounts.offlinePayments,
+    academicYearEnd: realCounts.configDates.academicYearEnd,
+    softBlock: realCounts.configDates.softBlock,
+    hardBlock: realCounts.configDates.hardBlock,
+    systemBusFee: realCounts.configDates.busFee,
+    feedbacksCount: realCounts.feedbacksCount
+  };
 
-  // Memoized calculation functions
-  const calculateCharts = useCallback(() => {
-    // Bus utilization with enhanced data and sorting
-    const busesToUse = allBuses;
-    const busUtilData = busesToUse.map((bus: any) => {
+  const busUtilization = allBuses.map((bus: any) => {
       const currentMembers = bus.currentMembers || 0;
-      let capacity = 55; // Default
+      let capacity = 55;
 
       if (bus.totalCapacity) {
         capacity = bus.totalCapacity;
@@ -361,26 +324,18 @@ export default function EnhancedAdminDashboard() {
         morningCount,
         eveningCount
       };
-    }).sort((a, b) => {
+    }).sort((a: any, b: any) => {
       const aNum = parseInt(a.name.replace(/\D/g, '')) || 0;
       const bNum = parseInt(b.name.replace(/\D/g, '')) || 0;
       return aNum - bNum;
     });
-    setBusUtilization(busUtilData);
 
-    // Student distribution by shift
-    const morningCount = realCounts.morningStudents;
-    const eveningCount = realCounts.eveningStudents;
+  const studentDistribution = [
+    { name: 'Evening', value: realCounts.eveningStudents || 0, color: '#3b82f6' },
+    { name: 'Morning', value: realCounts.morningStudents || 0, color: '#f97316' }
+  ];
 
-    setStudentDistribution([
-      { name: 'Evening', value: eveningCount || 0, color: '#3b82f6' }, // Blue
-      { name: 'Morning', value: morningCount || 0, color: '#f97316' }  // Orange
-    ]);
-
-    // Route occupancy data - sorted by occupancy rate (highest first)
-    const routesToUse = allRoutes;
-
-    const routeOccupancyData = routesToUse.map((route: any) => {
+  const routeOccupancy = allRoutes.map((route: any) => {
       const routeBuses = allBuses.filter((b: any) => b.routeId === route.routeId || b.route?.routeId === route.routeId);
 
       if (routeBuses.length === 0) {
@@ -396,7 +351,7 @@ export default function EnhancedAdminDashboard() {
       let totalCurrentLoad = 0;
 
       routeBuses.forEach((bus: any) => {
-        let capacity = 50; // Default
+        let capacity = 50;
         if (bus.capacity) {
           if (typeof bus.capacity === 'string' && bus.capacity.includes('/')) {
             capacity = parseInt(bus.capacity.split('/')[1]) || 50;
@@ -420,24 +375,11 @@ export default function EnhancedAdminDashboard() {
         capacity: totalCapacity
       };
     })
-      .filter(r => r.capacity > 0)
-      .sort((a, b) => b.occupancy - a.occupancy)
+      .filter((r: any) => r.capacity > 0)
+      .sort((a: any, b: any) => b.occupancy - a.occupancy)
       .slice(0, 8);
-    setRouteOccupancy(routeOccupancyData);
 
-  }, [allBuses, allRoutes, realCounts]);
-
-  // Helper function for extracting numbers from strings
-  const extractNumber = (str: string): string => {
-    const match = str?.match(/\d+/);
-    return match ? match[0] : '?';
-  };
-
-  // Calculate stats when data changes
-  useEffect(() => {
-    calculateStats();
-    calculateCharts();
-  }, [calculateStats, calculateCharts]);
+  // Update timestamp when data changes
 
   // Update timestamp when data changes
   useEffect(() => {

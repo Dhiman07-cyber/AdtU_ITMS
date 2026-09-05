@@ -3,14 +3,26 @@ import path from "path";
 
 const nextConfig: NextConfig = {
   /* config options here */
-  output: 'standalone',
+  output: process.env.VERCEL ? undefined : 'standalone',
+  allowedDevOrigins: [
+    '127.0.0.1',
+    'localhost',
+    '127.0.0.1:3000',
+    'localhost:3000',
+  ],
   // Performance optimizations
-  serverExternalPackages: ['cloudinary', 'razorpay'],
+  // Next.js 16 Compiler automatic memoization
+  reactCompiler: true,
 
   experimental: {
+    // Next.js 16 Auth Interrupts for forbidden() & unauthorized() boundaries
+    authInterrupts: true,
+    // Next.js 16 Turbopack Filesystem Caching for faster dev server restarts
+    turbopackFileSystemCacheForDev: true,
     optimizePackageImports: [
       'lucide-react',
-      'framer-motion',
+      'motion',
+      'motion/react',
       'recharts',
       '@radix-ui/react-dialog',
       '@radix-ui/react-dropdown-menu',
@@ -103,7 +115,7 @@ const nextConfig: NextConfig = {
             priority: 35,
           },
           uiLibs: {
-            test: /[\\/]node_modules[\\/](@radix-ui|framer-motion|recharts|lucide-react|class-variance-authority)[\\/]/,
+            test: /[\\/]node_modules[\\/](@radix-ui|motion|framer-motion|recharts|lucide-react|class-variance-authority)[\\/]/,
             name: 'ui-libs',
             chunks: 'all',
             priority: 30,
@@ -156,7 +168,7 @@ const nextConfig: NextConfig = {
     ],
     // Image optimization settings - prioritize quality
     formats: ['image/webp', 'image/avif'],
-    minimumCacheTTL: 3600,
+    minimumCacheTTL: 14400,
     dangerouslyAllowSVG: false,
     contentSecurityPolicy: "default-src 'self'; script-src 'none'; sandbox;",
     // Disable automatic optimization for Cloudinary URLs to preserve quality
@@ -180,7 +192,7 @@ const nextConfig: NextConfig = {
       // COOP header configured for Firebase Auth popup compatibility
       {
         key: 'Cross-Origin-Opener-Policy',
-        value: isProduction ? 'same-origin-allow-popups' : 'unsafe-none',
+        value: 'unsafe-none',
       },
       {
         key: 'Cross-Origin-Embedder-Policy',
@@ -202,6 +214,7 @@ const nextConfig: NextConfig = {
             ? "connect-src 'self' ws://* wss://* ws: wss: https://fonts.openmaptiles.org https://demotiles.maplibre.org https://*.razorpay.com https://api.razorpay.com wss://*.supabase.co https://*.supabase.co https://*.supabase.in https://firestore.googleapis.com https://securetoken.googleapis.com https://identitytoolkit.googleapis.com https://*.googleapis.com https://apis.google.com https://accounts.google.com https://www.google.com https://www.googletagmanager.com https://analytics.google.com https://www.google-analytics.com https://api.cloudinary.com https://*.cloudinary.com https://vercel.live https://*.vercel.live https://vitals.vercel-insights.com"
             : "connect-src 'self' ws://localhost:* ws://127.0.0.1:* ws://* wss://* ws: wss: http://localhost:* https://*.devtunnels.ms https://fonts.openmaptiles.org https://demotiles.maplibre.org https://*.razorpay.com https://api.razorpay.com wss://*.supabase.co https://*.supabase.co https://*.supabase.in https://firestore.googleapis.com https://securetoken.googleapis.com https://identitytoolkit.googleapis.com https://*.googleapis.com https://apis.google.com https://accounts.google.com https://www.google.com https://www.googletagmanager.com https://analytics.google.com https://www.google-analytics.com https://api.cloudinary.com https://*.cloudinary.com https://vercel.live https://*.vercel.live https://vitals.vercel-insights.com",
           "frame-src 'self' https://api.razorpay.com https://checkout.razorpay.com https://accounts.google.com https://*.firebaseapp.com https://vercel.live https://*.vercel.live https://www.google.com",
+          "frame-ancestors 'self' https://accounts.google.com https://*.firebaseapp.com",
           "media-src 'self' blob: data: https://*.supabase.co https://*.supabase.in",
           "base-uri 'self'",
           "form-action 'self' https://api.razorpay.com https://accounts.google.com",
@@ -211,7 +224,7 @@ const nextConfig: NextConfig = {
       },
       // Security headers
       { key: 'X-Content-Type-Options', value: 'nosniff' },
-      { key: 'X-Frame-Options', value: 'DENY' },
+      { key: 'X-Frame-Options', value: 'SAMEORIGIN' },
       { key: 'X-XSS-Protection', value: '1; mode=block' },
       { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
       { key: 'X-DNS-Prefetch-Control', value: 'on' },
@@ -220,7 +233,7 @@ const nextConfig: NextConfig = {
         key: 'Permissions-Policy',
         value: 'camera=(self), microphone=(), geolocation=(self), payment=(self), usb=(), bluetooth=(), serial=(), hid=(), magnetometer=(), gyroscope=(), accelerometer=(self), autoplay=()',
       },
-      { key: 'Cross-Origin-Resource-Policy', value: 'same-origin' },
+      { key: 'Cross-Origin-Resource-Policy', value: 'cross-origin' },
     ];
 
     return [

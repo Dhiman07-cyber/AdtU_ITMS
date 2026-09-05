@@ -9,7 +9,12 @@ const validator = new LocationValidationService();
 
 const MAX_SPEED_KMH = 200;
 const MAX_JUMP_METERS = 5000;
-const MAX_ACCURACY_METERS = 1000;
+// Real-world Android GPS accuracy commonly ranges 80–300 m depending on
+// signal strength, device hardware and urban canyons. 80 m was silently
+// rejecting the majority of legitimate driver updates, which prevented
+// emitEvent from firing and left the student's WS feed starved.
+// 150 m is a safer threshold that blocks only genuinely degraded fixes.
+const MAX_ACCURACY_METERS = 150;
 
 function validateBounds(n: LocationUpdateNormalized): string | null {
   if (!Number.isFinite(n.lat) || !Number.isFinite(n.lng)) return 'Valid latitude and longitude are required';
@@ -17,7 +22,7 @@ function validateBounds(n: LocationUpdateNormalized): string | null {
   if (n.lat < -90 || n.lat > 90 || n.lng < -180 || n.lng > 180) return 'Coordinates are out of range';
   if (n.speed !== null && (n.speed < 0 || n.speed > MAX_SPEED_KMH)) return `Speed exceeds limit (${MAX_SPEED_KMH} km/h)`;
   if (n.heading !== null && (n.heading < 0 || n.heading > 360)) return 'Heading is out of range';
-  if (n.accuracy !== null && (n.accuracy < 0 || n.accuracy > MAX_ACCURACY_METERS)) return 'Accuracy is out of range';
+  if (n.accuracy !== null && (n.accuracy < 0 || n.accuracy > MAX_ACCURACY_METERS)) return `GPS accuracy (${Math.round(n.accuracy)}m) exceeds threshold (${MAX_ACCURACY_METERS}m)`;
   return null;
 }
 

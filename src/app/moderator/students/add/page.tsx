@@ -1,5 +1,6 @@
 "use client";
 
+import { PremiumPageLoader } from '@/components/LoadingSpinner';
 import AddStudentPaymentSection from '@/components/AddStudentPaymentSection';
 import EnhancedDatePicker from "@/components/enhanced-date-picker";
 import FacultyDepartmentSelector from '@/components/faculty-department-selector';
@@ -187,6 +188,7 @@ export default function AddStudentForm() {
 
   // Recalculate validUntil when academicDeadline changes
   useEffect(() => {
+    if (!academicDeadline) return;
     handleSessionStartYearChange(formData.sessionStartYear);
   }, [academicDeadline]);
 
@@ -352,6 +354,12 @@ export default function AddStudentForm() {
     const validDuration = isNaN(durationYears) ? 1 : durationYears;
 
     const endYear = validStartYear + validDuration;
+
+    // If deadline config not yet loaded from server, return empty validUntil until fetched
+    if (!academicDeadline) {
+      return { endYear, validUntil: '' };
+    }
+
     // Calculate validUntil using dynamic academic deadline
     const validUntil = calculateValidUntilDate(validStartYear, validDuration, academicDeadline).toISOString();
     return { endYear, validUntil };
@@ -778,6 +786,10 @@ export default function AddStudentForm() {
     addToast('Form reset successfully', 'info');
   };
 
+  if (loading || permsLoading) {
+    return <PremiumPageLoader message="Loading Student Registration..." subMessage="Setting up form..." />;
+  }
+
   if (!permsLoading && !canStudentAdd) {
     return <PermissionDeniedCard title="Adding Student Restricted" actionName="Adding Students" />;
   }
@@ -788,13 +800,14 @@ export default function AddStudentForm() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-white mb-1">Add Student</h1>
-            <p className="text-gray-400 text-xs">Register a new student in the system</p>
+            <h1 className="text-3xl font-bold text-foreground">Add Student</h1>
+            <p className="text-muted-foreground mt-1">Register a new student in the system</p>
           </div>
           <Link
             href="/moderator/students"
-            className="inline-flex items-center px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white text-sm border border-white/20 hover:border-white/30 rounded-lg transition-all duration-200 hover:shadow-lg"
+            className="inline-flex items-center px-3.5 py-1.5 bg-white/10 hover:bg-white/20 text-white text-sm border border-white/20 hover:border-white/30 rounded-lg transition-all duration-200 hover:shadow-md"
           >
+            <span className="mr-1.5 text-sm">←</span>
             Back
           </Link>
         </div>

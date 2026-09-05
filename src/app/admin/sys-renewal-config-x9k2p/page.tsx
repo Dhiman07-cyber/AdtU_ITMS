@@ -34,7 +34,7 @@ import {
 	XCircle
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { useCallback,useEffect,useState } from 'react';
+import { useEffect,useState } from 'react';
 
 // ============================================================================
 // TYPES
@@ -403,7 +403,7 @@ export default function SystemRenewalConfigPage() {
     const [privacyUpdatedAt, setPrivacyUpdatedAt] = useState<string | null>(null);
 
     // Load configurations
-    const loadConfigs = useCallback(async () => {
+    const loadConfigs = async () => {
         try {
             setLoading(true);
 
@@ -490,30 +490,30 @@ export default function SystemRenewalConfigPage() {
         } finally {
             setLoading(false);
         }
-    }, [showToast]);
+    };
 
     useEffect(() => {
         loadConfigs();
-    }, [loadConfigs]);
+    }, []);
 
     // Check for unsaved changes
-    const hasSystemChanges = useCallback(() => {
+    const hasSystemChanges = () => {
         return JSON.stringify(systemConfig) !== JSON.stringify(originalSystemConfig);
-    }, [systemConfig, originalSystemConfig]);
+    };
 
-    const hasDeadlineChanges = useCallback(() => {
+    const hasDeadlineChanges = () => {
         return dates.academicSessionStart?.month !== originalDates.academicSessionStart?.month ||
             dates.academicSessionStart?.day !== originalDates.academicSessionStart?.day ||
             dates.urgentWarningDays !== originalDates.urgentWarningDays;
-    }, [dates, originalDates]);
+    };
 
-    const hasTermsChanges = useCallback(() => {
+    const hasTermsChanges = () => {
         return JSON.stringify(termsConfig) !== JSON.stringify(originalTermsConfig);
-    }, [termsConfig, originalTermsConfig]);
+    };
 
-    const hasPrivacyChanges = useCallback(() => {
+    const hasPrivacyChanges = () => {
         return JSON.stringify(privacyConfig) !== JSON.stringify(originalPrivacyConfig);
-    }, [privacyConfig, originalPrivacyConfig]);
+    };
 
     const hasChanges = hasSystemChanges() || hasDeadlineChanges() || hasTermsChanges() || hasPrivacyChanges();
 

@@ -61,6 +61,17 @@ export interface EnvironmentValidationResult {
     summary: Record<string, string>;
 }
 
+export function assertPrivilegedTokenSafe(
+    token: string | undefined = process.env.WS_PRIVILEGED_TOKEN,
+    env: string = process.env.NODE_ENV || 'development'
+): void {
+    if (env === 'production') {
+        if (!token || token.trim() === '' || token === '__server__') {
+            throw new Error('WS_PRIVILEGED_TOKEN is missing or insecure in production.');
+        }
+    }
+}
+
 export function validateEnvironment(options?: { isWebSocketServer?: boolean }): EnvironmentValidationResult {
     const missing: string[] = [];
     const warnings: string[] = [];
@@ -85,6 +96,16 @@ export function validateEnvironment(options?: { isWebSocketServer?: boolean }): 
     }
 
     const isProd = process.env.NODE_ENV === 'production';
+    if (isProd) {
+        const wsToken = process.env.WS_PRIVILEGED_TOKEN;
+        if (!wsToken || wsToken.trim() === '' || wsToken === '__server__') {
+            if (!missing.includes('WS_PRIVILEGED_TOKEN')) {
+                missing.push('WS_PRIVILEGED_TOKEN');
+            }
+            warnings.push('WS_PRIVILEGED_TOKEN is missing or insecure in production.');
+        }
+    }
+
     const valid = missing.length === 0;
 
     if (!valid && isProd) {

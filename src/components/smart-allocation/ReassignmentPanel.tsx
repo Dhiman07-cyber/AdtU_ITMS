@@ -20,7 +20,7 @@ import {
 import { useAuth } from "@/contexts/auth-context";
 import { cn } from "@/lib/utils";
 import { isStudentBusShiftCompatible,normalizeShift,type CanonicalShift } from "@/lib/utils/shift-utils";
-import { AnimatePresence,motion } from "framer-motion";
+import { AnimatePresence,motion } from "motion/react";
 import {
 	AlertCircle,
 	ArrowRight,
@@ -32,7 +32,7 @@ import {
 	Users,
 	X
 } from "lucide-react";
-import { useCallback,useEffect,useMemo,useState } from "react";
+import { useEffect,useState } from "react";
 import { toast } from "react-hot-toast";
 
 // =============================================================================
@@ -214,10 +214,7 @@ export default function ReassignmentPanel({
   const [draftAssignments, setDraftAssignments] = useState<Record<string, AssignmentDetails>>({});
   const [busShiftSelections, setBusShiftSelections] = useState<Record<string, "Morning" | "Evening">>({});
 
-  const activeStudent = useMemo(() =>
-    selectedStudents.find(s => s.id === activeStudentId),
-    [selectedStudents, activeStudentId]
-  );
+  const activeStudent = selectedStudents.find(s => s.id === activeStudentId);
 
   // ─────────────────────────────────────────────────────────────────────────
   // ALGORITHM: Pre-Analysis & Load-Balanced Distribution
@@ -227,7 +224,7 @@ export default function ReassignmentPanel({
   // 1. Pre-Analysis: Calculate Compatibility Map (Static for session)
   // This tells us for each student, WHICH buses are physically possible (Route/Shift)
   // We do NOT check capacity here, because capacity changes dynamically during edits.
-  const { studentOptions, assignableStudents, unassignable } = useMemo(() => {
+  const { studentOptions, assignableStudents, unassignable } = (() => {
     const options = new Map<string, BusData[]>();
     const assignable: ProcessedStudent[] = [];
     const unassignableList: { student: StudentData; reason: string }[] = [];
@@ -244,8 +241,16 @@ export default function ReassignmentPanel({
         return true;
       });
 
-      if (eligible.length === 0) {
-        let reason = "No alternative buses available";
+      options.set(student.id, eligible);
+
+      if (eligible.length > 0) {
+        assignable.push({
+          student,
+          normalizedShift: shift,
+          eligibleBuses: eligible,
+        });
+      } else {
+        let reason = "No route serves this stop";
         const coversStop = allBuses.some(b => b.id !== currentBus.id && busCoversStop(b, stop_name));
         const compatibleShift = allBuses.some(b => b.id !== currentBus.id && isShiftCompatible(shift, b.shift));
 
@@ -253,18 +258,11 @@ export default function ReassignmentPanel({
         else if (!compatibleShift) reason = `No other buses support ${shift} shift`;
 
         unassignableList.push({ student, reason });
-      } else {
-        options.set(student.id, eligible);
-        assignable.push({
-          student,
-          normalizedShift: shift,
-          eligibleBuses: eligible,
-        });
       }
     });
 
     return { studentOptions: options, assignableStudents: assignable, unassignable: unassignableList };
-  }, [selectedStudents, allBuses, currentBus]);
+  })();
 
 
   // 3. Initial Allocation (Run once on mount)
@@ -321,7 +319,7 @@ export default function ReassignmentPanel({
   }, [assignableStudents, allBuses, currentBus]);
 
   // 4. Derived State: Live Plan & Loads
-  const { plan, busLoadImpacts, liveBusLoads } = useMemo(() => {
+  const { plan, busLoadImpacts, liveBusLoads } = (() => {
     const planMap = new Map<string, { bus: BusData; students: (StudentData & { overrideStopId?: string; overrideStopName?: string; overrideShift?: CanonicalShift })[] }>();
 
     // Helper to get base loads
@@ -373,7 +371,7 @@ export default function ReassignmentPanel({
       busLoadImpacts: impacts,
       liveBusLoads: currentLoads
     };
-  }, [draftAssignments, selectedStudents, allBuses]);
+  })();
 
   // Total students being moved
   const totalMoving = plan.reduce((sum, item) => sum + item.students.length, 0);
@@ -385,7 +383,7 @@ export default function ReassignmentPanel({
   // HANDLERS
   // ─────────────────────────────────────────────────────────────────────────
 
-  const handleConfirm = useCallback(async () => {
+  const handleConfirm = async () => {
     if (totalMoving === 0 || isProcessing) return;
 
     setIsProcessing(true);
@@ -490,7 +488,7 @@ export default function ReassignmentPanel({
     } finally {
       setIsProcessing(false);
     }
-  }, [plan, currentBus, totalMoving, onSuccess, onClose, isProcessing, currentUser, userData]);
+  };
 
   // ─────────────────────────────────────────────────────────────────────────
   // RENDER

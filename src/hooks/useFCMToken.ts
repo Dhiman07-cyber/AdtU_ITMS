@@ -1,7 +1,7 @@
 "use client";
 
 import { getFCMToken,requestNotificationPermission } from '@/lib/fcm-service';
-import { useCallback,useEffect,useRef,useState } from 'react';
+import { useEffect,useRef,useState } from 'react';
 
 export const useFCMToken = () => {
     const [fcmToken, setFcmToken] = useState<string | null>(null);
@@ -9,7 +9,7 @@ export const useFCMToken = () => {
     const [error, setError] = useState<string | null>(null);
     const isMountedRef = useRef(true);
 
-    const requestPermission = useCallback(async () => {
+    const requestPermission = async () => {
         setLoading(true);
         setError(null);
         try {
@@ -29,7 +29,7 @@ export const useFCMToken = () => {
         } finally {
             if (isMountedRef.current) setLoading(false);
         }
-    }, []);
+    };
 
     useEffect(() => {
         isMountedRef.current = true;

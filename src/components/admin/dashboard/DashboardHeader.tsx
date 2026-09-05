@@ -57,7 +57,7 @@ export default function DashboardHeader({
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
               <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]"></span>
             </div>
-            <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-widest">Live Engine</span>
+            <span className="text-[10px] font-bold text-emerald-400">Live Engine</span>
           </div>
         </div>
 
@@ -73,9 +73,9 @@ export default function DashboardHeader({
 
       <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
         <div className="flex flex-col items-start lg:items-end">
-          <span className={cn("text-xs font-semibold tracking-wider flex items-center gap-2", theme === 'dark' ? "text-slate-400" : "text-[#6B7280]")}>
+          <span className={cn("text-xs font-semibold flex items-center gap-2", theme === 'dark' ? "text-slate-400" : "text-[#6B7280]")}>
             <Clock className="w-3.5 h-3.5" />
-            LAST UPDATED
+            Last Updated
           </span>
           <span className={cn("text-sm font-mono", theme === 'dark' ? "text-slate-300" : "text-[#111827]")}>
             {lastUpdated.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
@@ -85,15 +85,10 @@ export default function DashboardHeader({
         <Button
           onClick={onRefresh}
           disabled={isRefreshing}
-          className={cn(
-            "group h-10 px-5 border rounded-xl transition-all duration-300 active:scale-95",
-            theme === 'dark'
-              ? "bg-[#0a0b14] hover:bg-[#0f101f] text-cyan-400 border-cyan-500/20 hover:border-cyan-400/50 shadow-lg shadow-cyan-500/5 hover:shadow-cyan-500/10"
-              : "bg-[#1E3A8A] hover:bg-[#1E40AF] text-white border-[#1E3A8A]/20 hover:border-[#1E3A8A]/50 shadow-lg shadow-[#1E3A8A]/10 hover:shadow-[#1E3A8A]/20"
-          )}
+          className="group h-8 px-4 bg-white hover:bg-gray-50 text-gray-600 hover:text-blue-600 border border-gray-200 hover:border-blue-200 shadow-sm hover:shadow-lg hover:shadow-blue-500/10 font-bold text-[10px] uppercase tracking-widest rounded-lg transition-all duration-300 active:scale-95 disabled:opacity-50 flex items-center justify-center"
         >
           <RefreshCw className={`mr-2 h-3.5 w-3.5 transition-transform duration-500 ${isRefreshing ? 'animate-spin' : 'group-hover:rotate-180'}`} />
-          <span className="text-[10px] font-bold uppercase tracking-widest">Refresh Analytics</span>
+          Refresh
         </Button>
       </div>
     </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { FullScreenLoader } from '@/components/LoadingSpinner';
+import { PremiumPageLoader } from '@/components/LoadingSpinner';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card,CardContent } from '@/components/ui/card';
@@ -55,7 +55,7 @@ import {
 } from 'lucide-react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
-import { useCallback,useEffect,useMemo,useState } from 'react';
+import { useEffect,useState } from 'react';
 
 interface FeedbackEntry {
     id: string;
@@ -124,7 +124,7 @@ export default function ModeratorFeedbackPage() {
         }
     }, [currentUser, userData, authLoading, router]);
 
-    const fetchFeedback = useCallback(async () => {
+    const fetchFeedback = async () => {
         if (!currentUser) return;
 
         try {
@@ -155,17 +155,17 @@ export default function ModeratorFeedbackPage() {
             setLoading(false);
             setRefreshing(false);
         }
-    }, [currentUser]);
+    };
 
     // Fetch feedback on mount and when user is ready
     useEffect(() => {
         if (currentUser && userData?.role === 'moderator') {
             fetchFeedback();
         }
-    }, [currentUser, userData, fetchFeedback]);
+    }, [currentUser, userData]);
 
     // Load drivers for forward modal (Moderators can only forward to Drivers)
-    const loadDrivers = useCallback(async () => {
+    const loadDrivers = async () => {
         if (!currentUser) return;
         setLoadingRecipients(true);
 
@@ -173,25 +173,22 @@ export default function ModeratorFeedbackPage() {
             const token = await currentUser.getIdToken();
 
             // Fetch drivers
-            const driverResponse = await fetch('/api/drivers/get-all', {
-                headers: { 'Authorization': `Bearer ${token}` }
+            const response = await fetch('/api/drivers/get-all', {
+                headers: {
+                    'Authorization': `Bearer ${token}`
+                }
             });
-            if (driverResponse.ok) {
-                const driverData = await driverResponse.json();
-                if (driverData.success) {
-                    const mappedDrivers = driverData.drivers.map((d: any) => ({
-                        id: d.id,
-                        name: d.name || d.fullName || 'Unknown',
+
+            if (response.ok) {
+                const data = await response.json();
+                if (data.success) {
+                    const mapped = (data.drivers || []).map((d: any) => ({
+                        id: d.uid || d.id,
+                        name: d.fullName || d.name || 'Driver',
                         employeeId: d.employeeId || d.driverId || 'N/A',
-                        role: 'driver' as const
+                        role: 'driver'
                     }));
-
-                    // Natural sort by employee ID (DB-01, DB-02...)
-                    mappedDrivers.sort((a: any, b: any) =>
-                        a.employeeId.localeCompare(b.employeeId, undefined, { numeric: true, sensitivity: 'base' })
-                    );
-
-                    setDrivers(mappedDrivers);
+                    setDrivers(mapped);
                 }
             }
         } catch (err) {
@@ -199,25 +196,22 @@ export default function ModeratorFeedbackPage() {
         } finally {
             setLoadingRecipients(false);
         }
-    }, [currentUser]);
+    };
 
-    // Filtering Logic — memoized so searching/filtering doesn't rescan on every
-    // unrelated re-render (modal opens, refresh spinner, etc.).
-    const filteredFeedback = useMemo(() => {
+    // Filtering Logic — direct derivation in render
+    const filteredFeedback = feedback.filter(item => {
         const q = searchQuery.toLowerCase();
-        return feedback.filter(item => {
-            const matchesSearch =
-                !q ||
-                item.name.toLowerCase().includes(q) ||
-                item.email.toLowerCase().includes(q) ||
-                item.message.toLowerCase().includes(q) ||
-                item.user_id.toLowerCase().includes(q);
+        const matchesSearch =
+            !q ||
+            item.name.toLowerCase().includes(q) ||
+            item.email.toLowerCase().includes(q) ||
+            item.message.toLowerCase().includes(q) ||
+            item.user_id.toLowerCase().includes(q);
 
-            const matchesRole = roleFilter === 'all' || item.role === roleFilter;
+        const matchesRole = roleFilter === 'all' || item.role === roleFilter;
 
-            return matchesSearch && matchesRole;
-        });
-    }, [feedback, searchQuery, roleFilter]);
+        return matchesSearch && matchesRole;
+    });
 
     const formatDate = formatDateTimeShort;
 
@@ -367,7 +361,7 @@ export default function ModeratorFeedbackPage() {
     };
 
     if (authLoading) {
-        return <FullScreenLoader />;
+        return <PremiumPageLoader message="Loading Feedback..." subMessage="Fetching user feedback..." />;
     }
 
     return (
@@ -375,24 +369,26 @@ export default function ModeratorFeedbackPage() {
             {/* Page Header */}
             <div className="mb-6">
                 <div className="flex items-center justify-between gap-3">
-                    <h1 className="text-xl sm:text-3xl font-bold text-gray-900 dark:text-white truncate">Feedback Management</h1>
+                    <div>
+                        <h1 className="text-3xl font-bold text-foreground">Feedback Management</h1>
+                        <p className="text-muted-foreground mt-1">Manage and action user feedback submissions</p>
+                    </div>
 
                     <Button
                         onClick={fetchFeedback}
                         disabled={refreshing}
                         className={cn(
-                            "group h-8 px-4 bg-white hover:bg-gray-50 text-gray-600 hover:text-purple-600 border border-gray-200 hover:border-purple-200 shadow-sm hover:shadow-lg hover:shadow-purple-500/10 font-bold text-[10px] uppercase tracking-widest rounded-lg transition-all duration-300 active:scale-95",
+                            "group h-8 px-3.5 bg-zinc-100 hover:bg-zinc-200/80 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-200 hover:text-blue-600 dark:hover:text-blue-400 border border-zinc-300/80 dark:border-zinc-700 shadow-sm hover:shadow-md hover:border-blue-300 dark:hover:border-blue-500/50 font-bold text-[10px] uppercase tracking-widest rounded-lg transition-all duration-300 active:scale-95 cursor-pointer",
                             refreshing && "opacity-70 cursor-not-allowed"
                         )}
                     >
                         <RefreshCw className={cn(
                             "mr-2 h-3.5 w-3.5 transition-transform duration-500",
-                            refreshing ? "animate-spin text-purple-600" : "group-hover:rotate-180"
+                            refreshing ? "animate-spin text-blue-600" : "group-hover:rotate-180"
                         )} />
                         {refreshing ? 'Refreshing...' : 'Refresh'}
                     </Button>
                 </div>
-                <p className="text-gray-600 dark:text-gray-400 mt-1 text-xs sm:text-sm">Manage and action user feedback submissions</p>
             </div>
 
             {/* Main Card - Darker background */}
@@ -417,7 +413,7 @@ export default function ModeratorFeedbackPage() {
                             <button
                                 onClick={() => setRoleFilter('all')}
                                 className={`flex-1 md:flex-initial px-3 sm:px-4 py-2 rounded-md text-[10px] sm:text-xs font-medium transition-all ${roleFilter === 'all'
-                                    ? 'bg-purple-600 text-white shadow-sm'
+                                    ? 'bg-blue-600 text-white shadow-sm'
                                     : 'text-gray-400 hover:text-white hover:bg-gray-700'
                                     }`}
                             >

@@ -1,7 +1,6 @@
 'use client';
 
 import { cn } from '@/lib/utils';
-import { useMemo } from 'react';
 
 interface HeatStripProps {
   stops: Array<{ id: string; name: string; sequence: number }>;
@@ -19,7 +18,7 @@ export default function HeatStrip({
   className 
 }: HeatStripProps) {
   
-  const stopData = useMemo(() => {
+  const stopData = (() => {
     if (!counts || counts.size === 0) {
       return stops.map(stop => ({
         ...stop,
@@ -40,7 +39,7 @@ export default function HeatStrip({
         intensity
       };
     });
-  }, [stops, counts]);
+  })();
 
   const getHeatColor = (intensity: number) => {
     if (intensity === 0) return 'bg-zinc-700';

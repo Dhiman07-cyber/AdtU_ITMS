@@ -2,6 +2,7 @@
 
 import Avatar from '@/components/Avatar';
 import { ExportButton } from '@/components/ExportButton';
+import { PremiumPageLoader } from '@/components/LoadingSpinner';
 import { Button } from "@/components/ui/button";
 import {
 	Card,
@@ -46,7 +47,7 @@ import { exportToExcel } from '@/lib/export-helpers';
 import { safeImageSrc } from "@/lib/security/url-sanitizer";
 import { supabase } from '@/lib/supabase-client';
 import { cn } from '@/lib/utils';
-import { Edit,Eye,Filter,Loader2,MoreHorizontal,Plus,QrCode,RefreshCw,Search,Trash2 } from "lucide-react";
+import { ArrowRightLeft, Edit,Eye,Filter,Loader2,MoreHorizontal,Plus,QrCode,RefreshCw,Search,Trash2 } from "lucide-react";
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect,useMemo,useState } from 'react';
@@ -276,7 +277,11 @@ export default function AdminStudents() {
         }
     };
 
-    const commonBtnClass = "group h-8 px-4 bg-white hover:bg-gray-50 text-gray-700 hover:text-purple-600 border border-gray-200 hover:border-purple-200 shadow-sm hover:shadow-lg hover:shadow-purple-500/10 font-bold text-[10px] uppercase tracking-widest rounded-lg transition-all duration-300 active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer";
+    if (authLoading) {
+        return <PremiumPageLoader message="Loading Student Directory..." subMessage="Fetching students..." />;
+    }
+
+    const commonBtnClass = "group h-8 px-4 bg-white hover:bg-gray-50 text-gray-600 hover:text-blue-600 border border-gray-200 hover:border-blue-200 shadow-sm hover:shadow-lg hover:shadow-blue-500/10 font-bold text-[10px] uppercase tracking-widest rounded-lg transition-all duration-300 active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer";
 
     return (
         <div className="mt-12 space-y-6">
@@ -289,15 +294,24 @@ export default function AdminStudents() {
                 <div className="flex gap-2">
                     {canStudentAdd && (
                         <Link href="/moderator/students/add">
-                            <Button className="bg-blue-600 hover:bg-blue-700 text-white border border-blue-700 transition-all duration-200 hover:scale-105 hover:shadow-lg rounded-md px-2.5 py-1.5 text-xs h-8">
+                            <Button className="bg-blue-600 hover:bg-blue-700 text-white border border-blue-700 shadow-sm transition-all duration-200 hover:scale-105 hover:shadow-lg rounded-md px-2.5 py-1.5 text-xs h-8">
                                 <Plus className="mr-1.5 h-3.5 w-3.5" />
                                 Add New Student
                             </Button>
                         </Link>
                     )}
 
+                    {canStudentReassign && (
+                        <Link href="/moderator/smart-allocation">
+                            <Button className="bg-slate-800 hover:bg-slate-900 text-white dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-100 border border-slate-700 dark:border-slate-600 shadow-sm transition-all duration-200 hover:scale-105 hover:shadow-lg rounded-md px-2.5 py-1.5 text-xs h-8">
+                                <ArrowRightLeft className="mr-1.5 h-3.5 w-3.5" />
+                                Student Reassignment
+                            </Button>
+                        </Link>
+                    )}
+
                     <Link href="/moderator/verification">
-                        <Button className="bg-cyan-600 hover:bg-cyan-700 text-white border border-cyan-700 transition-all duration-200 hover:scale-105 hover:shadow-lg rounded-md px-2.5 py-1.5 text-xs h-8">
+                        <Button className="bg-cyan-600 hover:bg-cyan-700 text-white border border-cyan-700 shadow-sm transition-all duration-200 hover:scale-105 hover:shadow-lg rounded-md px-2.5 py-1.5 text-xs h-8">
                             <QrCode className="mr-1.5 h-3.5 w-3.5" />
                             Verification
                         </Button>

@@ -1,7 +1,7 @@
 "use client";
 
 import { GeolocationError,GeolocationPosition,geolocationService } from '@/lib/geolocation-service';
-import { useCallback,useEffect,useState } from 'react';
+import { useEffect,useState } from 'react';
 
 interface UseGeolocationOptions {
     watch?: boolean;
@@ -15,7 +15,7 @@ export const useGeolocation = (options: UseGeolocationOptions = {}) => {
     const [loading, setLoading] = useState(enabled);
     const [permissionDenied, setPermissionDenied] = useState(false);
 
-    const fetchPosition = useCallback(() => {
+    const fetchPosition = () => {
         if (!geolocationService.isAvailable()) {
             setError({
                 code: 0,
@@ -49,7 +49,7 @@ export const useGeolocation = (options: UseGeolocationOptions = {}) => {
             geolocationService.getCurrentPosition(handleSuccess, handleError);
             return () => { };
         }
-    }, [watch]);
+    };
 
     useEffect(() => {
         if (!enabled) {
@@ -63,11 +63,11 @@ export const useGeolocation = (options: UseGeolocationOptions = {}) => {
                 cleanup();
             }
         };
-    }, [enabled, fetchPosition]);
+    }, [enabled, watch]);
 
-    const retryTracking = useCallback(() => {
+    const retryTracking = () => {
         fetchPosition();
-    }, [fetchPosition]);
+    };
 
     return {
         position,

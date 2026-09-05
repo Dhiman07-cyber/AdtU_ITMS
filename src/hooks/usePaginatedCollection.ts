@@ -38,7 +38,7 @@ import {
 	query,
 	startAfter
 } from 'firebase/firestore';
-import { useCallback,useEffect,useMemo,useRef,useState } from 'react';
+import { useEffect,useRef,useState } from 'react';
 
 // ============================================================================
 // GLOBAL CACHE - Prevents duplicate fetches during HMR and rapid remounts
@@ -213,16 +213,16 @@ export function usePaginatedCollection<T = DocumentData>(
     const lastFetchRef = useRef<number>(0);
     const fetchPageRef = useRef<(isNextPage?: boolean, bypassCache?: boolean) => Promise<void>>(undefined);
 
-    // Memoized query factory
-    const createQuery = useCallback(() => {
+    // Query factory
+    const createQuery = () => {
         const collRef = collection(db, collectionName);
         // SPARK PLAN SAFETY: Removed secondary documentId() sort to avoid requiring composite indexes
         // Pagination still works correctly via cursor using startAfter()
         return query(collRef, orderBy(orderByField, orderDirection));
-    }, [collectionName, orderByField, orderDirection]);
+    };
 
     // Fetch a page of documents
-    const fetchPage = useCallback(async (isNextPage: boolean = false, bypassCache: boolean = false) => {
+    const fetchPage = async (isNextPage: boolean = false, bypassCache: boolean = false) => {
         if (!currentUser || !enabled) {
             setLoading(false);
             return;
@@ -317,24 +317,24 @@ export function usePaginatedCollection<T = DocumentData>(
                 setLoading(false);
             }
         }
-    }, [currentUser, enabled, createQuery, effectivePageSize, cursor, collectionName]);
+    };
 
     // Keep ref current so retry timer always calls the latest fetchPage
     fetchPageRef.current = fetchPage;
 
     // Public methods
-    const fetchNextPage = useCallback(async () => {
+    const fetchNextPage = async () => {
         if (!hasMore || loading) return;
         await fetchPage(true);
-    }, [hasMore, loading, fetchPage]);
+    };
 
-    const refresh = useCallback(async () => {
+    const refresh = async () => {
         setCursor(null);
         setHasMore(true);
         // SPARK PLAN FIX: Don't clear pages immediately to prevent UI flash
         // setPages([]); 
         await fetchPage(false, true); // bypassCache = true for manual refresh
-    }, [fetchPage]);
+    };
 
     // Initial fetch
     useEffect(() => {
@@ -368,8 +368,8 @@ export function usePaginatedCollection<T = DocumentData>(
         return () => clearInterval(intervalId);
     }, [autoRefresh, enabled, isVisible, isOnline, autoRefreshInterval, refresh]);
 
-    // Memoized flattened data
-    const data = useMemo(() => pages.flat(), [pages]);
+    // Flattened data derivation
+    const data = pages.flat();
 
     return {
         data,

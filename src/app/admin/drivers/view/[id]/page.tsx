@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import { Avatar,AvatarFallback } from "@/components/ui/avatar";
@@ -248,7 +248,7 @@ export default function ViewDriverPage({ params }: { params: Promise<{ id: strin
                 <StatusBadge status={driver.status || 'active'} />
               </div>
               <div className="md:hidden mt-2 text-center">
-                <h2 className="text-2xl font-black bg-gradient-to-r from-blue-400 to-indigo-500 bg-clip-text text-transparent mb-1 leading-tight break-words">{driver.fullName || driver.name}</h2>
+                <h2 className="text-2xl font-bold text-foreground mb-1 leading-tight break-words">{driver.fullName || driver.name}</h2>
                 <p className="text-sm text-primary font-medium mb-0.5">Professional Driver</p>
                 {calculateExperience(driver.joiningDate) && (
                   <p className="text-xs text-muted-foreground">{calculateExperience(driver.joiningDate)} years of experience</p>
@@ -290,7 +290,7 @@ export default function ViewDriverPage({ params }: { params: Promise<{ id: strin
           <div className="hidden md:block space-y-4">
             {/* Name & Title */}
             <div>
-              <h2 className="text-2xl font-black bg-gradient-to-r from-blue-400 to-indigo-500 bg-clip-text text-transparent mb-1 leading-tight">{driver.fullName || driver.name}</h2>
+              <h2 className="text-2xl font-bold text-foreground mb-1 leading-tight">{driver.fullName || driver.name}</h2>
               <p className="text-sm text-primary font-medium mb-0.5">Professional Driver</p>
               {calculateExperience(driver.joiningDate) && (
                 <p className="text-xs text-muted-foreground">{calculateExperience(driver.joiningDate)} years of experience</p>
@@ -341,7 +341,7 @@ export default function ViewDriverPage({ params }: { params: Promise<{ id: strin
           <div className="relative inline-flex items-center gap-3">
             <div className="w-12 h-[1.5px] bg-gradient-to-r from-transparent to-primary/40"></div>
             <div className="px-4 py-1.5 rounded-lg bg-blue-500/10 border border-blue-500/20 shadow-sm">
-              <span className="text-xs font-bold bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 dark:from-blue-400 dark:via-purple-400 dark:to-pink-400 bg-clip-text text-transparent">Detailed Information</span>
+              <span className="text-xs font-bold text-foreground">Detailed Information</span>
             </div>
             <div className="w-12 h-[1.5px] bg-gradient-to-l from-transparent to-primary/40"></div>
           </div>

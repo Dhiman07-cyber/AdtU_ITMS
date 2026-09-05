@@ -28,7 +28,7 @@ import {
 } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
-import { useCallback,useEffect,useState } from "react";
+import { useEffect,useState } from "react";
 
 const DynamicStudentMap = dynamic(() => import('@/components/DynamicStudentMap'), {
   ssr: false,
@@ -131,7 +131,7 @@ function StudentBusLive() {
   }, [permissionDenied]);
 
   // Handle raising waiting flag
-  const handleRaiseFlag = useCallback(async (stop_name: string) => {
+  const handleRaiseFlag = async (stop_name: string) => {
     if (raisingFlag) return;
     if (!currentUser || !studentData?.busId || !studentData?.routeId) return;
 
@@ -175,10 +175,10 @@ function StudentBusLive() {
     } finally {
       setRaisingFlag(false);
     }
-  }, [currentUser, studentData, stops, addToast]);
+  };
 
   // Remove waiting flag
-  const removeWaitingFlag = useCallback(async () => {
+  const removeWaitingFlag = async () => {
     if (!waitingFlagId || !currentUser) return;
 
     try {
@@ -201,7 +201,7 @@ function StudentBusLive() {
     } catch (error) {
       console.error("Error removing waiting flag:", error);
     }
-  }, [waitingFlagId, currentUser, addToast]);
+  };
 
   if (loading) {
     return <PremiumPageLoader message="Loading Bus Details..." subMessage="Fetching bus status and schedule..." />;

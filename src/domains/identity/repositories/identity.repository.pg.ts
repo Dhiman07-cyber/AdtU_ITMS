@@ -124,7 +124,7 @@ async function pgInsertProfile(table: string, data: Record<string, any>, fieldMa
   if (!row.uid) throw new Error(`IdentityRepository (PG) ${table} insert requires uid`);
   if (!row.created_at) row.created_at = new Date().toISOString();
   row.updated_at = new Date().toISOString();
-  const { error } = await db.from(table).insert(row);
+  const { error } = await db.from(table).upsert(row, { onConflict: 'uid' });
   if (error) throw new Error(`IdentityRepository (PG) ${table} insert failed: ${error.message}`);
 }
 
@@ -277,7 +277,7 @@ export async function pgInsertUser(user: IdentityUser): Promise<void> {
 
   const { error } = await db
     .from('users')
-    .insert(payload);
+    .upsert(payload, { onConflict: 'uid' });
 
   if (error) {
     throw new Error(`IdentityRepository (PG) insert failed: ${error.message}`);

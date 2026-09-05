@@ -67,8 +67,8 @@ export const GET = withSecurity(
         const busId = activeTrip?.bus_id || null;
         const routeId = activeTrip?.route_id || null;
 
-        // 3. Fetch Bus details, Route details, and Student counts if trip is active
-        const [busResult, routeResult, totalStudentsRes, morningStudentsRes, eveningStudentsRes] = await Promise.all([
+        // 3. Fetch Bus details, Route details, Student counts, and Active Waiting Flags
+        const [busResult, routeResult, totalStudentsRes, morningStudentsRes, eveningStudentsRes, waitingFlagsRes] = await Promise.all([
             busId
                 ? supabase.from('buses').select('id, bus_number, status, current_members, capacity, route_id, morning_load, evening_load').eq('id', busId).maybeSingle()
                 : Promise.resolve({ data: null, error: null }),
@@ -84,6 +84,9 @@ export const GET = withSecurity(
             busId
                 ? supabase.from('student_profiles').select('uid', { count: 'exact', head: true }).eq('bus_id', busId).eq('status', 'active').eq('shift', 'Evening')
                 : Promise.resolve({ count: 0, error: null }),
+            busId
+                ? supabase.from('waiting_flags').select('*').eq('bus_id', busId).in('status', ['raised', 'waiting', 'acknowledged']).order('created_at', { ascending: false })
+                : Promise.resolve({ data: null, error: null })
         ]);
 
         const bus = busResult.data || null;
@@ -91,6 +94,29 @@ export const GET = withSecurity(
         const studentCount = totalStudentsRes.count ?? bus?.current_members ?? 0;
         const morningCount = morningStudentsRes.count ?? bus?.morning_load ?? 0;
         const eveningCount = eveningStudentsRes.count ?? bus?.evening_load ?? 0;
+
+        const rawFlags = waitingFlagsRes.data || [];
+        const waitingFlags = rawFlags.map((f: any) => ({
+            id: f.id,
+            student_uid: f.student_uid,
+            studentUid: f.student_uid,
+            student_name: f.student_name || 'Student',
+            studentName: f.student_name || 'Student',
+            student_profile_photo: f.student_profile_photo || null,
+            bus_id: f.bus_id,
+            busId: f.bus_id,
+            route_id: f.route_id,
+            routeId: f.route_id,
+            stop_name: f.stop_name || 'Pickup Point',
+            stop_lat: f.stop_lat,
+            stop_lng: f.stop_lng,
+            lat: f.stop_lat,
+            lng: f.stop_lng,
+            status: f.status,
+            created_at: f.created_at,
+            createdAt: f.created_at,
+            message: f.message || null,
+        }));
 
         const formattedBus = bus ? {
             ...bus,
@@ -123,6 +149,7 @@ export const GET = withSecurity(
             route: formattedRoute,
             studentCount,
             tripActive: isTripActive,
+            waitingFlags,
             tripData: activeTrip ? {
                 tripId: activeTrip.trip_id,
                 busId: activeTrip.bus_id,

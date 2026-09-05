@@ -8,7 +8,14 @@ import { NextRequest,NextResponse } from 'next/server';
 export async function GET(req: NextRequest) {
     try {
         const systemConfigResult = await getSystemConfig();
-        return NextResponse.json({ config: systemConfigResult.data, updatedAt: systemConfigResult.updatedAt });
+        return NextResponse.json(
+            { config: systemConfigResult.data, updatedAt: systemConfigResult.updatedAt },
+            {
+                headers: {
+                    'Cache-Control': 'public, max-age=60, stale-while-revalidate=600',
+                }
+            }
+        );
     } catch (error: any) {
         console.error('Error fetching system config:', error);
         return NextResponse.json(

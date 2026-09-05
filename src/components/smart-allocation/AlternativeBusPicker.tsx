@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { normalizeShift,type CanonicalShift } from "@/lib/utils/shift-utils";
-import { motion } from "framer-motion";
+import { motion } from "motion/react";
 import {
 	AlertCircle,
 	ArrowRight,
@@ -18,7 +18,7 @@ import {
 	Check,
 	MapPin,
 } from "lucide-react";
-import React,{ useMemo } from "react";
+import React from "react";
 import { toast } from "react-hot-toast";
 
 // ── Types (compatible with ReassignmentPanel) ─────────────────────────────────
@@ -77,13 +77,11 @@ export default function AlternativeBusPicker({
   const [submitting, setSubmitting] = React.useState(false);
 
   // Sort alternatives: most available seats first
-  const sortedAlternatives = useMemo(() => {
-    return [...alternatives].sort((a, b) => {
-      const seatsA = Math.max(0, (a.capacity || 55) - getShiftLoad(a, shift));
-      const seatsB = Math.max(0, (b.capacity || 55) - getShiftLoad(b, shift));
-      return seatsB - seatsA;
-    });
-  }, [alternatives, shift]);
+  const sortedAlternatives = [...alternatives].sort((a, b) => {
+    const seatsA = Math.max(0, (a.capacity || 55) - getShiftLoad(a, shift));
+    const seatsB = Math.max(0, (b.capacity || 55) - getShiftLoad(b, shift));
+    return seatsB - seatsA;
+  });
 
   const handleSelect = async (busId: string) => {
     if (submitting) return;

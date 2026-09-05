@@ -22,6 +22,10 @@ export async function GET(req: NextRequest) {
             config: result.data,
             updatedAt: result.updatedAt,
             source: 'postgresql'
+        }, {
+            headers: {
+                'Cache-Control': 'public, max-age=60, stale-while-revalidate=600',
+            }
         });
     } catch (error: any) {
         console.error('Error reading UI config:', error);

@@ -3,7 +3,7 @@
 import { Card,CardContent,CardHeader,CardTitle } from '@/components/ui/card';
 import { useAuth } from '@/contexts/auth-context';
 import { authApiFetch } from '@/lib/secure-api-client';
-import { motion } from 'framer-motion';
+import { motion } from 'motion/react';
 import { BarChart3,MousePointer2,Percent,RefreshCw,TrendingUp,Users } from 'lucide-react';
 import { useEffect,useState } from 'react';
 import {
@@ -204,11 +204,11 @@ export default function PlatformAnalytics() {
                 <div className={`p-1.5 ${metric.bg} rounded-lg`}>
                   <metric.icon className={`w-3.5 h-3.5 ${metric.color}`} />
                 </div>
-                <span className="text-[9px] font-black text-emerald-400 uppercase">{metric.trend}</span>
+                <span className="text-[9px] font-bold text-emerald-400">{metric.trend}</span>
               </div>
               <div className="space-y-0.5">
-                <p className="text-slate-500 text-[9px] font-bold uppercase tracking-wider">{metric.label}</p>
-                <p className="text-2xl font-black text-white tracking-tight">
+                <p className="text-slate-500 text-[9px] font-bold">{metric.label}</p>
+                <p className="text-2xl font-bold text-white">
                   {typeof metric.value === 'number' ? metric.value.toLocaleString() : metric.value}
                 </p>
               </div>
@@ -220,11 +220,11 @@ export default function PlatformAnalytics() {
           <div className="absolute top-2 right-4 flex items-center gap-3 z-20">
             <div className="flex items-center gap-1.5">
               <div className="w-2 h-2 rounded-full bg-blue-500" />
-              <span className="text-[8px] font-bold text-slate-500 uppercase tracking-tighter">Users</span>
+              <span className="text-[8px] font-bold text-slate-500">Users</span>
             </div>
             <div className="flex items-center gap-1.5">
               <div className="w-2 h-2 rounded-full bg-purple-500" />
-              <span className="text-[8px] font-bold text-slate-500 uppercase tracking-tighter">Sessions</span>
+              <span className="text-[8px] font-bold text-slate-500">Sessions</span>
             </div>
           </div>
           
@@ -276,7 +276,7 @@ export default function PlatformAnalytics() {
           )}
         </div>
 
-        <div className="flex items-center justify-center gap-2 text-[8px] text-slate-700 font-bold uppercase tracking-[0.2em]">
+        <div className="flex items-center justify-center gap-2 text-[8px] text-slate-700 font-bold">
           <div className="w-1 h-1 rounded-full bg-blue-500/40" />
           Platform Intelligence Engine
         </div>

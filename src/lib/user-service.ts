@@ -81,8 +81,8 @@ export async function signInWithGoogle() {
     } else if (error.code === 'auth/cancelled-popup-request') {
       return { success: false, error: 'Sign in was cancelled' };
     } else if (error.code === 'auth/popup-blocked') {
-      console.warn('⚠️ Sign-in popup was blocked by browser');
-      return { success: false, error: 'Popup was blocked. Please allow popups for this site and try again.' };
+      console.warn('⚠️ Sign-in popup was blocked by browser or ad blocker');
+      return { success: false, error: 'Sign-in popup was blocked by your browser or ad blocker. Please allow popups or pause your ad blocker for this site to continue.' };
     } else if (error.code === 'auth/network-request-failed') {
       console.warn('⚠️ Network error during sign-in');
       return { success: false, error: 'Network error. Please check your connection and try again.' };

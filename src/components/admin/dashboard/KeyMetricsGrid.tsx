@@ -65,9 +65,9 @@ const MetricCard = ({
         </div>
 
         <div className="space-y-0.5 w-full">
-          <h3 className={cn("text-[10px] font-bold uppercase tracking-[0.12em]", theme === 'dark' ? "text-slate-500" : "text-[#6B7280]")}>{title}</h3>
+          <h3 className={cn("text-[10px] font-bold", theme === 'dark' ? "text-slate-500" : "text-[#6B7280]")}>{title}</h3>
           <div className="flex flex-col items-center">
-            <span className={cn("text-2xl font-black tracking-tight", theme === 'dark' ? "text-white" : "text-[#111827]")}>{value}</span>
+            <span className={cn("text-2xl font-bold", theme === 'dark' ? "text-white" : "text-[#111827]")}>{value}</span>
             {subValue && <span className={cn("text-[10px] font-semibold", theme === 'dark' ? "text-slate-500" : "text-[#6B7280]")}>{subValue}</span>}
           </div>
         </div>
@@ -104,7 +104,7 @@ export default function KeyMetricsGrid({ stats, role = 'admin' }: { stats: Dashb
                 theme === 'dark' ? "bg-emerald-500/10 border-emerald-500/20" : "bg-emerald-50 border-emerald-200"
               )}>
                 <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                <span className="text-[10px] font-black text-emerald-400 uppercase tracking-widest">
+                <span className="text-[10px] font-bold text-emerald-400">
                   {role === 'admin' ? 'Real-time Revenue' : 'Payment Processing'}
                 </span>
               </div>
@@ -114,18 +114,18 @@ export default function KeyMetricsGrid({ stats, role = 'admin' }: { stats: Dashb
                 className={cn("group/btn", theme === 'dark' ? "text-slate-400 hover:text-white" : "text-[#6B7280] hover:text-[#111827]")}
                 onClick={() => router.push(role === 'admin' ? '/admin/renewal-service' : '/moderator/renewal-service')}
               >
-                <span className="text-[10px] font-bold uppercase tracking-widest mr-2">Audit Log</span>
+                <span className="text-[10px] font-bold mr-2">Audit Log</span>
                 <ArrowUpRight className="w-4 h-4 group-hover/btn:translate-x-0.5 group-hover/btn:-translate-y-0.5 transition-transform" />
               </Button>
             </div>
 
             <div className="space-y-1">
-              <h3 className={cn("text-sm font-bold uppercase tracking-widest", theme === 'dark' ? "text-slate-400" : "text-[#6B7280]")}>
+              <h3 className={cn("text-sm font-bold", theme === 'dark' ? "text-slate-400" : "text-[#6B7280]")}>
                 {role === 'admin' ? 'Total Cumulative Revenue' : 'Online vs Offline Preference'}
               </h3>
               <div className="flex items-baseline gap-4">
                 {role === 'admin' ? (
-                  <span className={cn("text-3xl md:text-4xl font-black tracking-tighter", theme === 'dark' ? "text-white" : "text-[#111827]")}>
+                  <span className={cn("text-3xl md:text-4xl font-bold", theme === 'dark' ? "text-white" : "text-[#111827]")}>
                     {stats.totalRevenue ? stats.totalRevenue.toLocaleString('en-IN', {
                       style: 'currency',
                       currency: 'INR',
@@ -135,13 +135,13 @@ export default function KeyMetricsGrid({ stats, role = 'admin' }: { stats: Dashb
                 ) : (
                   <div className="flex items-center gap-6">
                     <div className="flex flex-col">
-                      <span className="text-3xl font-black text-indigo-400">{stats.onlinePayments || 0}</span>
-                      <span className={cn("text-[10px] font-bold uppercase tracking-widest", theme === 'dark' ? "text-slate-500" : "text-[#6B7280]")}>Online</span>
+                      <span className="text-3xl font-bold text-indigo-400">{stats.onlinePayments || 0}</span>
+                      <span className={cn("text-[10px] font-bold", theme === 'dark' ? "text-slate-500" : "text-[#6B7280]")}>Online</span>
                     </div>
                     <div className={cn("h-10 w-px mx-2", theme === 'dark' ? "bg-white/10" : "bg-[#E5E7EB]")} />
                     <div className="flex flex-col">
-                      <span className="text-3xl font-black text-emerald-400">{stats.offlinePayments || 0}</span>
-                      <span className={cn("text-[10px] font-bold uppercase tracking-widest", theme === 'dark' ? "text-slate-500" : "text-[#6B7280]")}>Offline</span>
+                      <span className="text-3xl font-bold text-emerald-400">{stats.offlinePayments || 0}</span>
+                      <span className={cn("text-[10px] font-bold", theme === 'dark' ? "text-slate-500" : "text-[#6B7280]")}>Offline</span>
                     </div>
                   </div>
                 )}
@@ -150,28 +150,28 @@ export default function KeyMetricsGrid({ stats, role = 'admin' }: { stats: Dashb
           </div>
           <div className={cn("grid grid-cols-2 md:grid-cols-3 gap-3 mt-4 pt-3 border-t", theme === 'dark' ? "border-white/5" : "border-[#E5E7EB]")}>
             <div className="space-y-1 hover:cursor-pointer">
-              <span className={cn("text-[10px] font-bold uppercase tracking-widest", theme === 'dark' ? "text-slate-500" : "text-[#6B7280]")}>System Bus fee</span>
+              <span className={cn("text-[10px] font-bold", theme === 'dark' ? "text-slate-500" : "text-[#6B7280]")}>System Bus Fee</span>
               <div className={cn("text-xl font-bold", theme === 'dark' ? "text-white" : "text-[#111827]")}>₹{typeof stats.systemBusFee === 'number' ? stats.systemBusFee.toLocaleString('en-IN') : '...'}</div>
             </div>
             {role === 'admin' ? (
               <>
                 <div className="space-y-1 hover:cursor-pointer">
-                  <span className={cn("text-[10px] font-bold uppercase tracking-widest", theme === 'dark' ? "text-slate-500" : "text-[#6B7280]")}>Online Payments</span>
+                  <span className={cn("text-[10px] font-bold", theme === 'dark' ? "text-slate-500" : "text-[#6B7280]")}>Online Payments</span>
                   <div className="text-xl font-bold text-indigo-400">{stats.onlinePayments || 0}</div>
                 </div>
                 <div className="space-y-1 hover:cursor-pointer">
-                  <span className={cn("text-[10px] font-bold uppercase tracking-widest", theme === 'dark' ? "text-slate-500" : "text-[#6B7280]")}>Offline Payments</span>
+                  <span className={cn("text-[10px] font-bold", theme === 'dark' ? "text-slate-500" : "text-[#6B7280]")}>Offline Payments</span>
                   <div className="text-xl font-bold text-emerald-400">{stats.offlinePayments || 0}</div>
                 </div>
               </>
             ) : (
               <>
                 <div className="space-y-1">
-                  <span className={cn("text-[10px] font-bold uppercase tracking-widest", theme === 'dark' ? "text-slate-500" : "text-[#6B7280]")}>Currency</span>
+                  <span className={cn("text-[10px] font-bold", theme === 'dark' ? "text-slate-500" : "text-[#6B7280]")}>Currency</span>
                   <div className="text-xl font-bold text-cyan-400">INR</div>
                 </div>
                 <div className="space-y-1">
-                  <span className={cn("text-[10px] font-bold uppercase tracking-widest", theme === 'dark' ? "text-slate-500" : "text-[#6B7280]")}>Payment Gateway</span>
+                  <span className={cn("text-[10px] font-bold", theme === 'dark' ? "text-slate-500" : "text-[#6B7280]")}>Payment Gateway</span>
                   <div className="text-xl font-bold text-orange-400">Razorpay</div>
                 </div>
               </>

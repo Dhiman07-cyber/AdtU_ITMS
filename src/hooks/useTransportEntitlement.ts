@@ -5,7 +5,6 @@ import {
 	EntitlementReason,
 	getTransportEntitlement,
 } from '@/lib/entitlement/transport-entitlement';
-import { useMemo } from 'react';
 
 export interface UseTransportEntitlement {
   /** True only while auth/user data is still loading (decision not yet known). */
@@ -30,14 +29,12 @@ export interface UseTransportEntitlement {
 export function useTransportEntitlement(): UseTransportEntitlement {
   const { userData, loading } = useAuth();
 
-  return useMemo(() => {
-    if (loading) {
-      return { loading: true, entitled: false, reason: 'no_account' as EntitlementReason };
-    }
-    if (!userData || userData.role !== 'student') {
-      return { loading: false, entitled: false, reason: 'no_account' as EntitlementReason };
-    }
-    const { entitled, reason } = getTransportEntitlement(userData);
-    return { loading: false, entitled, reason };
-  }, [userData, loading]);
+  if (loading) {
+    return { loading: true, entitled: false, reason: 'no_account' as EntitlementReason };
+  }
+  if (!userData || userData.role !== 'student') {
+    return { loading: false, entitled: false, reason: 'no_account' as EntitlementReason };
+  }
+  const { entitled, reason } = getTransportEntitlement(userData);
+  return { loading: false, entitled, reason };
 }

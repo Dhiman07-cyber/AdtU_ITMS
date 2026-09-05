@@ -131,18 +131,14 @@ export async function updateSystemConfig(
 // ─── Landing Config ──────────────────────────────────────────────────────────
 
 export async function getLandingConfig(): Promise<ConfigResult<LandingConfig>> {
-  if (!adminDb) {
-    throw new Error('Firebase Admin SDK is not initialized. Please try again later.');
-  }
+  const defaultConfig: LandingConfig = {
+    heroTitle: 'AdtU Bus Services',
+    heroSubtitle: 'Smart Campus Transit Portal',
+    features: [],
+    updatedAt: new Date().toISOString(),
+  } as any;
 
-  const doc = await adminDb.collection('settings').doc('landing').get();
-  if (!doc.exists) {
-    const defaultConfig: LandingConfig = {
-      heroTitle: 'AdtU Bus Services',
-      heroSubtitle: 'Smart Campus Transit Portal',
-      features: [],
-      updatedAt: new Date().toISOString(),
-    } as any;
+  if (!adminDb) {
     return {
       data: defaultConfig,
       updatedAt: null,
@@ -150,12 +146,30 @@ export async function getLandingConfig(): Promise<ConfigResult<LandingConfig>> {
     };
   }
 
-  const data = doc.data() as LandingConfig;
-  return {
-    data: data,
-    updatedAt: data.updatedAt || data.lastUpdated || null,
-    updatedByUid: data.updatedBy || null,
-  };
+  try {
+    const doc = await adminDb.collection('settings').doc('landing').get();
+    if (!doc.exists) {
+      return {
+        data: defaultConfig,
+        updatedAt: null,
+        updatedByUid: null,
+      };
+    }
+
+    const data = doc.data() as LandingConfig;
+    return {
+      data: data,
+      updatedAt: data.updatedAt || data.lastUpdated || null,
+      updatedByUid: data.updatedBy || null,
+    };
+  } catch (error) {
+    console.warn('[getLandingConfig] Firestore read failed, returning fallback config:', error);
+    return {
+      data: defaultConfig,
+      updatedAt: null,
+      updatedByUid: null,
+    };
+  }
 }
 
 export async function updateLandingConfig(

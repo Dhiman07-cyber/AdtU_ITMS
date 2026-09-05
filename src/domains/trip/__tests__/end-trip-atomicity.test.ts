@@ -23,6 +23,8 @@ vi.mock('@/domains/trip/services/trip-cleanup.service', () => ({
 }));
 
 import { tripLockService } from '@/lib/services/trip-lock-service';
+import { broadcastTripEvent } from '../services/trip-broadcast.service';
+import { cleanupTrip } from '../services/trip-cleanup.service';
 import { endTrip } from '../services/trip-orchestrator';
 
 describe('Trip end — atomicity and idempotency', () => {
@@ -167,5 +169,73 @@ describe('Trip end — atomicity and idempotency', () => {
       p_bus_id: 'b-1',
       p_driver_id: 'd-1',
     });
+  });
+
+  it('TRIP-001: RPC failure must NOT trigger cleanup (waiting flags remain during active trip)', async () => {
+    // RPC fails — trip is still active
+    mockRpc.mockResolvedValue({
+      data: null,
+      error: { message: 'Lock acquisition failed' },
+    });
+
+    await endTrip({ driverId: 'd-1', busId: 'b-1', tripId: 't-123' });
+
+    // BUG: Current code runs cleanupTrip in parallel via Promise.all.
+    // When RPC fails, Promise.all rejects but cleanupTrip continues in background.
+    // After fix: cleanupTrip should NOT be called when RPC fails.
+    expect(cleanupTrip).not.toHaveBeenCalled();
+  });
+
+  it('TRIP-002: Accidental trip + RPC failure must NOT broadcast trip_ended', async () => {
+    // Simulate a trip that started <10 minutes ago (accidental)
+    // by mocking active_trips with a recent start_time
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'active_trips') {
+        return {
+          select: vi.fn(() => ({
+            eq: vi.fn(() => ({
+              eq: vi.fn(() => ({
+                maybeSingle: vi.fn().mockResolvedValue({
+                  data: {
+                    trip_id: 't-123',
+                    bus_id: 'b-1',
+                    driver_id: 'd-1',
+                    route_id: 'r-1',
+                    status: 'active',
+                    start_time: new Date(Date.now() - 2 * 60 * 1000).toISOString(), // 2 minutes ago
+                  },
+                  error: null,
+                }),
+              })),
+            })),
+          })),
+          delete: vi.fn(() => ({
+            eq: vi.fn().mockResolvedValue({ data: null, error: null }),
+          })),
+        };
+      }
+      return {
+        select: vi.fn(() => ({
+          eq: vi.fn(() => ({
+            maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+          })),
+        })),
+        delete: vi.fn(() => ({
+          eq: vi.fn().mockResolvedValue({ data: null, error: null }),
+        })),
+      };
+    });
+
+    // RPC fails for the accidental trip
+    mockRpc.mockResolvedValue({
+      data: null,
+      error: { message: 'Already ended by heartbeat' },
+    });
+
+    await endTrip({ driverId: 'd-1', busId: 'b-1', tripId: 't-123' });
+
+    // Broadcast must NOT fire — the trip was accidental and RPC failed.
+    // No student should receive a "trip ended" event for a failed operation.
+    expect(broadcastTripEvent).not.toHaveBeenCalled();
   });
 });

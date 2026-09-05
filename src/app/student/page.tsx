@@ -8,7 +8,7 @@ import { useAuth } from "@/contexts/auth-context";
 import { WebSocketClient } from '@/domains/realtime/ws-client';
 import { getTransportEntitlement } from '@/lib/entitlement/transport-entitlement';
 import { authApiFetch } from '@/lib/secure-api-client';
-import { motion } from "framer-motion";
+import { motion } from "motion/react";
 import {
 	Activity,
 	AlertCircle,
