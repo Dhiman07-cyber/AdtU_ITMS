@@ -1,4 +1,5 @@
 import { WebSocketClient } from '@/domains/realtime/ws-client';
+import { getClientWsUrl } from '@/domains/realtime';
 import { decideLocationPacket, parseTimestampMs } from '@/domains/realtime/location-packet-guard';
 import { isValidLatLng } from '@/lib/maps/location-display-guards';
 import { useEffect, useRef, useState } from 'react';
@@ -314,9 +315,7 @@ export const useBusLocation = (busId: string, token?: string | null, externalCli
       return;
     }
 
-    const url =
-      process.env.NEXT_PUBLIC_WS_URL ||
-      `ws://${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}:3001/ws`;
+    const url = getClientWsUrl();
     const client = new WebSocketClient({ url, token });
     clientRef.current = client;
     client.connect();

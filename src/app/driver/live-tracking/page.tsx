@@ -4,25 +4,24 @@ import ErrorBoundary from "@/components/ErrorBoundary";
 import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card,CardContent,CardHeader,CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAuth } from "@/contexts/auth-context";
 import { useToast } from "@/contexts/toast-context";
 import { WebSocketClient } from '@/domains/realtime/ws-client';
+import { getClientWsUrl } from '@/domains/realtime';
 import { authApiFetch } from "@/lib/secure-api-client";
-import { supabase } from "@/lib/supabase-client";
-import { getBusById,getDriverById,getRouteById } from "@/lib/dataService";
 import {
-	checkDeviceSession,
-	getOrCreateDeviceId,
-	heartbeatDeviceSession,
-	registerDeviceSession,
-	releaseDeviceSession
+  checkDeviceSession,
+  getOrCreateDeviceId,
+  heartbeatDeviceSession,
+  registerDeviceSession,
+  releaseDeviceSession
 } from "@/lib/session-device-service";
 import { formatIdForDisplay } from "@/lib/utils";
-import { Activity,AlertCircle,Bus,CheckCircle,Clock,Flag,Loader2,MapPin,Moon,Navigation,PlayCircle,StopCircle,Sun,XCircle } from "lucide-react";
+import { Activity, AlertCircle, Bus, CheckCircle, Clock, Flag, Loader2, MapPin, Moon, Navigation, PlayCircle, StopCircle, Sun, XCircle } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
-import { useCallback,useEffect,useRef,useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useScreenWakeLock } from "@/hooks/useScreenWakeLock";
 
 // Dynamically import components to avoid SSR issues
@@ -258,7 +257,7 @@ export default function DriverLiveTrackingPage() {
         try {
           const audio = new Audio('/sounds/notification.mp3');
           audio.play().catch(e => console.log('Audio play failed', e));
-        } catch (e) {}
+        } catch (e) { }
       });
     }
 
@@ -479,7 +478,7 @@ export default function DriverLiveTrackingPage() {
       try {
         const token = await currentUser.getIdToken();
         if (cancelled) return;
-        const url = process.env.NEXT_PUBLIC_WS_URL || `ws://${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}:3001`;
+        const url = getClientWsUrl();
         const client = new WebSocketClient({ url, token });
         wsClientRef.current = client;
         setWsClientReady(true);
@@ -714,7 +713,7 @@ export default function DriverLiveTrackingPage() {
     // and busLockedByOther state so the interval arms/disarms correctly.
     checkActiveTrip();
 
-    return () => {};
+    return () => { };
   }, [currentUser, busData?.busId, startLocationTracking, stopLocationTracking]);
 
   // Periodic active-trip poll: arms/disarms as state changes so the interval is
@@ -1014,7 +1013,7 @@ export default function DriverLiveTrackingPage() {
       clearInterval(pollInterval);
       unsubscribe();
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wsClientReady, targetBusId, currentUser]);
 
   // Screen Wake Lock - Keep screen on during driver tracking
@@ -1113,7 +1112,7 @@ export default function DriverLiveTrackingPage() {
         if (wsClientRef.current) {
           try {
             wsClientRef.current.connect();
-          } catch (_) {}
+          } catch (_) { }
         }
 
         // Restart GPS watch if OS dropped it during screen off
@@ -1604,528 +1603,526 @@ export default function DriverLiveTrackingPage() {
 
   return (
     <ErrorBoundary>
-    <div className="flex-1 bg-[#0A0D16] min-h-screen pb-24 md:pb-6 text-white font-sans">
-      {/* WAIT REQUEST OVERLAY */}
-      {activeWaitRequest && (
-        <div className="fixed inset-0 z-[10001] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in zoom-in duration-200">
-          <Card className="max-w-md w-full border-0 shadow-2xl bg-white dark:bg-gray-900 rounded-3xl overflow-hidden relative">
-            {sendingResponse && (
-              <div className="absolute inset-0 bg-white/50 dark:bg-black/50 z-10 flex items-center justify-center">
-                <Loader2 className="w-10 h-10 animate-spin text-blue-600" />
-              </div>
-            )}
-
-            <div className="relative p-6 pb-8 bg-gradient-to-r from-purple-600 to-blue-600">
-              <div className="absolute inset-0 bg-[url('/noise.png')] opacity-20" />
-
-              {/* Animated Timer Ring */}
-              <div className="absolute top-4 right-4 w-12 h-12 rounded-full border-4 border-white/30 flex items-center justify-center">
-                <span className="text-xl font-bold text-white">{waitRequestTimer}</span>
-                <svg className="absolute inset-0 w-full h-full -rotate-90">
-                  <circle
-                    className="text-white"
-                    strokeWidth="4"
-                    strokeDasharray={100}
-                    strokeDashoffset={100 - (waitRequestTimer / 10) * 100}
-                    strokeLinecap="round"
-                    stroke="currentColor"
-                    fill="transparent"
-                    r="20" cx="24" cy="24"
-                  />
-                </svg>
-              </div>
-
-              <div className="relative z-10 mt-4">
-                <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center shadow-lg mb-4 mx-auto animate-bounce">
-                  <img
-                    src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${activeWaitRequest.studentName}`}
-                    alt={activeWaitRequest.studentName}
-                    className="w-12 h-12 rounded-full"
-                  />
+      <div className="flex-1 bg-[#0A0D16] min-h-screen pb-24 md:pb-6 text-white font-sans">
+        {/* WAIT REQUEST OVERLAY */}
+        {activeWaitRequest && (
+          <div className="fixed inset-0 z-[10001] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in zoom-in duration-200">
+            <Card className="max-w-md w-full border-0 shadow-2xl bg-white dark:bg-gray-900 rounded-3xl overflow-hidden relative">
+              {sendingResponse && (
+                <div className="absolute inset-0 bg-white/50 dark:bg-black/50 z-10 flex items-center justify-center">
+                  <Loader2 className="w-10 h-10 animate-spin text-blue-600" />
                 </div>
-                <h2 className="text-2xl font-bold text-center text-white mb-1">
-                  {activeWaitRequest.studentName}
-                </h2>
-                <p className="text-blue-100 text-center text-sm font-medium uppercase tracking-wide">
-                  Waiting Request • <span className="text-white font-bold">{activeWaitRequest.stop_name}</span>
+              )}
+
+              <div className="relative p-6 pb-8 bg-gradient-to-r from-purple-600 to-blue-600">
+                <div className="absolute inset-0 bg-[url('/noise.png')] opacity-20" />
+
+                {/* Animated Timer Ring */}
+                <div className="absolute top-4 right-4 w-12 h-12 rounded-full border-4 border-white/30 flex items-center justify-center">
+                  <span className="text-xl font-bold text-white">{waitRequestTimer}</span>
+                  <svg className="absolute inset-0 w-full h-full -rotate-90">
+                    <circle
+                      className="text-white"
+                      strokeWidth="4"
+                      strokeDasharray={100}
+                      strokeDashoffset={100 - (waitRequestTimer / 10) * 100}
+                      strokeLinecap="round"
+                      stroke="currentColor"
+                      fill="transparent"
+                      r="20" cx="24" cy="24"
+                    />
+                  </svg>
+                </div>
+
+                <div className="relative z-10 mt-4">
+                  <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center shadow-lg mb-4 mx-auto animate-bounce">
+                    <img
+                      src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${activeWaitRequest.studentName}`}
+                      alt={activeWaitRequest.studentName}
+                      className="w-12 h-12 rounded-full"
+                    />
+                  </div>
+                  <h2 className="text-2xl font-bold text-center text-white mb-1">
+                    {activeWaitRequest.studentName}
+                  </h2>
+                  <p className="text-blue-100 text-center text-sm font-medium uppercase tracking-wide">
+                    Waiting Request • <span className="text-white font-bold">{activeWaitRequest.stop_name}</span>
+                  </p>
+                  <p className="text-white/80 text-center text-xs mt-2">
+                    Bus is nearby! Waiting for you to accept...
+                  </p>
+                </div>
+              </div>
+
+              <CardContent className="p-6 pt-8 -mt-6 bg-white dark:bg-gray-900 rounded-t-3xl relative z-0">
+                <p className="text-center text-gray-600 dark:text-gray-400 mb-6 font-medium">
+                  Has stopped near {activeWaitRequest.stop_name}. Can you wait 2 minutes?
                 </p>
-                <p className="text-white/80 text-center text-xs mt-2">
-                  Bus is nearby! Waiting for you to accept...
-                </p>
-              </div>
-            </div>
 
-            <CardContent className="p-6 pt-8 -mt-6 bg-white dark:bg-gray-900 rounded-t-3xl relative z-0">
-              <p className="text-center text-gray-600 dark:text-gray-400 mb-6 font-medium">
-                Has stopped near {activeWaitRequest.stop_name}. Can you wait 2 minutes?
-              </p>
-
-              <div className="grid grid-cols-2 gap-4">
-                <Button
-                  onClick={() => handleRespondToWaitRequest('rejected')}
-                  variant="outline"
-                  className="h-14 rounded-xl border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700 hover:border-red-300 font-bold text-lg"
-                >
-                  Reject
-                </Button>
-                <Button
-                  onClick={() => handleRespondToWaitRequest('accepted')}
-                  className="h-14 rounded-xl bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white font-bold text-lg shadow-lg shadow-green-500/30"
-                >
-                  Accept
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 md:py-8 space-y-8">
-        {/* Enhanced Live Location Sharing Card */}
-        <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-purple-600 via-blue-600 to-cyan-600 p-1 animate-fade-in shadow-2xl shadow-blue-500/10">
-          <div className="absolute inset-0 bg-gradient-to-r from-purple-600 via-blue-600 to-cyan-600 opacity-30 blur-3xl" />
-          <div className="relative bg-[#0F1423]/95 backdrop-blur-xl rounded-3xl p-5 md:p-8 lg:p-10 border border-white/5">
-            {/* Desktop Layout */}
-            <div className="hidden md:flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <div className="p-3 rounded-2xl bg-gradient-to-br from-blue-500 to-purple-600 shadow-lg animate-float">
-                  <Bus className="h-5 w-5 md:h-6 md:w-6 text-white" />
+                <div className="grid grid-cols-2 gap-4">
+                  <Button
+                    onClick={() => handleRespondToWaitRequest('rejected')}
+                    variant="outline"
+                    className="h-14 rounded-xl border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700 hover:border-red-300 font-bold text-lg"
+                  >
+                    Reject
+                  </Button>
+                  <Button
+                    onClick={() => handleRespondToWaitRequest('accepted')}
+                    className="h-14 rounded-xl bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white font-bold text-lg shadow-lg shadow-green-500/30"
+                  >
+                    Accept
+                  </Button>
                 </div>
-                <div>
-                  <h1 className="text-2xl md:text-3xl lg:text-4xl font-bold text-white">Live Location Sharing</h1>
-                  <p className="text-white/60 text-sm md:text-base mt-1 font-medium">Share your bus location in real-time</p>
-                </div>
-              </div>
-              <Badge className={`px-4 py-2 text-sm md:text-lg font-semibold border-0 ${tripActive
-                ? 'bg-gradient-to-r from-green-500 to-emerald-600 text-white shadow-lg shadow-green-500/20'
-                : 'bg-gradient-to-r from-gray-600 to-gray-700 text-white'
-                }`}>
-                {tripActive ? "Trip Active" : "Trip Inactive"}
-              </Badge>
-            </div>
-
-            {/* Mobile Layout - Enhanced Premium Design */}
-            <div className="md:hidden space-y-5">
-              {/* Header Section */}
-              <div className="flex items-center gap-4">
-                <div className="relative">
-                  <div className="absolute inset-0 bg-blue-500 blur-lg opacity-40 animate-pulse"></div>
-                  <div className="relative p-3.5 rounded-2xl bg-gradient-to-br from-blue-500 to-purple-600 shadow-xl border border-white/10 shrink-0">
-                    <Bus className="h-6 w-6 text-white" />
+              </CardContent>
+            </Card>
+          </div>
+        )}
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 md:py-8 space-y-8">
+          {/* Enhanced Live Location Sharing Card */}
+          <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-purple-600 via-blue-600 to-cyan-600 p-1 animate-fade-in shadow-2xl shadow-blue-500/10">
+            <div className="absolute inset-0 bg-gradient-to-r from-purple-600 via-blue-600 to-cyan-600 opacity-30 blur-3xl" />
+            <div className="relative bg-[#0F1423]/95 backdrop-blur-xl rounded-3xl p-5 md:p-8 lg:p-10 border border-white/5">
+              {/* Desktop Layout */}
+              <div className="hidden md:flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <div className="p-3 rounded-2xl bg-gradient-to-br from-blue-500 to-purple-600 shadow-lg animate-float">
+                    <Bus className="h-5 w-5 md:h-6 md:w-6 text-white" />
+                  </div>
+                  <div>
+                    <h1 className="text-2xl md:text-3xl lg:text-4xl font-bold text-white">Live Location Sharing</h1>
+                    <p className="text-white/60 text-sm md:text-base mt-1 font-medium">Share your bus location in real-time</p>
                   </div>
                 </div>
-                <div className="flex-1">
-                  <h1 className="text-xl font-bold text-white tracking-tight">Live Location Sharing</h1>
-                  <p className="text-white/60 text-[13px] mt-0.5 font-medium leading-tight">Share your bus location in real-time</p>
-                </div>
+                <Badge className={`px-4 py-2 text-sm md:text-lg font-semibold border-0 ${tripActive
+                  ? 'bg-gradient-to-r from-green-500 to-emerald-600 text-white shadow-lg shadow-green-500/20'
+                  : 'bg-gradient-to-r from-gray-600 to-gray-700 text-white'
+                  }`}>
+                  {tripActive ? "Trip Active" : "Trip Inactive"}
+                </Badge>
               </div>
 
-              {/* Status Section */}
-              <div className="flex justify-start pt-1">
-                <div className={`px-5 py-2.5 rounded-full shadow-lg border-2 ${tripActive
-                  ? 'bg-gradient-to-r from-green-500/10 to-emerald-600/10 text-green-400 border-green-500/30'
-                  : 'bg-gradient-to-r from-gray-500/10 to-gray-600/10 text-gray-400 border-gray-500/30'
-                  }`}>
-                  <div className="flex items-center gap-2.5">
-                    <div className={`w-2 h-2 rounded-full ${tripActive ? 'bg-green-400 animate-pulse shadow-[0_0_10px_rgba(74,222,128,0.5)]' : 'bg-gray-500'}`}></div>
-                    <span className="text-xs font-black uppercase tracking-widest">{tripActive ? "Trip Active" : "Trip Inactive"}</span>
+              {/* Mobile Layout - Enhanced Premium Design */}
+              <div className="md:hidden space-y-5">
+                {/* Header Section */}
+                <div className="flex items-center gap-4">
+                  <div className="relative">
+                    <div className="absolute inset-0 bg-blue-500 blur-lg opacity-40 animate-pulse"></div>
+                    <div className="relative p-3.5 rounded-2xl bg-gradient-to-br from-blue-500 to-purple-600 shadow-xl border border-white/10 shrink-0">
+                      <Bus className="h-6 w-6 text-white" />
+                    </div>
+                  </div>
+                  <div className="flex-1">
+                    <h1 className="text-xl font-bold text-white tracking-tight">Live Location Sharing</h1>
+                    <p className="text-white/60 text-[13px] mt-0.5 font-medium leading-tight">Share your bus location in real-time</p>
+                  </div>
+                </div>
+
+                {/* Status Section */}
+                <div className="flex justify-start pt-1">
+                  <div className={`px-5 py-2.5 rounded-full shadow-lg border-2 ${tripActive
+                    ? 'bg-gradient-to-r from-green-500/10 to-emerald-600/10 text-green-400 border-green-500/30'
+                    : 'bg-gradient-to-r from-gray-500/10 to-gray-600/10 text-gray-400 border-gray-500/30'
+                    }`}>
+                    <div className="flex items-center gap-2.5">
+                      <div className={`w-2 h-2 rounded-full ${tripActive ? 'bg-green-400 animate-pulse shadow-[0_0_10px_rgba(74,222,128,0.5)]' : 'bg-gray-500'}`}></div>
+                      <span className="text-xs font-black uppercase tracking-widest">{tripActive ? "Trip Active" : "Trip Inactive"}</span>
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
           </div>
-        </div>
 
-        {/* Trip Status Card - Enhanced Premium Design */}
-        <Card className="group relative overflow-hidden p-0 gap-0 bg-[#0F1423] border-white/5 shadow-2xl transition-all duration-300 rounded-[2rem]">
-          <CardHeader className="bg-[#161C2E] px-6 py-4 border-b border-white/5">
-            <CardTitle className="flex items-center gap-3 text-white">
-              <div className="p-2.5 rounded-xl bg-blue-500/10 border border-blue-500/20 group-hover:bg-blue-500/20 transition-colors">
-                <Navigation className="h-5 w-5 text-blue-400" />
-              </div>
-              <span className="text-lg font-bold tracking-tight">Trip Control</span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-5 space-y-6">
-            {/* Enhanced Bus Info Grid */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5 md:gap-6">
-              {/* Bus Number Card */}
-              <div className="group/item bg-[#161C2E] rounded-2xl p-3.5 border border-white/5 hover:border-blue-500/30 transition-all duration-300">
-                <div className="flex items-center gap-2.5 mb-2">
-                  <div className="p-1.5 rounded-lg bg-blue-500/10">
-                    <Bus className="h-3.5 w-3.5 text-blue-400" />
-                  </div>
-                  <p className="text-[10px] font-bold text-blue-400/80 uppercase tracking-[0.1em] whitespace-nowrap">Bus Number</p>
+          {/* Trip Status Card - Enhanced Premium Design */}
+          <Card className="group relative overflow-hidden p-0 gap-0 bg-[#0F1423] border-white/5 shadow-2xl transition-all duration-300 rounded-[2rem]">
+            <CardHeader className="bg-[#161C2E] px-6 py-4 border-b border-white/5">
+              <CardTitle className="flex items-center gap-3 text-white">
+                <div className="p-2.5 rounded-xl bg-blue-500/10 border border-blue-500/20 group-hover:bg-blue-500/20 transition-colors">
+                  <Navigation className="h-5 w-5 text-blue-400" />
                 </div>
-                <p className="text-[13px] md:text-sm font-black text-white">{busData?.busNumber || busData?.bus_number || 'Select Bus'}</p>
-              </div>
-
-              {/* Route Card */}
-              <div className="group/item bg-[#161C2E] rounded-2xl p-3.5 border border-white/5 hover:border-purple-500/30 transition-all duration-300">
-                <div className="flex items-center gap-2.5 mb-2">
-                  <div className="p-1.5 rounded-lg bg-purple-500/10">
-                    <MapPin className="h-3.5 w-3.5 text-purple-400" />
-                  </div>
-                  <p className="text-[10px] font-bold text-purple-400/80 uppercase tracking-[0.1em] whitespace-nowrap">Route</p>
-                </div>
-                <p className="text-[13px] md:text-sm font-black text-white">{routeData?.routeName || routeData?.route_name || 'Select Route'}</p>
-              </div>
-
-              {/* Speed Card */}
-              <div className="group/item bg-[#161C2E] rounded-2xl p-3.5 border border-white/5 hover:border-green-500/30 transition-all duration-300">
-                <div className="flex items-center gap-2.5 mb-2">
-                  <div className="p-1.5 rounded-lg bg-green-500/10">
-                    <Activity className="h-3.5 w-3.5 text-green-400" />
-                  </div>
-                  <p className="text-[10px] font-bold text-green-400/80 uppercase tracking-[0.1em] whitespace-nowrap">Speed</p>
-                </div>
-                <p className="text-[13px] md:text-sm font-black text-white">{(speed * 3.6).toFixed(1)} km/h</p>
-              </div>
-
-              {/* GPS Accuracy Card */}
-              <div className="group/item bg-[#161C2E] rounded-2xl p-3.5 border border-white/5 hover:border-orange-500/30 transition-all duration-300">
-                <div className="flex items-center gap-2.5 mb-2">
-                  <div className="p-1.5 rounded-lg bg-orange-500/10">
-                    <Navigation className="h-3.5 w-3.5 text-orange-400" />
-                  </div>
-                  <p className="text-[9px] font-bold text-orange-400/80 uppercase tracking-[0.1em] whitespace-nowrap">GPS Accuracy</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <p className={`text-[13px] md:text-sm font-black ${accuracy > 100 ? 'text-red-400' : accuracy > 50 ? 'text-yellow-400' : 'text-green-400'}`}>
-                    {accuracy.toFixed(1)}m
-                  </p>
-                  <div className={`w-2 h-2 rounded-full ${tripActive ? 'animate-pulse' : ''} ${accuracy <= 20 ? 'bg-green-400 shadow-[0_0_8px_rgba(74,222,128,0.4)]' :
-                    accuracy <= 50 ? 'bg-blue-400' :
-                      accuracy <= 100 ? 'bg-yellow-400' : 'bg-red-400'
-                    }`} />
-                </div>
-              </div>
-            </div>
-
-            {/* Enhanced Trip Controls */}
-            <div className="flex gap-4">
-              {!tripActive ? (
-                <Button
-                  onClick={handleStartTrip}
-                  disabled={loading}
-                  className="group relative flex-1 bg-gradient-to-r from-green-500 via-emerald-500 to-green-600 hover:from-green-600 hover:via-emerald-600 hover:to-green-700 text-white font-bold py-6 text-lg shadow-xl hover:shadow-2xl transition-all duration-300 hover:scale-[1.02] rounded-xl overflow-hidden"
-                >
-                  <div className="absolute inset-0 bg-gradient-to-r from-white/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
-                  <div className="relative flex items-center justify-center gap-3">
-                    <div className="p-1 rounded-full bg-white/20 group-hover:bg-white/30 transition-colors duration-300">
-                      <PlayCircle className="h-5 w-5 group-hover:scale-110 transition-transform duration-300" />
+                <span className="text-lg font-bold tracking-tight">Trip Control</span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-5 space-y-6">
+              {/* Enhanced Bus Info Grid */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5 md:gap-6">
+                {/* Bus Number Card */}
+                <div className="group/item bg-[#161C2E] rounded-2xl p-3.5 border border-white/5 hover:border-blue-500/30 transition-all duration-300">
+                  <div className="flex items-center gap-2.5 mb-2">
+                    <div className="p-1.5 rounded-lg bg-blue-500/10">
+                      <Bus className="h-3.5 w-3.5 text-blue-400" />
                     </div>
-                    <span className="tracking-wide">Start Trip</span>
+                    <p className="text-[10px] font-bold text-blue-400/80 uppercase tracking-[0.1em] whitespace-nowrap">Bus Number</p>
                   </div>
-                </Button>
-              ) : (
-                <Button
-                  onClick={handleEndTrip}
-                  disabled={loading}
-                  className="group relative flex-1 bg-gradient-to-r from-red-500 via-red-600 to-red-700 hover:from-red-600 hover:via-red-700 hover:to-red-800 text-white font-bold py-6 text-lg shadow-xl hover:shadow-2xl transition-all duration-300 hover:scale-[1.02] rounded-xl overflow-hidden"
-                >
-                  <div className="absolute inset-0 bg-gradient-to-r from-white/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
-                  <div className="relative flex items-center justify-center gap-3">
-                    <div className="p-1 rounded-full bg-white/20 group-hover:bg-white/30 transition-colors duration-300">
-                      <StopCircle className="h-5 w-5 group-hover:scale-110 transition-transform duration-300" />
-                    </div>
-                    <span className="tracking-wide">End Trip</span>
-                  </div>
-                </Button>
-              )}
-            </div>
-          </CardContent>
-        </Card>
+                  <p className="text-[13px] md:text-sm font-black text-white">{busData?.busNumber || busData?.bus_number || 'Select Bus'}</p>
+                </div>
 
-        {/* Waiting Flags */}
-        {waitingFlags.length > 0 && (
-          <div className="space-y-2 animate-slide-up">
-            <h3 className="text-sm font-bold text-white/60 ml-1 flex items-center gap-2 mb-3">
-              <div className="p-1 px-2 rounded-lg bg-orange-500/10 border border-orange-500/20">
-                <Flag className="h-4 w-4 text-orange-400" />
+                {/* Route Card */}
+                <div className="group/item bg-[#161C2E] rounded-2xl p-3.5 border border-white/5 hover:border-purple-500/30 transition-all duration-300">
+                  <div className="flex items-center gap-2.5 mb-2">
+                    <div className="p-1.5 rounded-lg bg-purple-500/10">
+                      <MapPin className="h-3.5 w-3.5 text-purple-400" />
+                    </div>
+                    <p className="text-[10px] font-bold text-purple-400/80 uppercase tracking-[0.1em] whitespace-nowrap">Route</p>
+                  </div>
+                  <p className="text-[13px] md:text-sm font-black text-white">{routeData?.routeName || routeData?.route_name || 'Select Route'}</p>
+                </div>
+
+                {/* Speed Card */}
+                <div className="group/item bg-[#161C2E] rounded-2xl p-3.5 border border-white/5 hover:border-green-500/30 transition-all duration-300">
+                  <div className="flex items-center gap-2.5 mb-2">
+                    <div className="p-1.5 rounded-lg bg-green-500/10">
+                      <Activity className="h-3.5 w-3.5 text-green-400" />
+                    </div>
+                    <p className="text-[10px] font-bold text-green-400/80 uppercase tracking-[0.1em] whitespace-nowrap">Speed</p>
+                  </div>
+                  <p className="text-[13px] md:text-sm font-black text-white">{(speed * 3.6).toFixed(1)} km/h</p>
+                </div>
+
+                {/* GPS Accuracy Card */}
+                <div className="group/item bg-[#161C2E] rounded-2xl p-3.5 border border-white/5 hover:border-orange-500/30 transition-all duration-300">
+                  <div className="flex items-center gap-2.5 mb-2">
+                    <div className="p-1.5 rounded-lg bg-orange-500/10">
+                      <Navigation className="h-3.5 w-3.5 text-orange-400" />
+                    </div>
+                    <p className="text-[9px] font-bold text-orange-400/80 uppercase tracking-[0.1em] whitespace-nowrap">GPS Accuracy</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <p className={`text-[13px] md:text-sm font-black ${accuracy > 100 ? 'text-red-400' : accuracy > 50 ? 'text-yellow-400' : 'text-green-400'}`}>
+                      {accuracy.toFixed(1)}m
+                    </p>
+                    <div className={`w-2 h-2 rounded-full ${tripActive ? 'animate-pulse' : ''} ${accuracy <= 20 ? 'bg-green-400 shadow-[0_0_8px_rgba(74,222,128,0.4)]' :
+                      accuracy <= 50 ? 'bg-blue-400' :
+                        accuracy <= 100 ? 'bg-yellow-400' : 'bg-red-400'
+                      }`} />
+                  </div>
+                </div>
               </div>
-              Waiting Students ({waitingFlags.length})
-            </h3>
-            {waitingFlags
-              .map((flag) => {
+
+              {/* Enhanced Trip Controls */}
+              <div className="flex gap-4">
+                {!tripActive ? (
+                  <Button
+                    onClick={handleStartTrip}
+                    disabled={loading}
+                    className="group relative flex-1 bg-gradient-to-r from-green-500 via-emerald-500 to-green-600 hover:from-green-600 hover:via-emerald-600 hover:to-green-700 text-white font-bold py-6 text-lg shadow-xl hover:shadow-2xl transition-all duration-300 hover:scale-[1.02] rounded-xl overflow-hidden"
+                  >
+                    <div className="absolute inset-0 bg-gradient-to-r from-white/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+                    <div className="relative flex items-center justify-center gap-3">
+                      <div className="p-1 rounded-full bg-white/20 group-hover:bg-white/30 transition-colors duration-300">
+                        <PlayCircle className="h-5 w-5 group-hover:scale-110 transition-transform duration-300" />
+                      </div>
+                      <span className="tracking-wide">Start Trip</span>
+                    </div>
+                  </Button>
+                ) : (
+                  <Button
+                    onClick={handleEndTrip}
+                    disabled={loading}
+                    className="group relative flex-1 bg-gradient-to-r from-red-500 via-red-600 to-red-700 hover:from-red-600 hover:via-red-700 hover:to-red-800 text-white font-bold py-6 text-lg shadow-xl hover:shadow-2xl transition-all duration-300 hover:scale-[1.02] rounded-xl overflow-hidden"
+                  >
+                    <div className="absolute inset-0 bg-gradient-to-r from-white/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+                    <div className="relative flex items-center justify-center gap-3">
+                      <div className="p-1 rounded-full bg-white/20 group-hover:bg-white/30 transition-colors duration-300">
+                        <StopCircle className="h-5 w-5 group-hover:scale-110 transition-transform duration-300" />
+                      </div>
+                      <span className="tracking-wide">End Trip</span>
+                    </div>
+                  </Button>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Waiting Flags */}
+          {waitingFlags.length > 0 && (
+            <div className="space-y-2 animate-slide-up">
+              <h3 className="text-sm font-bold text-white/60 ml-1 flex items-center gap-2 mb-3">
+                <div className="p-1 px-2 rounded-lg bg-orange-500/10 border border-orange-500/20">
+                  <Flag className="h-4 w-4 text-orange-400" />
+                </div>
+                Waiting Students ({waitingFlags.length})
+              </h3>
+              {waitingFlags
+                .map((flag) => {
+                  // Support both new and legacy coordinate fields
+                  const targetLat = flag.stop_lat || flag.lat;
+                  const targetLng = flag.stop_lng || flag.lng;
+
+                  // Calculate distance if driver location is available
+                  if (currentLocation && currentLocation.lat && currentLocation.lng && targetLat && targetLng) {
+                    // Haversine formula for distance calculation
+                    const R = 6371; // Radius of earth in km
+                    const dLat = (targetLat - currentLocation.lat) * Math.PI / 180;
+                    const dLon = (targetLng - currentLocation.lng) * Math.PI / 180;
+                    const a =
+                      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                      Math.cos(currentLocation.lat * Math.PI / 180) * Math.cos(targetLat * Math.PI / 180) *
+                      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+                    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+                    const distance = R * c; // Distance in km
+                    return { ...flag, distance };
+                  }
+                  return { ...flag, distance: undefined };
+                })
+                .sort((a, b) => (a.distance || 999) - (b.distance || 999)) // Sort by distance
+                .map((flag) => (
+                  <div key={flag.id} className="flex items-center justify-between p-3.5 bg-[#161C2E] rounded-[1.25rem] border border-white/5 shadow-xl animate-in slide-in-from-right duration-300">
+                    <div className="flex items-center gap-3.5">
+                      <div className="relative">
+                        <div className="absolute inset-0 bg-orange-500/20 blur-md rounded-full"></div>
+                        <div className="relative h-10 w-10 rounded-full bg-gradient-to-br from-orange-400 to-red-500 flex items-center justify-center text-white font-black text-sm border-2 border-[#161C2E] shadow-lg">
+                          {flag.student_name.charAt(0)}
+                        </div>
+                      </div>
+                      <div>
+                        <p className="font-bold text-sm text-white">{flag.student_name}</p>
+                        <div className="flex items-center gap-2 text-[11px] text-white/50 font-medium">
+                          <span className="text-orange-400">{flag.distance ? `${(flag.distance * 1000).toFixed(0)}m away` : 'Waiting'}</span>
+                          <span className="opacity-30">•</span>
+                          <span className="truncate max-w-[120px]">{flag.stop_name || "Custom Stop"}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleAcknowledgeFlag(flag.id)}
+                      className="h-8 text-xs bg-orange-50 text-orange-700 hover:bg-orange-100 hover:text-orange-800 border-orange-200 dark:bg-orange-900/20 dark:text-orange-300 dark:hover:bg-orange-900/40 dark:border-orange-800"
+                    >
+                      Acknowledge
+                    </Button>
+                  </div>
+                ))}
+            </div>
+          )}
+
+          {/* Uber-like Full Screen Map */}
+          <div className={`transition-all duration-300 shadow-2xl overflow-hidden ${isFullScreenMap
+            ? "fixed inset-0 z-[10000] h-[100dvh] w-screen rounded-none"
+            : "h-[450px] md:h-[calc(100vh-20rem)] md:min-h-[600px] rounded-3xl"
+            } ${isScannerOpen ? 'blur-sm opacity-50 pointer-events-none' : ''}`}>
+            <LiveTrackingDriverMap
+              driverLocation={currentLocation}
+              waitingStudents={waitingFlags.map(flag => {
                 // Support both new and legacy coordinate fields
                 const targetLat = flag.stop_lat || flag.lat;
                 const targetLng = flag.stop_lng || flag.lng;
 
-                // Calculate distance if driver location is available
-                if (currentLocation && currentLocation.lat && currentLocation.lng && targetLat && targetLng) {
-                  // Haversine formula for distance calculation
+                // Calculate distance for sorting and display
+                let distance = undefined;
+                if (currentLocation && targetLat && targetLng) {
                   const R = 6371; // Radius of earth in km
                   const dLat = (targetLat - currentLocation.lat) * Math.PI / 180;
                   const dLon = (targetLng - currentLocation.lng) * Math.PI / 180;
-                  const a =
-                    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
                     Math.cos(currentLocation.lat * Math.PI / 180) * Math.cos(targetLat * Math.PI / 180) *
                     Math.sin(dLon / 2) * Math.sin(dLon / 2);
                   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-                  const distance = R * c; // Distance in km
-                  return { ...flag, distance };
+                  distance = R * c;
                 }
-                return { ...flag, distance: undefined };
+
+                return {
+                  ...flag,
+                  distance,
+                  stop_lat: targetLat,
+                  stop_lng: targetLng,
+                  accuracy: 50, // Default accuracy for student markers
+                  stop_name: flag.stop_name || undefined,
+                  status: flag.status as 'waiting' | 'acknowledged' | 'boarded' | 'raised'
+                };
               })
-              .sort((a, b) => (a.distance || 999) - (b.distance || 999)) // Sort by distance
-              .map((flag) => (
-                <div key={flag.id} className="flex items-center justify-between p-3.5 bg-[#161C2E] rounded-[1.25rem] border border-white/5 shadow-xl animate-in slide-in-from-right duration-300">
-                  <div className="flex items-center gap-3.5">
-                    <div className="relative">
-                      <div className="absolute inset-0 bg-orange-500/20 blur-md rounded-full"></div>
-                      <div className="relative h-10 w-10 rounded-full bg-gradient-to-br from-orange-400 to-red-500 flex items-center justify-center text-white font-black text-sm border-2 border-[#161C2E] shadow-lg">
-                        {flag.student_name.charAt(0)}
-                      </div>
-                    </div>
-                    <div>
-                      <p className="font-bold text-sm text-white">{flag.student_name}</p>
-                      <div className="flex items-center gap-2 text-[11px] text-white/50 font-medium">
-                        <span className="text-orange-400">{flag.distance ? `${(flag.distance * 1000).toFixed(0)}m away` : 'Waiting'}</span>
-                        <span className="opacity-30">•</span>
-                        <span className="truncate max-w-[120px]">{flag.stop_name || "Custom Stop"}</span>
-                      </div>
-                    </div>
-                  </div>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => handleAcknowledgeFlag(flag.id)}
-                    className="h-8 text-xs bg-orange-50 text-orange-700 hover:bg-orange-100 hover:text-orange-800 border-orange-200 dark:bg-orange-900/20 dark:text-orange-300 dark:hover:bg-orange-900/40 dark:border-orange-800"
-                  >
-                    Acknowledge
-                  </Button>
-                </div>
-              ))}
+                .sort((a, b) => (a.distance ?? 9999) - (b.distance ?? 9999))}
+              tripActive={tripActive}
+              busNumber={busData?.busNumber}
+              routeName={routeData?.routeName}
+              speed={speed}
+              accuracy={accuracy}
+              onQrScan={() => setIsScannerOpen(true)}
+              onAcknowledgeStudent={handleAcknowledgeFlag}
+              onMarkBoarded={async (studentId) => {
+                // Mark student as boarded
+                try {
+                  const idToken = await currentUser?.getIdToken();
+                  const response = await fetch("/api/driver/mark-boarded", {
+                    method: "POST",
+                    headers: {
+                      "Content-Type": "application/json",
+                      Authorization: `Bearer ${idToken}`,
+                    },
+                    body: JSON.stringify({
+                      idToken,
+                      flagId: studentId,
+                    }),
+                  });
+
+                  if (response.ok) {
+                    setWaitingFlags((prev) => prev.filter((flag) => flag.id !== studentId));
+                    addToast("Student marked as boarded", "success");
+                  }
+                } catch (error) {
+                  console.error("Error marking student as boarded:", error);
+                  addToast("Failed to mark student as boarded", "error");
+                }
+              }}
+              isFullScreen={isFullScreenMap}
+              onToggleFullScreen={() => setIsFullScreenMap(!isFullScreenMap)}
+              showStatsOnMobile={isFullScreenMap}
+              primaryActionLabel={tripActive ? "End Trip" : "Start Trip"}
+              primaryActionColor={tripActive ? "red" : "green"}
+              onPrimaryAction={tripActive ? handleEndTrip : handleStartTrip}
+            />
           </div>
+        </div>
+
+        {/* Browser Compatibility Banner */}
+        <BrowserCompatibilityBanner />
+
+        {/* PWA Install Prompt */}
+        <PWAInstallPrompt />
+
+        {/* Notification Permission Banner */}
+
+
+        {/* Fullscreen overlay to cover navbar when scanner is open */}
+        {isScannerOpen && isFullScreenMap && (
+          <div className="fixed inset-0 z-[10001] bg-black/60 backdrop-blur-sm pointer-events-none" />
         )}
 
-        {/* Uber-like Full Screen Map */}
-        <div className={`transition-all duration-300 shadow-2xl overflow-hidden ${isFullScreenMap
-          ? "fixed inset-0 z-[10000] h-[100dvh] w-screen rounded-none"
-          : "h-[450px] md:h-[calc(100vh-20rem)] md:min-h-[600px] rounded-3xl"
-          } ${isScannerOpen ? 'blur-sm opacity-50 pointer-events-none' : ''}`}>
-          <LiveTrackingDriverMap
-            driverLocation={currentLocation}
-            waitingStudents={waitingFlags.map(flag => {
-              // Support both new and legacy coordinate fields
-              const targetLat = flag.stop_lat || flag.lat;
-              const targetLng = flag.stop_lng || flag.lng;
+        <BusPassScannerModal
+          isOpen={isScannerOpen}
+          onClose={() => setIsScannerOpen(false)}
+          onScanSuccess={(result) => {
+            // Toast removed as per request
+          }}
+        />
 
-              // Calculate distance for sorting and display
-              let distance = undefined;
-              if (currentLocation && targetLat && targetLng) {
-                const R = 6371; // Radius of earth in km
-                const dLat = (targetLat - currentLocation.lat) * Math.PI / 180;
-                const dLon = (targetLng - currentLocation.lng) * Math.PI / 180;
-                const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-                  Math.cos(currentLocation.lat * Math.PI / 180) * Math.cos(targetLat * Math.PI / 180) *
-                  Math.sin(dLon / 2) * Math.sin(dLon / 2);
-                const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-                distance = R * c;
-              }
-
-              return {
-                ...flag,
-                distance,
-                stop_lat: targetLat,
-                stop_lng: targetLng,
-                accuracy: 50, // Default accuracy for student markers
-                stop_name: flag.stop_name || undefined,
-                status: flag.status as 'waiting' | 'acknowledged' | 'boarded' | 'raised'
-              };
-            })
-              .sort((a, b) => (a.distance ?? 9999) - (b.distance ?? 9999))}
-            tripActive={tripActive}
-            busNumber={busData?.busNumber}
-            routeName={routeData?.routeName}
-            speed={speed}
-            accuracy={accuracy}
-            onQrScan={() => setIsScannerOpen(true)}
-            onAcknowledgeStudent={handleAcknowledgeFlag}
-            onMarkBoarded={async (studentId) => {
-              // Mark student as boarded
-              try {
-                const idToken = await currentUser?.getIdToken();
-                const response = await fetch("/api/driver/mark-boarded", {
-                  method: "POST",
-                  headers: {
-                    "Content-Type": "application/json",
-                    Authorization: `Bearer ${idToken}`,
-                  },
-                  body: JSON.stringify({
-                    idToken,
-                    flagId: studentId,
-                  }),
-                });
-
-                if (response.ok) {
-                  setWaitingFlags((prev) => prev.filter((flag) => flag.id !== studentId));
-                  addToast("Student marked as boarded", "success");
-                }
-              } catch (error) {
-                console.error("Error marking student as boarded:", error);
-                addToast("Failed to mark student as boarded", "error");
-              }
-            }}
-            isFullScreen={isFullScreenMap}
-            onToggleFullScreen={() => setIsFullScreenMap(!isFullScreenMap)}
-            showStatsOnMobile={isFullScreenMap}
-            primaryActionLabel={tripActive ? "End Trip" : "Start Trip"}
-            primaryActionColor={tripActive ? "red" : "green"}
-            onPrimaryAction={tripActive ? handleEndTrip : handleStartTrip}
-          />
-        </div>
-      </div>
-
-      {/* Browser Compatibility Banner */}
-      <BrowserCompatibilityBanner />
-
-      {/* PWA Install Prompt */}
-      <PWAInstallPrompt />
-
-      {/* Notification Permission Banner */}
-
-
-      {/* Fullscreen overlay to cover navbar when scanner is open */}
-      {isScannerOpen && isFullScreenMap && (
-        <div className="fixed inset-0 z-[10001] bg-black/60 backdrop-blur-sm pointer-events-none" />
-      )}
-
-      <BusPassScannerModal
-        isOpen={isScannerOpen}
-        onClose={() => setIsScannerOpen(false)}
-        onScanSuccess={(result) => {
-          // Toast removed as per request
-        }}
-      />
-
-      {/* START TRIP SELECTION MODAL / CARD */}
-      {showStartTripModal && !tripActive && (
-        <div className="fixed inset-0 z-[10000] flex items-center justify-center p-4 bg-black/60">
-          <Card className="w-full max-w-md bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 shadow-lg rounded-2xl overflow-hidden">
-            <CardHeader className="bg-emerald-600 text-white p-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-white/20 rounded-xl">
-                    <Bus className="h-5 w-5 text-white" />
+        {/* START TRIP SELECTION MODAL / CARD */}
+        {showStartTripModal && !tripActive && (
+          <div className="fixed inset-0 z-[10000] flex items-center justify-center p-4 bg-black/60">
+            <Card className="w-full max-w-md bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 shadow-lg rounded-2xl overflow-hidden">
+              <CardHeader className="bg-emerald-600 text-white p-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-white/20 rounded-xl">
+                      <Bus className="h-5 w-5 text-white" />
+                    </div>
+                    <div>
+                      <CardTitle className="text-lg font-bold text-white">Start New Trip</CardTitle>
+                      <p className="text-xs text-emerald-100 font-normal">Select bus & shift to begin tracking</p>
+                    </div>
                   </div>
-                  <div>
-                    <CardTitle className="text-lg font-bold text-white">Start New Trip</CardTitle>
-                    <p className="text-xs text-emerald-100 font-normal">Select bus & shift to begin tracking</p>
-                  </div>
-                </div>
-                <button
-                  onClick={() => setShowStartTripModal(false)}
-                  className="p-1 rounded-full hover:bg-white/20 text-white/80 hover:text-white transition-colors"
-                >
-                  <XCircle className="h-5 w-5" />
-                </button>
-              </div>
-            </CardHeader>
-
-            <CardContent className="p-5 space-y-5">
-              {/* BUS SELECTION */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
-                  <Bus className="h-4 w-4 text-emerald-600" />
-                  Select Bus
-                </label>
-
-                {fetchingBuses ? (
-                  <div className="flex items-center justify-center p-3 bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
-                    <Loader2 className="h-4 w-4 text-emerald-600 animate-spin mr-2" />
-                    <span className="text-xs text-gray-500">Loading buses...</span>
-                  </div>
-                ) : availableBuses.length > 0 ? (
-                  <select
-                    value={selectedBusId}
-                    onChange={(e) => setSelectedBusId(e.target.value)}
-                    className="w-full px-3 py-2.5 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-sm font-medium text-gray-900 dark:text-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                  >
-                    {availableBuses.map((bus: any) => (
-                      <option key={bus.id} value={bus.id}>
-                        Bus {bus.bus_number || bus.busNumber} — {bus.route_name || bus.routeName || 'Standard Route'}
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <div className="p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl text-xs text-amber-700 dark:text-amber-400">
-                    No active buses found. Defaulting to assigned bus.
-                  </div>
-                )}
-              </div>
-
-              {/* SHIFT SELECTION */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
-                  <Clock className="h-4 w-4 text-emerald-600" />
-                  Select Shift
-                </label>
-
-                <div className="grid grid-cols-2 gap-3">
                   <button
-                    type="button"
-                    onClick={() => setSelectedShift('Morning')}
-                    className={`flex items-center justify-center gap-2 p-3 rounded-xl font-medium text-sm border ${
-                      selectedShift === 'Morning'
-                        ? 'bg-amber-500 text-white border-amber-500 font-semibold'
-                        : 'bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700'
-                    }`}
+                    onClick={() => setShowStartTripModal(false)}
+                    className="p-1 rounded-full hover:bg-white/20 text-white/80 hover:text-white transition-colors"
                   >
-                    <Sun className="h-4 w-4" />
-                    Morning Shift
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setSelectedShift('Evening')}
-                    className={`flex items-center justify-center gap-2 p-3 rounded-xl font-medium text-sm border ${
-                      selectedShift === 'Evening'
-                        ? 'bg-indigo-600 text-white border-indigo-600 font-semibold'
-                        : 'bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700'
-                    }`}
-                  >
-                    <Moon className="h-4 w-4" />
-                    Evening Shift
+                    <XCircle className="h-5 w-5" />
                   </button>
                 </div>
-              </div>
+              </CardHeader>
 
-              {/* ACTION BUTTONS */}
-              <div className="flex items-center gap-3 pt-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setShowStartTripModal(false)}
-                  className="flex-1 py-5 rounded-xl font-medium border-gray-300 dark:border-gray-700"
-                >
-                  Cancel
-                </Button>
+              <CardContent className="p-5 space-y-5">
+                {/* BUS SELECTION */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
+                    <Bus className="h-4 w-4 text-emerald-600" />
+                    Select Bus
+                  </label>
 
-                <Button
-                  type="button"
-                  onClick={handleConfirmInitiateTrip}
-                  disabled={initiatingTrip || !selectedBusId}
-                  className="flex-1 py-5 rounded-xl font-semibold bg-emerald-600 hover:bg-emerald-700 text-white"
-                >
-                  {initiatingTrip ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                      Initiating...
-                    </>
+                  {fetchingBuses ? (
+                    <div className="flex items-center justify-center p-3 bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
+                      <Loader2 className="h-4 w-4 text-emerald-600 animate-spin mr-2" />
+                      <span className="text-xs text-gray-500">Loading buses...</span>
+                    </div>
+                  ) : availableBuses.length > 0 ? (
+                    <select
+                      value={selectedBusId}
+                      onChange={(e) => setSelectedBusId(e.target.value)}
+                      className="w-full px-3 py-2.5 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-sm font-medium text-gray-900 dark:text-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                    >
+                      {availableBuses.map((bus: any) => (
+                        <option key={bus.id} value={bus.id}>
+                          Bus {bus.bus_number || bus.busNumber} — {bus.route_name || bus.routeName || 'Standard Route'}
+                        </option>
+                      ))}
+                    </select>
                   ) : (
-                    <>
-                      <PlayCircle className="h-4 w-4 mr-2" />
-                      Confirm & Start
-                    </>
+                    <div className="p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl text-xs text-amber-700 dark:text-amber-400">
+                      No active buses found. Defaulting to assigned bus.
+                    </div>
                   )}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
-    </div>
+                </div>
+
+                {/* SHIFT SELECTION */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
+                    <Clock className="h-4 w-4 text-emerald-600" />
+                    Select Shift
+                  </label>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedShift('Morning')}
+                      className={`flex items-center justify-center gap-2 p-3 rounded-xl font-medium text-sm border ${selectedShift === 'Morning'
+                          ? 'bg-amber-500 text-white border-amber-500 font-semibold'
+                          : 'bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700'
+                        }`}
+                    >
+                      <Sun className="h-4 w-4" />
+                      Morning Shift
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setSelectedShift('Evening')}
+                      className={`flex items-center justify-center gap-2 p-3 rounded-xl font-medium text-sm border ${selectedShift === 'Evening'
+                          ? 'bg-indigo-600 text-white border-indigo-600 font-semibold'
+                          : 'bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700'
+                        }`}
+                    >
+                      <Moon className="h-4 w-4" />
+                      Evening Shift
+                    </button>
+                  </div>
+                </div>
+
+                {/* ACTION BUTTONS */}
+                <div className="flex items-center gap-3 pt-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setShowStartTripModal(false)}
+                    className="flex-1 py-5 rounded-xl font-medium border-gray-300 dark:border-gray-700"
+                  >
+                    Cancel
+                  </Button>
+
+                  <Button
+                    type="button"
+                    onClick={handleConfirmInitiateTrip}
+                    disabled={initiatingTrip || !selectedBusId}
+                    className="flex-1 py-5 rounded-xl font-semibold bg-emerald-600 hover:bg-emerald-700 text-white"
+                  >
+                    {initiatingTrip ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                        Initiating...
+                      </>
+                    ) : (
+                      <>
+                        <PlayCircle className="h-4 w-4 mr-2" />
+                        Confirm & Start
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        )}
+      </div>
     </ErrorBoundary>
   );
 }

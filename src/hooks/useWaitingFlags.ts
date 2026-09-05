@@ -1,4 +1,5 @@
 import { WebSocketClient } from '@/domains/realtime/ws-client';
+import { getClientWsUrl } from '@/domains/realtime';
 import { supabase } from '@/lib/supabase-client';
 import { useEffect,useRef,useState } from 'react';
 
@@ -74,8 +75,7 @@ export const useWaitingFlags = (busId: string, getToken: () => Promise<string | 
     let wsClient: WebSocketClient | null = null;
     const initWs = async () => {
       const token = await getToken();
-      if (!token) return;
-      const url = process.env.NEXT_PUBLIC_WS_URL || `ws://${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}:3001`;
+      const url = getClientWsUrl();
       wsClient = new WebSocketClient({ url, token });
       wsClient.connect();
       wsClient.subscribe(`waiting_flags_${busId}`, (payload: any) => {

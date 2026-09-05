@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Card,CardContent,CardHeader,CardTitle } from '@/components/ui/card';
 import { useAuth } from '@/contexts/auth-context';
 import { WebSocketClient } from '@/domains/realtime/ws-client';
+import { getClientWsUrl } from '@/domains/realtime';
 import { supabase } from '@/lib/supabase-client';
 import { AlertCircle,Bus,Clock,MapPin,Navigation } from 'lucide-react';
 import dynamic from 'next/dynamic';
@@ -137,7 +138,7 @@ function DynamicStudentMap({
 
     const initWs = async () => {
       const token = await currentUser.getIdToken();
-      const url = process.env.NEXT_PUBLIC_WS_URL || `ws://${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}:3001`;
+      const url = getClientWsUrl();
       const client = new WebSocketClient({ url, token });
       wsRef.current = client;
       client.connect();

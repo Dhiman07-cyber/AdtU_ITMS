@@ -35,6 +35,8 @@ export const ENV_CATALOG: EnvClassification[] = [
     { name: 'WS_PORT', category: 'private', lifecycle: 'runtime', required: false, description: 'WebSocket server port (default: 3001)' },
     { name: 'HEALTH_PORT', category: 'private', lifecycle: 'runtime', required: false, description: 'WS Health/Metrics port (default: 9090)' },
     { name: 'LOG_LEVEL', category: 'private', lifecycle: 'runtime', required: false, description: 'Structured logger level (info/warn/error/debug)' },
+    { name: 'WS_SERVER_URL', category: 'private', lifecycle: 'runtime', required: false, description: 'Internal / Remote WebSocket endpoint for Next.js server-side transport' },
+    { name: 'WS_HOST', category: 'private', lifecycle: 'runtime', required: false, description: 'Fallback WebSocket host (default: 127.0.0.1)' },
 
     // --- Secrets ---
     { name: 'FIREBASE_CLIENT_EMAIL', category: 'secret', lifecycle: 'runtime', required: true, description: 'Firebase Admin Service Account Email' },

@@ -191,3 +191,37 @@ export function decideLocationPacket(
 ### Key Guard Invariants:
 1. **Clock Skew Tolerance (5,000ms)**: Drivers using Android devices with unsynchronized clocks or slow network queues will not have their packets discarded if timestamp drift is within 5 seconds.
 2. **Trip Auto-Healing**: When a driver starts a new trip, incoming packets carrying the new `tripId` automatically reset tombstone state and resume UI tracking without requiring the student to refresh their browser.
+
+---
+
+## 5. Adaptive HTTP Recovery Fallback & Monotonic State Protection
+
+Earlier, the student tracking interface (`src/app/student/track-bus/page.tsx`) executed an unconditional 5-second `setInterval` query to `/api/student/trip-status`. Inside the state update handler, a static condition was used:
+```typescript
+// Earlier implementation
+setBusLocation((prev: any) => {
+  if (prev) return prev; // Locked location on first receipt
+  return newLoc;
+});
+```
+This meant that while the initial position loaded upon opening the map, every subsequent polling response received from the driver was discarded. If WebSocket streaming was severed by cellular handoffs or network dead zones, the marker froze permanently on the map. Furthermore, polling at a constant 5-second interval while WebSockets were healthy generated unnecessary database read load and burned client battery.
+
+After the new patch, adaptive recovery polling and strict monotonic timestamp protection were ensured. This means:
+1. **Adaptive Dynamic Intervals**:
+   - When the WebSocket connection is healthy (`wsConnected === true`), the polling interval automatically relaxes to **25 seconds** as a lightweight background sanity check, reducing client HTTP invocations by 80%.
+   - If the WebSocket disconnects or encounters network turbulence (`wsConnected === false`), the polling interval accelerates to **5 seconds**, keeping the live marker tracking smoothly from HTTP snapshots.
+2. **Monotonic Timestamp Invariant**:
+   - State updates evaluate:
+     ```typescript
+     setBusLocation((prev: any) => {
+       if (!prev) return newLoc;
+       const prevTs = parseTimestampMs(prev.timestamp);
+       const newTs = parseTimestampMs(newLoc.timestamp);
+       if (newTs > prevTs) return newLoc;
+       return prev;
+     });
+     ```
+     This guarantees that out-of-order snapshots or delayed HTTP responses can never cause the bus marker to jump backward on the map.
+3. **Timer Safety & Memory Protection**:
+   - Polling utilizes chained `setTimeout` with an `inFlight` request mutex rather than unmanaged `setInterval`, preventing stacking requests over high-latency cellular networks and eliminating memory leaks on component unmount.
+

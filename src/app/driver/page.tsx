@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card,CardContent,CardHeader } from "@/components/ui/card";
 import { useAuth } from "@/contexts/auth-context";
 import { WebSocketClient } from '@/domains/realtime/ws-client';
+import { getClientWsUrl } from '@/domains/realtime';
 import { authApiFetch } from "@/lib/secure-api-client";
 import { supabase } from "@/lib/supabase-client";
 import { formatIdForDisplay } from "@/lib/utils";
@@ -141,7 +142,7 @@ export default function DriverDashboard() {
     const initTripWs = async () => {
       if (!busId || !currentUser) return;
       const token = await currentUser.getIdToken();
-      const url = process.env.NEXT_PUBLIC_WS_URL || `ws://${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}:3001`;
+      const url = getClientWsUrl();
       tripWsClient = new WebSocketClient({ url, token });
       tripWsClient.connect();
       tripWsClient.subscribe(`trip-status-${busId}`, (payload: any) => {

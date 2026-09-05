@@ -14,7 +14,7 @@ import { updateLiveBusLocation } from './socket-router';
 
 import { assertPrivilegedTokenSafe } from './authenticator';
 
-const WS_PORT = parseInt(process.env.WS_PORT || '3001', 10);
+const WS_PORT = parseInt(process.env.PORT || process.env.WS_PORT || '3001', 10);
 const HEALTH_PORT = parseInt(process.env.HEALTH_PORT || '9090', 10);
 
 async function main() {
@@ -36,7 +36,26 @@ async function main() {
     logger.warn('Firebase Admin credentials not found; auth will reject all connections', { port: WS_PORT });
   }
 
-  const server = createServer();
+  const server = createServer((req, res) => {
+    // Health probe responder on main server port (for Render, Railway, and external keep-alive crons)
+    const rawUrl = req.url?.split('?')[0];
+    if (rawUrl === '/health' || rawUrl === '/health/live' || rawUrl === '/') {
+      const status = healthService.liveness();
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.writeHead(status.status === 'ok' ? 200 : 503);
+      res.end(JSON.stringify({ status: status.status, service: 'itms-ws-server', uptime: status.uptime }));
+      return;
+    }
+    if (rawUrl === '/health/ready') {
+      const status = healthService.readiness();
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.writeHead(status.status === 'ok' ? 200 : 503);
+      res.end(JSON.stringify(status));
+      return;
+    }
+  });
   wsServer.start(server);
 
   // Connect Redis and initialize cross-node broadcast relay.
@@ -98,9 +117,11 @@ async function main() {
     }
   });
 
-  healthServer.listen(HEALTH_PORT, () => {
-    logger.info('health_server_started', { port: HEALTH_PORT });
-  });
+  if (HEALTH_PORT !== WS_PORT) {
+    healthServer.listen(HEALTH_PORT, () => {
+      logger.info('health_server_started', { port: HEALTH_PORT });
+    });
+  }
 
   const shutdown = async (signal: string) => {
     logger.info('shutdown_started', { signal, drainTimeout: 30000 });

@@ -113,6 +113,11 @@ export class WebSocketClient {
     if (storedReconnectToken) params.set('reconnect_token', storedReconnectToken);
 
     let baseUrl = this.config.url.trim();
+    if (baseUrl.startsWith('https://')) {
+      baseUrl = 'wss://' + baseUrl.slice(8);
+    } else if (baseUrl.startsWith('http://')) {
+      baseUrl = 'ws://' + baseUrl.slice(7);
+    }
     const queryIndex = baseUrl.indexOf('?');
     if (queryIndex !== -1) {
       baseUrl = baseUrl.substring(0, queryIndex);
@@ -121,7 +126,8 @@ export class WebSocketClient {
     if (!baseUrl.endsWith('/ws')) {
       baseUrl = `${baseUrl}/ws`;
     }
-    const url = `${baseUrl}?${params.toString()}`;
+    const paramStr = params.toString();
+    const url = paramStr ? `${baseUrl}?${paramStr}` : baseUrl;
     this.ws = new WebSocket(url);
 
     this.ws.onopen = () => {

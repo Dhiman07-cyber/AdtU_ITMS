@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card,CardContent,CardHeader } from "@/components/ui/card";
 import { useAuth } from "@/contexts/auth-context";
 import { WebSocketClient } from '@/domains/realtime/ws-client';
+import { getClientWsUrl } from '@/domains/realtime';
 import { getTransportEntitlement } from '@/lib/entitlement/transport-entitlement';
 import { authApiFetch } from '@/lib/secure-api-client';
 import { motion } from "motion/react";
@@ -152,8 +153,7 @@ export default function StudentDashboard() {
     const init = async () => {
       try {
         const token = await currentUser.getIdToken();
-        if (isCancelled) return;
-        const url = process.env.NEXT_PUBLIC_WS_URL || `ws://${window.location.hostname}:3001/ws`;
+        const url = getClientWsUrl();
         wsClient = new WebSocketClient({ url, token });
         wsClient.connect();
 

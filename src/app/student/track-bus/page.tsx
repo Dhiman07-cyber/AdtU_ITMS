@@ -8,6 +8,8 @@ import { Card,CardContent,CardHeader,CardTitle } from "@/components/ui/card";
 import { useAuth } from "@/contexts/auth-context";
 import { useToast } from "@/contexts/toast-context";
 import { WebSocketClient } from '@/domains/realtime/ws-client';
+import { getClientWsUrl } from '@/domains/realtime';
+import { parseTimestampMs } from '@/domains/realtime/location-packet-guard';
 import { useBusLocation } from '@/hooks/useBusLocation';
 import {
 	getBusById,
@@ -345,7 +347,7 @@ function TrackBusLive() {
       try {
         const token = await currentUser.getIdToken();
         if (cancelled) return;
-        const url = process.env.NEXT_PUBLIC_WS_URL || `ws://${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}:3001/ws`;
+        const url = getClientWsUrl();
         const client = new WebSocketClient({ url, token });
         wsClientRef.current = client;
         // Connect FIRST so the WS handshake starts, then expose the client
@@ -370,6 +372,23 @@ function TrackBusLive() {
       setWsClientReady(false);
     };
   }, [currentUser]);
+
+  const [wsConnected, setWsConnected] = useState(false);
+
+  // Track live WebSocket connection health to dynamically tune HTTP fallback polling
+  useEffect(() => {
+    if (!wsClient) {
+      setWsConnected(false);
+      return;
+    }
+    setWsConnected(wsClient.isConnected());
+    const unsub = wsClient.onStatus((status) => {
+      setWsConnected(status === 'connected');
+    });
+    return () => {
+      unsub();
+    };
+  }, [wsClient]);
 
 
   // Subscribe to per-student events (ack broadcasts, trip-end teardown)
@@ -428,9 +447,16 @@ function TrackBusLive() {
   } = useBusLocation(targetBusId, authToken || undefined, wsClient);
 
 
-  // Update local busLocation state whenever hook location changes
+  // Update local busLocation state whenever hook location changes (monotonic guard)
   useEffect(() => {
-    setBusLocation(hookBusLocation);
+    if (!hookBusLocation) return;
+    setBusLocation((prev: any) => {
+      if (!prev) return hookBusLocation;
+      const prevTs = parseTimestampMs(prev.timestamp);
+      const hookTs = parseTimestampMs(hookBusLocation.timestamp);
+      if (hookTs >= prevTs) return hookBusLocation;
+      return prev;
+    });
   }, [hookBusLocation]);
 
   // useBusLocation (above) is the single authoritative bus-location producer.
@@ -442,21 +468,69 @@ function TrackBusLive() {
   // on the same channel would race each other and could deliver duplicate or
   // out-of-order state updates to setBusLocation.
 
+  // Subscribe to trip status events via WebSocket
+  useEffect(() => {
+    if (!targetBusId || !wsClient) return;
 
-  // Check for active trip with realtime subscription & 5s fast check fallback
+    const unsub = wsClient.subscribe(`trip-status-${targetBusId}`, (payload: any) => {
+      console.log("🚦 Trip status broadcast:", payload);
+      const data = payload.payload || payload;
+      const eventType = data.event || payload.event;
+      if (eventType === "trip_started" || data.status === "active") {
+        const studentShift = studentData?.shift || studentData?.student_shift;
+        if (data.shift && studentShift && !isShiftCompatible(studentShift, data.shift)) {
+          console.log(`ℹ️ Ignoring trip_started broadcast for bus ${targetBusId} due to shift mismatch (student: ${studentShift}, trip: ${data.shift})`);
+          return;
+        }
+        setTripActive(true);
+        addToast(`🚌 Trip started for ${formatIdForDisplay(data.routeId || data.busId || targetBusId)}!`, "success");
+      } else if (eventType === "trip_ended" || data.status === "ended") {
+        setTripActive(false);
+        setBusLocation(null);
+        setIsFullScreenMap(false);
+        setIsWaiting(false);
+        setCurrentFlagId(null);
+        if (typeof window !== 'undefined') {
+          (window as any).__itmsLastBusLocation = null;
+          (window as any).__itmsMarkerPosition = null;
+        }
+        addToast(`🏁 Trip for ${formatIdForDisplay(data.busNumber || data.busId || targetBusId)} has ended`, "success");
+      }
+    });
+
+    return () => {
+      unsub();
+    };
+  }, [targetBusId, wsClient, studentData, addToast]);
+
+  // Adaptive HTTP fallback polling:
+  // - WebSocket healthy (wsConnected === true): relaxes to 25s check.
+  // - WebSocket disconnected/reconnecting (wsConnected === false): 5s fast recovery poll.
+  // Guarantees: inFlight guard prevents overlapping polls; cleanup prevents timer leaks;
+  // monotonic timestamp guard accepts only newer snapshots.
   useEffect(() => {
     if (!targetBusId) return;
 
+    let isMounted = true;
+    let timerId: NodeJS.Timeout | null = null;
+    let inFlight = false;
+
+    const pollIntervalMs = wsConnected ? 25000 : 5000;
+
     const checkActiveTrip = async () => {
+      if (!isMounted || inFlight) return;
+      inFlight = true;
+
       try {
         const token = authToken || await currentUser?.getIdToken();
         const response = await fetch(`/api/student/trip-status?busId=${encodeURIComponent(targetBusId)}`, {
           headers: token ? { Authorization: `Bearer ${token}` } : {}
         });
 
-        if (!response.ok) return;
+        if (!response.ok || !isMounted) return;
 
         const result = await response.json();
+        if (!isMounted) return;
 
         if (result.tripActive) {
           setTripActive(true);
@@ -473,17 +547,28 @@ function TrackBusLive() {
                 accuracy: loc.accuracy,
                 timestamp: loc.timestamp || new Date().toISOString(),
               };
+
               setBusLocation((prev: any) => {
-                if (prev) return prev; // Preserve live WebSocket location updates
-                return newLoc;
+                if (!prev) return newLoc;
+                const prevTs = parseTimestampMs(prev.timestamp);
+                const newTs = parseTimestampMs(newLoc.timestamp);
+                if (newTs > prevTs) return newLoc;
+                return prev;
               });
+
+              if (typeof window !== 'undefined') {
+                const prev = (window as any).__itmsLastBusLocation;
+                const prevTs = prev ? parseTimestampMs(prev.timestamp) : 0;
+                const newTs = parseTimestampMs(newLoc.timestamp);
+                if (newTs > prevTs) {
+                  (window as any).__itmsLastBusLocation = { ...newLoc, appliedAtMs: Date.now() };
+                }
+              }
             }
           }
         } else {
           setTripActive(false);
           setBusLocation(null);
-          // Clear the useBusLocation window globals so the marker is removed
-          // even if the WS trip_ended event was delayed or missed.
           if (typeof window !== 'undefined') {
             (window as any).__itmsLastBusLocation = null;
             (window as any).__itmsMarkerPosition = null;
@@ -491,49 +576,22 @@ function TrackBusLive() {
         }
       } catch (error) {
         console.error("❌ Error checking active trip:", error);
+      } finally {
+        inFlight = false;
+        if (isMounted) {
+          timerId = setTimeout(checkActiveTrip, pollIntervalMs);
+        }
       }
     };
 
-    // Run the check immediately
+    // Immediate initial check
     checkActiveTrip();
 
-    // Fast 5-second interval fallback so student UI activates automatically even if WS packet drops
-    const interval = setInterval(checkActiveTrip, 5000);
-
-    // Use the reactive wsClient state — not wsClientRef.current — so this
-    // subscription is guaranteed to see a non-null client when the effect runs.
-    // wsClientRef.current is set synchronously alongside wsClient, but the ref
-    // read happens at closure creation time and can be null in a render race.
-    let unsub: (() => void) | null = null;
-    if (wsClient) {
-      unsub = wsClient.subscribe(`trip-status-${targetBusId}`, (payload: any) => {
-        console.log("🚦 Trip status broadcast:", payload);
-        const data = payload.payload || payload;
-        const eventType = data.event || payload.event;
-        if (eventType === "trip_started" || data.status === "active") {
-          const studentShift = studentData?.shift || studentData?.student_shift;
-          if (data.shift && studentShift && !isShiftCompatible(studentShift, data.shift)) {
-            console.log(`ℹ️ Ignoring trip_started broadcast for bus ${targetBusId} due to shift mismatch (student: ${studentShift}, trip: ${data.shift})`);
-            return;
-          }
-          setTripActive(true);
-          addToast(`🚌 Trip started for ${formatIdForDisplay(data.routeId || data.busId || targetBusId)}!`, "success");
-        } else if (eventType === "trip_ended" || data.status === "ended") {
-          setTripActive(false);
-          setBusLocation(null);
-          setIsFullScreenMap(false);
-          setIsWaiting(false);
-          setCurrentFlagId(null);
-          addToast(`🏁 Trip for ${formatIdForDisplay(data.busNumber || data.busId || targetBusId)} has ended`, "success");
-        }
-      });
-    }
-
     return () => {
-      clearInterval(interval);
-      if (unsub) unsub();
+      isMounted = false;
+      if (timerId) clearTimeout(timerId);
     };
-  }, [targetBusId, wsClient, wsClientReady, authToken, currentUser?.uid, studentData, addToast]);
+  }, [targetBusId, wsConnected, authToken, currentUser]);
 
   // Calculate distance and ETA between bus and student
   useEffect(() => {

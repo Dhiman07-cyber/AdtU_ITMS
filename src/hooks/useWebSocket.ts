@@ -1,6 +1,7 @@
 'use client';
 
 import { WebSocketClient } from '@/domains/realtime/ws-client';
+import { getClientWsUrl } from '@/domains/realtime';
 import { auth } from '@/lib/firebase';
 import { useEffect,useState } from 'react';
 
@@ -17,7 +18,7 @@ const defaultGetNewToken = async (): Promise<string> => {
 
 function getOrCreateClient(token: string, getNewToken?: () => Promise<string>): WebSocketClient {
   if (!globalClient) {
-    const url = process.env.NEXT_PUBLIC_WS_URL || `ws://${typeof window !== 'undefined' ? window.location.hostname : 'localhost'}:3001`;
+    const url = getClientWsUrl();
     globalClient = new WebSocketClient({ url, token, getNewToken: getNewToken || defaultGetNewToken });
     globalClient.connect();
   }

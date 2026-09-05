@@ -1,9 +1,18 @@
-const privilegedToken = process.env.WS_PRIVILEGED_TOKEN;
-const isProd = process.env.NODE_ENV === 'production';
-const privilegedAuthEnabled = isProd
-  ? Boolean(privilegedToken && privilegedToken.trim() !== '' && privilegedToken !== '__server__')
-  : Boolean(privilegedToken || true);
-const PRIVILEGED_TOKEN = privilegedToken || (isProd ? '' : '__server__');
+import { getServerWsUrl } from '../ws-config';
+
+function getPrivilegedToken(): string {
+  const token = process.env.WS_PRIVILEGED_TOKEN;
+  const isProd = process.env.NODE_ENV === 'production';
+  return token || (isProd ? '' : '__server__');
+}
+
+function isPrivilegedAuthEnabled(): boolean {
+  const token = process.env.WS_PRIVILEGED_TOKEN;
+  const isProd = process.env.NODE_ENV === 'production';
+  return isProd
+    ? Boolean(token && token.trim() !== '' && token !== '__server__')
+    : Boolean(token || true);
+}
 
 const MAX_QUEUE = 500;
 /** Cap for the client-side ws buffer before we queue instead of send. At ~200
@@ -20,12 +29,10 @@ export class WebSocketTransport {
   private sendQueue: string[] = [];
 
   async connect(): Promise<void> {
-    if (!privilegedAuthEnabled) {
+    if (!isPrivilegedAuthEnabled()) {
       console.warn('[WebSocketTransport] WS_PRIVILEGED_TOKEN is missing or insecure in production; server bridge disabled. Events will queue.');
       return;
     }
-    const port = process.env.WS_PORT || '3001';
-    const host = process.env.WS_HOST || '127.0.0.1';
     if (this.connected) return;
 
     if (this.ws) {
@@ -34,16 +41,31 @@ export class WebSocketTransport {
     }
 
     try {
+      const endpoint = getServerWsUrl();
       const { default: WebSocket } = await import('ws');
-      this.ws = new WebSocket(`ws://${host}:${port}/ws?token=${PRIVILEGED_TOKEN}`);
+      this.ws = new WebSocket(endpoint);
 
       this.ws.on('open', () => {
+        // Path B: authenticate as first frame over the wire — never expose secret in URL
+        const token = getPrivilegedToken();
+        if (token) {
+          this.unsafeSend(JSON.stringify({ type: 'auth', token }));
+        }
         this.connected = true;
         this.sendPresence();
         // Drain synchronously first so callers see an empty queue immediately.
         // The batched path handles any messages queued during the drain itself.
         this.drainQueueSync();
         this.drainQueue();
+      });
+
+      this.ws.on('message', (data: any) => {
+        try {
+          const msg = JSON.parse(data.toString());
+          if (msg.type === 'auth_required' || (msg.type === 'error' && String(msg.message).toLowerCase().includes('auth'))) {
+            console.warn('[WebSocketTransport] Server rejected internal auth:', msg.message);
+          }
+        } catch {}
       });
 
       this.ws.on('close', () => {

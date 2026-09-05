@@ -212,3 +212,26 @@ export function checkRateLimit(socketId: string, uid?: string): { allowed: boole
 - **Server Pings**: The server issues standard WebSocket `ping` frames every 25 seconds.
 - **Client Pongs**: The client must reply with `pong` or any valid message.
 - **Eviction**: If two consecutive ping intervals elapse without client traffic, the socket is terminated, in-memory subscriptions are cleaned up, and metrics are adjusted.
+
+---
+
+### 4.4 Client & Server Endpoint Resolution Architecture (`src/domains/realtime/ws-config.ts`)
+
+Earlier, client components and server transports relied on static environment configurations (`NEXT_PUBLIC_WS_URL=ws://localhost:3001` and `WS_HOST=127.0.0.1`). When testing across local LAN devices, separate mobile carrier networks (such as Airtel on a student phone and Jio on a driver phone), or in cross-cloud topologies (Next.js on Vercel connecting to a dedicated WebSocket cluster on Render), the client bundles attempted to connect to `localhost:3001` on the mobile phones themselves, leading to immediate handshake failures.
+
+After the new patch, centralized endpoint resolution via `getClientWsUrl()` and `getServerWsUrl()` was ensured. This means:
+- **Dynamic LAN Host Rewriting**: When a student or driver accesses the application from a smartphone on the local network (e.g., `http://192.168.1.5:3000`), the browser dynamically inspects `window.location.hostname`. If the configured URL targets `localhost`, it automatically translates the hostname to `192.168.1.5:3001`, enabling immediate multi-device connectivity without modifying environment files.
+- **Protocol Auto-Upgrade**: On HTTPS production pages, `ws://` endpoints are automatically upgraded to `wss://` to eliminate browser mixed-content security blocks.
+- **Path & Query Normalization**: Trailing slashes and repeated `/ws` segments are normalized to avoid invalid routing, and query parameters are stripped at the boundary.
+
+---
+
+### 4.5 Privileged Internal Server Transport & First-Frame Authentication
+
+Earlier, the internal server-to-server WebSocket transport appended privileged credentials directly into the URL query parameters (`ws://127.0.0.1:3001/ws?token=SECRET`). This presented serious security risks because secrets embedded in URL strings leak through reverse proxy access logs, monitoring spans, and network telemetry. Furthermore, the hardcoded loopback host prevented serverless API functions on Vercel from routing GPS events to a remote WebSocket server.
+
+After the new patch, the internal bridge was updated to use dedicated `WS_SERVER_URL` resolution and first-frame wire authentication (`{ type: 'auth', token: PRIVILEGED_TOKEN }`). This means:
+1. The Next.js API server connects to the dedicated WebSocket server using a clean URL path (`/ws`) with zero credentials in the address bar or HTTP request line.
+2. Upon connection `open`, the internal transport transmits an encrypted JSON authentication envelope over the established socket.
+3. The WebSocket server verifies the secret, assigns `{ authenticated: true, uid: 'server', role: 'server' }`, and grants unthrottled broadcast privileges to publish driver location telemetry across subscriber channels.
+
