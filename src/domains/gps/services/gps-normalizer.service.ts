@@ -1,6 +1,6 @@
 import type { LocationUpdate,LocationUpdateNormalized } from './types';
 
-const MAX_CLOCK_SKEW_MS = 2 * 60 * 1000;
+export const MAX_CLOCK_SKEW_MS = 2 * 60 * 1000;
 
 export function normalizeLocationUpdate(raw: LocationUpdate): LocationUpdateNormalized {
   return {

@@ -139,7 +139,9 @@ export async function processCapturedPayment(paymentDetails: {
             // SELF-HEALING GUARANTEE: For renewal payments, verify that the renewal application record exists.
             // If a previous payment capture failed halfway due to a transient database outage or network switch,
             // recover and create the renewal application now instead of dropping it.
-            const rawPurpose = String(notes.purpose || notes.type || '');
+        // Server-derived `type` (set at order creation) is authoritative;
+        // free-text `purpose` is only a legacy fallback.
+        const rawPurpose = String(notes.type || notes.purpose || '');
             const isRenewal = !rawPurpose.toLowerCase().includes('registration') && rawPurpose.toLowerCase() !== 'new_registration';
             if (isRenewal) {
                 const applicationId = `online_${paymentId}`;

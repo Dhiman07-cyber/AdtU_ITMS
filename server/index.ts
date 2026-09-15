@@ -10,7 +10,7 @@ import { stopMessageValidator } from './message-validator';
 import { validateEnvironment } from '../src/lib/env-validator';
 import { redisClient } from './redis-client';
 import { initRedisBroadcastRelay } from './redis-broadcast';
-import { updateLiveBusLocation } from './socket-router';
+import { updateLiveBusLocation, clearLiveBusLocation } from './socket-router';
 
 import { assertPrivilegedTokenSafe } from './authenticator';
 
@@ -68,6 +68,8 @@ async function main() {
         (channel, event, payload) => wsServer.broadcastToChannel(channel, event, payload),
         // onLocationUpdate: keep the in-process live-location cache in sync
         (busId, payload) => updateLiveBusLocation(busId, payload),
+        // onTripEnded: clear the in-process live-location cache on trip end across nodes
+        (busId) => clearLiveBusLocation(busId),
       ).catch((err) => {
         logger.warn('redis_broadcast_relay_init_failed', { error: (err as Error).message });
       });

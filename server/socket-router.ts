@@ -95,8 +95,17 @@ handle('subscribe', (ws, session, payload) => {
   // SECURITY: Students may only subscribe to channels for their assigned bus.
   // Drivers may only subscribe to channels for their active trip's bus.
   // Admins/moderators/server have unrestricted access.
+  // driver_wait_request_* is driver-only: it carries other students' names
+  // and stops, so students are never allowed to subscribe to it even for
+  // their own bus.
+  if (channel.startsWith('driver_wait_request_') && session.role === 'student') {
+    send(ws, { type: 'error', message: 'Not authorized to subscribe to this channel' });
+    metricsService.inc('errors');
+    logger.warn('subscribe_unauthorized_student_wait_channel', { uid: session.uid, channel });
+    return;
+  }
   if (session.role === 'student' || session.role === 'driver') {
-    const busIdMatch = channel.match(/^(?:bus:|bus_location_|trip-status-|waiting_flags_)(.+)$/);
+    const busIdMatch = channel.match(/^(?:bus:|bus_location_|trip-status-|waiting_flags_|driver_wait_request_)(.+)$/);
     if (busIdMatch) {
       const channelBusId = busIdMatch[1];
       // REJECT if session.busId is not set (presence not sent yet)
@@ -253,8 +262,9 @@ handle('location_update', (ws, session, payload) => {
     return;
   }
 
-  // DEPRECATED: Direct WS location updates bypass the robust validation pipeline
-  // (Kalman filters, spoofing detection) and drop trip metadata.
+  // DEPRECATED: Direct WS location updates bypass the HTTP validation pipeline
+  // (bounds, speed/heading limits, accuracy cap, active-trip check, jump and
+  // replay-ordering guards in gps-pipeline.service) and drop trip metadata.
   // The authoritative path is now the HTTP API which emits via Redis.
   // We no longer broadcast or cache from this handler to prevent duplicate packets.
   // We just increment the metric to track if any legacy clients are still sending this.
@@ -273,7 +283,10 @@ handle('broadcast', (ws, session, payload) => {
     return;
   }
   const eventPayload = (payload.payload || {}) as Record<string, unknown>;
-  const busIdMatch = channel.match(/^(?:bus:|bus_location_)(.+)$/);
+  // Lifecycle events ship on trip-status-{busId} (see trip-broadcast.service),
+  // so the live-location snapshot must be cleared for that channel shape too —
+  // otherwise new subscribers get a stale position for up to 60s after end.
+  const busIdMatch = channel.match(/^(?:bus:|bus_location_|trip-status-)(.+)$/);
   if (busIdMatch) {
     if (event === 'bus_location_update') {
       updateLiveBusLocation(busIdMatch[1], eventPayload);

@@ -5,6 +5,7 @@
  * Replaces Firestore getDoc(doc(db, 'notifications', id)) in view pages.
  */
 import * as Notification from '@/domains/notification';
+import { getByUid as getStudentByUid } from '@/domains/student';
 import { withSecurity } from '@/lib/security/api-security';
 import { NextResponse } from 'next/server';
 
@@ -31,6 +32,33 @@ export const GET = withSecurity(
           { success: false, error: 'Notification not found' },
           { status: 404 }
         );
+      }
+
+      // Only intended recipients (and staff) may view a notification.
+      // Staff (admin/moderator) retain full visibility; students/drivers
+      // must satisfy the same visibility rules as the list endpoint.
+      if (auth.role === 'student' || auth.role === 'driver') {
+        let userRouteId: string | null = null;
+        if (auth.role === 'student') {
+          try {
+            const student = await getStudentByUid(auth.uid);
+            userRouteId = (student as any)?.routeId || (student as any)?.route_id || null;
+          } catch {
+            userRouteId = null;
+          }
+        }
+        const visibility = Notification.isNotificationVisibleToUser(
+          notification,
+          auth.uid,
+          auth.role as any,
+          userRouteId
+        );
+        if (!visibility.visible) {
+          return NextResponse.json(
+            { success: false, error: 'Notification not found' },
+            { status: 404 }
+          );
+        }
       }
 
       return NextResponse.json(notification, { status: 200 });

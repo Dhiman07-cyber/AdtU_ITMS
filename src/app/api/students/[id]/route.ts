@@ -1,6 +1,7 @@
 import { getByEnrollmentId,getById,getByUid } from '@/domains/student';
 import { verifyApiAuth } from '@/lib/security/api-auth';
 import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
+import { getSupabaseServer } from '@/lib/supabase-server';
 import { NextResponse } from 'next/server';
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -30,6 +31,26 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     // Student self-access check: students can only access their own profile
     if (auth.role === 'student' && auth.uid !== student.uid && auth.uid !== student.id) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
+
+    // Driver access check: drivers may only view students assigned to a bus
+    // on which they currently hold an active trip (e.g. QR-scan verification).
+    if (auth.role === 'driver') {
+      const studentBusId = student.busId || (student as any).bus_id;
+      if (!studentBusId) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+      }
+      const supabase = getSupabaseServer();
+      const { data: activeTrip } = await supabase
+        .from('active_trips')
+        .select('trip_id')
+        .eq('driver_id', auth.uid)
+        .eq('bus_id', studentBusId)
+        .eq('status', 'active')
+        .maybeSingle();
+      if (!activeTrip) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+      }
     }
 
     // Format the date of birth to ensure it's in YYYY-MM-DD format (if present)

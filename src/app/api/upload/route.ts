@@ -10,18 +10,18 @@
  *  6. ✅ Server-generated unique public_id (client cannot set it)
  *  7. ✅ Overwrite disabled (prevents replacing existing assets)
  *  8. ✅ EXIF/metadata stripped from uploads
- *  9. ✅ Old image deleted (via SDK, not by sending API_SECRET in a form!)
+ *  9. ✅ No deletion of caller-supplied URLs (deleting any known asset URL
+ *     would let an authenticated user destroy other users' photos whose URLs
+ *     are visible in-app; old-photo cleanup happens in update-profile-photo,
+ *     which only deletes the target's current photo)
  * 10. ✅ Error messages sanitised in production
  *
  * Accepts multipart/form-data with fields:
  *   file        – the image file (required)
  *   folder      – target folder, validated against allow-list (default: "adtu")
- *   oldImageUrl – previous Cloudinary URL to delete (optional)
  */
 
 import cloudinary,{
-	deleteAsset,
-	extractPublicId,
 	isAllowedMimeType,
 	isAllowedSize,
 	MAX_FILE_SIZE,
@@ -64,7 +64,6 @@ export async function POST(request: NextRequest) {
     const formData = await request.formData();
     const file = formData.get('file') as File | null;
     const rawFolder = formData.get('folder') as string | null;
-    const oldImageUrl = (formData.get('oldImageUrl') as string) || '';
 
     if (!file) {
       return NextResponse.json({ error: 'No file provided' }, { status: 400 });
@@ -94,22 +93,7 @@ export async function POST(request: NextRequest) {
     // SECURITY: Only permitted folder names are accepted.
     const folder = sanitizeFolder(rawFolder);
 
-    // ── 7. Delete Old Image (if provided) ─────────────────────────────────
-    // SECURITY: Deletion is done via the SDK which keeps API_SECRET on the
-    // server — the old route sent api_secret in a FormData POST (bad!).
-    if (oldImageUrl) {
-      const oldPublicId = extractPublicId(oldImageUrl);
-      if (oldPublicId) {
-        const deleted = await deleteAsset(oldPublicId);
-        if (deleted) {
-          console.log(`✅ [Upload] Deleted old image: ${oldPublicId}`);
-        } else {
-          console.warn(`⚠️ [Upload] Could not delete old image: ${oldPublicId}`);
-        }
-      }
-    }
-
-    // ── 8. Upload to Cloudinary (server-side SDK) ─────────────────────────
+    // ── 7. Upload to Cloudinary (server-side SDK) ─────────────────────────
     // SECURITY:
     //  - unique_filename: true  → Cloudinary generates a random name
     //  - use_filename: false    → Ignores the original filename

@@ -16,6 +16,59 @@
  * Resolves the public WebSocket endpoint URL for browser / client components.
  */
 export function getClientWsUrl(): string {
+  // Support explicit WS endpoint override via ?ws= query param for cross-node multi-instance E2E tests.
+  // SECURITY INVARIANTS:
+  //   1. In production (on non-loopback origins like https://adtu.app), ?ws= is unconditionally ignored.
+  //   2. On loopback testing environments (localhost / 127.0.0.1), target MUST strictly be a loopback host.
+  //   3. Scheme must be ws:// or wss:// (or http/https normalized).
+  //   4. Credentials/userinfo (@) in the URL are unconditionally rejected.
+  if (typeof window !== 'undefined' && window.location?.search) {
+    try {
+      const isWindowLoopback = window.location.hostname === 'localhost' ||
+                               window.location.hostname === '127.0.0.1' ||
+                               window.location.hostname === '[::1]';
+
+      // Disallow ?ws= on any production non-loopback domain
+      if (isWindowLoopback || process.env.NODE_ENV !== 'production') {
+        const searchParams = new URLSearchParams(window.location.search);
+        const wsParam = searchParams.get('ws');
+        if (wsParam && wsParam.trim()) {
+          let customUrl = wsParam.trim();
+          if (customUrl.startsWith('https://')) {
+            customUrl = 'wss://' + customUrl.slice(8);
+          } else if (customUrl.startsWith('http://')) {
+            customUrl = 'ws://' + customUrl.slice(7);
+          }
+
+          if ((customUrl.startsWith('ws://') || customUrl.startsWith('wss://')) && !customUrl.includes('@')) {
+            const dummyProto = customUrl.startsWith('wss:') ? 'https:' : 'http:';
+            const parsed = new URL(customUrl.replace(/^wss?:/, dummyProto));
+
+            // Block userinfo and restrict target hostname strictly to loopback addresses
+            if (!parsed.username && !parsed.password) {
+              const targetHost = parsed.hostname;
+              const isTargetLoopback = targetHost === 'localhost' ||
+                                       targetHost === '127.0.0.1' ||
+                                       targetHost === '[::1]';
+
+              if (isTargetLoopback) {
+                const qIdx = customUrl.indexOf('?');
+                if (qIdx !== -1) customUrl = customUrl.substring(0, qIdx);
+                customUrl = customUrl.replace(/\/+$/, '');
+                if (!customUrl.endsWith('/ws')) customUrl = `${customUrl}/ws`;
+                return customUrl;
+              } else {
+                console.warn('[SECURITY] Ignored untrusted ?ws= parameter:', targetHost);
+              }
+            }
+          }
+        }
+      }
+    } catch {
+      // Fall through to standard resolution
+    }
+  }
+
   const envUrl = process.env.NEXT_PUBLIC_WS_URL;
 
   if (envUrl && envUrl.trim()) {

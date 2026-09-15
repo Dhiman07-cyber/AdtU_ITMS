@@ -234,10 +234,8 @@ export async function POST(request: NextRequest) {
             // This check avoids the heavier locked increment when the bus is clearly full.
             // Note: there is a TOCTOU gap between check and increment — capacity could
             // change between the two calls.  bus_increment_capacity handles this correctly
-            // by re-checking inside its FOR UPDATE lock.
-            // TODO: pgIncrementBusCapacity throws generic Error on capacity full, not
-            // CapacityFullError.  Fix fleet.repository.pg to throw CapacityFullError so
-            // the catch block below can distinguish capacity errors from other failures.
+            // by re-checking inside its FOR UPDATE lock, and pgIncrementBusCapacity
+            // surfaces a full bus as CapacityFullError (recognized below).
             const capCheck = await checkBusCapacity(renewalBusId, shift);
             if (!capCheck.available) {
               throw new CapacityFullError();
@@ -250,7 +248,10 @@ export async function POST(request: NextRequest) {
             results.push({ studentUid, success: true, newValidUntil });
             console.log(`✅ Renewed + reclaimed seat for ${studentUid.substring(0,8)}... on bus ${renewalBusId}`);
           } catch (txErr: any) {
-            if (txErr instanceof CapacityFullError) {
+            // pgIncrementBusCapacity surfaces a full bus as CapacityFullError;
+            // the message check below is belt-and-braces for any caller that
+            // surfaces the raw RPC error string instead.
+            if (txErr instanceof CapacityFullError || /full capacity/i.test(txErr?.message || '')) {
               results.push({ studentUid, success: false, error: 'Original bus full — reassign required before renewal' });
             } else {
               console.error(`❌ Seat-reclaim renewal failed for ${studentUid}:`, txErr);

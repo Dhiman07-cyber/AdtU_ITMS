@@ -1,5 +1,7 @@
 import { getModeratorById,updateModeratorPermissions } from '@/domains/identity';
 import { withSecurity } from '@/lib/security/api-security';
+import { invalidateModeratorPermissionCache } from '@/lib/security/moderator-permissions';
+import { invalidateCachedRole } from '@/lib/security/role-cache';
 import { UIDSchema,UpdatePermissionsSchema,validateInput } from '@/lib/security/validation-schemas';
 import { NextResponse } from 'next/server';
 
@@ -70,6 +72,9 @@ export const PUT = withSecurity(
             const { permissions } = body as { permissions: Record<string, any> };
 
             await updateModeratorPermissions(id, permissions as any, auth.uid);
+
+            invalidateCachedRole(id);
+            invalidateModeratorPermissionCache(id);
 
             console.log(`Permissions updated for moderator ${id} by admin ${auth.uid}`);
 

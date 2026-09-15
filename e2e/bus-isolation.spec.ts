@@ -33,7 +33,7 @@ import { WsAgent } from '../scripts/staging/ws-agent';
 
 const BASELINE_GPS_COUNT = 6;
 const GPS_INTERVAL_MS = 2000;
-const GPS_WATCH_SECONDS = 18;
+const GPS_WATCH_SECONDS = 30;
 
 type BrowserFamily = 'Chromium' | 'Firefox' | 'Webkit';
 
@@ -89,6 +89,8 @@ test.describe('bus and student isolation', () => {
 
       await drvA.startTrip();
       await drvB.startTrip();
+      (drvA.liveGps as any).dwellUntilMs = 0;
+      (drvB.liveGps as any).dwellUntilMs = 0;
       await drvA.connectWs(WS_BASE);
       await drvB.connectWs(WS_BASE);
 
@@ -108,11 +110,7 @@ test.describe('bus and student isolation', () => {
       const [browserA, browserB, browserC] = await Promise.all(
         families.map(f => browser.newContext().then(ctx => ctx.newPage()))
       );
-      after(async () => {
-        await Promise.allSettled([browserA, browserB, browserC].map(async p => {
-          try { await p.context().close(); } catch {}
-        }));
-      });
+      try {
 
       const signStudent = async (student: typeof studentA, page: typeof browserA) => {
         const token = await mintCustomToken(student.uid);
@@ -276,6 +274,11 @@ test.describe('bus and student isolation', () => {
       console.log('  [PASS] no cross-contamination between buses');
       console.log('  [PASS] DB active_trips isolated');
       console.log('  [PASS] DB bus_locations isolated');
+      } finally {
+        await Promise.allSettled([browserA, browserB, browserC].map(async p => {
+          try { await p.context().close(); } catch {}
+        }));
+      }
     });
 
     test('student cannot see data for a different bus', async ({ browser }) => {
@@ -362,10 +365,12 @@ test.describe('bus and student isolation', () => {
       console.log(`driver-A (correct): ${driverA.label}`);
       console.log(`driver-B (wrong bus): ${driverB.label}`);
 
-      const [dTokA, dTokB, sTokA] = await Promise.all([
+      const [dTokA, dTokB, sTokAId, sTokACustom, sTokBId] = await Promise.all([
         mintIdToken(driverA.uid),
         mintIdToken(driverB.uid),
+        mintIdToken(studentA.uid),
         mintCustomToken(studentA.uid),
+        mintIdToken(studentB.uid),
       ]);
 
       const drvA = new DriverAgent({
@@ -384,7 +389,7 @@ test.describe('bus and student isolation', () => {
         }
       })();
 
-      await page.goto(`${APP_URL}/e2e-signin?token=${encodeURIComponent(sTokA)}`);
+      await page.goto(`${APP_URL}/e2e-signin?token=${encodeURIComponent(sTokACustom)}`);
       await page.waitForSelector('[data-testid="e2e-signin-status"]', { state: 'attached' });
       await page.waitForFunction(
         () => document.querySelector('[data-testid="e2e-signin-status"]')?.textContent?.startsWith('signed-in:'),
@@ -404,7 +409,7 @@ test.describe('bus and student isolation', () => {
 
       // ── STUDENT A: raise flag ────────────────────────────────────────
       console.log('student raising flag...');
-      const flag1Resp = await apiCall('POST', '/api/student/waiting-flag', sTokA, {
+      const flag1Resp = await apiCall('POST', '/api/student/waiting-flag', sTokAId, {
         busId: busA.id,
         routeId: busA.routeId,
         stop_name: 'Golden Test Stop',
@@ -438,8 +443,7 @@ test.describe('bus and student isolation', () => {
 
       // ── STUDENT B (different bus): attempt ack → must fail ────────────
       console.log('student B (different bus) attempting ack...');
-      const sTokB = await mintCustomToken(studentB.uid);
-      const ackStudent = await apiCall('POST', '/api/driver/ack-flag', sTokB, { flagId: flagId1 });
+      const ackStudent = await apiCall('POST', '/api/driver/ack-flag', sTokBId, { flagId: flagId1 });
       console.log(`  student ack: HTTP ${ackStudent.status} (expected 403)`);
       expect(ackStudent.status).toBe(403);
 
@@ -477,7 +481,7 @@ test.describe('bus and student isolation', () => {
       const studentA = personas.students.find(s => s.busId === busA.id) || personas.students[0];
 
       const dTokA = await mintIdToken(driverA.uid);
-      const sTokA = await mintCustomToken(studentA.uid);
+      const sTokA = await mintIdToken(studentA.uid);
 
       const drvA = new DriverAgent({
         label: driverA.label, uid: driverA.uid, idToken: dTokA,
@@ -540,7 +544,7 @@ test.describe('bus and student isolation', () => {
 
       const dTokA = await mintIdToken(driverA.uid);
       const dTokB = await mintIdToken(driverB.uid);
-      const sTokA = await mintCustomToken(studentA.uid);
+      const sTokA = await mintIdToken(studentA.uid);
 
       const drvA = new DriverAgent({
         label: driverA.label, uid: driverA.uid, idToken: dTokA,

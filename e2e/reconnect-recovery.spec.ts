@@ -38,6 +38,7 @@ test.describe('reconnect recovery', () => {
     // ── 1. Start trip ────────────────────────────────────────────────────
     const drv = new DriverAgent({ label: driverA.label, uid: driverA.uid, idToken: dTokA, busId: busA.id, routeId: busA.routeId!, gpsSeed: `reconnect-${busA.id}` });
     await drv.startTrip();
+    (drv.liveGps as any).dwellUntilMs = 0;
     await drv.connectWs(WS_BASE);
     console.log(`trip started: ${drv.tripId}`);
 

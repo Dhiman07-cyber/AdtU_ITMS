@@ -34,6 +34,7 @@ export class DriverAgent {
   readonly sent: GpsSentRec[] = [];
   readonly failures: Failure[] = [];
   readonly flagsAcked: string[] = [];
+  readonly presenceHistory: { busId: string; timestamp: number; lat?: number; lng?: number; accuracy?: number }[] = [];
   wsStats = { reconnects: 0, sent: 0 };
 
   private autoAckFlags: boolean;
@@ -61,9 +62,15 @@ export class DriverAgent {
     await withRetry(() => ws.connect(this.idToken));
     this.ws = ws;
     ws.presence(this.busId, this.tripId || undefined, this.routeId);
+    this.presenceHistory.push({ busId: this.busId, timestamp: Date.now() });
     if (this.autoAckFlags) {
       ws.onChannel(`waiting_flags_${this.busId}`, (m) => this.onWaitingFlag(m).catch(() => { }));
     }
+  }
+
+  async sendPresence(data?: { lat?: number; lng?: number; accuracy?: number }): Promise<void> {
+    this.ws?.presence(this.busId, this.tripId || undefined, this.routeId);
+    this.presenceHistory.push({ busId: this.busId, timestamp: Date.now(), ...data });
   }
 
   get wsOpen(): boolean { return this.ws?.isOpen ?? false; }
@@ -79,7 +86,7 @@ export class DriverAgent {
   }
 
   /** One GPS tick: WS location_update + HTTP /api/location/update (dual path, like the real page). */
-  async tick(nowMs: number, expectedFanOut: number): Promise<GpsSentRec | null> {
+  async tick(nowMs: number, expectedFanOut = 1): Promise<GpsSentRec | null> {
     if (!this.tripId) return null;
     const fix = this.gps.fix(nowMs);
     const ts = new Date(nowMs).toISOString();

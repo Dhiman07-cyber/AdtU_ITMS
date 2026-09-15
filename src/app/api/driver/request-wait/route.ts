@@ -2,6 +2,7 @@ import { emitEvent } from '@/domains/realtime/event-emitter';
 import { withSecurity } from '@/lib/security/api-security';
 import { RateLimits } from '@/lib/security/rate-limiter';
 import { RequestWaitSchema } from '@/lib/security/validation-schemas';
+import { getSupabaseServer } from '@/lib/supabase-server';
 import { NextResponse } from 'next/server';
 
 /**
@@ -18,6 +19,22 @@ export const POST = withSecurity(
         if (auth.uid !== studentId) {
             return NextResponse.json(
                 { error: 'Forbidden: You can only request a wait for your own account' },
+                { status: 403 }
+            );
+        }
+
+        // Security check: Student can only request wait on their assigned bus.
+        // Prevents spamming arbitrary buses' driver channels.
+        const supabase = getSupabaseServer();
+        const { data: profile } = await supabase
+            .from('student_profiles')
+            .select('bus_id')
+            .eq('uid', auth.uid)
+            .maybeSingle();
+
+        if (!profile?.bus_id || profile.bus_id !== busId) {
+            return NextResponse.json(
+                { error: 'Forbidden: You can only request a wait on your assigned bus' },
                 { status: 403 }
             );
         }

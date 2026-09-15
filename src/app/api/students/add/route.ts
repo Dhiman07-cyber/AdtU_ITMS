@@ -1,16 +1,33 @@
 import { createStudent,createUser } from '@/domains/identity';
 import { getDeadlineConfig } from '@/lib/deadline-config-service';
 import { verifyApiAuth } from '@/lib/security/api-auth';
+import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
 import { checkRateLimit,createRateLimitId,RateLimits } from '@/lib/security/rate-limiter';
 import { computeBlockDatesFromValidUntil } from '@/lib/utils/deadline-computation';
 import { calculateRenewalDate } from '@/lib/utils/renewal-utils';
 import { NextRequest,NextResponse } from 'next/server';
+
+// Explicit allowlist of client-writable fields. Server-authoritative fields
+// (uid, role, status, busId, routeId, shift, validity, blocks, entitlement
+// flags) are NEVER taken from client input.
+const ALLOWED_FIELDS = new Set([
+  'name', 'fullName', 'email', 'phone', 'phoneNumber', 'alternatePhone', 'altPhone',
+  'enrollmentId', 'gender', 'faculty', 'department', 'semester', 'parentName',
+  'parentPhone', 'dob', 'address', 'bloodGroup', 'profilePhotoUrl', 'stop_name',
+  'pickupPoint', 'sessionDuration',
+]);
 
 export async function POST(request: NextRequest) {
   try {
     // SECURITY: Require admin or moderator authentication
     const auth = await verifyApiAuth(request, ['admin', 'moderator']);
     if (!auth.authenticated) return auth.response;
+
+    // SECURITY: Moderators need explicit student-creation permission
+    if (auth.role === 'moderator') {
+      const permissionDenied = await requireModeratorPermission(auth, 'students', 'canAdd');
+      if (permissionDenied) return permissionDenied;
+    }
 
     // SECURITY: Rate limit
     const rateLimitId = createRateLimitId(auth.uid, 'students-add');
@@ -22,19 +39,30 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const newStudentData = await request.json();
+    const rawStudentData = await request.json();
 
     // SECURITY: Validate required fields
-    if (!newStudentData.name || !newStudentData.email) {
+    if (!rawStudentData.name && !rawStudentData.fullName) {
       return NextResponse.json(
-        { error: 'Name and email are required' },
+        { error: 'Name is required' },
+        { status: 400 }
+      );
+    }
+    if (!rawStudentData.email) {
+      return NextResponse.json(
+        { error: 'Email is required' },
         { status: 400 }
       );
     }
 
-    // SECURITY: Sanitize - prevent role injection
-    delete newStudentData.role;
-    delete newStudentData.uid;
+    // SECURITY: Allowlist — drop every non-listed key (role, uid, status,
+    // busId, routeId, shift, validUntil, blocks, feesStatus, ...).
+    const newStudentData: Record<string, any> = {};
+    for (const [key, value] of Object.entries(rawStudentData)) {
+      if (ALLOWED_FIELDS.has(key)) {
+        newStudentData[key] = value;
+      }
+    }
 
     const studentId = crypto.randomUUID();
     
@@ -45,19 +73,13 @@ export async function POST(request: NextRequest) {
     
     const config = await getDeadlineConfig();
 
-    if (newStudentData.sessionInfo) {
-      sessionStartYear = newStudentData.sessionInfo.sessionStartYear;
-      sessionEndYear = newStudentData.sessionInfo.sessionEndYear;
-      validUntil = newStudentData.sessionInfo.validUntil;
-      console.log(`📅 Creating student with session: ${sessionStartYear}-${sessionEndYear}, validUntil: ${validUntil}`);
-    } else {
-      console.warn('⚠️ No sessionInfo provided in student data - computing dynamically from Firestore deadline config');
-      const currentYear = new Date().getFullYear();
-      sessionStartYear = currentYear;
-      sessionEndYear = currentYear;
-      const renewalResult = calculateRenewalDate(null, 1, config);
-      validUntil = renewalResult.newValidUntil;
-    }
+    // Session is always computed server-side from the deadline config.
+    // Client-supplied sessionInfo/session years are ignored (allowlisted out).
+    const currentYear = new Date().getFullYear();
+    sessionStartYear = currentYear;
+    sessionEndYear = currentYear;
+    const renewalResult = calculateRenewalDate(null, 1, config);
+    validUntil = renewalResult.newValidUntil;
 
     const blockDates = computeBlockDatesFromValidUntil(validUntil, config);
     

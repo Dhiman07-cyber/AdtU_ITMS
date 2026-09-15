@@ -1,4 +1,3 @@
-import { User } from '@/lib/types';
 import { cert,getApps,initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
@@ -69,6 +68,19 @@ export async function POST(request: Request) {
     let currentUserName: string = 'System';
 
     // Verify the token with Firebase Admin SDK
+    // SECURITY: fail-closed — without the Admin SDK the Bearer token cannot
+    // be verified, so user creation is refused instead of running
+    // unauthenticated (the old fallback created users for any request
+    // carrying any Bearer string).
+    if (!useAdminSDK || !auth) {
+      return new Response(JSON.stringify({
+        success: false,
+        error: 'Server authentication unavailable'
+      }), {
+        status: 503,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
     if (useAdminSDK && auth) {
       try {
         const decodedToken = await auth.verifyIdToken(token);
@@ -103,7 +115,6 @@ export async function POST(request: Request) {
     }
 
     const userData = await request.json();
-    console.log('Received user data:', userData);
 
     const {
       email,
@@ -332,127 +343,13 @@ export async function POST(request: Request) {
         });
       }
     } else {
-      // Fallback to client SDK (existing implementation)
-      const { Timestamp } = await import('firebase/firestore');
-
-      // For the fallback implementation, we need to handle the case where we don't have
-      // the Firebase Auth UID yet. In a real implementation, the user would sign in
-      // with Google first to get their UID, then we'd update their document.
-      // For now, we'll use a placeholder that will be updated when they sign in.
-
-      // Create user document in users collection with email-based ID
-      // This will be updated with the real UID when the user signs in
-      const userDocId = email.replace(/[^a-zA-Z0-9]/g, '_');
-      const userDocData: User = {
-        uid: userDocId, // Temporary ID, will be updated when user signs in
-        email,
-        name,
-        role,
-        createdAt: Timestamp.now()
-      };
-
-      // Write user to PostgreSQL (canonical source of truth)
-      await createUser({
-        uid: userDocId,
-        email,
-        name,
-        role,
-        createdAt: new Date().toISOString(),
-      });
-
-      // Create role-specific document
-      if (role === 'student') {
-        const studentDocData: any = {
-          uid: userDocId, // Temporary ID, will be updated when user signs in
-          email,
-          fullName: name,
-          faculty: faculty || '',
-          department: department || '',
-          gender: gender || '',
-          dob: dob || '',
-          phone: phone || '',
-          altPhone: alternatePhone || '',
-          parentName: parentName || '',
-          parentPhone: parentPhone || '',
-          enrollmentId: enrollmentId || '',
-          bloodGroup: bloodGroup || '',
-          address: address || '',
-          profilePhotoUrl: profilePhotoUrl || '',
-          routeId: routeId || undefined,
-          busId: busId || undefined,
-          shift: shift || 'Morning',
-          approvedBy: approvedBy || 'System (AUTO_MIGRATION)',
-          // Session System fields
-          sessionDuration: sessionDuration || '1',
-          sessionStartYear: sessionStartYear || new Date().getFullYear(),
-          sessionEndYear: sessionEndYear || (new Date().getFullYear() + 1),
-          validUntil: validUntil || calculateValidUntilDate(sessionStartYear || new Date().getFullYear(), parseInt(sessionDuration || '1'), deadlineConfig).toISOString(),
-          // Block dates computed from sessionEndYear
-          ...computeBlockDatesFromValidUntil(validUntil || calculateValidUntilDate(sessionStartYear || new Date().getFullYear(), parseInt(sessionDuration || '1'), deadlineConfig).toISOString(), deadlineConfig),
-          waitingFlag: false,
-          boardedFlag: false,
-          feesStatus: 'draft',
-          createdAt: Timestamp.now(),
-          // Audit trail - who created/updated this document
-        };
-
-        // ponytail: idempotency check BEFORE createStudent for fallback path
-        const existingStudentFallback = await getStudentById(userDocId);
-        const alreadyExistedFallback = !!existingStudentFallback;
-
-        // Create role-specific document via PG
-        await createStudent({
-          ...studentDocData,
-          uid: userDocId,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        });
-
-        // Increment capacity in PG only if student is new and bus assigned
-        if (busId && !alreadyExistedFallback) {
-          try {
-            await incrementBusCapacity(busId, studentDocData.shift);
-          } catch (pgErr) {
-            console.warn(`⚠️ moderator/create-user (fallback): PG capacity increment failed for bus ${busId}:`, pgErr);
-          }
-        }
-      } else if (role === 'driver') {
-        const driverDocData: any = {
-          uid: userDocId, // Temporary ID, will be updated when user signs in
-          email,
-          fullName: name,
-          licenseNumber: licenseNumber || '',
-          aadharNumber: aadharNumber || '',
-          phone: phone || '',
-          altPhone: alternatePhone || '',
-          joiningDate: joiningDate || '',
-          address: address || '',
-          profilePhotoUrl: profilePhotoUrl || '',
-          routeId: routeId || undefined,
-          busId: busId || undefined,
-          shift: shift || 'Both',
-          approvedBy: approvedBy || 'System (AUTO_MIGRATION)',
-          dob: dob || '',
-          status: 'active',
-          createdAt: Timestamp.now(),
-          // Audit trail - who created/updated this document
-        };
-
-        // Create driver via PG (canonical source of truth)
-        await createDriver({
-          ...driverDocData,
-          uid: userDocId,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        });
-
-      }
-
+      // No unauthenticated fallback: without the Admin SDK the request was
+      // already rejected with 503 above. This branch is unreachable.
       return new Response(JSON.stringify({
-        success: true,
-        message: `${role.charAt(0).toUpperCase() + role.slice(1)} created successfully. They can sign in with Google using the email provided.`
+        success: false,
+        error: 'Server authentication unavailable'
       }), {
-        status: 200,
+        status: 503,
         headers: { 'Content-Type': 'application/json' },
       });
     }

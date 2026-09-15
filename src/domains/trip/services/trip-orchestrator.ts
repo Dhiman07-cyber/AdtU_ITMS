@@ -12,6 +12,23 @@ import { checkNoConflict,resolveRouteId,resolveRouteName,tripStartPreflight,veri
 import { invalidateActiveTripCache } from '@/domains/gps/services/gps-persistence.service';
 import { clearInMemoryLastLocation } from '@/domains/gps/services/gps-pipeline.service';
 
+// FCM send is best-effort and must not dictate trip-response latency, but it
+// also must not be dropped silently: serverless runtimes may freeze the
+// function after the response, so a bare fire-and-forget can lose the send.
+// Bound it: give FCM up to 5s, then return and let the dedup lock
+// (acquire_fcm_lock) make any late/duplicate delivery safe.
+function dispatchFcmBounded(promise: Promise<unknown>, label: string): Promise<void> {
+  const timeout = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error('FCM dispatch timeout (5s)')), 5000)
+  );
+  return Promise.race([promise, timeout]).then(
+    () => undefined,
+    (e) => {
+      console.warn(`${label} FCM dispatch failed or timed out (non-critical):`, (e as Error)?.message || e);
+    }
+  );
+}
+
 type ShiftLower = 'morning' | 'evening' | 'both';
 
 export interface StartTripParams {
@@ -115,14 +132,20 @@ export async function startTrip(params: StartTripParams): Promise<StartTripOutpu
       busNumber,
     });
 
-    await dispatchTripNotification({
-      routeId: effectiveRouteId,
-      tripId: activeTripId,
-      routeName,
-      busId: params.busId,
-      shift: tripShift,
-      eventType: 'TRIP_STARTED',
-    });
+    // FCM off the critical path but bounded (see dispatchFcmBounded): dedup
+    // via acquire_fcm_lock is preserved; a notification failure must never
+    // fail an already-acquired trip start.
+    await dispatchFcmBounded(
+      dispatchTripNotification({
+        routeId: effectiveRouteId,
+        tripId: activeTripId,
+        routeName,
+        busId: params.busId,
+        shift: tripShift,
+        eventType: 'TRIP_STARTED',
+      }),
+      'trip start'
+    );
   }
 
   return { success: true, tripId: activeTripId, routeId: effectiveRouteId, shift: tripShift };
@@ -198,43 +221,28 @@ export async function endTrip(params: EndTripParams): Promise<EndTripOutput> {
   }
 
   // 1. Authoritative state transition FIRST — no side effects until this succeeds.
-  const endResult = await tripLockService.endTrip(activeTripId, params.driverId, params.busId);
+  // Sub-10-minute ("accidental") trips are discarded from driver_trip_history
+  // inside the RPC; cleanup + broadcast below still run so clients converge.
+  const endResult = await tripLockService.endTrip(activeTripId, params.driverId, params.busId, 600);
 
   if (!endResult.success) {
-    if (IS_ACCIDENTAL_SHORT_TRIP) {
-      // The RPC failed (e.g. lock conflict). Do NOT force-delete — that
-      // bypasses the lock. Return failure so the driver can retry.
-      appLogger.error('trip', 'short_trip_end_failed', { ...logCtx, tripId: activeTripId, reason: endResult.reason, errorClass: ErrorClass.TRIP_LOCK_FAILED, latencyMs: Date.now() - start });
-      return { success: false, reason: endResult.reason };
-    }
+    // The RPC failed (e.g. lock conflict). Do NOT force-delete — that
+    // bypasses the lock. Return failure so the driver can retry.
     appLogger.error('trip', 'end_failed', { ...logCtx, tripId: activeTripId, reason: endResult.reason, errorClass: ErrorClass.TRIP_LOCK_FAILED, latencyMs: Date.now() - start });
     return { success: false, reason: endResult.reason };
   }
 
-  // 2. RPC succeeded — now safe to record history and clean up transient state.
-  // History write AFTER authoritative end to avoid stale rows on RPC failure.
-  if (!IS_ACCIDENTAL_SHORT_TRIP && tripDurationMinutes >= 10) {
-    const { error: historyErr } = await supabase
-      .from('driver_trip_history')
-      .upsert(
-        {
-          trip_id: activeTripId,
-          driver_id: params.driverId,
-          bus_id: params.busId,
-          route_id: routeId || null,
-          shift: (activeTrip as any)?.shift || null,
-          start_time: (activeTrip as any)?.start_time || new Date(Date.now() - tripDurationMinutes * 60000).toISOString(),
-          end_time: new Date().toISOString(),
-          duration_minutes: Math.round(tripDurationMinutes * 10) / 10,
-        },
-        { onConflict: 'trip_id' }
-      );
-    if (historyErr) {
-      console.warn('Optional driver_trip_history insert note:', historyErr.message);
-    }
+  // Idempotent retry (double-click / network retry after a successful end):
+  // the lock is already gone, so there is nothing to clean up or broadcast.
+  // Return success WITHOUT emitting a second trip_ended / FCM / cleanup wave.
+  if (endResult.alreadyEnded) {
+    appLogger.info('trip', 'end_duplicate_suppressed', { ...logCtx, tripId: activeTripId, latencyMs: Date.now() - start });
+    return { success: true, tripId: activeTripId };
   }
 
   // 2. RPC succeeded — now safe to clean up transient state.
+  // History is written atomically by end_trip_atomically (duration_seconds);
+  // sub-10-minute trips are discarded from history inside the RPC.
   await Promise.allSettled([
     cleanupTrip({ driverId: params.driverId, busId: params.busId, tripId: activeTripId }),
     supabase.from('bus_locations').delete().eq('bus_id', params.busId),
@@ -256,13 +264,21 @@ export async function endTrip(params: EndTripParams): Promise<EndTripOutput> {
     busNumber,
   });
 
-  await dispatchTripNotification({
-    routeId: routeId || 'unassigned_route',
-    tripId: activeTripId,
-    routeName,
-    busId: params.busId,
-    eventType: 'TRIP_ENDED',
-  });
+  // FCM is bounded, not unbounded (see dispatchFcmBounded): token fetch +
+  // multicast no longer defines the tail latency of the driver's end-trip
+  // response, while the send still gets up to 5s to complete. Deduplication
+  // via acquire_fcm_lock is preserved, and failures here must never fail an
+  // already-committed trip end.
+  await dispatchFcmBounded(
+    dispatchTripNotification({
+      routeId: routeId || 'unassigned_route',
+      tripId: activeTripId,
+      routeName,
+      busId: params.busId,
+      eventType: 'TRIP_ENDED',
+    }),
+    'trip end'
+  );
 
   return { success: true, tripId: activeTripId };
 }

@@ -1,27 +1,24 @@
 import { getById } from '@/domains/application';
-import { adminAuth } from '@/lib/firebase-admin';
-import { resolveUserRole } from '@/lib/security/role-cache';
-import { NextRequest,NextResponse } from 'next/server';
+import { withSecurity } from '@/lib/security/api-security';
+import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
+import { RateLimits } from '@/lib/security/rate-limiter';
+import { NextResponse } from 'next/server';
 
-export async function GET(
-  request: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    const token = request.headers.get('Authorization')?.replace('Bearer ', '');
-    if (!token) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+export const GET = withSecurity(
+  async (request, { auth }) => {
+    const url = new URL(request.url);
+    const pathParts = url.pathname.split('/');
+    const applicationId = pathParts[pathParts.length - 1];
+
+    if (!applicationId) {
+      return NextResponse.json({ error: 'Application ID required' }, { status: 400 });
     }
 
-    const decodedToken = await adminAuth.verifyIdToken(token);
-    const uid = decodedToken.uid;
-
-    const userRole = await resolveUserRole(uid);
-    if (userRole.role !== 'admin' && userRole.role !== 'moderator') {
-      return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 });
+    if (auth.role === 'moderator') {
+      const permissionDenied = await requireModeratorPermission(auth, 'applications', 'canView');
+      if (permissionDenied) return permissionDenied;
     }
 
-    const { id: applicationId } = await params;
     const application = await getById(applicationId);
 
     if (!application) {
@@ -29,11 +26,9 @@ export async function GET(
     }
 
     return NextResponse.json({ success: true, application });
-  } catch (error: any) {
-    console.error('Error fetching application:', error);
-    return NextResponse.json(
-      { error: 'Failed to fetch application' },
-      { status: 500 }
-    );
+  },
+  {
+    requiredRoles: ['admin', 'moderator'],
+    rateLimit: RateLimits.READ,
   }
-}
+);

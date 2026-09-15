@@ -50,8 +50,8 @@ export async function checkBusCapacity(busId: string, shift?: string) {
   return fleetRepository.checkBusCapacity(busId, shift);
 }
 
-export async function incrementBusCapacity(busId: string, shift?: string) {
-  return fleetRepository.incrementBusCapacity(busId, shift);
+export async function incrementBusCapacity(busId: string, shift?: string, enforceCapacity = true) {
+  return fleetRepository.incrementBusCapacity(busId, shift, enforceCapacity);
 }
 
 export async function decrementBusCapacity(busId: string, shift?: string) {

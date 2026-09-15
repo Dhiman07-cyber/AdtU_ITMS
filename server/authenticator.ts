@@ -1,4 +1,13 @@
 import type { IncomingMessage } from 'http';
+import crypto from 'crypto';
+
+function safeCompare(a: string, b: string): boolean {
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
+}
 
 export function assertPrivilegedTokenSafe(
   token: string | undefined = process.env.WS_PRIVILEGED_TOKEN,
@@ -34,14 +43,17 @@ interface CachedAuth {
 }
 
 const tokenAuthCache = new Map<string, CachedAuth>();
-const TOKEN_CACHE_TTL_MS = 5 * 60 * 1000; // 5-minute TTL
+// 90-second TTL: bounds the stale-role window after a demotion/deletion.
+// Auth runs once per connection (plus reconnects), so a short TTL costs
+// essentially nothing in steady state.
+const TOKEN_CACHE_TTL_MS = 90 * 1000;
 
 export async function authenticateSocket(request: IncomingMessage): Promise<AuthResult> {
   const token = extractToken(request);
   if (!token) return { authenticated: false, error: 'Missing or invalid token' };
 
   const { token: privilegedToken, enabled: privilegedEnabled } = getPrivilegedAuthConfig();
-  if (privilegedEnabled && token === privilegedToken) {
+  if (privilegedEnabled && safeCompare(token, privilegedToken)) {
     return { authenticated: true, uid: 'server', role: 'server' };
   }
 
@@ -55,19 +67,22 @@ export async function authenticateSocket(request: IncomingMessage): Promise<Auth
     const decoded = await verifyToken(token);
     const uid = decoded.uid;
 
-    const roleFromToken = (decoded as any).role;
+    // PostgreSQL is authoritative for role (same source as HTTP). The
+    // Firebase custom claim is only a fallback for accounts not yet
+    // provisioned in PG — never preferred, so a demoted user cannot ride
+    // a stale claim past their PG role.
+    const { getSupabaseServer } = await import('@/lib/supabase-server');
+    const supabase = getSupabaseServer();
+
+    const { data: userRow } = await supabase.from('users').select('role').eq('uid', uid).maybeSingle();
     let authResult: AuthResult;
 
-    if (roleFromToken) {
-      authResult = { authenticated: true, uid, role: roleFromToken };
+    if (userRow?.role) {
+      authResult = { authenticated: true, uid, role: userRow.role };
+    } else if ((decoded as any).role) {
+      authResult = { authenticated: true, uid, role: (decoded as any).role };
     } else {
-      const { getSupabaseServer } = await import('@/lib/supabase-server');
-      const supabase = getSupabaseServer();
-
-      const { data: userRow } = await supabase.from('users').select('role').eq('uid', uid).maybeSingle();
-      const role = userRow?.role || 'student';
-
-      authResult = { authenticated: true, uid, role };
+      return { authenticated: false, error: 'Unknown user' };
     }
 
     if (tokenAuthCache.size > 1000) {

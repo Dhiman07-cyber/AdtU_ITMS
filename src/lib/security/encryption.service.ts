@@ -412,6 +412,11 @@ export function signData(data: object | string): string {
  */
 export function verifySignature(data: object | string, signature: string): boolean {
     const expectedSignature = signData(data);
+    // timingSafeEqual throws on length mismatch — a wrong-length signature is
+    // simply invalid, not an exceptional condition.
+    if (typeof signature !== 'string' || signature.length !== expectedSignature.length) {
+        return false;
+    }
     return crypto.timingSafeEqual(
         Buffer.from(signature),
         Buffer.from(expectedSignature)

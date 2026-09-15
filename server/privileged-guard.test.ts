@@ -1,7 +1,11 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { assertPrivilegedTokenSafe } from './authenticator';
 import { validateEnvironment } from '@/lib/env-validator';
 import { authenticateSocket } from './authenticator';
+
+vi.mock('@/lib/firebase-admin', () => ({
+  verifyToken: vi.fn().mockRejectedValue(new Error('Invalid test token')),
+}));
 
 describe('Privileged Token Production Startup Guard', () => {
   const originalEnv = process.env;

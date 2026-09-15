@@ -1,11 +1,14 @@
-import { LocationValidationService } from '@/lib/security/location-validation-service';
 import { appLogger } from '@/lib/logger';
 import { ErrorClass } from '@/lib/error-classes';
-import { normalizeLocationUpdate } from './gps-normalizer.service';
+import { MAX_CLOCK_SKEW_MS,normalizeLocationUpdate } from './gps-normalizer.service';
 import { checkActiveTrip } from './gps-persistence.service';
 import type { LastLocation, LocationUpdate, LocationUpdateNormalized, PipelineResult } from './types';
 
-const validator = new LocationValidationService();
+// NOTE: live enforcement here is bounds, speed/heading/accuracy caps,
+// active-trip check, jump/speed guards, and the raw-clock replay guard below.
+// LocationValidationService (geofence/teleport/zigzag/blacklist) is exposed
+// via gps.service for measured future wiring — it is NOT on this hot path
+// today, and must not be assumed to be until wired + benchmarked.
 
 const MAX_SPEED_KMH = 200;
 const MAX_JUMP_METERS = 5000;
@@ -67,19 +70,42 @@ function validateJump(n: LocationUpdateNormalized, last: LastLocation): string |
 }
 
 const inMemoryLastLocations = new Map<string, LastLocation>();
+// Last RAW client timestamps per bus (unclamped). The normalizer rewrites
+// far-skewed client timestamps to server time, so comparing only normalized
+// timestamps lets replays through (rewritten time ≈ now ≈ accepted). Ordering
+// must use the original client clock, which is monotonic for a stable device
+// even when that clock is wrong in absolute terms.
+const inMemoryLastRawTs = new Map<string, number>();
+
+function getRawClientTime(raw: LocationUpdate): number | null {
+  const t = (raw as any).timestamp;
+  if (t === undefined || t === null) return null;
+  const ms = new Date(t).getTime();
+  return Number.isFinite(ms) ? ms : null;
+}
 
 export function clearInMemoryLastLocation(busId: string): void {
   if (!busId) return;
   inMemoryLastLocations.delete(busId);
+  inMemoryLastRawTs.delete(busId);
   if (busId.startsWith('bus_')) {
     inMemoryLastLocations.delete(busId.replace('bus_', ''));
+    inMemoryLastRawTs.delete(busId.replace('bus_', ''));
   } else {
     inMemoryLastLocations.delete(`bus_${busId}`);
+    inMemoryLastRawTs.delete(`bus_${busId}`);
   }
 }
 
 export function setInMemoryLastLocation(busId: string, loc: LastLocation): void {
-  if (busId) inMemoryLastLocations.set(busId, loc);
+  if (busId) {
+    inMemoryLastLocations.set(busId, loc);
+    // Keep the raw-clock guard coherent with a seeded anchor: the anchor's
+    // own timestamp is the best available raw clock for it.
+    const rawMs = new Date(loc.timestamp).getTime();
+    if (Number.isFinite(rawMs)) inMemoryLastRawTs.set(busId, rawMs);
+    else inMemoryLastRawTs.delete(busId);
+  }
 }
 
 export function getLastLocationForBus(busId: string): LastLocation | null {
@@ -132,6 +158,16 @@ export async function processLocationUpdate(raw: LocationUpdate): Promise<Pipeli
   }
 
   const lastLoc = inMemoryLastLocations.get(normalized.busId);
+  // Replay guard: the raw client clock must advance relative to the last
+  // accepted packet's raw clock. A replayed/stale packet carries an older
+  // raw timestamp even though normalization clamped it to ~now.
+  const rawTime = getRawClientTime(raw);
+  const lastRaw = inMemoryLastRawTs.get(normalized.busId);
+  if (rawTime !== null && lastRaw !== undefined && rawTime < lastRaw) {
+    const reason = 'Out-of-order GPS packet (older than last accepted location)';
+    appLogger.warn('gps', 'location_rejected', { ...logCtx, reason, errorClass: ErrorClass.GPS_OUT_OF_ORDER, latencyMs: Date.now() - start });
+    return { accepted: false, reason, normalized };
+  }
   if (lastLoc) {
     const jumpError = validateJump(normalized, lastLoc);
     if (jumpError) {
@@ -152,6 +188,14 @@ export async function processLocationUpdate(raw: LocationUpdate): Promise<Pipeli
     lng: normalized.lng,
     timestamp: normalized.timestamp.toISOString(),
   });
+  if (rawTime !== null) {
+    // Bound the stored raw clock to receipt time + skew. A single far-future
+    // fix (wall-clock glitch) must not poison the guard and stall legitimate
+    // fixes until the device clock catches up — worst stall is ~MAX_SKEW.
+    // Past-side values are stored verbatim so stable-but-wrong clocks stay
+    // monotonic and usable.
+    inMemoryLastRawTs.set(normalized.busId, Math.min(rawTime, Date.now() + MAX_CLOCK_SKEW_MS));
+  }
 
   appLogger.debug('gps', 'location_accepted', { ...logCtx, lat: normalized.lat, lng: normalized.lng, latencyMs: Date.now() - start });
   return { accepted: true, normalized, persisted: false };

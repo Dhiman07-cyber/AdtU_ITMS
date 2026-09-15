@@ -171,8 +171,8 @@ test.describe('R2 · realtime trip_ended WS event vs HTTP fallback', () => {
       () => document.querySelector('[data-testid="e2e-signin-status"]')?.textContent?.startsWith('signed-in:'),
       { timeout: 30_000 }
     );
-    await page.goto(`${APP_URL}/student/track-bus`);
-    await page.waitForLoadState('networkidle');
+    await page.goto(`${APP_URL}/student/track-bus`, { waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('main, [data-testid="track-bus-container"]', { state: 'attached' }).catch(() => {});
 
     const drv = new DriverAgent({ label: driverA.label, uid: driverA.uid, idToken: dTok, busId: busA.id, routeId: busA.routeId! });
     await drv.startTrip();
@@ -398,8 +398,8 @@ test.describe('R5 · post-trip late data rejection', () => {
       () => document.querySelector('[data-testid="e2e-signin-status"]')?.textContent?.startsWith('signed-in:'),
       { timeout: 30_000 }
     );
-    await page.goto(`${APP_URL}/student/track-bus`);
-    await page.waitForLoadState('networkidle');
+    await page.goto(`${APP_URL}/student/track-bus`, { waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('main, [data-testid="track-bus-container"]', { state: 'attached' }).catch(() => {});
 
     const drv = new DriverAgent({ label: driverA.label, uid: driverA.uid, idToken: dTok, busId: busA.id, routeId: busA.routeId! });
     await drv.startTrip();

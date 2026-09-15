@@ -221,3 +221,26 @@ To prevent accidental driver taps from polluting official university audit repor
   - It is **omitted** from `driver_trip_history`.
   - Its active trip row and temporary state are purged cleanly.
 - If a trip lasts **10 minutes or longer**, full summary records (duration, timestamps, route, and shift) are upserted into `driver_trip_history`.
+
+---
+
+## 5. Active-Trip Data Invariant: Application Authority vs Database Triggers
+
+### Architectural Decision Record (ADR): Intentional Trigger Omission
+
+1. **The Invariant**: No telemetry coordinates may be persisted into `public.bus_locations` unless an active, unexpired trip exists in `public.active_trips` for the corresponding `bus_id` and `driver_id`.
+
+2. **Authoritative Application-Layer Enforcement**:
+   - In [`src/domains/gps/services/gps-pipeline.service.ts`](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/src/domains/gps/services/gps-pipeline.service.ts), `processGpsPacket` performs an authoritative PostgreSQL check against `active_trips`.
+   - If no active trip exists, the incoming frame is immediately rejected with HTTP 400 (`NO_ACTIVE_TRIP`). The execution never reaches the `bus_locations` upsert block in [`src/app/api/location/update/route.ts`](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/src/app/api/location/update/route.ts).
+   - In [`src/domains/trip/services/trip-orchestrator.ts`](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/src/domains/trip/services/trip-orchestrator.ts) and the database RPC `end_trip_atomically`, `bus_locations` is purged atomically with `active_trips` upon trip termination.
+
+3. **Intentional Omission of Database-Level Trigger**:
+   - A database trigger (`trg_bus_location_active_trip`) was evaluated during hardening.
+   - **Decision**: The database-level trigger is **intentionally NOT installed** in the remote production schema.
+   - **Rationale**: Strict PostgreSQL triggers on `bus_locations` create rigid failure modes during emergency administrative operations, route migrations, manual dispatch corrections, and synthetic replay drills. 
+   - Defense-in-depth is maintained by:
+     - Application pipeline authorization and rate limits.
+     - Atomic RPC cleanup (`DELETE FROM bus_locations WHERE bus_id = p_bus_id`).
+     - Real-time Redis lifecycle invalidation (`clearLiveBusLocation`).
+

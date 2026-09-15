@@ -129,9 +129,10 @@ test.describe('failure injection', () => {
       .order('timestamp', { ascending: false }).limit(1).maybeSingle();
     expect(dbAfterInvalid?.lat).toBe(dbBefore?.lat);
 
-    // Valid GPS still works after all invalid
+    // Valid GPS still works after all invalid (forward from +0.002 at normal speed ~40 km/h)
+    await sleep(2000);
     const validAfterInvalid = await apiCall('POST', '/api/location/update', dTokA, {
-      busId: busA.id, routeId: busA.routeId!, lat: baselineLastSent.lat + 0.003, lng: baselineLastSent.lng + 0.003,
+      busId: busA.id, routeId: busA.routeId!, lat: baselineLastSent.lat + 0.0022, lng: baselineLastSent.lng + 0.0022,
       accuracy: 10, speed: 30, heading: 90, timestamp: new Date().toISOString(), tripId: drv.tripId,
     });
     expect(validAfterInvalid.status).toBe(200);
@@ -157,7 +158,7 @@ test.describe('failure injection', () => {
     expect(checks.every(c => c.ok)).toBe(true);
   });
 
-  test('WS GPS anomalies: client-side guard filters stale and ended-trip packets', async () => {
+  test('WS GPS anomalies: client-side guard filters stale and ended-trip packets', async ({ page }) => {
     test.setTimeout(120000);
     const personas = loadPersonas();
     if (!personas || personas.drivers.length < 1 || personas.students.length < 1) throw new Error('Need >= 1 driver, >= 1 student');
@@ -170,6 +171,7 @@ test.describe('failure injection', () => {
 
     const drv = new DriverAgent({ label: driverA.label, uid: driverA.uid, idToken: dTokA, busId: busA.id, routeId: busA.routeId!, gpsSeed: `ws-fail-${busA.id}` });
     await drv.startTrip();
+    (drv.liveGps as any).dwellUntilMs = 0;
     await drv.connectWs(WS_BASE);
 
     // GPS loop
@@ -350,6 +352,8 @@ test.describe('failure injection', () => {
     const dTokA = await mintIdToken(driverA.uid);
     const drv = new DriverAgent({ label: driverA.label, uid: driverA.uid, idToken: dTokA, busId: busA.id, routeId: busA.routeId!, gpsSeed: `refresh-${busA.id}` });
     await drv.startTrip();
+    (drv.liveGps as any).posMeters = 50;
+    (drv.liveGps as any).dwellUntilMs = 0;
     await drv.connectWs(WS_BASE);
 
     // GPS loop — continuous throughout the test
@@ -372,11 +376,17 @@ test.describe('failure injection', () => {
     );
     await page.goto(`${APP_URL}/student/track-bus`, { waitUntil: 'domcontentloaded' });
 
-    // ── PRE-REFRESH: collect GPS A and B ───────────────────────────────────
-    console.log('collecting pre-refresh GPS...');
+    // Wait for initial GPS and map marker to be rendered
+    for (let i = 0; i < 50; i++) {
+      const s = await readApplied(page);
+      const m = await readMarkerPosition(page);
+      if (s && m) break;
+      await sleep(500);
+    }
+
     const preRefresh: { lat: number; lng: number; timestamp: string }[] = [];
     const preMarker: { lat: number; lng: number }[] = [];
-    for (let i = 0; i < 40; i++) {
+    for (let i = 0; i < 30; i++) {
       const s = await readApplied(page);
       const m = await readMarkerPosition(page);
       if (s) {

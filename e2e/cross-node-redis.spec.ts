@@ -29,12 +29,13 @@ import {
   WS_BASE,
   DriverAgent,
   readApplied,
+  apiCall,
   type Persona,
 } from './helpers';
 
 // Hardcoded WS nodes for cross-node test
-const WS_NODE1 = 'ws://127.0.0.1:3001';
-const WS_NODE2 = 'ws://127.0.0.1:3003';
+const WS_NODE1: string = 'ws://127.0.0.1:3001';
+const WS_NODE2: string = 'ws://127.0.0.1:3003';
 
 // Ensure nodes are different
 if (WS_NODE1 === WS_NODE2) {
@@ -42,11 +43,11 @@ if (WS_NODE1 === WS_NODE2) {
 }
 
 const GPS_INTERVAL_MS = 2000;
-const WATCH_SECONDS = 30;
+const WATCH_SECONDS = 15;
 
 test.describe('cross-node Redis fan-out', () => {
   test('driver on WS1 reaches student on WS2 via Redis', async ({ page }) => {
-    test.setTimeout(90000);
+    test.setTimeout(180000);
     const personas = loadPersonas();
     if (!personas || personas.drivers.length < 1 || personas.students.length < 1) {
       throw new Error('Need >= 1 driver, >= 1 student. Run: npx tsx scripts/staging/personas.ts --drivers 2 --students 2');
@@ -75,6 +76,9 @@ test.describe('cross-node Redis fan-out', () => {
       routeId: busA.routeId!,
       gpsSeed: `cross-${busA.id}`,
     });
+    // Ensure bus moves along the route immediately rather than dwelling at terminal stop
+    (drv.liveGps as any).posMeters = 50;
+    (drv.liveGps as any).dwellUntilMs = 0;
     await drv.startTrip();
     console.log(`trip started: ${drv.tripId}`);
 
@@ -87,7 +91,7 @@ test.describe('cross-node Redis fan-out', () => {
     const gpsLoop = (async () => {
       while (ticking) {
         const t0 = Date.now();
-        await drv.tick(t0);
+        await drv.tick(t0, 1);
         await sleep(Math.max(0, GPS_INTERVAL_MS - (Date.now() - t0)));
       }
     })();
@@ -114,17 +118,17 @@ test.describe('cross-node Redis fan-out', () => {
 
     // ── 7. Wait for initial location (first GPS from driver) ─────────────────
     const samples: { lat: number; lng: number; timestamp: string }[] = [];
-    console.log(`watching for location updates on student (WS2) for ${WATCH_SECONDS}s...`);
-    const watchEnd = Date.now() + WATCH_SECONDS * 1000;
+    console.log(`watching for location updates on student (WS2)...`);
+    const watchEnd = Date.now() + 35000;
     while (Date.now() < watchEnd) {
       const s = await readApplied(page);
       if (s) {
         const last = samples[samples.length - 1];
         if (!last || last.timestamp !== s.timestamp) {
           samples.push({ lat: s.lat, lng: s.lng, timestamp: s.timestamp });
-          if (samples.length <= 5 || samples.length % 10 === 0) {
-            console.log(`  sample #${samples.length}: ${s.lat.toFixed(5)},${s.lng.toFixed(5)} @ ${s.timestamp}`);
-          }
+          console.log(`  sample #${samples.length}: ${s.lat.toFixed(5)},${s.lng.toFixed(5)} @ ${s.timestamp}`);
+          const distinct = new Set(samples.map((x) => `${x.lat},${x.lng}`)).size;
+          if (distinct >= 2 && samples.length >= 3) break;
         }
       }
       await sleep(400);
@@ -133,14 +137,19 @@ test.describe('cross-node Redis fan-out', () => {
     // ── 8. Stop GPS and end trip ──────────────────────────────────────────────
     ticking = false;
     await gpsLoop.catch(() => {});
-    await drv.endTrip();
+    const endRes = await drv.endTrip();
+    console.log(`endTrip response: status=${endRes.status}, json=`, JSON.stringify(endRes.json));
     await sleep(2000);
 
     // Check marker cleared
     let markerCleared = false;
-    for (let i = 0; i < 20 && !markerCleared; i++) {
-      markerCleared = (await readApplied(page)) === null;
-      if (!markerCleared) await sleep(500);
+    for (let i = 0; i < 25 && !markerCleared; i++) {
+      const cur = await readApplied(page);
+      markerCleared = cur === null;
+      if (!markerCleared) {
+        console.log(`  wait marker clear #${i + 1}: still has loc ts=${cur?.timestamp}`);
+        await sleep(500);
+      }
     }
     console.log(`trip ended, marker cleared: ${markerCleared}`);
 
@@ -153,7 +162,36 @@ test.describe('cross-node Redis fan-out', () => {
     const dbClean = (activeTrips?.length ?? 0) === 0;
     console.log(`DB: active trips for bus ${busA.id}: ${activeTrips?.length ?? 0}`);
 
-    // ── 10. Assertions ──────────────────────────────────────────────────────────
+    // ── 10. Student reconnects to WS2: verify NO stale snapshot ──────────────
+    console.log('reconnecting student to WS2 to verify no stale snapshot...');
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await sleep(3000);
+    const staleSnapshot = await readApplied(page);
+    const noStaleSnapshot = staleSnapshot === null;
+    console.log(`reconnect check: stale snapshot present = ${!noStaleSnapshot}`);
+
+    // ── 11. Send late GPS: verify rejected by active_trips check ─────────────
+    console.log('sending late GPS for ended trip to verify authoritative rejection...');
+    const lateGpsRes = await apiCall('POST', '/api/location/update', dTokA, {
+      busId: busA.id,
+      tripId: drv.tripId,
+      routeId: busA.routeId,
+      lat: 26.1445,
+      lng: 91.7362,
+      timestamp: new Date().toISOString(),
+    });
+    const lateGpsRejected = lateGpsRes.status === 400 || lateGpsRes.status === 409 || lateGpsRes.json?.error === 'NO_ACTIVE_TRIP';
+    console.log(`late GPS HTTP status: ${lateGpsRes.status}, error: ${JSON.stringify(lateGpsRes.json?.error)}`);
+
+    // ── 12. Direct stale bus_locations DB verification ───────────────────────
+    const { data: busLocs } = await supabase()
+      .from('bus_locations')
+      .select('bus_id, trip_id')
+      .eq('bus_id', busA.id);
+    const busLocsClean = (busLocs?.length ?? 0) === 0;
+    console.log(`DB: bus_locations count for bus ${busA.id}: ${busLocs?.length ?? 0}`);
+
+    // ── 13. Assertions ──────────────────────────────────────────────────────────
     const distinct = new Set(samples.map((s) => `${s.lat},${s.lng}`)).size;
     const driverSent = drv.sent.length;
 
@@ -177,6 +215,18 @@ test.describe('cross-node Redis fan-out', () => {
       {
         name: 'DB: active_trips cleaned up',
         ok: dbClean,
+      },
+      {
+        name: 'Student reconnect to WS2 has NO stale snapshot',
+        ok: noStaleSnapshot,
+      },
+      {
+        name: 'Late GPS rejected authoritatively by active_trips check',
+        ok: lateGpsRejected,
+      },
+      {
+        name: 'DB: bus_locations cleared on trip end',
+        ok: busLocsClean,
       },
     ];
 

@@ -14,9 +14,9 @@ export async function POST(request: NextRequest) {
     const uid = decodedToken.uid;
 
     const body = await request.json();
-    const { applicationId, rejectorName, rejectorId, reason } = body;
+    const { applicationId, reason } = body;
 
-    if (!applicationId || !rejectorName || !rejectorId || !reason) {
+    if (!applicationId || !reason) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
@@ -41,11 +41,13 @@ export async function POST(request: NextRequest) {
     );
     if (permissionDenied) return permissionDenied;
 
+    // Audit identity comes from the verified session, never the body —
+    // client-supplied rejectorName would let anyone forge the audit trail.
     const result = await reject(
       applicationId,
       {
         uid,
-        name: rejectorName,
+        name: updaterInfo.name,
         role: userRole.role,
       },
       reason

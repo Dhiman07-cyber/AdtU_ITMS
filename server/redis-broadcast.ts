@@ -83,6 +83,7 @@ export function publishToRedis(
 export async function initRedisBroadcastRelay(
   onBroadcast: (channel: string, event: string, payload: Record<string, unknown>) => void,
   onLocationUpdate: (busId: string, payload: Record<string, unknown>) => void,
+  onTripEnded?: (busId: string) => void,
 ): Promise<void> {
   await redisPubSub.subscribe(REDIS_BROADCAST_CHANNEL, (raw) => {
     let envelope: BroadcastEnvelope;
@@ -97,8 +98,13 @@ export async function initRedisBroadcastRelay(
     if (envelope.originNodeId === MY_NODE_ID) return;
 
     // Keep local live-location cache in sync across nodes.
-    if (envelope.event === 'bus_location_update' && envelope.payload.busId) {
-      onLocationUpdate(envelope.payload.busId as string, envelope.payload);
+    const busIdMatch = envelope.channel.match(/^(?:bus:|bus_location_|trip-status-)(.+)$/);
+    const busId = (envelope.payload.busId as string) || busIdMatch?.[1];
+
+    if (envelope.event === 'bus_location_update' && busId) {
+      onLocationUpdate(busId, envelope.payload);
+    } else if (envelope.event === 'trip_ended' && busId) {
+      onTripEnded?.(busId);
     }
 
     // Relay to local subscribers.

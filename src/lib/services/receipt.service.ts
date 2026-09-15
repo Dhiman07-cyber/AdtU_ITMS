@@ -45,6 +45,18 @@ function asOptionalStringOrNumber(value: unknown): string | number | undefined {
   return typeof value === 'string' || typeof value === 'number' ? value : undefined;
 }
 
+// Output-encode every ledger/DB string interpolated into the Puppeteer HTML.
+// student_name and friends are set at application time (pre-approval,
+// attacker-influenced) and would otherwise become live markup in the renderer.
+function escapeHtml(value: unknown): string {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 export async function getOrCreateReceiptSignature(payment: PaymentRecord): Promise<string | null> {
   const result = await ensureReceiptSignature(payment);
   return result.ok ? result.signature : null;
@@ -147,7 +159,7 @@ export async function generateReceiptPdf(paymentOrId: string | PaymentRecord): P
       });
     };
 
-    let approvedByDisplay = getApprovedByDisplay(payment);
+    let approvedByDisplay = escapeHtml(getApprovedByDisplay(payment));
 
     // Template HTML (Local fonts, fast rendering)
     const receiptHTML = `
@@ -219,10 +231,10 @@ export async function generateReceiptPdf(paymentOrId: string | PaymentRecord): P
       <div class="verification-qr"><img src="${qrCodeDataUrl}" /></div>
       <div class="receipt-meta">
         <div class="receipt-label">Receipt ID</div>
-        <div class="receipt-id">${payment.payment_id}</div>
+        <div class="receipt-id">${escapeHtml(payment.payment_id)}</div>
         <div style="margin-top: 10px;">
           <div class="receipt-label">Date</div>
-          <div class="field-value">${dateStr} | ${timeStr}</div>
+          <div class="field-value">${escapeHtml(dateStr)} | ${escapeHtml(timeStr)}</div>
         </div>
       </div>
     </div>
@@ -230,15 +242,15 @@ export async function generateReceiptPdf(paymentOrId: string | PaymentRecord): P
     <div class="receipt-grid">
       <div class="info-group">
         <div class="field-label">Student</div>
-        <div class="field-value" style="font-size: 14px;">${payment.student_name || 'Student'}</div>
+        <div class="field-value" style="font-size: 14px;">${escapeHtml(payment.student_name) || 'Student'}</div>
         <div style="margin-top: 8px;">
           <div class="field-label">Enrollment ID</div>
-          <div class="field-value">${payment.student_id || 'N/A'}</div>
+          <div class="field-value">${escapeHtml(payment.student_id) || 'N/A'}</div>
         </div>
       </div>
       <div class="info-group">
         <div class="field-label">Method</div>
-        <div class="field-value">${payment.method || 'Offline'}</div>
+        <div class="field-value">${escapeHtml(payment.method) || 'Offline'}</div>
         <div style="margin-top: 8px;">
           <div class="field-label">Approved By</div>
           <div class="field-value">${approvedByDisplay}</div>
@@ -250,11 +262,11 @@ export async function generateReceiptPdf(paymentOrId: string | PaymentRecord): P
       <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px;">
         <div>
           <div class="field-label">Payment Period</div>
-          <div class="field-value">${payment.session_start_year || 'N/A'} - ${payment.session_end_year || 'N/A'}</div>
+          <div class="field-value">${escapeHtml(payment.session_start_year) || 'N/A'} - ${escapeHtml(payment.session_end_year) || 'N/A'}</div>
         </div>
         <div>
           <div class="field-label">Session Duration</div>
-          <div class="field-value">${payment.duration_years || 1} Year(s)</div>
+          <div class="field-value">${escapeHtml(payment.duration_years) || 1} Year(s)</div>
         </div>
         <div>
           <div class="field-label">Coverage Status</div>

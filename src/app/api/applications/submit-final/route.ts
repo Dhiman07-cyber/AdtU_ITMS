@@ -1,4 +1,4 @@
-import { submitFinal } from '@/domains/application';
+import { getById,submitFinal } from '@/domains/application';
 import { withSecurity } from '@/lib/security/api-security';
 import { NextResponse } from 'next/server';
 
@@ -20,6 +20,19 @@ export const POST = withSecurity(
       const rawFormData = { ...asRecord((body as any).formData) };
       if ('age' in rawFormData) {
         delete rawFormData.age;
+      }
+
+      // Ownership: a custom applicationId may only reference the caller's own
+      // application — otherwise one user could overwrite another's submission.
+      const claimedId = asString((body as any).applicationId);
+      if (claimedId && claimedId !== uid) {
+        const existingApp = await getById(claimedId);
+        if (!existingApp) {
+          return NextResponse.json({ error: 'Application not found' }, { status: 404 });
+        }
+        if ((existingApp as any).applicantUid !== uid) {
+          return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+        }
       }
 
       if (Object.keys(rawFormData).length === 0) {

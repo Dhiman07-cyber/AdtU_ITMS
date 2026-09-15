@@ -235,11 +235,14 @@ export function withSecurity<T = any>(
             }
 
             // Parse and merge query parameters for all requests
+            // SECURITY: query-sourced `idToken` is NEVER accepted — tokens in
+            // URLs leak into proxy/Vercel logs, browser history, and Referer
+            // headers. Body `idToken` remains for mobile backward compat.
             try {
                 const url = new URL(request.url);
                 const queryParams: Record<string, string> = {};
                 url.searchParams.forEach((value, key) => {
-                    queryParams[key] = value;
+                    if (key !== 'idToken') queryParams[key] = value;
                 });
                 rawBody = { ...queryParams, ...rawBody };
             } catch (e) {

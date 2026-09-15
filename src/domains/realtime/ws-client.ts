@@ -107,7 +107,10 @@ export class WebSocketClient {
       this.reconnectTimer = null;
     }
     if (this.ws) this.close();
-    const params = new URLSearchParams({ token: this.currentToken });
+    // Phase-05 Hardening: Do not send token in URL query params to prevent credential leakage.
+    // Auth token is transmitted over the wire as the first message frame on open (Path B).
+    // Only reconnect_token is sent in query params for session restoration.
+    const params = new URLSearchParams();
     const store = getStorage();
     const storedReconnectToken = store?.getItem(STORAGE_KEY);
     if (storedReconnectToken) params.set('reconnect_token', storedReconnectToken);

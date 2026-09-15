@@ -15,7 +15,7 @@ function amountsMatch(clientAmount: number, expectedAmount: number): boolean {
 
 export const POST = withSecurity<CreateOrderBody>(
     async (_request, { auth, body }) => {
-        const { amount, notes, userName, purpose, enrollmentId, durationYears } = body;
+        const { amount, notes, userName, enrollmentId, durationYears } = body;
         const trustedUserId = auth.uid;
         const trustedDurationYears = durationYears || Number(notes?.duration || 1);
         const [systemConfigResult, student] = await Promise.all([
@@ -49,7 +49,10 @@ export const POST = withSecurity<CreateOrderBody>(
         const receipt = generateReceiptId('ADTU_BUS');
 
         // Create order notes - IMPORTANT: These are used by webhook/verification
-        // SECURITY: Use trustedUserId (from auth) instead of client-supplied userId
+        // SECURITY: Use trustedUserId (from auth) instead of client-supplied userId.
+        // `purpose` is set to the server-derived orderType: the client `purpose`
+        // field is free-text and must never decide renewal vs registration
+        // routing downstream (validity math differs per funnel).
         const orderNotes = {
             ...notes,
             userId: trustedUserId || 'unknown',
@@ -58,7 +61,7 @@ export const POST = withSecurity<CreateOrderBody>(
             studentName: trustedStudentName,
             userName: trustedStudentName,
             durationYears: trustedDurationYears.toString(),
-            purpose: purpose || 'Bus Service Payment',
+            purpose: orderType,
             type: orderType,
             timestamp: new Date().toISOString(),
         };

@@ -45,7 +45,22 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     const { id } = await params;
     if (!id) return NextResponse.json({ error: 'Driver ID is required' }, { status: 400 });
 
-    const data = await request.json();
+    // FIELD ALLOW-LIST (mirrors drivers/[id]/update): only safe profile
+    // fields may be updated. Operational/security fields (busId, routeId,
+    // role, status, ...) are never writable via this endpoint even though
+    // the repository field-map would drop most of them anyway.
+    const ALLOWED_FIELDS = new Set([
+      'fullName', 'name', 'email', 'phone', 'employeeId', 'profilePhotoUrl', 'phone_number',
+      'alternatePhone', 'altPhone', 'address', 'licenseNumber', 'aadharNumber',
+      'joiningDate', 'dob',
+    ]);
+    const rawData = await request.json();
+    const data: Record<string, any> = {};
+    for (const [key, value] of Object.entries(rawData)) {
+      if (ALLOWED_FIELDS.has(key)) {
+        data[key] = value;
+      }
+    }
     await updateDriver(id, data);
 
     const updated = await getDriverById(id);

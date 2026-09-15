@@ -70,6 +70,8 @@ scripts/staging/.personas.json
 diagnostic*.json
 temp/
 security-tools/
+strix_runs/
+.strix/
 SECURITY_TOOLS.md
 
 .env*

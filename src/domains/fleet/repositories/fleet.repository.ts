@@ -83,8 +83,8 @@ export async function checkBusCapacity(busId: string, shift?: string) {
   return pgCheckBusCapacity(busId, shift);
 }
 
-export async function incrementBusCapacity(busId: string, shift?: string) {
-  return pgIncrementBusCapacity(busId, shift);
+export async function incrementBusCapacity(busId: string, shift?: string, enforceCapacity = true) {
+  return pgIncrementBusCapacity(busId, shift, enforceCapacity);
 }
 
 export async function decrementBusCapacity(busId: string, shift?: string) {

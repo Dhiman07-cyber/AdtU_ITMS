@@ -19,8 +19,7 @@
  * model                      → model
  * year                       → year
  * capacity                   → capacity
- * driverUID                  → driver_uid
- * driverName                 → driver_name
+ * driverUID / driverName     → DROPPED (no static binding; live driver via active_trips)
  * routeId                    → route_id
  * routeName                  → route_name
  * status                     → status
@@ -38,16 +37,15 @@
  * phone                      → phone
  * alternatePhone             → alternate_phone
  * licenseNumber              → license_number
- * busId                      → bus_id
- * routeId                    → route_id
+ * busId / routeId / shift / tripActive / activeTripId
+ *                            → DROPPED (dynamic binding via active_trips)
  * joiningDate                → joining_date
- * shift                      → shift
  * status                     → status
- * tripActive                 → trip_active
- * activeTripId               → active_trip_id
+ * tripActive / activeTripId  → DROPPED (dynamic binding via active_trips)
  * createdAt / updatedAt      → created_at / updated_at
  */
 import { getSupabaseServer } from '@/lib/supabase-server';
+import { CapacityFullError } from '@/lib/errors/sentinel-errors';
 import { normalizeShift } from '@/lib/utils/shift-utils';
 import type { Bus } from '@/lib/types';
 // ─── Bus Field Map ────────────────────────────────────────────────────────────
@@ -274,17 +272,24 @@ export async function pgCheckBusCapacity(busId: string, shift?: string): Promise
   return data as CapacityCheckResult;
 }
 
-export async function pgIncrementBusCapacity(busId: string, shift?: string): Promise<CapacityMutationResult> {
+export async function pgIncrementBusCapacity(busId: string, shift?: string, enforceCapacity = true): Promise<CapacityMutationResult> {
   const normalized = normalizeShift(shift);
   if (!normalized) throw new Error('Shift parameter is required for bus capacity increment');
   const db = getSupabaseServer();
   const { data, error } = await db.rpc('bus_increment_capacity', {
     p_bus_id: busId,
     p_shift: normalized,
+    p_enforce_capacity: enforceCapacity,
   });
   if (error) throw new Error(`FleetRepository (PG) incrementBusCapacity failed: ${error.message}`);
   if (!data) throw new Error(`Bus ${busId} not found`);
-  if (data.error) throw new Error(data.error);
+  // The guarded RPC reports a full bus as data.error (not a transport error).
+  // Surface it as CapacityFullError so callers can distinguish "bus full"
+  // (alternative bus / pending allocation) from genuine failures.
+  if (data.error) {
+    if (/full capacity/i.test(data.error)) throw new CapacityFullError(data.error);
+    throw new Error(data.error);
+  }
   return data as CapacityMutationResult;
 }
 

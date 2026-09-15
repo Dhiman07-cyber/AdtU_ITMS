@@ -102,7 +102,7 @@ export const POST = withSecurity<VerifyPaymentBody>(
         const trustedEnrollmentId = noteString(trustedNotes, 'enrollmentId') || noteString(trustedNotes, 'studentId');
         const trustedStudentName = noteString(trustedNotes, 'studentName') || noteString(trustedNotes, 'userName') || 'Unknown';
         const trustedDurationYears = parseDuration(noteString(trustedNotes, 'durationYears'));
-        const trustedPurpose = normalizePurpose(noteString(trustedNotes, 'purpose') || noteString(trustedNotes, 'type'));
+        const trustedPurpose = normalizePurpose(noteString(trustedNotes, 'type') || noteString(trustedNotes, 'purpose'));
         const trustedAmount = Number(orderDetails.amount || 0) / 100;
 
         if (!trustedUserId || trustedUserId !== auth.uid) {

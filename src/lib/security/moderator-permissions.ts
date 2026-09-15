@@ -47,6 +47,10 @@ export async function getModeratorPermissions(uid: string): Promise<ModeratorPer
   return permissions;
 }
 
+export function invalidateModeratorPermissionCache(uid: string): void {
+  permissionCache.delete(uid);
+}
+
 export async function requireAdminPermission(
   auth: SecurityAuth,
   requestId?: string

@@ -53,9 +53,37 @@ export const GET = withSecurity(
                 return NextResponse.json({ error: 'Failed to fetch file from source' }, { status: 502 });
             }
 
+            // Bound memory: reject oversized bodies before buffering.
+            const MAX_DOWNLOAD_BYTES = 25 * 1024 * 1024; // 25 MB
+            const declaredLength = Number(response.headers.get('content-length') || 0);
+            if (Number.isFinite(declaredLength) && declaredLength > MAX_DOWNLOAD_BYTES) {
+                return NextResponse.json({ error: 'File too large' }, { status: 413 });
+            }
+
             const contentType = response.headers.get('content-type') || 'application/octet-stream';
-            const arrayBuffer = await response.arrayBuffer();
-            const buffer = Buffer.from(arrayBuffer);
+            const reader = response.body?.getReader();
+            if (!reader) {
+                return NextResponse.json({ error: 'Failed to fetch file from source' }, { status: 502 });
+            }
+            const chunks: Uint8Array[] = [];
+            let received = 0;
+            for (;;) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                received += value.byteLength;
+                if (received > MAX_DOWNLOAD_BYTES) {
+                    try { await reader.cancel(); } catch { /* ignore */ }
+                    return NextResponse.json({ error: 'File too large' }, { status: 413 });
+                }
+                chunks.push(value);
+            }
+            const total = chunks.reduce((n, c) => n + c.byteLength, 0);
+            const buffer = Buffer.allocUnsafe(total);
+            let offset = 0;
+            for (const c of chunks) {
+                buffer.set(c, offset);
+                offset += c.byteLength;
+            }
 
             return new NextResponse(buffer, {
                 status: 200,

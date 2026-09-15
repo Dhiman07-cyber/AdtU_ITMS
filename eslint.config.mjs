@@ -14,6 +14,8 @@ const eslintConfig = [
       // Non-application code — tooling, skills, scripts, infra. Not app source.
       ".agent/**",
       ".agents/**",
+      ".claude/**",
+      "security-tools/**",
       "scripts/**",
       "loadtests/**",
       "audits/**",

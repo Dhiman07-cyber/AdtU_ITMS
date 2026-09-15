@@ -31,6 +31,23 @@ export const POST = withSecurity(
             return NextResponse.json({ error: 'Waiting flag not found' }, { status: 404 });
         }
 
+        // Verify the driver holds an active trip on THIS bus (same pattern as ack-flag).
+        // The trip lock is the authoritative runtime signal of bus ownership.
+        const { data: activeTrip } = await supabase
+            .from('active_trips')
+            .select('trip_id')
+            .eq('driver_id', driverUid)
+            .eq('bus_id', flagData.bus_id)
+            .eq('status', 'active')
+            .maybeSingle();
+
+        if (!activeTrip) {
+            return NextResponse.json(
+                { error: 'Driver is not assigned to this bus' },
+                { status: 403 }
+            );
+        }
+
         if (flagData.status === 'picked_up' || flagData.status === 'boarded') {
             return NextResponse.json({ success: true, message: 'Student already boarded', data: { flagId, studentUid: flagData.student_uid } });
         }

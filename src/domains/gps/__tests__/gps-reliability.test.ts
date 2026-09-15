@@ -118,3 +118,62 @@ describe('GPS Reliability — Timestamp Ordering', () => {
     expect(result.reason).toMatch(/jump too large/i);
   });
 });
+
+describe('GPS Reliability — Replay Resistance (raw client clock)', () => {
+  beforeEach(() => {
+    clearInMemoryLastLocation('bus-1');
+  });
+
+  it('rejects a replayed stale packet that normalization would clamp to ~now', async () => {
+    const first = await processLocationUpdate({ ...base, timestamp: new Date().toISOString() });
+    expect(first.accepted).toBe(true);
+
+    // Replayed packet from 1h ago, same position: the skew clamp rewrites its
+    // timestamp to ~now, so only the raw-clock guard can catch it.
+    const replay = await processLocationUpdate({
+      ...base,
+      timestamp: new Date(Date.now() - 3600_000).toISOString(),
+    });
+    expect(replay.accepted).toBe(false);
+    expect(replay.reason).toMatch(/out-of-order/i);
+  });
+
+  it('accepts a monotonic but absolutely-wrong device clock (stable skew)', async () => {
+    const skewedBase = Date.now() - 3600_000; // device clock 1h behind
+    const first = await processLocationUpdate({
+      ...base,
+      timestamp: new Date(skewedBase).toISOString(),
+    });
+    expect(first.accepted).toBe(true);
+
+    const second = await processLocationUpdate({
+      ...base,
+      timestamp: new Date(skewedBase + 2000).toISOString(),
+    });
+    expect(second.accepted).toBe(true);
+  });
+
+  it('still accepts exact duplicate packets (idempotent retry)', async () => {
+    const ts = new Date().toISOString();
+    expect((await processLocationUpdate({ ...base, timestamp: ts })).accepted).toBe(true);
+    expect((await processLocationUpdate({ ...base, timestamp: ts })).accepted).toBe(true);
+  });
+
+  it('recovers after a far-future clock glitch (bounded stall, not permanent)', async () => {
+    // One fix with a +1h wall-clock glitch is accepted (clamped for storage).
+    const glitch = await processLocationUpdate({
+      ...base,
+      timestamp: new Date(Date.now() + 3600_000).toISOString(),
+    });
+    expect(glitch.accepted).toBe(true);
+
+    // The very next correct-clock fix may briefly reject (raw behind the
+    // bounded stored clock), but fixes must resume — never stall for an hour.
+    // Advance past the skew bound: this must be accepted.
+    const recovered = await processLocationUpdate({
+      ...base,
+      timestamp: new Date(Date.now() + 3 * 60_000).toISOString(),
+    });
+    expect(recovered.accepted).toBe(true);
+  });
+});

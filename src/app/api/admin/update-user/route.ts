@@ -2,8 +2,10 @@ import { decrementBusCapacity,incrementBusCapacity } from '@/domains/fleet';
 import { getStudentById,updateStudent } from '@/domains/identity';
 import { wasSeatReleased } from '@/lib/config/capacity-flags';
 import { getDeadlineConfig } from '@/lib/deadline-config-service';
+import { CapacityFullError } from '@/lib/errors/sentinel-errors';
 import { withSecurity } from '@/lib/security/api-security';
 import { RateLimits } from '@/lib/security/rate-limiter';
+import { invalidateCachedRole } from '@/lib/security/role-cache';
 import { safeErrorMessage } from '@/lib/security/safe-error';
 import { UpdateStudentSchema } from '@/lib/security/validation-schemas';
 import { computeBlockDatesFromValidUntil } from '@/lib/utils/deadline-computation';
@@ -120,8 +122,18 @@ export const POST = withSecurity(
                 throw pgUpdErr;
             }
 
+            invalidateCachedRole(uid);
+
             return NextResponse.json({ success: true, message: 'Student updated successfully' });
         } catch (error: any) {
+            // Moving a student onto a full bus is refused (compensations above
+            // already restored prior capacity) — report it as 409, not 500.
+            if (error instanceof CapacityFullError || /full capacity/i.test(error?.message || '')) {
+                return NextResponse.json({
+                    success: false,
+                    error: 'Target bus is at full capacity for this shift'
+                }, { status: 409 });
+            }
             const msg = error instanceof Error ? error.message : '';
             return NextResponse.json({
                 success: false,

@@ -51,5 +51,5 @@ export function generatePrefixedId(prefix: string, byteLength: 4 | 8 = 4): strin
     return `${prefix}${ts}_${hex}`;
   }
 
-  return `${prefix}${ts}_${Math.random().toString(36).substring(2, 10)}`;
+  throw new Error('Secure random generation is not available');
 }

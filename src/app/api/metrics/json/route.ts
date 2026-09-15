@@ -4,12 +4,18 @@
  */
 
 import { NextResponse } from 'next/server';
+import { verifyApiAuth } from '@/lib/security/api-auth';
 import { metricsRegistry } from '@/lib/observability/metrics';
 import { nodeRuntimeCollector } from '@/lib/observability/infrastructure/node';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(req: Request) {
+  // /api/metrics (Prometheus text) stays public for scraping; the JSON
+  // snapshot is staff-only.
+  const auth = await verifyApiAuth(req, ['admin', 'moderator']);
+  if (!auth.authenticated) return auth.response;
+
   try {
     nodeRuntimeCollector.collect();
     const snapshot = metricsRegistry.getMetricsJSON();

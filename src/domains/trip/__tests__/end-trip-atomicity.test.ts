@@ -73,6 +73,7 @@ describe('Trip end — atomicity and idempotency', () => {
       p_trip_id: 't-123',
       p_bus_id: 'b-1',
       p_driver_id: 'd-1',
+      p_min_duration_seconds: 600,
     });
   });
 
@@ -168,7 +169,22 @@ describe('Trip end — atomicity and idempotency', () => {
       p_trip_id: 't-123',
       p_bus_id: 'b-1',
       p_driver_id: 'd-1',
+      p_min_duration_seconds: 0,
     });
+  });
+
+  it('7. alreadyEnded retry — no duplicate broadcast, cleanup, or notification', async () => {
+    mockRpc.mockResolvedValue({
+      data: { success: true, tripId: 't-123', alreadyEnded: true },
+      error: null,
+    });
+
+    const result = await endTrip({ driverId: 'd-1', busId: 'b-1', tripId: 't-123' });
+
+    expect(result.success).toBe(true);
+    expect(result.tripId).toBe('t-123');
+    expect(broadcastTripEvent).not.toHaveBeenCalled();
+    expect(cleanupTrip).not.toHaveBeenCalled();
   });
 
   it('TRIP-001: RPC failure must NOT trigger cleanup (waiting flags remain during active trip)', async () => {

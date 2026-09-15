@@ -18,6 +18,7 @@
  * last_login_at        → lastLoginAt
  */
 import { getSupabaseServer } from '@/lib/supabase-server';
+import { invalidateCachedRole } from '@/lib/security/role-cache';
 import type { UserRole } from '@/lib/user-service';
 import * as studentRepo from '../../student/repositories/student.repository.pg';
 
@@ -177,11 +178,13 @@ export async function pgFindUserById(uid: string): Promise<IdentityUser | null> 
 
   const user = pgRowToUser(data as PgUser);
 
-  // If user is a student, attach student_profiles fields (status, valid_until, soft_block, etc.)
+  // NOTE: select only columns that exist in student_profiles (see
+  // supabase/migrations/Firestore_to_supabase_migration.sql). Selecting
+  // nonexistent columns makes PostgREST return 400 and breaks login.
   if (user.role === 'student') {
     const { data: studentProfile } = await db
       .from('student_profiles')
-      .select('status, soft_block, valid_until, bus_id, route_id, shift, enrollment_id, payment_status, current_session')
+      .select('status, soft_block, valid_until, bus_id, route_id, shift, enrollment_id')
       .eq('uid', uid)
       .maybeSingle();
 
@@ -193,8 +196,6 @@ export async function pgFindUserById(uid: string): Promise<IdentityUser | null> 
       user.routeId = studentProfile.route_id;
       user.shift = studentProfile.shift;
       user.enrollmentId = studentProfile.enrollment_id;
-      user.paymentStatus = studentProfile.payment_status;
-      user.currentSession = studentProfile.current_session;
     } else {
       user.status = 'active';
     }
@@ -282,6 +283,7 @@ export async function pgInsertUser(user: IdentityUser): Promise<void> {
   if (error) {
     throw new Error(`IdentityRepository (PG) insert failed: ${error.message}`);
   }
+  invalidateCachedRole(user.uid);
 }
 
 /**
@@ -306,6 +308,7 @@ export async function pgUpdateUser(uid: string, data: Partial<IdentityUser>): Pr
     if (error) {
       throw new Error(`IdentityRepository (PG) update failed: ${error.message}`);
     }
+    invalidateCachedRole(uid);
   }
 }
 
@@ -323,6 +326,7 @@ export async function pgRemoveUser(uid: string): Promise<void> {
   if (error) {
     throw new Error(`IdentityRepository (PG) delete failed: ${error.message}`);
   }
+  invalidateCachedRole(uid);
 }
 
 /**

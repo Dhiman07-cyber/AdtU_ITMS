@@ -1,8 +1,12 @@
 import { NextResponse } from 'next/server';
+import { verifyApiAuth } from '@/lib/security/api-auth';
 import { diagnosticsEngine } from '@/lib/observability/tracing/root-cause';
 import { distributedTracer } from '@/lib/observability/tracing/tracer';
 
 export async function GET(req: Request, { params }: { params: Promise<{ traceId: string }> }) {
+  const auth = await verifyApiAuth(req, ['admin', 'moderator']);
+  if (!auth.authenticated) return auth.response;
+
   const { traceId } = await params;
 
   const latency = diagnosticsEngine.analyzeLatency(traceId);

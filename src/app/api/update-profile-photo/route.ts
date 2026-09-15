@@ -70,8 +70,11 @@ export const POST = withSecurity(
 
             const currentImageUrl = oldImageUrl || currentData.profilePhotoUrl;
 
-            // Delete old Cloudinary image via SDK
-            if (currentImageUrl && currentImageUrl !== newImageUrl) {
+            // Delete the previous photo via SDK — but ONLY if it is the
+            // target's current photo. Deleting any caller-supplied URL would
+            // let an authenticated user destroy arbitrary Cloudinary assets.
+            if (currentImageUrl && currentImageUrl !== newImageUrl &&
+                currentImageUrl === currentData.profilePhotoUrl) {
                 const publicId = extractPublicId(currentImageUrl);
                 if (publicId) {
                     await deleteAsset(publicId);

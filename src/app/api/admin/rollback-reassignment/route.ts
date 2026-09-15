@@ -1,7 +1,6 @@
-﻿import { createAuditEvent,type AuditActorRole } from '@/domains/audit';
-import { decrementBusCapacity,incrementBusCapacity } from '@/domains/fleet';
-import { updateStudent } from '@/domains/identity';
+import { createAuditEvent,type AuditActorRole } from '@/domains/audit';
 import { withSecurity } from '@/lib/security/api-security';
+import { requireAdminPermission } from '@/lib/security/moderator-permissions';
 import { RateLimits } from '@/lib/security/rate-limiter';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import { NextResponse } from 'next/server';
@@ -17,10 +16,18 @@ type RollbackBody = z.infer<typeof RollbackSchema>;
  * POST /api/admin/rollback-reassignment
  *
  * Rolls back a reassignment using the before/after snapshot from reassignment_logs.
- * Uses domain services to reverse changes in PostgreSQL atomically.
+ *
+ * Delegates to the atomic `execute_reassignment_rollback` RPC (the same
+ * implementation behind POST /api/reassignment-logs/rollback): single
+ * transaction, precondition checks, bus-load recount, idempotent on retry.
+ * This route preserves the legacy response shape ({ success, studentCount })
+ * for the smart-allocation undo snackbar.
  */
 export const POST = withSecurity<RollbackBody>(
   async (_request, { auth, body }) => {
+    const permissionDenied = await requireAdminPermission(auth);
+    if (permissionDenied) return permissionDenied;
+
     const { operationId } = body;
     const supabase = getSupabaseServer();
 
@@ -55,79 +62,37 @@ export const POST = withSecurity<RollbackBody>(
         );
       }
 
-      // 2. Separate student and bus changes
       const studentChanges = changes.filter(c => c.collection === 'students');
-      const busChanges = changes.filter(c => c.collection === 'buses');
 
-      // 3. Calculate bus capacity deltas for rollback
-      const busCapacityUpdates = new Map<string, { morningDelta: number; eveningDelta: number }>();
+      // 2. Execute the rollback atomically via RPC (single transaction with
+      // precondition checks + bus-load recount). Safe to retry: already-rolled
+      // -back logs return success without re-applying changes.
+      const actorLabel = auth.name ? `${auth.name} (${auth.role})` : auth.role;
+      const { data: rpcResult, error: rpcError } = await supabase.rpc('execute_reassignment_rollback', {
+        p_operation_id: operationId,
+        p_actor_id: auth.uid,
+        p_actor_label: actorLabel,
+        p_changes: changes,
+      });
 
-      for (const change of busChanges) {
-        const busId = change.docId;
-        const beforeMorning = change.before?.morningLoad || 0;
-        const afterMorning = change.after?.morningLoad || 0;
-        const beforeEvening = change.before?.eveningLoad || 0;
-        const afterEvening = change.after?.eveningLoad || 0;
-
-        // Reverse the deltas: restore to "before" state from "after" state
-        busCapacityUpdates.set(busId, {
-          morningDelta: beforeMorning - afterMorning,
-          eveningDelta: beforeEvening - afterEvening,
-        });
+      if (rpcError) {
+        console.error('Rollback RPC failed:', rpcError);
+        return NextResponse.json(
+          { success: false, error: 'Rollback failed. Please retry.' },
+          { status: 409 }
+        );
       }
 
-      // 4. Apply rollback: Update students to their "before" state
-      for (const change of studentChanges) {
-        const studentUid = change.docId;
-        const before = change.before;
-
-        // Restore student to their original bus/route/shift
-        await updateStudent(studentUid, {
-          busId: before.busId,
-          shift: before.shift,
-          updatedAt: new Date().toISOString(),
-        });
+      if (!rpcResult?.success) {
+        return NextResponse.json(
+          { success: false, error: rpcResult?.error || 'Rollback failed precondition checks' },
+          { status: 409 }
+        );
       }
 
-      // 5. Apply bus capacity rollback
-      for (const [busId, deltas] of busCapacityUpdates.entries()) {
-        // Apply the calculated deltas to restore original capacity
-        if (deltas.morningDelta > 0) {
-          for (let i = 0; i < deltas.morningDelta; i++) {
-            await incrementBusCapacity(busId, 'Morning');
-          }
-        } else if (deltas.morningDelta < 0) {
-          for (let i = 0; i < Math.abs(deltas.morningDelta); i++) {
-            await decrementBusCapacity(busId, 'Morning');
-          }
-        }
-
-        if (deltas.eveningDelta > 0) {
-          for (let i = 0; i < deltas.eveningDelta; i++) {
-            await incrementBusCapacity(busId, 'Evening');
-          }
-        } else if (deltas.eveningDelta < 0) {
-          for (let i = 0; i < Math.abs(deltas.eveningDelta); i++) {
-            await decrementBusCapacity(busId, 'Evening');
-          }
-        }
-      }
-
-      // 6. Mark the log as rolled back
-      await supabase
-        .from('reassignment_logs')
-        .update({
-          status: 'rolled_back',
-          meta: {
-            ...logEntry.meta,
-            rolled_back_at: new Date().toISOString(),
-            rolled_back_by: auth.uid,
-          },
-        })
-        .eq('operation_id', operationId);
-
-      // 7. Create audit event
-      await createAuditEvent({
+      // 3. Create audit event (non-blocking: the rollback already committed;
+      // an audit failure must not misreport success as failure).
+      void createAuditEvent({
         action: 'reassignment_rolled_back',
         actor_id: auth.uid,
         actor_name: auth.name || 'Unknown',
@@ -141,9 +106,8 @@ export const POST = withSecurity<RollbackBody>(
         metadata: {
           operation_id: operationId,
           student_count: studentChanges.length,
-          bus_count: busChanges.length,
         },
-      });
+      }).catch((e) => console.error('Rollback audit event failed (non-critical):', e?.message || e));
 
       return NextResponse.json({
         success: true,

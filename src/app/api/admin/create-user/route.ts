@@ -7,6 +7,7 @@ import { sendBusFullAlert } from '@/lib/busCapacityService';
 import { getDeadlineConfig } from '@/lib/deadline-config-service';
 import { adminAuth } from '@/lib/firebase-admin';
 import { withSecurity } from '@/lib/security/api-security';
+import { invalidateCachedRole } from '@/lib/security/role-cache';
 import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
 import { RateLimits } from '@/lib/security/rate-limiter';
 import { CreateUserSchema } from '@/lib/security/validation-schemas';
@@ -242,10 +243,13 @@ export const POST = withSecurity<CreateUserBody>(
             let capRouteId = '';
 
             if (studentBusId && !alreadyExisted) {
-                // Increment capacity in PG (source of truth) — admin-create intentionally
-                // over-fills (no capacity gate), matching legacy behavior.
+                // Increment capacity in PG (source of truth). Admin-create
+                // intentionally over-fills: enforceCapacity=false is the
+                // explicit admin override (audited below via capExceeded),
+                // so the seat count stays truthful instead of silently
+                // under-counting.
                 try {
-                    const capResult = await incrementBusCapacity(studentBusId, studentDoc.shift);
+                    const capResult = await incrementBusCapacity(studentBusId, studentDoc.shift, false);
                     capNewMembers = capResult.newShiftLoad;
                     capLimit = capResult.capacity;
                     capExceeded = capNewMembers > capLimit;
@@ -379,6 +383,8 @@ export const POST = withSecurity<CreateUserBody>(
                 });
             }
         }
+
+        invalidateCachedRole(uid);
 
         return NextResponse.json({
             success: true,

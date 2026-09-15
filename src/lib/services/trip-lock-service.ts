@@ -61,6 +61,7 @@ export interface StartTripResult {
 
 export interface EndTripResult {
     success: boolean;
+    alreadyEnded?: boolean;
     reason?: string;
 }
 
@@ -245,7 +246,8 @@ export class TripLockService {
     async endTrip(
         tripId: string,
         driverId: string,
-        busId: string
+        busId: string,
+        minDurationSeconds = 0
     ): Promise<EndTripResult> {
         try {
             // Ownership is already verified by the orchestrator before this call.
@@ -256,6 +258,7 @@ export class TripLockService {
                     p_trip_id: tripId,
                     p_bus_id: busId,
                     p_driver_id: driverId,
+                    p_min_duration_seconds: minDurationSeconds,
                 });
 
             if (rpcError) {
@@ -268,7 +271,7 @@ export class TripLockService {
             }
 
             heartbeatWriteCache.delete(`${tripId}:${driverId}:${busId}`);
-            return { success: true };
+            return { success: true, alreadyEnded: result?.alreadyEnded === true };
 
         } catch (error: unknown) {
             appLogger.error('trip-lock', 'end_trip_error', { tripId, driverId, busId, error: getErrorMessage(error) });

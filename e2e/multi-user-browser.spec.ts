@@ -41,6 +41,8 @@ test.describe('multi-user browser', () => {
     const drvA = new DriverAgent({ label: driverA.label, uid: driverA.uid, idToken: dTokA, busId: busA.id, routeId: busA.routeId!, gpsSeed: `multi-a-${busA.id}` });
     const drvB = new DriverAgent({ label: driverB.label, uid: driverB.uid, idToken: dTokB, busId: busB.id, routeId: busB.routeId!, gpsSeed: `multi-b-${busB.id}` });
     await Promise.all([drvA.startTrip(), drvB.startTrip()]);
+    (drvA.liveGps as any).dwellUntilMs = 0;
+    (drvB.liveGps as any).dwellUntilMs = 0;
     await Promise.all([drvA.connectWs(WS_BASE), drvB.connectWs(WS_BASE)]);
     console.log(`trips started: A=${drvA.tripId} B=${drvB.tripId}`);
 

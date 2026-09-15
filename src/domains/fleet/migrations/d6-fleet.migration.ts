@@ -100,12 +100,11 @@ async function up(): Promise<MigrationResult> {
       const bus: Record<string, any> = {
         id,
         // bus_id column dropped — was always identical to id
+        // driver_uid/driver_name columns dropped — binding is dynamic via active_trips
         bus_number: fsData.busNumber || '',
         model: fsData.model || null,
         year: fsData.year || null,
         capacity: typeof fsData.capacity === 'number' ? fsData.capacity : 0,
-        driver_uid: fsData.driverUID || null,
-        driver_name: fsData.driverName || null,
         route_id: fsData.routeId || null,
         route_name: fsData.routeName || null,
         status: fsData.status || 'inactive',
@@ -157,13 +156,10 @@ async function up(): Promise<MigrationResult> {
         employee_id: fsData.employeeId || fsData.driverId || null,
         address: fsData.address || null,
         profile_photo_url: fsData.profilePhotoUrl || null,
-        bus_id: fsData.busId || null,
-        route_id: fsData.routeId || null,
+        // bus_id/route_id/shift/trip_active/active_trip_id columns dropped —
+        // binding is dynamic via active_trips
         joining_date: fsData.joiningDate || null,
-        shift: fsData.shift || null,
         status: fsData.status || null,
-        trip_active: fsData.tripActive ?? false,
-        active_trip_id: fsData.activeTripId || null,
         is_reserved: fsData.isReserved ?? false,
         created_at: toISOString(fsData.createdAt),
         updated_at: toISOString(fsData.updatedAt),

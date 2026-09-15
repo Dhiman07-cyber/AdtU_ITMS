@@ -55,18 +55,29 @@ export async function POST(request: NextRequest) {
     if (event === 'payment.captured' && paymentEntity) {
       const { id: paymentId, order_id, amount, method } = paymentEntity;
 
-      // SECURITY: Fetch order details from Razorpay to get TRUSTED data
-      // Don't trust payment notes - they can be different from order notes
+      // SECURITY: Fetch order details from Razorpay to get TRUSTED data.
+      // Don't trust payment notes - they can differ from order notes.
+      // On fetch failure return 502 (NOT 200): Razorpay retries webhooks on
+      // non-2xx, so the payment is processed on retry instead of being
+      // processed now from untrusted payment-entity notes.
       let orderDetails;
       try {
         orderDetails = await fetchOrderDetails(order_id);
       } catch (error) {
-        // Fallback to payment notes if order fetch fails
-        orderDetails = { notes: paymentEntity.notes || {} };
+        console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] Webhook: order fetch failed, returning 502 for retry`);
+        return NextResponse.json({ error: 'Order verification unavailable, retrying' }, { status: 502 });
       }
 
-      // SECURITY: Extract trusted values from order notes
-      const notes = orderDetails.notes || paymentEntity.notes || {};
+      // SECURITY: Extract trusted values from order notes only.
+      const notes = orderDetails.notes || {};
+
+      // Amount binding (mirrors verify-payment): the captured amount must
+      // match the trusted order amount before any ledger write. A mismatch is
+      // deterministic (integer paise), so 400 stops Razorpay retries.
+      if (Number(orderDetails.amount || 0) !== Number(paymentEntity.amount || 0)) {
+        console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] Webhook: amount mismatch, rejecting`);
+        return NextResponse.json({ error: 'Amount mismatch' }, { status: 400 });
+      }
 
       console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] Webhook: Calling processCapturedPayment for:`, paymentId, `orderId:`, order_id);
       const result = await processCapturedPayment({

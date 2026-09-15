@@ -15,6 +15,8 @@ function isPrivilegedAuthEnabled(): boolean {
 }
 
 const MAX_QUEUE = 500;
+/** GPS coalescing cap (one slot per channel). Fleet scale is ~50 buses. */
+const MAX_GPS_CHANNELS = 500;
 /** Cap for the client-side ws buffer before we queue instead of send. At ~200
  *  bytes/msg, 16KB = ~80 buffered broadcasts — well above a single tick's
  *  volume, so this only engages under real backpressure. */
@@ -27,6 +29,13 @@ export class WebSocketTransport {
   private connected = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private sendQueue: string[] = [];
+  // GPS coalescing lane: only the latest bus_location_update frame per channel
+  // is kept. A stale position is worthless once a newer one exists, and without
+  // this, 0.5Hz/bus GPS traffic evicts lifecycle (trip_started/ended) frames
+  // from the shared 500-frame FIFO during bridge outages. Other event types —
+  // including per-student waiting-flag events that share a channel — are never
+  // merged and always go through the FIFO lane.
+  private gpsLatest = new Map<string, string>();
 
   async connect(): Promise<void> {
     if (!isPrivilegedAuthEnabled()) {
@@ -99,6 +108,17 @@ export class WebSocketTransport {
     const socketOpen = this.ws?.readyState === 1;
     const saturated = this.ws?.bufferedAmount !== undefined && this.ws.bufferedAmount > BACKPRESSURE_BYTES;
     if (!this.connected || !this.ws || !socketOpen || saturated) {
+      if (event === 'bus_location_update') {
+        // Coalesce: one slot per channel, newest wins. Bounded by channel
+        // count, not message rate — a long outage can no longer evict
+        // lifecycle frames or flood the reconnect with stale positions.
+        if (!this.gpsLatest.has(channel) && this.gpsLatest.size >= MAX_GPS_CHANNELS) {
+          const oldest = this.gpsLatest.keys().next().value;
+          if (oldest) this.gpsLatest.delete(oldest);
+        }
+        this.gpsLatest.set(channel, msg);
+        return;
+      }
       if (this.sendQueue.length >= MAX_QUEUE) this.sendQueue.shift();
       this.sendQueue.push(msg);
       return;
@@ -112,6 +132,7 @@ export class WebSocketTransport {
     this.ws?.close();
     this.ws = null;
     this.sendQueue = [];
+    this.gpsLatest.clear();
   }
 
   private sendPresence(): void {
@@ -135,6 +156,11 @@ export class WebSocketTransport {
       const msg = this.sendQueue.shift();
       if (msg) this.unsafeSend(msg);
     }
+    // Lifecycle/other events first; GPS snapshots follow. gpsLatest is
+    // drained + cleared so a reconnect never replays the same frame twice
+    // (drainQueueSync runs, then the batched drainQueue sees an empty map).
+    for (const msg of this.gpsLatest.values()) this.unsafeSend(msg);
+    this.gpsLatest.clear();
   }
 
   private drainQueue(): void {
@@ -145,9 +171,18 @@ export class WebSocketTransport {
         const msg = this.sendQueue.shift();
         if (msg) { this.unsafeSend(msg); n++; }
       }
-      if (this.sendQueue.length > 0) setImmediate(sendBatch);
+      // GPS snapshots after queued events; delete each channel slot as sent.
+      // A newer frame arriving mid-drain simply re-populates the slot.
+      for (const [channel, msg] of this.gpsLatest) {
+        if (n >= 20) break;
+        if (this.gpsLatest.get(channel) !== msg) continue;
+        this.gpsLatest.delete(channel);
+        this.unsafeSend(msg);
+        n++;
+      }
+      if (this.sendQueue.length > 0 || this.gpsLatest.size > 0) setImmediate(sendBatch);
     };
-    if (this.sendQueue.length > 0) setImmediate(sendBatch);
+    if (this.sendQueue.length > 0 || this.gpsLatest.size > 0) setImmediate(sendBatch);
   }
 
   private scheduleReconnect(): void {

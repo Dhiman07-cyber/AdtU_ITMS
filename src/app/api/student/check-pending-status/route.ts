@@ -33,6 +33,14 @@ export const POST = withSecurity(
 
         const requestData = requestDoc.data();
 
+        // Ownership check: a student may only inspect their own requests.
+        if (requestData?.studentUid && requestData.studentUid !== studentUid) {
+            return NextResponse.json(
+                { success: false, error: 'Forbidden' },
+                { status: 403 }
+            );
+        }
+
         // If request exists but is not pending (approved/rejected), clean up in PostgreSQL
         if (requestData.status !== 'pending') {
             await update(studentUid, { pendingProfileUpdate: null });
