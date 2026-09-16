@@ -1,92 +1,85 @@
 groups:
   - name: itms_infrastructure_alerts
     rules:
-      - alert: RedisDown
-        expr: up{job="redis"} == 0
+      # WS node down: if a WebSocket server disappears from Prometheus scrape
+      - alert: WebSocketNodeDown
+        expr: up{job="itms-websocket-cluster"} == 0
         for: 1m
         labels:
           severity: critical
           category: INFRASTRUCTURE
         annotations:
-          summary: "Redis Cache Service Down"
-          description: "Redis instance is unreachable. Location cache and Pub/Sub message routing is impaired."
+          summary: "WebSocket node {{ $labels.instance }} is unreachable"
+          description: "Prometheus cannot scrape {{ $labels.instance }}. Real-time GPS and notifications are impaired for students on this node."
 
-      - alert: PostgreSQLDown
-        expr: up{job="postgres"} == 0
+      # App node down
+      - alert: NextjsNodeDown
+        expr: up{job="itms-nextjs-cluster"} == 0
         for: 1m
         labels:
           severity: critical
           category: INFRASTRUCTURE
         annotations:
-          summary: "PostgreSQL Database Down"
-          description: "Primary PostgreSQL database container is unreachable."
+          summary: "Next.js app node {{ $labels.instance }} is unreachable"
+          description: "The application API is down on {{ $labels.instance }}. Payments, logins and admin actions will fail."
 
-      - alert: WebSocketClusterDown
+      # Zero active connections across the whole WS cluster for > 2 min
+      # (normal during school-hours inactivity is fine — only fires during expected-busy periods)
+      - alert: WebSocketClusterZeroConnections
         expr: sum(itms_ws_connections_active) == 0
         for: 2m
         labels:
-          severity: critical
+          severity: warning
           category: INFRASTRUCTURE
         annotations:
-          summary: "WebSocket Cluster Down"
-          description: "Active WebSocket connections dropped to 0 across all instances."
+          summary: "WebSocket cluster has zero active connections"
+          description: "All WebSocket connections have dropped. Either all clients disconnected or the WS cluster is unreachable."
 
-      - alert: HighMemoryUsage
-        expr: (nodejs_process_resident_memory_bytes / 1024 / 1024) > 800
+      # High memory: WS nodes are capped at 1536MB in docker-compose.prod.yml
+      - alert: HighMemoryUsageWS
+        expr: (nodejs_process_resident_memory_bytes / 1024 / 1024) > 1200
         for: 5m
         labels:
           severity: warning
           category: CAPACITY
         annotations:
-          summary: "High Node.js process RSS memory consumption"
-          description: "Process memory consumption exceeded 800 MB threshold."
+          summary: "WebSocket node memory approaching container limit"
+          description: "RSS memory on {{ $labels.instance }} exceeds 1.2GB (container limit: 1.5GB). Risk of OOM kill."
 
   - name: itms_application_alerts
     rules:
+      # API error rate (uses itms_ prefix set in observabilityConfig.metricPrefix)
       - alert: HighApiErrorRate
-        expr: (sum(rate(itms_api_errors_total[5m])) / sum(rate(itms_api_requests_total[5m]))) * 100 > 5
+        expr: >
+          (
+            sum(rate(itms_api_requests_total{status=~"5.."}[5m]))
+            /
+            sum(rate(itms_api_requests_total[5m]))
+          ) * 100 > 5
         for: 3m
         labels:
           severity: warning
           category: APPLICATION
         annotations:
-          summary: "API Error rate exceeds 5%"
-          description: "HTTP 5xx server error rate is currently high."
+          summary: "API 5xx error rate exceeds 5%"
+          description: "HTTP server error rate is elevated. Check application logs for root cause."
 
+      # P95 API latency from histogram (itms_api_request_duration_seconds)
       - alert: HighApiLatencyP95
-        expr: histogram_quantile(0.95, sum(rate(itms_api_request_duration_seconds_bucket[5m])) by (le)) * 1000 > 300
+        expr: >
+          histogram_quantile(
+            0.95,
+            sum(rate(itms_api_request_duration_seconds_bucket[5m])) by (le)
+          ) > 0.3
         for: 3m
         labels:
           severity: warning
           category: PERFORMANCE
         annotations:
-          summary: "High API response latency (P95 > 300ms)"
-          description: "API response latency P95 exceeds 300ms SLA threshold."
+          summary: "API response latency P95 > 300ms"
+          description: "P95 API latency exceeds the 300ms SLA. Investigate slow routes or database queries."
 
-  - name: itms_business_alerts
-    rules:
-      - alert: LowPaymentSuccessRate
-        expr: (sum(rate(itms_payments_completed_total[1h])) / sum(rate(itms_payments_initiated_total[1h]))) * 100 < 90
-        for: 15m
-        labels:
-          severity: warning
-          category: PAYMENT
-        annotations:
-          summary: "Payment success rate dropped below 90%"
-          description: "Ratio of completed payments to initiated orders has degraded significantly."
-
-      - alert: GPSPipelineHighRejectionRate
-        expr: (sum(rate(itms_gps_rejected[5m])) / sum(rate(itms_gps_accepted[5m]) + rate(itms_gps_rejected[5m]))) * 100 > 15
-        for: 5m
-        labels:
-          severity: warning
-          category: GPS
-        annotations:
-          summary: "GPS coordinate rejection rate exceeds 15%"
-          description: "GPS pipeline is rejecting an excessive ratio of driver location updates."
-
-  - name: itms_security_alerts
-    rules:
+      # High WS auth failures (potential credential stuffing)
       - alert: MassAuthFailures
         expr: sum(rate(itms_ws_auth_failures[5m])) > 10
         for: 2m
@@ -94,9 +87,10 @@ groups:
           severity: critical
           category: SECURITY
         annotations:
-          summary: "Mass authentication failures detected"
-          description: "Potential credential stuffing or brute-force authentication attack in progress."
+          summary: "Mass WebSocket authentication failures"
+          description: "Potential credential stuffing or brute-force attack in progress. Rate: {{ $value | humanize }}/s"
 
+      # High rate-limit blocks
       - alert: RateLimitExceededSpike
         expr: sum(rate(itms_ws_rate_limit_blocks[5m])) > 50
         for: 2m
@@ -104,5 +98,35 @@ groups:
           severity: warning
           category: SECURITY
         annotations:
-          summary: "High rate limit enforcement rate"
-          description: "Excessive client requests triggering rate limit blocks."
+          summary: "High WebSocket rate-limit enforcement rate"
+          description: "Clients are being blocked at rate {{ $value | humanize }}/s. Could indicate abuse or a misbehaving client."
+
+  - name: itms_gps_alerts
+    rules:
+      # GPS rejection rate on the WS cluster (itms_gps_accepted / itms_gps_rejected are WS-node counters)
+      - alert: GPSPipelineHighRejectionRate
+        expr: >
+          (
+            sum(rate(itms_gps_rejected[5m]))
+            /
+            (sum(rate(itms_gps_accepted[5m])) + sum(rate(itms_gps_rejected[5m])))
+          ) * 100 > 20
+        for: 5m
+        labels:
+          severity: warning
+          category: GPS
+        annotations:
+          summary: "GPS rejection rate exceeds 20%"
+          description: "Over 20% of driver GPS packets are being rejected. Check driver app version, signal quality, and jump guard thresholds."
+
+      # No GPS updates at all from any bus for > 3 min (during expected-active hours)
+      - alert: GPSFeedSilent
+        expr: sum(rate(itms_gps_accepted[3m])) == 0
+        for: 3m
+        labels:
+          severity: warning
+          category: GPS
+        annotations:
+          summary: "No GPS updates accepted in the last 3 minutes"
+          description: "Either all buses are stationary, all drivers have disconnected, or the GPS pipeline is broken."
+

@@ -11,15 +11,13 @@ export const GET = withSecurity(
         const { searchParams } = new URL(request.url);
         const mode = searchParams.get('mode') || 'days';
 
-        const stats = await paymentsSupabaseService.getPaymentStats();
-        const methodTrend = await paymentsSupabaseService.getPaymentMethodTrend();
-
-        let trend;
-        if (mode === 'months') {
-            trend = await paymentsSupabaseService.getPaymentTrendMonthly();
-        } else {
-            trend = await paymentsSupabaseService.getPaymentTrend();
-        }
+        const [stats, methodTrend, trend] = await Promise.all([
+            paymentsSupabaseService.getPaymentStats(),
+            paymentsSupabaseService.getPaymentMethodTrend(),
+            mode === 'months'
+                ? paymentsSupabaseService.getPaymentTrendMonthly()
+                : paymentsSupabaseService.getPaymentTrend()
+        ]);
 
         return NextResponse.json({
             success: true,

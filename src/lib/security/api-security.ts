@@ -118,12 +118,15 @@ function extractToken(request: Request, body: any, allowBodyToken: boolean): str
 // ============================================================================
 
 function getClientIp(request: Request): string {
-    return (
-        request.headers.get('x-real-ip') ||
-        request.headers.get('cf-connecting-ip') ||
-        request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
-        '127.0.0.1'
-    );
+    const realIp = request.headers.get('x-real-ip') || request.headers.get('cf-connecting-ip');
+    if (realIp) return realIp.trim();
+
+    const xff = request.headers.get('x-forwarded-for');
+    if (xff) {
+        const parts = xff.split(',').map(s => s.trim()).filter(Boolean);
+        if (parts.length > 0) return parts[parts.length - 1];
+    }
+    return '127.0.0.1';
 }
 
 // ============================================================================
@@ -170,6 +173,23 @@ async function safeParseBody(request: Request): Promise<any> {
  * 8. Call the handler
  * 9. Catch and sanitize errors
  */
+let cachedAllowedHosts: Set<string> | null = null;
+
+function getAllowedOriginHosts(): Set<string> {
+    const hosts = new Set<string>();
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL;
+    if (appUrl) {
+        try { hosts.add(new URL(appUrl).host); } catch {}
+    }
+    hosts.add('adtu-bus.vercel.app');
+    hosts.add('adtu-bus-xq.vercel.app');
+    if (process.env.NODE_ENV === 'development') {
+        hosts.add('localhost:3000');
+        hosts.add('127.0.0.1:3000');
+    }
+    return hosts;
+}
+
 export function withSecurity<T = any>(
     handler: SecureHandler<T>,
     options: SecurityOptions<T> = {}
@@ -187,27 +207,30 @@ export function withSecurity<T = any>(
     return async (request: NextRequest | Request): Promise<NextResponse> => {
         const requestId = crypto.randomUUID();
         const ip = getClientIp(request);
+        const reqUrl = request instanceof NextRequest ? request.nextUrl : new URL(request.url);
         const method = request.method;
-        const url = request instanceof NextRequest ? request.nextUrl.pathname : new URL(request.url).pathname;
+        const pathname = reqUrl.pathname;
+        const url = pathname;
 
         try {
             // ── 0. CSRF origin check for state-changing methods ──
+
             if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
                 const origin = request.headers.get('origin');
                 if (origin) {
-                    const allowedOrigins = [
-                        process.env.NEXT_PUBLIC_APP_URL,
-                        process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null,
-                        process.env.NODE_ENV !== 'production' ? 'http://localhost:3000' : null,
-                    ].filter(Boolean) as string[];
-
-                    const originHost = new URL(origin).host;
-                    const isAllowed = allowedOrigins.some(allowed => {
-                        try { return new URL(allowed).host === originHost; } catch { return false; }
-                    });
+                    if (!cachedAllowedHosts) {
+                        cachedAllowedHosts = getAllowedOriginHosts();
+                    }
+                    let isAllowed = false;
+                    try {
+                        const originHost = new URL(origin).host;
+                        isAllowed = cachedAllowedHosts.has(originHost);
+                    } catch {
+                        isAllowed = false;
+                    }
 
                     if (!isAllowed) {
-                        console.warn(`[${requestId}] CSRF: Rejected origin ${origin} for ${method} ${url}`);
+                        console.warn(`[${requestId}] CSRF: Rejected origin ${origin} for ${method} ${pathname}`);
                         return NextResponse.json(
                             { success: false, error: 'Invalid request origin', requestId },
                             { status: 403 }
@@ -239,9 +262,8 @@ export function withSecurity<T = any>(
             // URLs leak into proxy/Vercel logs, browser history, and Referer
             // headers. Body `idToken` remains for mobile backward compat.
             try {
-                const url = new URL(request.url);
                 const queryParams: Record<string, string> = {};
-                url.searchParams.forEach((value, key) => {
+                reqUrl.searchParams.forEach((value, key) => {
                     if (key !== 'idToken') queryParams[key] = value;
                 });
                 rawBody = { ...queryParams, ...rawBody };

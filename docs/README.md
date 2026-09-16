@@ -67,6 +67,16 @@ If you are a new engineer or contributor joining the project, read through the s
 - **[01. Metrics Telemetry & Health Probes](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/05-operations-and-observability/01-telemetry-and-metrics.md)**: Prometheus scraping, custom `itms_*` metric catalogs, Alertmanager triggers, and Grafana dashboards.
 - **[02. Operational Incident Runbooks](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/05-operations-and-observability/02-incident-runbooks.md)**: Step-by-step procedures for handling stranded driver locks, Redis partitions, ghost map pins, and scheduled maintenance toggles.
 
+### [06. Evidence & Verification](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/06-evidence-and-verification/)
+- **[Capacity Concurrency Evidence](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/06-evidence-and-verification/CAPACITY_CONCURRENCY_EVIDENCE.md)**: Empirical stress evidence and atomic RPC verification for bus load and seat allocation invariants.
+- **[Payment Concurrency Evidence](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/06-evidence-and-verification/PAYMENT_CONCURRENCY_EVIDENCE.md)**: Distributed payment idempotency, webhook recovery, and partial unique constraint validation.
+- **[Production Readiness Gate](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/06-evidence-and-verification/PRODUCTION_READINESS_GATE.md)**: Master release gate auditing P0/P1 invariants, security perimeters, and deployment requirements.
+- **[Schema Reproducibility Report](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/06-evidence-and-verification/SCHEMA_REPRODUCIBILITY_REPORT.md)**: PostgreSQL schema audit, migration idempotency, RPC parameter alignment, and RLS policy verification.
+- **[Security Decision Log](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/06-evidence-and-verification/SECURITY_DECISION_LOG.md)**: Architectural security decisions (CSRF, XFF sanitization, WS wire auth, device-session fail-closed).
+- **[Test Evidence Matrix](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/06-evidence-and-verification/TEST_EVIDENCE_MATRIX.md)**: Comprehensive mapping of all 47 test suites, 287 unit tests, and system invariants.
+- **[Realtime Failure Matrix](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/06-evidence-and-verification/REALTIME_FAILURE_MATRIX.md)**: Failure mode analysis, split-brain scenarios, and recovery behaviors across Redis and WebSockets.
+- **[PR-001 Architecture Patch](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/06-evidence-and-verification/PR-001.md)**: Detailed patch documentation for payment crypto caching, gateway concurrency, and font optimizations.
+
 ---
 
 ## 🛠️ Essential Development & Operational Commands

@@ -98,3 +98,23 @@ Transportation validity is monitored by automated Vercel Cron routes configured 
    - Identifies students past their `hard_block` threshold and updates status from `active` to `expired`.
 3. `/api/cron/session-activation`:
    - Activates upcoming academic sessions, transitioning verified renewal applications into the active student roster.
+
+---
+
+## 5. Renewal Concurrency & Capacity Atomicity
+
+### 5.1 Partial Unique Index on Active Applications
+To eliminate duplicate renewal applications and race conditions during high-volume registration:
+```sql
+CREATE UNIQUE INDEX IF NOT EXISTS idx_applications_active_student_session 
+ON applications (applicant_uid, session_start_year) 
+WHERE state NOT IN ('rejected', 'cancelled', 'expired');
+```
+This partial index guarantees at the PostgreSQL engine level that a student can have at most one active application per academic session. Concurrent payment callbacks or duplicate user submissions attempting to create a second application immediately encounter a unique constraint violation and abort safely.
+
+### 5.2 Atomic Renewal Seat Assignment (`approve_renewal_with_seat`)
+When approving a student renewal that reclaims bus seating capacity after a soft block:
+- RPC `approve_renewal_with_seat` locks the student profile and bus row atomically with `FOR UPDATE`.
+- Re-checks remaining bus capacity against current shift load (`morning_load` / `evening_load`).
+- Increments occupied seats, extends `valid_until`, resets soft/hard block dates, and transitions application state to `approved` in a single ACID PostgreSQL transaction.
+- If capacity is exceeded or any step fails, the entire transaction rolls back, preserving original student validity and seat counts without partial side effects.

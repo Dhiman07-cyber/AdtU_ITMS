@@ -8,6 +8,7 @@ import { logger } from './structured-logger';
 import { perfMonitor } from './performance-monitor';
 import { wsServer } from './websocket-server';
 import { publishToRedis } from './redis-broadcast';
+import { encode } from './socket-encoder';
 import { getSupabaseServer } from '@/lib/supabase-server';
 
 type MessageHandler = (ws: WebSocket, session: Session, payload: any) => void | Promise<void>;
@@ -62,7 +63,7 @@ export async function routeMessage(ws: WebSocket, session: Session, parsed: any)
 
 function send(ws: WebSocket, data: Record<string, unknown>): void {
   if (ws.readyState === ws.OPEN) {
-    ws.send(JSON.stringify(data));
+    ws.send(encode(data));
     metricsService.inc('messagesSent');
   }
 }

@@ -27,12 +27,16 @@
 import crypto from 'crypto';
 import { redisPubSub } from './redis-pubsub';
 import { logger } from './structured-logger';
+import { invalidateTokenAuthCache } from './authenticator';
+import { sessionManager } from './session-manager';
+import { connectionRegistry } from './connection-registry';
 
 /** Unique identifier for this WS server process. Never changes after startup. */
 export const MY_NODE_ID = crypto.randomUUID();
 
 /** Redis channel all WS nodes listen on for cross-node broadcasts. */
 const REDIS_BROADCAST_CHANNEL = 'ws:broadcast';
+const ROLE_INVALIDATE_CHANNEL = 'role_invalidate';
 
 interface BroadcastEnvelope {
   /** The WS channel to broadcast on (e.g. 'bus:ABC', 'trip-status-BUS123') */
@@ -111,8 +115,44 @@ export async function initRedisBroadcastRelay(
     onBroadcast(envelope.channel, envelope.event, envelope.payload);
   });
 
+  // Cross-node role invalidation listener: purges cached JWT auth and terminates
+  // active sessions in this WS instance whenever an admin updates user permissions or roles.
+  await redisPubSub.subscribe(ROLE_INVALIDATE_CHANNEL, (rawUid) => {
+    const uid = rawUid ? rawUid.trim() : undefined;
+    invalidateTokenAuthCache(uid);
+
+    if (uid) {
+      const activeSessions = sessionManager.getByUid(uid);
+      for (const session of activeSessions) {
+        const conn = connectionRegistry.get(session.socketId);
+        if (conn) {
+          try {
+            conn.ws.close(4401, 'Role revoked or permissions modified - please re-authenticate');
+          } catch (err) {
+            logger.warn('ws_close_on_revoke_error', { socketId: session.socketId, error: (err as Error).message });
+          }
+          connectionRegistry.unregister(session.socketId);
+        }
+        sessionManager.delete(session.socketId);
+      }
+      logger.info('ws_active_sessions_revoked', { uid, count: activeSessions.length });
+    } else {
+      for (const [socketId, conn] of connectionRegistry.getAll().entries()) {
+        try {
+          conn.ws.close(4401, 'Global permissions modified - please re-authenticate');
+        } catch { /* ignore */ }
+        connectionRegistry.unregister(socketId);
+        sessionManager.delete(socketId);
+      }
+      logger.info('ws_all_sessions_revoked');
+    }
+
+    logger.info('ws_role_cache_invalidated', { uid: uid || 'all' });
+  });
+
   logger.info('redis_broadcast_relay_initialized', {
     nodeId: MY_NODE_ID,
     channel: REDIS_BROADCAST_CHANNEL,
+    roleInvalidateChannel: ROLE_INVALIDATE_CHANNEL,
   });
 }

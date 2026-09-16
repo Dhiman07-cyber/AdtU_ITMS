@@ -3,9 +3,6 @@
  * Fetches and normalizes user profile data with reference resolution
  */
 
-import { getAdminById } from '@/domains/identity';
-import { getById as getRouteById } from '@/domains/route';
-
 export type UserRole = 'student' | 'driver' | 'moderator' | 'admin';
 
 export interface BaseProfile {
@@ -223,6 +220,16 @@ export function clearRouteCache(routeId?: string): void {
   }
 }
 
+async function fetchRouteById(id: string): Promise<any> {
+  try {
+    const res = await fetch(`/api/routes/${encodeURIComponent(id)}`);
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
 async function resolveRoute(routeId: string): Promise<any | null> {
   if (!routeId) return null;
 
@@ -242,8 +249,8 @@ async function resolveRoute(routeId: string): Promise<any | null> {
       cleanRouteId = `Route-${number}`;
     }
     
-    // Try to fetch the route document via dataService (Postgres)
-    const routeData = await getRouteById(cleanRouteId);
+    // Try to fetch the route document via HTTP API (client-safe)
+    const routeData = await fetchRouteById(cleanRouteId);
     if (routeData) {
       routeCache.set(routeId, { data: routeData, timestamp: now });
       return routeData;
@@ -251,7 +258,7 @@ async function resolveRoute(routeId: string): Promise<any | null> {
     
     // If not found, try with the original routeId
     if (cleanRouteId !== routeId) {
-      const originalData = await getRouteById(routeId);
+      const originalData = await fetchRouteById(routeId);
       if (originalData) {
         routeCache.set(routeId, { data: originalData, timestamp: now });
         return originalData;
@@ -556,7 +563,10 @@ async function fetchModeratorProfile(uid: string): Promise<ModeratorProfile | nu
  */
 async function fetchAdminProfile(uid: string): Promise<AdminProfile | null> {
   try {
-    const data = await getAdminById(uid);
+    const res = await fetch('/api/auth/user');
+    if (!res.ok) return null;
+    const json = await res.json();
+    const data = json?.user;
     if (!data) return null;
     const joiningDate = toDate(data.joiningDate);
     const yearsOfService = calculateYearsOfService(joiningDate);

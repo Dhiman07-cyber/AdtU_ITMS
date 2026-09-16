@@ -91,7 +91,11 @@ export async function POST(request: NextRequest) {
       console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] Webhook: processCapturedPayment returned:`, JSON.stringify(result));
 
       if (result.status === 'error') {
-        return NextResponse.json({ error: result.error }, { status: 500 });
+        // Log the internal error detail server-side only — never expose it to
+        // Razorpay (external caller). The generic response still triggers a
+        // Razorpay retry on 5xx so the payment is retried safely.
+        console.error('[webhook] processCapturedPayment error (internal):', result.error);
+        return NextResponse.json({ error: 'Payment processing failed' }, { status: 500 });
       }
 
       return NextResponse.json({ status: result.status }, { status: 200 });

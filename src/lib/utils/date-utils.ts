@@ -199,3 +199,27 @@ export function calculateValidUntilDate(
   // Create date with deadline from config in UTC to prevent timezone leaks
   return new Date(Date.UTC(endYear, month, day, 23, 59, 59, 999));
 }
+
+/**
+ * Resolves a date from various validUntil representations (toDate, Date, string).
+ */
+export function getValidUntilDate(validUntil: unknown): Date | null {
+  if (!validUntil) return null;
+
+  try {
+    if (
+      typeof validUntil === 'object' &&
+      validUntil !== null &&
+      'toDate' in validUntil &&
+      typeof (validUntil as any).toDate === 'function'
+    ) {
+      return (validUntil as any).toDate();
+    }
+    if (validUntil instanceof Date) return validUntil;
+
+    const date = new Date(String(validUntil));
+    return Number.isNaN(date.getTime()) ? null : date;
+  } catch {
+    return null;
+  }
+}

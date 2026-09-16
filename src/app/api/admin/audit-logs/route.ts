@@ -48,7 +48,10 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
     }
 
-    const token = authHeader.split('Bearer ')[1];
+    const token = authHeader.slice(7).trim();
+    if (!token) {
+      return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
+    }
     const decodedToken = await adminAuth.verifyIdToken(token);
     const uid = decodedToken.uid;
 
@@ -74,23 +77,12 @@ export async function GET(req: NextRequest) {
         actor_role: performedByRole || undefined,
         from_date: startDate || undefined,
         to_date: endDate ? endDate + 'T23:59:59.999Z' : undefined,
+        search: search || undefined,
       },
       { page, per_page: limit }
     );
 
-    let results = result.data.map(rowToResponse);
-
-    if (search) {
-      const lowerSearch = search.toLowerCase();
-      results = results.filter(
-        (r) =>
-          r.action.toLowerCase().includes(lowerSearch) ||
-          r.summary.toLowerCase().includes(lowerSearch) ||
-          r.targetName.toLowerCase().includes(lowerSearch) ||
-          r.performedByName.toLowerCase().includes(lowerSearch)
-      );
-    }
-
+    const results = result.data.map(rowToResponse);
     const offset = (page - 1) * limit;
     const hasMore = offset + limit < result.total;
 
@@ -99,6 +91,7 @@ export async function GET(req: NextRequest) {
       page,
       hasMore,
       pageSize: limit,
+      total: result.total,
     });
   } catch (error) {
     console.error('Error fetching audit logs:', error);

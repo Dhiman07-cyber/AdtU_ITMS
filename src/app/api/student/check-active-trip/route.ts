@@ -2,7 +2,6 @@ import { requireTransportEntitlement } from '@/lib/entitlement/require-transport
 import { withSecurity } from '@/lib/security/api-security';
 import { RateLimits } from '@/lib/security/rate-limiter';
 import { BusIdSchema } from '@/lib/security/validation-schemas';
-import { getStudentProfileAndShift } from '@/lib/student-shift-resolver';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import { isShiftCompatible } from '@/lib/utils';
 import { NextResponse } from 'next/server';
@@ -18,30 +17,27 @@ export const POST = withSecurity(
     const { busId } = body as any;
 
     try {
+      let studentShift: string | null = null;
+
       // SECURITY: Transport entitlement check (students only)
       if (auth.role === 'student') {
         const gate = await requireTransportEntitlement(auth.uid);
         if (!gate.ok) return (gate as any).response;
-      }
-
-      // SECURITY: Students may only query their own assigned bus.
-      if (auth.role === 'student') {
-        const resolved = await getStudentProfileAndShift(auth.uid);
-        const studentBusId = resolved?.busId;
+        
+        const student = gate.student;
+        const studentBusId = student.busId || student.bus_id || null;
         if (studentBusId && studentBusId !== busId && studentBusId !== busId.replace('bus_', '') && `bus_${studentBusId}` !== busId) {
           return NextResponse.json({ success: false, error: 'Forbidden: You are not assigned to this bus', requestId }, { status: 403 });
         }
+        studentShift = student.shift || null;
       }
-
-      console.log(`🔍 [${requestId}] Querying for active trip and bus status for bus: ${busId}`);
 
       const supabase = getSupabaseServer();
 
-      // Parallelize Supabase active trip check, bus metadata fetch, and student profile/shift resolution
-      const [tripRes, busRes, resolved] = await Promise.all([
+      // Parallelize Supabase active trip check and bus metadata fetch
+      const [tripRes, busRes] = await Promise.all([
         supabase.from('active_trips').select('trip_id, bus_id, driver_id, route_id, shift, status, start_time, end_time, last_heartbeat').eq('bus_id', busId).eq('status', 'active').maybeSingle(),
         supabase.from('buses').select('status').eq('id', busId).maybeSingle(),
-        auth?.uid ? getStudentProfileAndShift(auth.uid) : Promise.resolve(null)
       ]);
 
       if (tripRes.error) {
@@ -53,7 +49,6 @@ export const POST = withSecurity(
       const busStatus = busRes.data?.status || null;
 
       if (activeTrip) {
-        const studentShift = resolved?.shift;
         if (!studentShift || !isShiftCompatible(studentShift, activeTrip.shift)) {
           return NextResponse.json({
             success: true,

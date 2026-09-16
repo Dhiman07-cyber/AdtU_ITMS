@@ -26,6 +26,7 @@ import { deleteUnauthUser } from '@/domains/identity';
 import * as Notification from '@/domains/notification';
 import * as Seat from '@/domains/seat';
 import * as Student from '@/domains/student';
+import { randomUUID } from 'crypto';
 import { getDeadlineConfig } from '@/lib/deadline-config-service';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import type { Application,ApplicationState,ApplicationType } from '@/lib/types/application';
@@ -110,7 +111,7 @@ export async function saveDraft(
   }
 
   // Create new draft
-  const newId = `app_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+  const newId = `app_${Date.now()}_${randomUUID().replace(/-/g, '').slice(0, 12)}`;
   await repository.insert({
     applicationId: newId,
     applicantUid: uid,
@@ -688,21 +689,21 @@ export async function getMyStatus(uid: string): Promise<{
   message: string;
   applicationData?: Application;
 }> {
-  // Check if user exists in Identity system (approved)
-  try {
-    const { getUserById } = await import('@/domains/identity');
-    const user = await getUserById(uid);
-    if (user) {
-      return {
-        status: 'approved',
-        message: 'Your application has been approved!',
-      };
-    }
-  } catch {
-    // User not found — continue checking application
+  const { getUserById } = await import('@/domains/identity');
+  const [userResult, appResult] = await Promise.allSettled([
+    getUserById(uid),
+    repository.findByApplicantUid(uid),
+  ]);
+
+  const user = userResult.status === 'fulfilled' ? userResult.value : null;
+  if (user) {
+    return {
+      status: 'approved',
+      message: 'Your application has been approved!',
+    };
   }
 
-  const app = await repository.findByApplicantUid(uid);
+  const app = appResult.status === 'fulfilled' ? appResult.value : null;
   if (!app) {
     return { status: 'no_application', message: 'No application found' };
   }

@@ -102,13 +102,17 @@ export class ResilientRedisClient {
                 if (gen !== this.subGeneration) return;
                 this.isSubConnected = true;
                 this.subSocket?.setKeepAlive(true, 30000);
-                if (this.password && this.subSocket) {
-                    this.sendCommand(this.subSocket, ['AUTH', this.password]);
+
+                // W10: Pipeline AUTH + all channel SUBSCRIBEs into a single TCP write
+                let pipeline = '';
+                if (this.password) {
+                    pipeline += this.encodeCommand(['AUTH', this.password]);
                 }
                 for (const channel of this.pubSubHandlers.keys()) {
-                    if (this.subSocket) {
-                        this.sendCommand(this.subSocket, ['SUBSCRIBE', channel]);
-                    }
+                    pipeline += this.encodeCommand(['SUBSCRIBE', channel]);
+                }
+                if (pipeline && this.subSocket && !this.subSocket.destroyed) {
+                    this.subSocket.write(pipeline);
                 }
             });
 
@@ -236,13 +240,17 @@ export class ResilientRedisClient {
         }, 5000 + jitterMs);
     }
 
-    private sendCommand(socket: net.Socket, args: string[]) {
-        if (!socket || socket.destroyed) return;
+    private encodeCommand(args: string[]): string {
         let command = `*${args.length}\r\n`;
         for (const arg of args) {
             command += `$${Buffer.byteLength(arg)}\r\n${arg}\r\n`;
         }
-        socket.write(command);
+        return command;
+    }
+
+    private sendCommand(socket: net.Socket, args: string[]) {
+        if (!socket || socket.destroyed) return;
+        socket.write(this.encodeCommand(args));
     }
 
     public async publish(channel: string, message: string): Promise<void> {

@@ -91,6 +91,8 @@ export const GET = withSecurity(
         let isRenewalCompleted = false;
 
         // Check student's application via domain API
+        let renewalPaymentId = '';
+        let renewalOrderId = '';
         const appDoc = await getByApplicantUid(targetUid);
         if (appDoc) {
             const appData = appDoc as any;
@@ -99,19 +101,15 @@ export const GET = withSecurity(
             }
             appPaymentId = appData.paymentId || appData.formData?.paymentId || '';
             appOrderId = appData.formData?.paymentInfo?.razorpayOrderId || '';
-        }
 
-        // D8: Check student's renewal applications from PostgreSQL instead of Firestore
-        let renewalPaymentId = '';
-        let renewalOrderId = '';
-        const renewalApp = await getByApplicantUid(targetUid);
-
-        if (renewalApp && (renewalApp.applicationType === 'renewal' || renewalApp.applicationType === 'renewal_after_soft_block')) {
-            if (renewalApp.state === 'approved' || renewalApp.state === 'submitted') {
-                isRenewalCompleted = renewalApp.state === 'approved';
+            // D8: Check renewal applications from PostgreSQL
+            if (appDoc.applicationType === 'renewal' || appDoc.applicationType === 'renewal_after_soft_block') {
+                if (appDoc.state === 'approved' || appDoc.state === 'submitted') {
+                    isRenewalCompleted = appDoc.state === 'approved';
+                }
+                renewalPaymentId = appDoc.paymentId || (appDoc.formData as any)?.paymentId || '';
+                renewalOrderId = (appDoc.formData as any)?.razorpayOrderId || '';
             }
-            renewalPaymentId = renewalApp.paymentId || (renewalApp.formData as any)?.paymentId || '';
-            renewalOrderId = (renewalApp.formData as any)?.razorpayOrderId || '';
         }
 
         console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] recover: appPaymentId=${appPaymentId} appOrderId=${appOrderId} isApplicationApproved=${isApplicationApproved} isRenewalCompleted=${isRenewalCompleted}`);

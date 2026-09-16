@@ -1,5 +1,7 @@
 import type { IncomingMessage } from 'http';
 import crypto from 'crypto';
+import { verifyToken } from '@/lib/firebase-admin';
+import { getSupabaseServer } from '@/lib/supabase-server';
 
 function safeCompare(a: string, b: string): boolean {
   if (typeof a !== 'string' || typeof b !== 'string') return false;
@@ -7,6 +9,14 @@ function safeCompare(a: string, b: string): boolean {
   const bufB = Buffer.from(b);
   if (bufA.length !== bufB.length) return false;
   return crypto.timingSafeEqual(bufA, bufB);
+}
+
+let ephemeralDevToken: string | null = null;
+function getEphemeralPrivilegedToken(): string {
+  if (!ephemeralDevToken) {
+    ephemeralDevToken = crypto.randomBytes(32).toString('hex');
+  }
+  return ephemeralDevToken;
 }
 
 export function assertPrivilegedTokenSafe(
@@ -23,10 +33,10 @@ export function assertPrivilegedTokenSafe(
 export function getPrivilegedAuthConfig(): { token: string; enabled: boolean } {
   const configured = process.env.WS_PRIVILEGED_TOKEN;
   const isProd = process.env.NODE_ENV === 'production';
-  const token = configured || (isProd ? '' : '__server__');
-  const enabled = isProd
-    ? Boolean(configured && configured.trim() !== '' && configured !== '__server__')
-    : Boolean(configured || true);
+  const token = configured && configured.trim() !== '' && configured !== '__server__'
+    ? configured
+    : (isProd ? '' : getEphemeralPrivilegedToken());
+  const enabled = Boolean(token && token.trim() !== '');
   return { token, enabled };
 }
 
@@ -48,6 +58,22 @@ const tokenAuthCache = new Map<string, CachedAuth>();
 // essentially nothing in steady state.
 const TOKEN_CACHE_TTL_MS = 90 * 1000;
 
+/**
+ * Invalidate cached socket auth by UID or completely.
+ * Triggered by Redis role_invalidate events when admin modifies user permissions.
+ */
+export function invalidateTokenAuthCache(uid?: string): void {
+  if (!uid) {
+    tokenAuthCache.clear();
+    return;
+  }
+  for (const [token, cached] of tokenAuthCache.entries()) {
+    if (cached.result.uid === uid) {
+      tokenAuthCache.delete(token);
+    }
+  }
+}
+
 export async function authenticateSocket(request: IncomingMessage): Promise<AuthResult> {
   const token = extractToken(request);
   if (!token) return { authenticated: false, error: 'Missing or invalid token' };
@@ -63,7 +89,6 @@ export async function authenticateSocket(request: IncomingMessage): Promise<Auth
   }
 
   try {
-    const { verifyToken } = await import('@/lib/firebase-admin');
     const decoded = await verifyToken(token);
     const uid = decoded.uid;
 
@@ -71,7 +96,6 @@ export async function authenticateSocket(request: IncomingMessage): Promise<Auth
     // Firebase custom claim is only a fallback for accounts not yet
     // provisioned in PG — never preferred, so a demoted user cannot ride
     // a stale claim past their PG role.
-    const { getSupabaseServer } = await import('@/lib/supabase-server');
     const supabase = getSupabaseServer();
 
     const { data: userRow } = await supabase.from('users').select('role').eq('uid', uid).maybeSingle();
@@ -85,10 +109,16 @@ export async function authenticateSocket(request: IncomingMessage): Promise<Auth
       return { authenticated: false, error: 'Unknown user' };
     }
 
-    if (tokenAuthCache.size > 1000) {
+    if (tokenAuthCache.size >= 1000) {
+      let checked = 0;
       const now = Date.now();
       for (const [k, v] of tokenAuthCache.entries()) {
         if (v.expiresAt <= now) tokenAuthCache.delete(k);
+        if (++checked >= 50) break;
+      }
+      if (tokenAuthCache.size >= 1000) {
+        const oldestKey = tokenAuthCache.keys().next().value;
+        if (oldestKey) tokenAuthCache.delete(oldestKey);
       }
     }
     tokenAuthCache.set(token, { result: authResult, expiresAt: Date.now() + TOKEN_CACHE_TTL_MS });
@@ -101,24 +131,15 @@ export async function authenticateSocket(request: IncomingMessage): Promise<Auth
 }
 
 function extractToken(request: IncomingMessage): string | null {
-  // A malformed request.url (e.g. a stray "%zz" in the query string) makes
-  // the URL constructor throw. This runs before any try/catch in
-  // authenticateSocket, so an uncaught throw here would crash the process
-  // via an unhandled rejection in the ws 'connection' handler.
-  let url: URL;
-  try {
-    url = new URL(request.url || '/', 'http://localhost');
-  } catch {
-    return null;
-  }
-  const queryToken = url.searchParams.get('token');
-  if (queryToken) return queryToken;
-
+  // Reject URL query-parameter tokens (?token=...) to eliminate exposure in proxy/server logs,
+  // browser history, and Referer headers (AUTH-03 / SEC-04).
+  // Clients must authenticate via HTTP Authorization header on handshake or First-Message (Path B).
   const authHeader = request.headers['authorization'] || request.headers['Authorization'];
   if (!authHeader) return null;
 
   const header = Array.isArray(authHeader) ? authHeader[0] : authHeader;
-  if (header.startsWith('Bearer ')) return header.slice(7);
+  if (header.startsWith('Bearer ')) return header.slice(7).trim();
 
-  return header;
+  return header.trim();
 }
+

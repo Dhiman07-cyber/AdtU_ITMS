@@ -114,3 +114,18 @@ export const POST = withSecurity(
   { roles: ['driver'] } // Only verified drivers can execute
 );
 ```
+
+---
+
+## 4. Single-Device Session Exclusivity & Role Revocation
+
+### 4.1 Single-Device Driver Invariant (`device_sessions`)
+To guarantee that a driver cannot broadcast duplicate or conflicting GPS coordinates from multiple active phones:
+- When a driver starts location sharing in the mobile app, their device ID is registered in PostgreSQL table `device_sessions` for `feature = 'driver_location_share'`.
+- All location transmission routes (`/api/driver/update-location`, `/api/location/update`) verify that the incoming `deviceId` matches the currently registered device session with an active heartbeat within 30 seconds.
+- Concurrent transmissions from unregistered or secondary devices are rejected with HTTP 403 (`ANOTHER_DEVICE_ACTIVE`).
+
+### 4.2 Cross-Node Distributed Role Invalidation
+When an administrator modifies user permissions, demotes roles, or deletes an account:
+- The change triggers a Redis publication on `role_invalidate`.
+- All running WebSocket server instances catch the notification, purge their local token authentication caches, look up active sessions matching the UID, and forcefully terminate connected sockets with close code `4401`, preventing stale privileged actions.

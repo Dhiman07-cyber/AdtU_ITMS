@@ -1,6 +1,6 @@
-import { checkAndNotifyExpiringStudents,sendMidJuneReminder } from '@/lib/expiry-check';
-import crypto from 'crypto';
-import { NextRequest,NextResponse } from 'next/server';
+import { verifyCronAuth } from '@/lib/security/cron-auth';
+import { checkAndNotifyExpiringStudents, sendMidJuneReminder } from '@/lib/expiry-check';
+import { NextRequest, NextResponse } from 'next/server';
 
 /**
  * Cron endpoint for expiry checks
@@ -14,18 +14,7 @@ import { NextRequest,NextResponse } from 'next/server';
  */
 export async function GET(request: NextRequest) {
   try {
-    // Verify cron secret (in production)
-    const authHeader = request.headers.get('Authorization');
-    const cronSecret = process.env.CRON_SECRET;
-
-    if (!cronSecret) {
-      console.error('🚫 CRON_SECRET not configured — blocking cron request');
-      return NextResponse.json({ error: 'Server configuration error' }, { status: 500 });
-    }
-    const providedToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : '';
-    const secretsMatch = providedToken.length === cronSecret.length &&
-      crypto.timingSafeEqual(Buffer.from(providedToken), Buffer.from(cronSecret));
-    if (!secretsMatch) {
+    if (!verifyCronAuth(request)) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 

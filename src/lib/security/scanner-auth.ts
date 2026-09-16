@@ -47,7 +47,7 @@ export async function validateStudentScannerContext(
 
   if (role === 'moderator') {
     const permissions = await getModeratorPermissions(auth.uid);
-    if (permissions?.students?.canView !== false) return null;
+    if (permissions?.students?.canView === true) return null;
 
     return NextResponse.json(
       { status: 'invalid', message: 'Moderator student verification permission is required.' },

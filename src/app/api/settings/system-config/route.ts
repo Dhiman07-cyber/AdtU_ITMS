@@ -1,6 +1,6 @@
 import { getSystemConfig,updateSystemConfig } from '@/domains/admin';
-import { getAdminById,getUserById } from '@/domains/identity';
-import { pgInsertNotification } from '@/domains/notification/repositories/notification.repository.pg';
+import { getUserById } from '@/domains/identity';
+import { notifyBusFeeChange } from '@/lib/bus-fee-service';
 import { adminAuth } from '@/lib/firebase-admin';
 import { NextRequest,NextResponse } from 'next/server';
 
@@ -91,35 +91,10 @@ export async function POST(req: NextRequest) {
                 ]
             };
 
-            // Notify users about bus fee change
-            try {
-                const adminData = await getAdminById(uid);
-                const adminName = adminData?.name || adminData?.fullName || 'Admin';
-
-                const oldAmount = oldConfig.busFee?.amount || 0;
-                const newAmount = config.busFee.amount;
-
-                const notificationContent = `The bus fee for the upcoming session has been revised from ₹${oldAmount.toLocaleString('en-IN')} to ₹${newAmount.toLocaleString('en-IN')}. ` +
-                    `Please update your payment plans accordingly. For any queries, contact the administration office.`;
-
-                await pgInsertNotification({
-                    title: '💰 Bus Fee Update - Important Notice',
-                    content: notificationContent,
-                    type: 'announcement',
-                    sender: {
-                        userId: uid,
-                        userName: adminName,
-                        userRole: 'admin'
-                    },
-                    target: {
-                        type: 'all_users',
-                    },
-                    recipientIds: [],
-                    readByUserIds: [],
-                });
-            } catch (error) {
-                console.error('Failed to send notification:', error);
-            }
+            // Notify users about bus fee change via shared service
+            const oldAmount = oldConfig.busFee?.amount || 0;
+            const newAmount = config.busFee.amount;
+            await notifyBusFeeChange(uid, oldAmount, newAmount);
         }
 
         // Save via service (handles cleaning and history limiting)

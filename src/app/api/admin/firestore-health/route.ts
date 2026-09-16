@@ -76,40 +76,46 @@ export const GET = withSecurity(
       const collectionStats: Record<string, number> = {};
       const collectionDetails: Array<{ name: string; count: number; avgSizeKB: number; totalMB: number }> = [];
 
-      for (const collectionId of collectionIds) {
-        try {
-          console.log(`\n  Processing: ${collectionId}...`);
+      const results = await Promise.all(
+        collectionIds.map(async (collectionId: string) => {
+          try {
+            // Use lightweight COUNT aggregation (1 read per 1000 docs)
+            const countSnapshot = await adminDb.collection(collectionId).count().get();
+            const docCount = countSnapshot.data().count;
 
-          // Use lightweight COUNT aggregation (1 read per 1000 docs)
-          const countSnapshot = await adminDb.collection(collectionId).count().get();
-          const docCount = countSnapshot.data().count;
+            const ESTIMATED_AVG_DOC_SIZE_BYTES = 1024; // 1 KB default estimate
+            const collectionBytes = docCount * ESTIMATED_AVG_DOC_SIZE_BYTES;
+            const totalMB = collectionBytes / (1024 * 1024);
 
-          // Estimate size (assume 1KB avg per doc for safety)
-          const ESTIMATED_AVG_DOC_SIZE_BYTES = 1024; // 1 KB default estimate
-
-          const collectionBytes = docCount * ESTIMATED_AVG_DOC_SIZE_BYTES;
-          const totalMB = collectionBytes / (1024 * 1024);
-
-          totalDocuments += docCount;
-          totalBytes += collectionBytes;
-          collectionStats[collectionId] = docCount;
-
-          if (docCount > 0) {
-            collectionDetails.push({
-              name: collectionId,
-              count: docCount,
-              avgSizeKB: parseFloat((ESTIMATED_AVG_DOC_SIZE_BYTES / 1024).toFixed(2)),
-              totalMB: parseFloat(totalMB.toFixed(4))
-            });
-
-            console.log(`    ✅ ${docCount} docs (Count verified)`);
-            console.log(`       Est. Size: ${totalMB.toFixed(4)} MB (based on 1KB/doc avg)`);
-          } else {
-            console.log(`    ⚠️  Empty collection`);
+            return {
+              collectionId,
+              docCount,
+              collectionBytes,
+              detail: docCount > 0 ? {
+                name: collectionId,
+                count: docCount,
+                avgSizeKB: parseFloat((ESTIMATED_AVG_DOC_SIZE_BYTES / 1024).toFixed(2)),
+                totalMB: parseFloat(totalMB.toFixed(4))
+              } : null
+            };
+          } catch (error: any) {
+            console.error(`    ❌ Error processing ${collectionId}:`, error.message);
+            return {
+              collectionId,
+              docCount: 0,
+              collectionBytes: 0,
+              detail: null
+            };
           }
-        } catch (error: any) {
-          console.error(`    ❌ Error processing ${collectionId}:`, error.message);
-          collectionStats[collectionId] = 0;
+        })
+      );
+
+      for (const res of results) {
+        totalDocuments += res.docCount;
+        totalBytes += res.collectionBytes;
+        collectionStats[res.collectionId] = res.docCount;
+        if (res.detail) {
+          collectionDetails.push(res.detail);
         }
       }
 

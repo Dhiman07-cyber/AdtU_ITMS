@@ -1,7 +1,7 @@
-import { createAuditEvent,SYSTEM_ACTOR } from '@/domains/audit';
+import { verifyCronAuth } from '@/lib/security/cron-auth';
+import { createAuditEvent, SYSTEM_ACTOR } from '@/domains/audit';
 import { activateUpcomingSessionApplications } from '@/lib/services/session-activation.service';
-import crypto from 'crypto';
-import { NextRequest,NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
 /**
  * Daily session-activation cron.
@@ -16,18 +16,7 @@ import { NextRequest,NextResponse } from 'next/server';
  */
 export async function GET(request: NextRequest) {
   try {
-    const cronSecret = process.env.CRON_SECRET;
-    if (!cronSecret) {
-      console.error('🚫 CRON_SECRET not configured — blocking cron request');
-      return NextResponse.json({ error: 'Server configuration error' }, { status: 500 });
-    }
-    const provided = request.headers.get('Authorization')?.startsWith('Bearer ')
-      ? request.headers.get('Authorization')!.substring(7)
-      : '';
-    if (
-      provided.length !== cronSecret.length ||
-      !crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(cronSecret))
-    ) {
+    if (!verifyCronAuth(request)) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 

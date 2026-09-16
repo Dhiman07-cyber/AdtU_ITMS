@@ -16,28 +16,18 @@
  * reported (and emitted as an operational event) for an administrator to action.
  */
 
-import { createAuditEvent,SYSTEM_ACTOR } from '@/domains/audit';
+import { verifyCronAuth } from '@/lib/security/cron-auth';
+import { createAuditEvent, SYSTEM_ACTOR } from '@/domains/audit';
 import { isSeatReleaseAtSoftBlockEnabled } from '@/lib/config/capacity-flags';
 import { adminReconcileBusLoads } from '@/lib/services/admin-reconcile-bus-loads';
 import { runIntegrityScan } from '@/lib/services/integrity-detector';
-import crypto from 'crypto';
-import { NextRequest,NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   try {
-    // Authorization — strictly enforce CRON_SECRET (parity with cleanup cron).
-    const cronSecret = process.env.CRON_SECRET;
-    if (!cronSecret) {
-      console.error('🚫 CRON_SECRET not configured — blocking integrity sweep');
-      return NextResponse.json({ error: 'Server configuration error' }, { status: 500 });
-    }
-    const providedToken = request.headers.get('Authorization')?.startsWith('Bearer ')
-      ? request.headers.get('Authorization')!.substring(7) : '';
-    const secretsMatch = providedToken.length === cronSecret.length &&
-      crypto.timingSafeEqual(Buffer.from(providedToken), Buffer.from(cronSecret));
-    if (!secretsMatch) {
+    if (!verifyCronAuth(request)) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 

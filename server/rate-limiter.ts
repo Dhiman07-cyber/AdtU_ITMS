@@ -16,6 +16,10 @@ function checkBucket(map: Map<string, Bucket>, key: string, limit: number): bool
   const now = Date.now();
   const bucket = map.get(key);
   if (!bucket || now > bucket.resetAt) {
+    if (map.size >= 10_000) {
+      const oldestKey = map.keys().next().value;
+      if (oldestKey) map.delete(oldestKey);
+    }
     map.set(key, { count: 1, resetAt: now + WINDOW_MS });
     return true;
   }

@@ -20,28 +20,19 @@ export const POST = withSecurity(
         const driverUid = auth.uid;
         const supabase = getSupabaseServer();
 
-        // 1. Fetch waiting flag data
-        const { data: flagData, error: flagError } = await supabase
-            .from('waiting_flags')
-            .select('*')
-            .eq('id', flagId)
-            .single();
+        // 1. Fetch waiting flag and driver active trip in parallel
+        const [flagRes, tripRes] = await Promise.all([
+            supabase.from('waiting_flags').select('*').eq('id', flagId).single(),
+            supabase.from('active_trips').select('trip_id, bus_id').eq('driver_id', driverUid).eq('status', 'active').maybeSingle(),
+        ]);
 
-        if (flagError || !flagData) {
+        const flagData = flagRes.data;
+        if (flagRes.error || !flagData) {
             return NextResponse.json({ error: 'Waiting flag not found' }, { status: 404 });
         }
 
-        // Verify the driver holds an active trip on THIS bus (same pattern as ack-flag).
-        // The trip lock is the authoritative runtime signal of bus ownership.
-        const { data: activeTrip } = await supabase
-            .from('active_trips')
-            .select('trip_id')
-            .eq('driver_id', driverUid)
-            .eq('bus_id', flagData.bus_id)
-            .eq('status', 'active')
-            .maybeSingle();
-
-        if (!activeTrip) {
+        const activeTrip = tripRes.data;
+        if (!activeTrip || activeTrip.bus_id !== flagData.bus_id) {
             return NextResponse.json(
                 { error: 'Driver is not assigned to this bus' },
                 { status: 403 }

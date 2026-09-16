@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import { Badge } from "@/components/ui/badge";
@@ -149,10 +149,20 @@ export default function StudentWaitingPage() {
           throw new Error(result.error || "Failed to create waiting flag");
         }
       } else {
-        // Remove waiting flag through backend API using student UID
+        // Remove waiting flag through backend API
+        // SECURITY: token sent in Authorization header — never in the URL (logs, history, Referer).
+        // The DELETE handler reads flagId and busId from the request body via withSecurity.
         const token = await currentUser.getIdToken();
-        const response = await fetch(`/api/student/waiting-flag?idToken=${token}`, {
-          method: 'DELETE'
+        const response = await fetch('/api/student/waiting-flag', {
+          method: 'DELETE',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            flagId: waitingFlagId,
+            busId: studentData?.busId || '',
+          }),
         });
 
         const result = await response.json();

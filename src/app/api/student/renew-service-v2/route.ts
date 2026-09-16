@@ -1,4 +1,6 @@
 import * as Application from '@/domains/application';
+import { getUsersByRole } from '@/domains/identity';
+import { createNotification } from '@/domains/notification';
 import { getById } from '@/domains/student';
 import { getCurrentBusFee } from '@/lib/bus-fee-service';
 import { createRazorpayOrder } from '@/lib/payment/razorpay.service';
@@ -110,7 +112,6 @@ export const POST = withSecurity<RenewServiceBody>(
 
       // Notify staff via domain API
       try {
-        const { getUsersByRole } = await import('@/domains/identity');
         const [admins, moderators] = await Promise.all([
           getUsersByRole('admin'),
           getUsersByRole('moderator'),
@@ -120,7 +121,6 @@ export const POST = withSecurity<RenewServiceBody>(
           ...moderators.map((u: any) => u.id || u.uid),
         ].filter(Boolean);
         if (allStaffIds.length > 0) {
-          const { createNotification } = await import('@/domains/notification');
           await createNotification(
             { userId, userName: studentName, userRole: 'student' },
             { type: 'specific_users', specificUserIds: allStaffIds },

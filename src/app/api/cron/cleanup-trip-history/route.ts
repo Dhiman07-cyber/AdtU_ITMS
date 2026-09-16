@@ -8,23 +8,9 @@
  * Permanently deletes records in public.driver_trip_history where end_time < NOW() - INTERVAL '1 year'.
  */
 
+import { verifyCronAuth } from '@/lib/security/cron-auth';
 import { getSupabaseServer } from '@/lib/supabase-server';
-import crypto from 'crypto';
 import { NextResponse } from 'next/server';
-
-function verifyCronAuth(request: Request): boolean {
-  const authHeader = request.headers.get('authorization');
-  const cronSecret = process.env.CRON_SECRET;
-
-  if (!cronSecret) {
-    console.error('🚫 CRON_SECRET not configured — blocking cron request');
-    return false;
-  }
-
-  const providedToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : '';
-  if (providedToken.length !== cronSecret.length) return false;
-  return crypto.timingSafeEqual(Buffer.from(providedToken), Buffer.from(cronSecret));
-}
 
 export async function GET(request: Request) {
   if (!verifyCronAuth(request)) {

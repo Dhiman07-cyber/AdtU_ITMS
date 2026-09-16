@@ -148,7 +148,13 @@ export const POST = withSecurity<CreateUserBody>(
 
         const now = new Date().toISOString();
 
-        // 3. Role-specific logic
+        // Wrap the PG write section so that if it throws we can attempt to
+        // delete the Firebase Auth user we just created — otherwise the user
+        // exists in Auth with no profile and can authenticate to a broken state.
+        // The cleanup is best-effort: if the delete also fails we still surface
+        // the original PG error so the caller can retry.
+        try {
+
         if (role === 'student') {
             let finalValidUntil = validUntil;
             let finalSessionEndYear = sessionEndYear;
@@ -391,7 +397,19 @@ export const POST = withSecurity<CreateUserBody>(
             message: `${role.charAt(0).toUpperCase() + role.slice(1)} created successfully.`,
             operationId: opId,
         });
+        } catch (pgErr: any) {
+            // PG write failed. If we created the Firebase Auth user in this
+            // request, remove it to avoid leaving an orphan that can authenticate
+            // but has no corresponding profile in any database.
+            if (authUserCreated) {
+                await adminAuth.deleteUser(uid).catch((delErr: any) => {
+                    console.error('[create-user] Failed to clean up orphaned Firebase Auth user after PG failure:', delErr.message);
+                });
+            }
+            throw pgErr;
+        }
     },
+
     {
         requiredRoles: ['admin', 'moderator'],
         schema: CreateUserSchema,

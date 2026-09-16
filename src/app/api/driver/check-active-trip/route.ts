@@ -20,11 +20,13 @@ export const POST = withSecurity(
     const supabase = getSupabaseServer();
 
     // 1. Check if driver has an active trip in active_trips (primary check)
+    const now = new Date().toISOString();
     let myTripQuery = supabase
       .from('active_trips')
       .select('trip_id, driver_id, bus_id, route_id, shift, start_time')
       .eq('driver_id', driverUid)
-      .eq('status', 'active');
+      .eq('status', 'active')
+      .gt('expires_at', now);
 
     if (inputBusId) {
       myTripQuery = myTripQuery.eq('bus_id', inputBusId);
@@ -33,7 +35,6 @@ export const POST = withSecurity(
     const { data: myTrip } = await myTripQuery.maybeSingle();
 
     if (myTrip) {
-      console.log('✅ Active trip found for driver in active_trips:', myTrip.trip_id);
       const startTime = myTrip.start_time ? new Date(myTrip.start_time).getTime() : Date.now();
       return NextResponse.json({
         hasActiveTrip: true,
@@ -49,36 +50,29 @@ export const POST = withSecurity(
       });
     }
 
-    // 2. If busId provided, perform lock check for other drivers
+    // 2. If busId provided, check for lock held by another driver (non-expired only)
     const targetBusId = inputBusId;
     if (targetBusId) {
       const { data: activeTrip } = await supabase
         .from('active_trips')
-        .select('trip_id, driver_id, status, start_time, expires_at')
+        .select('trip_id, driver_id, status, start_time')
         .eq('bus_id', targetBusId)
         .eq('status', 'active')
+        .gt('expires_at', now)
         .maybeSingle();
 
-      if (activeTrip) {
-        let isLockExpired = false;
-        if (activeTrip.expires_at) {
-          isLockExpired = Date.now() > new Date(activeTrip.expires_at).getTime();
-        }
-
-        if (activeTrip.driver_id && activeTrip.driver_id !== driverUid && !isLockExpired) {
-          console.log(`🔒 Bus ${targetBusId} is locked by driver ${activeTrip.driver_id}`);
-          return NextResponse.json({
-            hasActiveTrip: false,
-            tripData: null,
-            busLockedByOther: true,
-            lockInfo: {
-              lockedByDriver: activeTrip.driver_id,
-              tripId: activeTrip.trip_id,
-              since: activeTrip.start_time
-            },
-            reason: 'This bus is currently being operated by another driver. Please wait or try again later.'
-          });
-        }
+      if (activeTrip && activeTrip.driver_id && activeTrip.driver_id !== driverUid) {
+        return NextResponse.json({
+          hasActiveTrip: false,
+          tripData: null,
+          busLockedByOther: true,
+          lockInfo: {
+            lockedByDriver: activeTrip.driver_id,
+            tripId: activeTrip.trip_id,
+            since: activeTrip.start_time
+          },
+          reason: 'This bus is currently being operated by another driver. Please wait or try again later.'
+        });
       }
     }
 

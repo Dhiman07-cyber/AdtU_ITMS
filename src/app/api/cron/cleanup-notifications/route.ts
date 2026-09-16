@@ -1,13 +1,13 @@
+import { verifyCronAuth } from '@/lib/security/cron-auth';
 import { deleteExpiredNotifications } from '@/lib/notification-expiry';
-import crypto from 'crypto';
-import { NextRequest,NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
 /**
  * Cron endpoint for notification cleanup
  * Should be called EVERY 3 DAYS at 2:00 AM UTC
  * 
  * Schedule in vercel.json:
- * "schedule": "0 2 *\\/3 * *"  (Every 3 days at 02:00 UTC)
+ * "schedule": "0 2 *\/3 * *"  (Every 3 days at 02:00 UTC)
  * 
  * Actions:
  * - Deletes all notifications where expiresAt < now
@@ -15,20 +15,7 @@ import { NextRequest,NextResponse } from 'next/server';
  */
 export async function GET(request: NextRequest) {
   try {
-    // SECURITY: Verify cron secret (fail-closed: deny if not configured)
-    const authHeader = request.headers.get('Authorization');
-    const cronSecret = process.env.CRON_SECRET;
-
-    if (!cronSecret) {
-      console.error('🚫 CRON_SECRET not configured — blocking cron request');
-      return NextResponse.json({ error: 'Server configuration error' }, { status: 500 });
-    }
-
-    const providedToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : '';
-    const secretsMatch = providedToken.length === cronSecret.length &&
-      crypto.timingSafeEqual(Buffer.from(providedToken), Buffer.from(cronSecret));
-    if (!secretsMatch) {
-      console.warn('⚠️ Unauthorized cron request');
+    if (!verifyCronAuth(request)) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 

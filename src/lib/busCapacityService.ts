@@ -13,6 +13,7 @@
 import * as fleetService from '@/domains/fleet/services/fleet.service';
 import * as identityService from '@/domains/identity/services/identity.service';
 import { pgInsertNotification } from '@/domains/notification/repositories/notification.repository.pg';
+import { findAlternatives } from '@/domains/seat/repositories/seat.repository';
 import { areShiftsCompatible,calculateCapacityDelta,getShiftLoad,normalizeShift } from '@/lib/utils/shift-utils';
 
 export interface BusCapacity {
@@ -160,57 +161,12 @@ export async function findAlternativeBuses(
   shift: string
 ): Promise<AlternativeBusResult> {
   try {
-    console.log(`🔍 Finding alternative buses for stop: ${stop_name}, route: ${routeId}, shift: ${shift}`);
-
-    const allBuses = await fleetService.getAllBuses();
-    const alternativeBuses: BusCapacity[] = [];
-
-    for (const bus of allBuses) {
-      if (bus.routeId === routeId) continue;
-
-      const busShift = bus.shift || 'Both';
-      const requestedShift = shift || 'Morning';
-      const shiftMatch = areShiftsCompatible(requestedShift, busShift);
-
-      if (!shiftMatch) continue;
-
-      const shiftLoad = getShiftLoad(bus, requestedShift);
-      const capacity = bus.capacity || 55;
-      const available = shiftLoad < capacity;
-
-      if (available) {
-        alternativeBuses.push({
-          busId: bus.busId || bus.id || '',
-          busNumber: bus.busNumber,
-          capacity,
-          currentMembers: shiftLoad,
-          routeId: bus.routeId || '',
-          shift: bus.shift || 'Both',
-          isFull: false,
-        });
-      }
+    const result = await findAlternatives(stop_name, routeId, shift);
+    if (!result.success && result.adminAlert) {
+      console.warn(`⚠️ No alternative buses found for stop ${stop_name}`);
+      await sendHighDemandAlert(routeId, stop_name);
     }
-
-    if (alternativeBuses.length > 0) {
-      alternativeBuses.sort((a, b) =>
-        (b.capacity - b.currentMembers) - (a.capacity - a.currentMembers)
-      );
-
-      return {
-        success: true,
-        alternativeBuses,
-        message: `Found ${alternativeBuses.length} alternative bus(es) that pass through your stop with available seats.`
-      };
-    }
-
-    console.warn(`⚠️ No alternative buses found for stop ${stop_name}`);
-    await sendHighDemandAlert(routeId, stop_name);
-
-    return {
-      success: false,
-      message: 'All buses serving your area are currently full. An administrator has been notified and will assist you shortly.',
-      adminAlert: true
-    };
+    return result;
   } catch (error) {
     console.error('Error finding alternative buses:', error);
     return {

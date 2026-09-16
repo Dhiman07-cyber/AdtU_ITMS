@@ -1,4 +1,5 @@
-import { getStudentById,getUsersByRole,updateStudent } from '@/domains/identity';
+import { getUsersByRole } from '@/domains/identity';
+
 import { pgInsertNotification } from '@/domains/notification/repositories/notification.repository.pg';
 import { getDeadlineConfig } from '@/lib/deadline-config-service';
 import { getSupabaseServer } from '@/lib/supabase-server';
@@ -36,8 +37,8 @@ export async function checkAndNotifyExpiringStudents(force: boolean = false): Pr
     const isFinal = currentMonth === lifecycle.finalReminder.getUTCMonth() && currentDay === lifecycle.finalReminder.getUTCDate();
 
     let runR1 = force || isR1;
-    let runR2 = isR2;
-    let runFinal = isFinal;
+    let runR2 = force || isR2;
+    let runFinal = force || isFinal;
 
     if (!force && !isR1 && !isR2 && !isFinal) {
       console.log(`⏭️ Expiry check skipped. Today: ${now.toDateString()}`);
@@ -45,10 +46,12 @@ export async function checkAndNotifyExpiringStudents(force: boolean = false): Pr
       return result;
     }
 
-    const deadlineFirst = new Date(lifecycle.expiry);
-    deadlineFirst.setHours(0, 0, 0, 0);
-    const deadlineNext = new Date(deadlineFirst);
-    deadlineNext.setDate(deadlineNext.getDate() + 1);
+    // Compute UTC-aligned boundaries for the target expiration day to avoid local timezone drift
+    const expYear = lifecycle.expiry.getUTCFullYear();
+    const expMonth = lifecycle.expiry.getUTCMonth();
+    const expDate = lifecycle.expiry.getUTCDate();
+    const deadlineFirst = new Date(Date.UTC(expYear, expMonth, expDate, 0, 0, 0, 0));
+    const deadlineNext = new Date(Date.UTC(expYear, expMonth, expDate + 1, 0, 0, 0, 0));
 
     console.log(`🔍 Checking for students expiring on: ${deadlineFirst.toDateString()}`);
 
@@ -102,7 +105,25 @@ export async function checkAndNotifyExpiringStudents(force: boolean = false): Pr
 
         const nowIso = new Date().toISOString();
 
-        // 1. Write notification to PostgreSQL
+        // Atomically claim the "send reminder today" slot via a Postgres function
+        // that uses FOR UPDATE + UPDATE in one transaction. Returns TRUE only on
+        // the first call for this student on the current UTC calendar day.
+        // This prevents two concurrent cron executions from both sending a reminder.
+        const { data: claimed, error: claimErr } = await supabase
+          .rpc('increment_expiry_reminder_count', { p_uid: studentUid });
+
+        if (claimErr) {
+          result.errors.push(`Failed to claim reminder slot for ${studentUid}: ${claimErr.message}`);
+          continue;
+        }
+
+        // Another concurrent execution already sent the reminder today.
+        if (!claimed) {
+          continue;
+        }
+
+        // 1. Write notification to PostgreSQL (after atomic claim succeeds)
+
         await pgInsertNotification({
           title,
           content: body,
@@ -127,17 +148,13 @@ export async function checkAndNotifyExpiringStudents(force: boolean = false): Pr
           }
         });
 
-        // 2. Fetch fresh student details to count reminders and update in PostgreSQL (non-transactional, low-risk)
-        const freshStudent = await getStudentById(studentUid);
-        const freshCount = freshStudent?.expiryReminderCount || 0;
-
-        await updateStudent(studentUid, {
-          lastExpiryReminderSentAt: nowIso,
-          expiryReminderCount: freshCount + 1
-        });
+        // The atomic RPC (increment_expiry_reminder_count) already stamped
+        // last_expiry_reminder_sent_at and incremented expiry_reminder_count
+        // when it returned TRUE, so no second write is needed here.
 
         result.remindersSent++;
-        console.log(`%c✅ Sent reminder to ${studentUid} (count: ${freshCount + 1})`, 'color: green');
+        console.log(`[expiry-check] Sent reminder to ${studentUid.substring(0, 8)}...`);
+
       } catch (error: any) {
         result.errors.push(`Failed to process student ${studentUid}: ${error.message}`);
       }

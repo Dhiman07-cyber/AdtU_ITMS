@@ -84,74 +84,84 @@ export async function POST(req: NextRequest) {
         let wouldSoftBlock = 0;
         let wouldHardDelete = 0;
 
-        for (const studentId of studentIds) {
-            try {
-                // Fetch student from PostgreSQL (canonical source of truth)
-                const studentData = await getStudentById(studentId);
-
-                if (!studentData) {
-                    previews.push({
-                        studentId,
-                        error: 'Student not found',
-                        exists: false
-                    });
-                    continue;
+        // Fetch all students in parallel
+        const studentResults = await Promise.all(
+            studentIds.map(async (studentId: string) => {
+                try {
+                    const studentData = await getStudentById(studentId);
+                    return { studentId, studentData, error: null };
+                } catch (err: any) {
+                    return { studentId, studentData: null, error: err };
                 }
+            })
+        );
 
-                if (!studentData.sessionEndYear) {
-                    previews.push({
-                        studentId,
-                        studentName: studentData.fullName || studentData.name || 'Unknown',
-                        studentEmail: studentData.email,
-                        error: 'Student missing sessionEndYear',
-                        exists: true,
-                        hasSessionEndYear: false
-                    });
-                    continue;
-                }
-
-                // Compute preview
-                const preview = generateDatePreview(
-                    {
-                        id: studentId,
-                        name: studentData.name,
-                        fullName: studentData.fullName,
-                        email: studentData.email,
-                        sessionEndYear: studentData.sessionEndYear,
-                        status: studentData.status
-                    },
-                    config,
-                    simMode
-                );
-
-                if (preview) {
-                    previews.push({
-                        ...preview,
-                        exists: true,
-                        hasSessionEndYear: true,
-                        // Add formatted dates for display
-                        formattedDates: {
-                            serviceExpiry: formatDateWithOrdinal(new Date(preview.computedDates.serviceExpiryDate)),
-                            renewalNotification: formatDateWithOrdinal(new Date(preview.computedDates.renewalNotificationDate)),
-                            renewalDeadline: formatDateWithOrdinal(new Date(preview.computedDates.renewalDeadlineDate)),
-                            softBlock: formatDateWithOrdinal(new Date(preview.computedDates.softBlockDate)),
-                            hardDelete: formatDateWithOrdinal(new Date(preview.computedDates.hardDeleteDate)),
-                            urgentWarning: formatDateWithOrdinal(new Date(preview.computedDates.urgentWarningDate))
-                        },
-                        validUntil: studentData.validUntil,
-                        currentStatus: studentData.status || 'active'
-                    });
-
-                    // Count actions
-                    if (preview.todayActions.wouldSoftBlock) wouldSoftBlock++;
-                    if (preview.todayActions.wouldHardDelete) wouldHardDelete++;
-                }
-            } catch (error: any) {
+        for (const { studentId, studentData, error } of studentResults) {
+            if (error) {
                 previews.push({
                     studentId,
                     error: 'An unexpected error occurred',
                     exists: false
                 });
+                continue;
+            }
+
+            if (!studentData) {
+                previews.push({
+                    studentId,
+                    error: 'Student not found',
+                    exists: false
+                });
+                continue;
+            }
+
+            if (!studentData.sessionEndYear) {
+                previews.push({
+                    studentId,
+                    studentName: studentData.fullName || studentData.name || 'Unknown',
+                    studentEmail: studentData.email,
+                    error: 'Student missing sessionEndYear',
+                    exists: true,
+                    hasSessionEndYear: false
+                });
+                continue;
+            }
+
+            // Compute preview
+            const preview = generateDatePreview(
+                {
+                    id: studentId,
+                    name: studentData.name,
+                    fullName: studentData.fullName,
+                    email: studentData.email,
+                    sessionEndYear: studentData.sessionEndYear,
+                    status: studentData.status
+                },
+                config,
+                simMode
+            );
+
+            if (preview) {
+                previews.push({
+                    ...preview,
+                    exists: true,
+                    hasSessionEndYear: true,
+                    // Add formatted dates for display
+                    formattedDates: {
+                        serviceExpiry: formatDateWithOrdinal(new Date(preview.computedDates.serviceExpiryDate)),
+                        renewalNotification: formatDateWithOrdinal(new Date(preview.computedDates.renewalNotificationDate)),
+                        renewalDeadline: formatDateWithOrdinal(new Date(preview.computedDates.renewalDeadlineDate)),
+                        softBlock: formatDateWithOrdinal(new Date(preview.computedDates.softBlockDate)),
+                        hardDelete: formatDateWithOrdinal(new Date(preview.computedDates.hardDeleteDate)),
+                        urgentWarning: formatDateWithOrdinal(new Date(preview.computedDates.urgentWarningDate))
+                    },
+                    validUntil: studentData.validUntil,
+                    currentStatus: studentData.status || 'active'
+                });
+
+                // Count actions
+                if (preview.todayActions.wouldSoftBlock) wouldSoftBlock++;
+                if (preview.todayActions.wouldHardDelete) wouldHardDelete++;
             }
         }
 
@@ -235,8 +245,11 @@ export async function GET(req: NextRequest) {
             );
         }
 
-        // Fetch student from PostgreSQL (canonical source of truth)
-        const studentData = await getStudentById(studentId);
+        // Fetch student and deadline config in parallel
+        const [studentData, dbConfig] = await Promise.all([
+            getStudentById(studentId),
+            getDeadlineConfig(),
+        ]);
 
         if (!studentData) {
             return NextResponse.json(
@@ -253,8 +266,6 @@ export async function GET(req: NextRequest) {
                 recommendation: 'Please set the sessionEndYear field for this student'
             });
         }
-
-        const dbConfig = await getDeadlineConfig();
         // Use current config with simulation mode if enabled
         const simMode = (dbConfig as any).testingMode?.enabled
             ? { enabled: true, customYear: (dbConfig as any).testingMode.customYear }

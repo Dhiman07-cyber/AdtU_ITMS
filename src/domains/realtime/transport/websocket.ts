@@ -152,15 +152,17 @@ export class WebSocketTransport {
   }
 
   private drainQueueSync(): void {
-    while (this.sendQueue.length > 0) {
+    // Flush a small burst of urgent non-GPS events synchronously (up to 10).
+    // All GPS snapshots and remaining events are yielded in 20-frame ticks by drainQueue()
+    // to avoid saturating the socket or event loop on reconnect.
+    let n = 0;
+    while (this.sendQueue.length > 0 && n < 10) {
       const msg = this.sendQueue.shift();
-      if (msg) this.unsafeSend(msg);
+      if (msg) {
+        this.unsafeSend(msg);
+        n++;
+      }
     }
-    // Lifecycle/other events first; GPS snapshots follow. gpsLatest is
-    // drained + cleared so a reconnect never replays the same frame twice
-    // (drainQueueSync runs, then the batched drainQueue sees an empty map).
-    for (const msg of this.gpsLatest.values()) this.unsafeSend(msg);
-    this.gpsLatest.clear();
   }
 
   private drainQueue(): void {

@@ -48,7 +48,7 @@ const API_ROUTE_MAP: Record<string, { path: string; normalize: ResponseNormalize
         normalize: (raw) => Array.isArray(raw) ? raw : raw.routes ?? [],
     },
     applications: {
-        path: '/api/applications/all?limit=200',
+        path: '/api/applications/all',
         normalize: (raw) => raw.applications ?? raw ?? [],
     },
     moderators: {
@@ -149,6 +149,7 @@ export function useApiCollection<T = Record<string, any>>(
         fetchOnMount = true,
         enabled = true,
         cacheTTL,
+        pageSize = 50,
     } = options;
 
     const ttl = cacheTTL !== undefined ? cacheTTL : getDefaultTTL(collectionName);
@@ -159,8 +160,11 @@ export function useApiCollection<T = Record<string, any>>(
     const [data, setData] = useState<T[]>([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<Error | null>(null);
+    const [hasMore, setHasMore] = useState(false);
     const [autoRefresh, setAutoRefresh] = useState(initialAutoRefresh);
 
+    const offsetRef = useRef(0);
+    const fetchingNextPageRef = useRef(false);
     const retryCountRef = useRef(0);
     const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const maxRetries = 3;
@@ -172,6 +176,13 @@ export function useApiCollection<T = Record<string, any>>(
     if (!routeConfig) {
         console.warn(`[useApiCollection] No API route configured for collection: ${collectionName}`);
     }
+
+    const buildUrl = (offset: number) => {
+        if (!routeConfig) return '';
+        const base = routeConfig.path;
+        const separator = base.includes('?') ? '&' : '?';
+        return `${base}${separator}limit=${pageSize}&offset=${offset}`;
+    };
 
     const fetchPage = async (bypassCache: boolean = false) => {
         if (!currentUser || !enabled || !routeConfig) {
@@ -195,10 +206,12 @@ export function useApiCollection<T = Record<string, any>>(
 
         setLoading(true);
         setError(null);
+        offsetRef.current = 0;
 
         try {
             const token = await currentUser.getIdToken();
-            const res = await fetch(routeConfig.path, {
+            const targetUrl = buildUrl(0);
+            const res = await fetch(targetUrl, {
                 headers: { Authorization: `Bearer ${token}` },
             });
 
@@ -210,6 +223,13 @@ export function useApiCollection<T = Record<string, any>>(
 
             const raw = await res.json();
             const allData: T[] = routeConfig.normalize(raw) as T[];
+
+            // Determine if more items are available
+            const xHasMore = res.headers.get('X-Has-More');
+            const calculatedHasMore = xHasMore !== null
+                ? xHasMore === 'true'
+                : (raw && typeof raw.hasMore === 'boolean' ? raw.hasMore : allData.length >= pageSize);
+            setHasMore(calculatedHasMore);
 
             // Sort by orderByField client-side (API routes don't support sort params yet)
             const sorted = [...allData].sort((a: any, b: any) => {
@@ -246,8 +266,51 @@ export function useApiCollection<T = Record<string, any>>(
     fetchPageRef.current = fetchPage;
 
     const fetchNextPage = async () => {
-        // API routes return full datasets — no cursor pagination needed
-        // This is a no-op for compatibility with usePaginatedCollection interface
+        if (!currentUser || !enabled || !routeConfig || !hasMore || loading || fetchingNextPageRef.current) {
+            return;
+        }
+
+        fetchingNextPageRef.current = true;
+        const nextOffset = offsetRef.current + pageSize;
+
+        try {
+            const token = await currentUser.getIdToken();
+            const targetUrl = buildUrl(nextOffset);
+            const res = await fetch(targetUrl, {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+
+            if (!isMountedRef.current) return;
+
+            if (!res.ok) {
+                throw new Error(`API ${res.status}: ${res.statusText}`);
+            }
+
+            const raw = await res.json();
+            const nextBatch: T[] = routeConfig.normalize(raw) as T[];
+
+            const xHasMore = res.headers.get('X-Has-More');
+            const calculatedHasMore = xHasMore !== null
+                ? xHasMore === 'true'
+                : (raw && typeof raw.hasMore === 'boolean' ? raw.hasMore : nextBatch.length >= pageSize);
+            setHasMore(calculatedHasMore);
+
+            offsetRef.current = nextOffset;
+
+            // Merge and dedup by id/uid if available
+            setData(prev => {
+                const existingIds = new Set(prev.map((item: any) => item.id || item.uid || item._id));
+                const uniqueNew = nextBatch.filter((item: any) => {
+                    const id = item.id || item.uid || item._id;
+                    return id ? !existingIds.has(id) : true;
+                });
+                return [...prev, ...uniqueNew];
+            });
+        } catch (err) {
+            console.error('[useApiCollection] Failed to fetch next page:', err);
+        } finally {
+            fetchingNextPageRef.current = false;
+        }
     };
 
     const refresh = async () => {
@@ -284,7 +347,7 @@ export function useApiCollection<T = Record<string, any>>(
         error,
         fetchNextPage,
         refresh,
-        hasMore: false,
+        hasMore,
         totalFetched: data.length,
         isAutoRefreshing: autoRefresh && isVisible && isOnline,
         setAutoRefresh,

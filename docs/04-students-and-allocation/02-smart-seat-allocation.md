@@ -28,40 +28,15 @@ Every vehicle record in `buses` defines a maximum physical seating capacity (typ
 ### The Overbooking Race Condition
 When hundreds of students complete registration simultaneously during semester intake, naive applications suffer from Time-of-Check to Time-of-Use (TOCTOU) race conditions: two students both see "1 seat available", book concurrently, and overload the vehicle.
 
-### The Solution: Atomic PostgreSQL Capacity Reservation
-The database prevents overbooking through a dedicated stored procedure utilizing `FOR UPDATE` row locking:
+### The Solution: Atomic PostgreSQL Capacity Reservation & Shift Tracking
+The database prevents overbooking through dedicated stored procedures utilizing `FOR UPDATE` row locking against specific shift loads (`morning_load` and `evening_load`):
 
 ```sql
-CREATE OR REPLACE FUNCTION public.bus_increment_capacity(p_bus_id TEXT)
-RETURNS JSONB
-LANGUAGE plpgsql
-SECURITY DEFINER
-AS $$
-DECLARE
-    v_bus RECORD;
-BEGIN
-    SELECT id, capacity, current_occupancy
-    INTO v_bus
-    FROM public.buses
-    WHERE id = p_bus_id
-    FOR UPDATE;
-
-    IF NOT FOUND THEN
-        RETURN jsonb_build_object('success', false, 'reason', 'Bus not found');
-    END IF;
-
-    IF v_bus.current_occupancy >= v_bus.capacity THEN
-        RETURN jsonb_build_object('success', false, 'reason', 'Bus is at maximum capacity');
-    END IF;
-
-    UPDATE public.buses
-    SET current_occupancy = current_occupancy + 1,
-        updated_at = clock_timestamp()
-    WHERE id = p_bus_id;
-
-    RETURN jsonb_build_object('success', true, 'remaining_seats', v_bus.capacity - v_bus.current_occupancy - 1);
-END;
-$$;
+-- Atomic check and reservation on bus shift load
+SELECT id, capacity, morning_load, evening_load
+FROM public.buses
+WHERE id = p_bus_id
+FOR UPDATE;
 ```
 
 ---
@@ -72,6 +47,8 @@ When a requested bus reaches 100% occupancy:
 1. **Alternative Bus Suggestion (`AlternativeBusPicker.tsx`)**:
    - The system inspects neighboring buses running the same route or overlapping stops.
    - Proposes alternative vehicles with available seating capacity in the same shift window (Morning/Evening).
-2. **Bulk Reassignment (`ReassignmentPanel.tsx`)**:
-   - Administrators can migrate an entire batch of students from an overloaded bus to a newly provisioned vehicle.
-   - Automatically updates `student_profiles.bus_id` and dispatches push notifications to affected students.
+2. **Atomic Bulk Reassignment (`reassign_students_atomically`)**:
+   - Administrators migrate batches of students via the atomic RPC `reassign_students_atomically`.
+   - **Deadlock Avoidance**: Locks affected bus records in ascending identifier order (`ORDER BY bus_id`).
+   - **Strict Capacity Guarantee**: Aborts and rolls back the entire batch if the destination bus exceeds its physical capacity threshold.
+   - **Audit & Rollback**: Persists an immutable snapshot in `reassignment_logs`, allowing administrators to execute an instant rollback via `execute_reassignment_rollback` if route requirements change.

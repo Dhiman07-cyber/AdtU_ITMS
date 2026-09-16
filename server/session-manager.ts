@@ -188,8 +188,8 @@ export class SessionManager {
     return sessions.size;
   }
 
-  getActiveSockets(): Session[] {
-    return Array.from(sessions.values());
+  getActiveSockets(): Iterable<Session> {
+    return sessions.values();
   }
 }
 

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * API Route: Verify Secure QR Token
  * POST /api/bus-pass/verify-secure-qr
  */
@@ -13,27 +13,8 @@ import {
 	validateStudentScannerContext,
 } from '@/lib/security/scanner-auth';
 import { getSupabaseServer } from '@/lib/supabase-server';
+import { getValidUntilDate } from '@/lib/utils/date-utils';
 import { NextRequest,NextResponse } from 'next/server';
-
-function getValidUntilDate(validUntil: unknown): Date | null {
-    if (!validUntil) return null;
-    try {
-        if (
-            typeof validUntil === 'object' &&
-            validUntil !== null &&
-            'toDate' in validUntil &&
-            typeof validUntil.toDate === 'function'
-        ) {
-            return validUntil.toDate();
-        }
-        if (validUntil instanceof Date) return validUntil;
-
-        const date = new Date(String(validUntil));
-        return Number.isNaN(date.getTime()) ? null : date;
-    } catch {
-        return null;
-    }
-}
 
 export async function POST(request: NextRequest) {
     try {

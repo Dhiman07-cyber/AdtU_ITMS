@@ -21,16 +21,7 @@ export const POST = withSecurity<ReassignmentLogWriteBody>(
   async (_request, { auth, body }) => {
     const supabase = getSupabaseServer();
 
-    if (body.type !== 'rollback') {
-      const { error: deleteError } = await supabase
-        .from('reassignment_logs')
-        .delete()
-        .eq('type', body.type);
-
-      if (deleteError) {
-        return NextResponse.json({ error: 'Failed to prepare reassignment log' }, { status: 500 });
-      }
-    }
+    // Direct append — preserve all historical reassignment snapshots for deterministic rollback.
 
     const actorLabel = auth.name
       ? `${auth.name} (${auth.role})`

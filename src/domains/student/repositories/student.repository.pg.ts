@@ -164,23 +164,12 @@ export async function pgFindByUid(uid: string): Promise<Student | null> {
 
   if (!cleanId) return null;
 
-  // 1. Try exact match on uid
-  let { data, error } = await db
+  // Single query: match by uid OR enrollment_id, avoiding a sequential fallback.
+  const { data, error } = await db
     .from('student_profiles')
     .select('*')
-    .eq('uid', cleanId)
+    .or(`uid.eq.${cleanId},enrollment_id.eq.${cleanId}`)
     .maybeSingle();
-
-  // 2. If not found by uid, try matching by enrollment_id
-  if (!data && !error) {
-    const res = await db
-      .from('student_profiles')
-      .select('*')
-      .eq('enrollment_id', cleanId)
-      .maybeSingle();
-    data = res.data;
-    error = res.error;
-  }
 
   if (error) {
     throw new Error(`StudentRepository (PG) read failed: ${error.message}`);
@@ -490,7 +479,9 @@ export async function pgGetBusOccupancyStats(): Promise<{
   const db = getSupabaseServer();
   const { data, error } = await db
     .from('student_profiles')
-    .select('bus_id, shift, stop_name, status, seat_released_at');
+    .select('bus_id, shift, stop_name, status, seat_released_at')
+    .not('bus_id', 'is', null)
+    .in('status', ['active', 'soft_blocked', 'pending_deletion']);
 
   if (error) throw new Error(`StudentRepository (PG) occupancyStats: ${error.message}`);
 

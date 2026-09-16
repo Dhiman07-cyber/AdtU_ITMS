@@ -89,31 +89,47 @@ async function callDeviceSessionAPI(
     return response.json();
 }
 
+export interface DeviceSessionCheckResult {
+    isCurrentDevice: boolean;
+    hasActiveSession: boolean;
+    otherDeviceId?: string;
+    sessionAge?: number;
+    serviceUnavailable?: boolean;
+    error?: string;
+}
+
 /**
  * Check if current device has an active session for a feature
- * Returns: { isCurrentDevice: boolean, hasActiveSession: boolean, otherDeviceId?: string }
+ * Fails closed by default to prevent unauthorized session hijacking during network partitions.
  */
 export async function checkDeviceSession(
     userId: string,
-    feature: 'driver_location_share' | 'student_location_view'
-): Promise<{ isCurrentDevice: boolean; hasActiveSession: boolean; otherDeviceId?: string; sessionAge?: number }> {
+    feature: 'driver_location_share' | 'student_location_view',
+    failClosed: boolean = true
+): Promise<DeviceSessionCheckResult> {
     try {
         const result = await callDeviceSessionAPI('check', userId, feature);
 
-        if (!result) {
-            // On error, allow the operation to proceed (fail-open for better UX)
-            return { isCurrentDevice: true, hasActiveSession: false };
+        if (!result || result.error) {
+            if (failClosed) {
+                console.warn(`[DeviceSession] Service check failed for ${userId}/${feature}, failing closed.`);
+                return { isCurrentDevice: false, hasActiveSession: true, serviceUnavailable: true, error: result?.error || 'Service unavailable' };
+            }
+            return { isCurrentDevice: true, hasActiveSession: false, serviceUnavailable: true };
         }
 
         return {
-            isCurrentDevice: result.isCurrentDevice ?? true,
+            isCurrentDevice: result.isCurrentDevice ?? false,
             hasActiveSession: result.hasActiveSession ?? false,
             otherDeviceId: result.otherDeviceId,
             sessionAge: result.sessionAge
         };
-    } catch (err) {
+    } catch (err: any) {
         console.error('Exception checking device session:', err);
-        return { isCurrentDevice: true, hasActiveSession: false };
+        if (failClosed) {
+            return { isCurrentDevice: false, hasActiveSession: true, serviceUnavailable: true, error: err?.message || 'Network error' };
+        }
+        return { isCurrentDevice: true, hasActiveSession: false, serviceUnavailable: true };
     }
 }
 

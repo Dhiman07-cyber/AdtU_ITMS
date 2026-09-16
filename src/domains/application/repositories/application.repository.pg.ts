@@ -402,3 +402,47 @@ export async function pgCount(): Promise<number> {
 
   return count || 0;
 }
+
+/**
+ * Atomically claim an application for session activation with a lease.
+ */
+export async function pgClaimForActivation(
+  applicationId: string,
+  lockId: string,
+  leaseMinutes = 5
+): Promise<Application | null> {
+  const db = getSupabaseServer();
+  const { data, error } = await (db.rpc as any)('claim_application_for_activation', {
+    p_application_id: applicationId,
+    p_lock_id: lockId,
+    p_lease_minutes: leaseMinutes,
+  });
+
+  if (error) {
+    throw new Error(`claim_application_for_activation RPC failed: ${error.message}`);
+  }
+
+  if (!data) return null;
+  return pgRowToApplication(data);
+}
+
+/**
+ * Atomically release an application activation lease lock.
+ */
+export async function pgReleaseActivationClaim(
+  applicationId: string,
+  lockId: string
+): Promise<boolean> {
+  const db = getSupabaseServer();
+  const { data, error } = await (db.rpc as any)('release_application_activation_claim', {
+    p_application_id: applicationId,
+    p_lock_id: lockId,
+  });
+
+  if (error) {
+    throw new Error(`release_application_activation_claim RPC failed: ${error.message}`);
+  }
+
+  return Boolean(data);
+}
+

@@ -129,8 +129,6 @@ export async function processCapturedPayment(paymentDetails: {
     console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] processCapturedPayment ENTER. paymentId:`, paymentId, `orderId:`, orderId, `amount:`, amount, `source:`, source);
 
     try {
-        const deadlineConfig = await getDeadlineConfig();
-
         // 1. Idempotency Check: check if already processed
         const isProcessed = await isPaymentProcessed(paymentId);
         if (isProcessed) {
@@ -178,6 +176,7 @@ export async function processCapturedPayment(paymentDetails: {
                             baseYear = studentData?.sessionEndYear || baseYear;
                         }
                     }
+                    const deadlineConfig = await getDeadlineConfig();
                     const newValidUntil = calculateValidUntilDate(baseYear, durationYears, deadlineConfig);
                     const { submitFinal } = await import('@/domains/application');
                     await submitFinal(
@@ -225,6 +224,7 @@ export async function processCapturedPayment(paymentDetails: {
 
         const rawPurpose = String(notes.purpose || notes.type || '');
         const isNewRegistration = rawPurpose.toLowerCase().includes('registration') || rawPurpose.toLowerCase() === 'new_registration';
+        const deadlineConfig = await getDeadlineConfig();
 
         if (isNewRegistration) {
             let sessionStartYear: number | undefined;
@@ -628,10 +628,19 @@ export async function approveOfflinePayment(
             throw new Error('Payment was already processed by another approver');
         }
 
-        const completedPayment = await paymentsSupabaseService.getPaymentById(request.paymentId);
-        if (!completedPayment || completedPayment.status !== 'Completed') {
-            throw new Error('Payment approval could not be confirmed');
-        }
+        // State is atomically confirmed Completed by updatePaymentStatus CAS check
+        const completedPayment: PaymentRecord = {
+            ...payment,
+            status: 'Completed',
+            approved_by: {
+                type: request.approverRole?.toLowerCase() === 'admin' ? 'admin' : 'moderator',
+                userId: request.approverUserId,
+                empId: request.approverEmpId,
+                name: request.approverName,
+                role: request.approverRole,
+            },
+            approved_at: new Date().toISOString(),
+        };
 
         // Update student document validity in Firestore safely via helper.
         // Retry up to 3 times — if this fails, the payment is Completed but the
@@ -1078,6 +1087,14 @@ export async function getPaymentDetails(paymentId: string): Promise<PaymentDetai
  * Canonical implementation — used by webhook and verify-payment routes.
  */
 export async function isPaymentProcessed(paymentId: string): Promise<boolean> {
+    const isRazorpayId = paymentId.startsWith('pay_') && !paymentId.startsWith('pay_online_');
+    if (isRazorpayId) {
+        const paymentByRazorpay = await paymentsSupabaseService.getPaymentByRazorpayId(paymentId);
+        if (paymentByRazorpay?.status === 'Completed') return true;
+        const payment = await paymentsSupabaseService.getPaymentById(paymentId);
+        return payment?.status === 'Completed';
+    }
+
     // 1. Check by Primary ID (Supabase)
     const payment = await paymentsSupabaseService.getPaymentById(paymentId);
     if (payment?.status === 'Completed') return true;

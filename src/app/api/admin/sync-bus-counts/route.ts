@@ -17,8 +17,15 @@ export const POST = withSecurity(
         // Database-aggregated lookup
         const { occupancy, stops } = await getBusOccupancyStats();
 
-        const updates: any[] = [];
         let totalSeatOccupyingStudents = 0;
+        const updates: any[] = [];
+        const pendingUpdates: {
+            busId: string;
+            busNumber: string;
+            oldCounts: any;
+            newCounts: any;
+            promise: Promise<any>;
+        }[] = [];
 
         for (const bus of buses) {
             const busId = bus.busId || bus.id || '';
@@ -47,22 +54,35 @@ export const POST = withSecurity(
                 oldCounts.eveningCount !== newCounts.eveningCount ||
                 JSON.stringify(oldCounts.stopCounts) !== JSON.stringify(newCounts.stopCounts)
             ) {
-                // Write corrected counts to PG (source of truth)
-                await updateBus(busId, {
-                    currentMembers: newCounts.currentMembers,
-                    morningLoad: newCounts.morningCount,
-                    eveningLoad: newCounts.eveningCount,
-                    stopCounts: newCounts.stopCounts,
-                } as any);
-
-                updates.push({
-                    busId: busId,
+                pendingUpdates.push({
+                    busId,
                     busNumber: bus.busNumber || busId,
-                    old: oldCounts,
-                    new: newCounts,
+                    oldCounts,
+                    newCounts,
+                    promise: updateBus(busId, {
+                        currentMembers: newCounts.currentMembers,
+                        morningLoad: newCounts.morningCount,
+                        eveningLoad: newCounts.eveningCount,
+                        stopCounts: newCounts.stopCounts,
+                    } as any),
                 });
             }
         }
+
+        const settled = await Promise.allSettled(pendingUpdates.map(p => p.promise));
+        settled.forEach((res, i) => {
+            const p = pendingUpdates[i];
+            if (res.status === 'fulfilled') {
+                updates.push({
+                    busId: p.busId,
+                    busNumber: p.busNumber,
+                    old: p.oldCounts,
+                    new: p.newCounts,
+                });
+            } else {
+                console.error(`Failed to update bus ${p.busId}:`, res.reason);
+            }
+        });
 
         return NextResponse.json({
             success: true,

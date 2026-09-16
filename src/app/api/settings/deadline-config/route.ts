@@ -13,35 +13,29 @@ async function checkDependencies(): Promise<boolean> {
     try {
         const supabase = getSupabaseServer();
 
-        // Check if any student profiles exist in PG
-        const { count: studentCount } = await supabase
-            .from('student_profiles')
-            .select('*', { count: 'exact', head: true })
-            .limit(1);
+        // Check if any student profiles or pending/upcoming applications exist in parallel
+        const [studentRes, upcomingRes, pendingSeatRes] = await Promise.all([
+            supabase
+                .from('student_profiles')
+                .select('id', { count: 'exact', head: true })
+                .limit(1),
+            supabase
+                .from('applications')
+                .select('application_id', { count: 'exact', head: true })
+                .eq('state', 'verified_upcoming')
+                .limit(1),
+            supabase
+                .from('applications')
+                .select('application_id', { count: 'exact', head: true })
+                .eq('state', 'pending_seat_allocation')
+                .limit(1),
+        ]);
 
-        if (studentCount && studentCount > 0) {
-            return true;
-        }
-
-        // Check if any verified_upcoming applications exist in PG
-        const { count: upcomingCount } = await supabase
-            .from('applications')
-            .select('*', { count: 'exact', head: true })
-            .eq('state', 'verified_upcoming')
-            .limit(1);
-
-        if (upcomingCount && upcomingCount > 0) {
-            return true;
-        }
-
-        // Check if any pending_seat_allocation applications exist in PG
-        const { count: pendingSeatCount } = await supabase
-            .from('applications')
-            .select('*', { count: 'exact', head: true })
-            .eq('state', 'pending_seat_allocation')
-            .limit(1);
-
-        if (pendingSeatCount && pendingSeatCount > 0) {
+        if (
+            (studentRes.count && studentRes.count > 0) ||
+            (upcomingRes.count && upcomingRes.count > 0) ||
+            (pendingSeatRes.count && pendingSeatRes.count > 0)
+        ) {
             return true;
         }
 
@@ -57,8 +51,10 @@ async function checkDependencies(): Promise<boolean> {
  */
 export async function GET(req: NextRequest) {
     try {
-        const config = await getDeadlineConfig();
-        const hasDependencies = await checkDependencies();
+        const [config, hasDependencies] = await Promise.all([
+            getDeadlineConfig(),
+            checkDependencies(),
+        ]);
         return NextResponse.json({ config, hasDependencies });
     } catch (error: any) {
         console.error('Error fetching deadline config:', error);

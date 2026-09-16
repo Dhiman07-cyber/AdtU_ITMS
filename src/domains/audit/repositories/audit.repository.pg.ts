@@ -59,6 +59,7 @@ export interface AuditEventFilters {
   actor_role?: string;
   from_date?: string;
   to_date?: string;
+  search?: string;
 }
 
 export interface AuditEventPagination {
@@ -153,6 +154,13 @@ export async function pgQueryAuditEvents(
   }
   if (filters.to_date) {
     query = query.lte('created_at', filters.to_date);
+  }
+  if (filters.search) {
+    const cleanSearch = filters.search.replace(/[%_,]/g, '');
+    if (cleanSearch) {
+      const term = `%${cleanSearch}%`;
+      query = query.or(`action.ilike.${term},summary.ilike.${term},target_name.ilike.${term},actor_name.ilike.${term}`);
+    }
   }
 
   const offset = (pagination.page - 1) * pagination.per_page;

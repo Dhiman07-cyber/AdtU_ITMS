@@ -26,6 +26,9 @@ function mergeWithDefaults(partial?: Partial<ModeratorPermissions>): ModeratorPe
 export async function getModeratorPermissions(uid: string): Promise<ModeratorPermissions> {
   const cached = permissionCache.get(uid);
   if (cached && Date.now() < cached.expiresAt) {
+    // Re-insert to maintain true LRU order
+    permissionCache.delete(uid);
+    permissionCache.set(uid, cached);
     return cached.permissions;
   }
 

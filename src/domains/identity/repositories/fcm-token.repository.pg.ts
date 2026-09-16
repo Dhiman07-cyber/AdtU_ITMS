@@ -146,30 +146,18 @@ export async function cleanupStaleTokens(maxAgeDays: number = 30): Promise<{
 
   const cutoffIso = cutoff.toISOString();
 
-  // Count before
-  const { count: scanned } = await db
+  // Perform single atomic delete with count
+  const { data, count, error } = await db
     .from('fcm_tokens')
-    .select('*', { count: 'exact', head: true })
-    .lt('last_seen', cutoffIso);
-
-  // Delete
-  const { error } = await db
-    .from('fcm_tokens')
-    .delete()
-    .lt('last_seen', cutoffIso);
+    .delete({ count: 'exact' })
+    .lt('last_seen', cutoffIso)
+    .select('id');
 
   if (error) {
     console.error('FCM token cleanup failed:', error.message);
     return { scanned: 0, deleted: 0 };
   }
 
-  // Count remaining to estimate actual deletions
-  const { count: remaining } = await db
-    .from('fcm_tokens')
-    .select('*', { count: 'exact', head: true })
-    .lt('last_seen', cutoffIso);
-
-  const before = scanned ?? 0;
-  const after = remaining ?? 0;
-  return { scanned: before, deleted: Math.max(0, before - after) };
+  const deletedCount = count ?? (data?.length || 0);
+  return { scanned: deletedCount, deleted: deletedCount };
 }

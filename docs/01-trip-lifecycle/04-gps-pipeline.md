@@ -225,3 +225,17 @@ After the new patch, adaptive recovery polling and strict monotonic timestamp pr
 3. **Timer Safety & Memory Protection**:
    - Polling utilizes chained `setTimeout` with an `inFlight` request mutex rather than unmanaged `setInterval`, preventing stacking requests over high-latency cellular networks and eliminating memory leaks on component unmount.
 
+---
+
+## 6. Distributed Redis Lua Guard & Device Session Enforcement
+
+### 6.1 Distributed Redis Lua Guard (`gps_guard.lua` & `gps-redis-guard.ts`)
+To prevent split-brain coordinate tracking across multiple application instances and enforce sub-millisecond bounding validation:
+- Incoming coordinates are verified via an atomic Redis Lua script (`gps_guard.lua`) that records and evaluates the last valid coordinate per bus in Redis memory.
+- **Fail-Closed Semantics**: In `production`, if Redis is unavailable or disconnected, `gps-redis-guard.ts` returns `{ valid: false, reason: 'redis_unavailable' }`, ensuring that uncoordinated split-brain telemetry is rejected rather than silently accepted via local memory fallback.
+
+### 6.2 Server-Side Single-Device Driver Exclusivity
+Driver GPS submission routes (`/api/driver/update-location` and `/api/location/update`) enforce server-side device session exclusivity:
+- The driver's device identifier (`deviceId` in body or `x-device-id` header) is validated against the active session in `device_sessions` for `feature = 'driver_location_share'`.
+- If another device holds an active heartbeat within 30 seconds, the update is rejected with HTTP 403 (`ANOTHER_DEVICE_ACTIVE`), preventing rogue, background, or duplicate device transmissions from polluting live student tracking.
+

@@ -1,7 +1,8 @@
 import { getSystemConfig,updateSystemConfig } from '@/domains/admin';
-import { getAdminById,getUserById } from '@/domains/identity';
-import { pgInsertNotification } from '@/domains/notification/repositories/notification.repository.pg';
-import { adminAuth } from '@/lib/firebase-admin';
+import { notifyBusFeeChange } from '@/lib/bus-fee-service';
+import { withSecurity } from '@/lib/security/api-security';
+import { RateLimits } from '@/lib/security/rate-limiter';
+import { BusFeeUpdateSchema } from '@/lib/security/validation-schemas';
 import { NextRequest,NextResponse } from 'next/server';
 
 // GET: Retrieve bus fees from system config (Firestore settings/config)
@@ -30,32 +31,19 @@ export async function GET(req: NextRequest) {
 }
 
 // POST: Update bus fees (Admin only)
-export async function POST(req: NextRequest) {
-  try {
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return NextResponse.json({ message: 'Unauthorized' }, { status: 401 });
-    }
+export const POST = withSecurity(
+  async (request, { auth, body }) => {
+    try {
+      const uid = auth.uid;
+      const { amount } = body as { amount: number };
 
-    const token = authHeader.split('Bearer ')[1];
-    const decodedToken = await adminAuth.verifyIdToken(token);
-    const uid = decodedToken.uid;
+      if (!amount || amount <= 0) {
+        return NextResponse.json({ message: 'Invalid amount' }, { status: 400 });
+      }
 
-    // Check if user is admin via PostgreSQL (canonical source of truth)
-    const user = await getUserById(uid);
-    if (!user || user.role !== 'admin') {
-      return NextResponse.json({ message: 'Access denied. Admin only.' }, { status: 403 });
-    }
-
-    const { amount } = await req.json();
-
-    if (!amount || amount <= 0) {
-      return NextResponse.json({ message: 'Invalid amount' }, { status: 400 });
-    }
-
-    // Get current config
-    const systemConfigResult = await getSystemConfig();
-    const oldAmount = systemConfigResult.data?.busFee?.amount || 0;
+      // Get current config
+      const systemConfigResult = await getSystemConfig();
+      const oldAmount = systemConfigResult.data?.busFee?.amount || 0;
 
     // Prepare updated bus fee data
     // Note: The service will handle truncation of history
@@ -83,35 +71,8 @@ export async function POST(req: NextRequest) {
 
     console.log(`✅ Bus fee updated by admin ${uid}: ${oldAmount} -> ${amount}`);
 
-    // --- Notification Logic ---
-    // Get admin user details for notification sender
-    const adminData = await getAdminById(uid);
-    const adminName = adminData?.name || adminData?.fullName || 'Admin';
-
-    let notificationSent = false;
-    try {
-      const notificationContent = `The bus fee for the upcoming session has been revised from ₹${oldAmount.toLocaleString('en-IN')} to ₹${amount.toLocaleString('en-IN')}. ` +
-        `Please update your payment plans accordingly. For any queries, contact the administration office.`;
-
-      await pgInsertNotification({
-        title: '💰 Bus Fee Update - Important Notice',
-        content: notificationContent,
-        type: 'announcement',
-        sender: {
-          userId: uid,
-          userName: adminName,
-          userRole: 'admin'
-        },
-        target: {
-          type: 'all_users',
-        },
-        recipientIds: [],
-        readByUserIds: [],
-      });
-      notificationSent = true;
-    } catch (error) {
-      console.error('Failed to send announcement notification:', error);
-    }
+    // Notify all users about bus fee change via shared service
+    const notificationSent = await notifyBusFeeChange(uid, oldAmount, amount);
 
     return NextResponse.json({
       message: 'Bus fee updated successfully',
@@ -126,4 +87,10 @@ export async function POST(req: NextRequest) {
       { status: 500 }
     );
   }
-}
+},
+{
+  requiredRoles: ['admin'],
+  schema: BusFeeUpdateSchema,
+  rateLimit: RateLimits.UPDATE,
+});
+

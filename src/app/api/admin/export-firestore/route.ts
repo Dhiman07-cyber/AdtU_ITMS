@@ -34,6 +34,11 @@ export const GET = withSecurity(
     async (request, { auth }) => {
         console.log(`📦 Firestore export requested by admin: ${auth.uid.substring(0,8)}...`);
 
+        if (!adminDb) {
+            return NextResponse.json({ error: 'Firebase Admin SDK not initialized' }, { status: 500 });
+        }
+
+        let totalDocuments = 0;
         const exportData: any = {
             metadata: {
                 exportedAt: new Date().toISOString(),
@@ -44,21 +49,30 @@ export const GET = withSecurity(
             collections: {}
         };
 
-        let totalDocuments = 0;
-        for (const collectionName of COLLECTIONS_TO_EXPORT) {
-            try {
-                const snapshot = await adminDb.collection(collectionName).get();
-                const documents: any = {};
-                snapshot.forEach(doc => {
-                    documents[doc.id] = convertTimestamps(doc.data());
-                });
+        const results = await Promise.all(
+            COLLECTIONS_TO_EXPORT.map(async (collectionName) => {
+                try {
+                    const snapshot = await adminDb.collection(collectionName).get();
+                    const documents: any = {};
+                    snapshot.forEach(doc => {
+                        documents[doc.id] = convertTimestamps(doc.data());
+                    });
 
-                exportData.collections[collectionName] = { documents, count: snapshot.size };
-                totalDocuments += snapshot.size;
-            } catch (error: any) {
-                console.error(`   ❌ Error exporting ${collectionName}:`, error.message);
-                exportData.collections[collectionName] = { documents: {}, count: 0, error: 'Export failed' };
-            }
+                    return { collectionName, documents, count: snapshot.size, error: null };
+                } catch (error: any) {
+                    console.error(`   ❌ Error exporting ${collectionName}:`, error.message);
+                    return { collectionName, documents: {}, count: 0, error: 'Export failed' };
+                }
+            })
+        );
+
+        for (const res of results) {
+            exportData.collections[res.collectionName] = {
+                documents: res.documents,
+                count: res.count,
+                ...(res.error ? { error: res.error } : {})
+            };
+            totalDocuments += res.count;
         }
 
         console.log(`📊 Total documents exported: ${totalDocuments}`);

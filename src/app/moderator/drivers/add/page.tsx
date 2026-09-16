@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import EnhancedDatePicker from "@/components/enhanced-date-picker";
 import { PremiumPageLoader } from "@/components/LoadingSpinner";
@@ -494,7 +494,7 @@ export default function AddDriver() {
         routeId = formData.routeId;
       }
 
-      const response = await fetch('/api/moderator/create-user', {
+      const response = await fetch('/api/admin/create-user', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

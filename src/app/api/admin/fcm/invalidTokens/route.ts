@@ -11,58 +11,47 @@ export const GET = withSecurity(
         cutoff.setDate(cutoff.getDate() - olderThanDays);
 
         const db = getSupabaseServer();
+        const cutoffIso = cutoff.toISOString();
 
-        // Get all tokens from PostgreSQL
-        const { data: tokens, error } = await db
-            .from('fcm_tokens')
-            .select('user_id, token_hash, platform, last_seen, valid');
+        // Push filter to SQL and fetch counts concurrently
+        const [totalRes, validRes, staleRes] = await Promise.all([
+            db.from('fcm_tokens').select('*', { count: 'exact', head: true }),
+            db.from('fcm_tokens').select('*', { count: 'exact', head: true }).eq('valid', true),
+            db.from('fcm_tokens')
+                .select('user_id, token_hash, platform, last_seen, valid', { count: 'exact' })
+                .or(`valid.eq.false,last_seen.lt.${cutoffIso}`)
+                .order('last_seen', { ascending: true })
+                .limit(100),
+        ]);
 
-        if (error) {
-            console.error('Failed to fetch FCM tokens:', error.message);
+        if (staleRes.error) {
+            console.error('Failed to fetch FCM tokens:', staleRes.error.message);
             return NextResponse.json(
                 { error: 'Failed to fetch tokens' },
                 { status: 500 }
             );
         }
 
-        const staleTokens: Array<{
-            studentId: string;
-            tokenHash: string;
-            platform: string;
-            lastSeen: string;
-            valid: boolean;
-        }> = [];
+        const totalTokens = totalRes.count ?? 0;
+        const validTokens = validRes.count ?? 0;
+        const staleOrInvalidTokens = staleRes.count ?? (staleRes.data?.length || 0);
 
-        let totalTokens = 0;
-        let validTokens = 0;
-
-        for (const token of tokens ?? []) {
-            totalTokens++;
-            if (token.valid) validTokens++;
-
-            const lastSeenDate = new Date(token.last_seen);
-            const isStale = lastSeenDate < cutoff;
-            const isInvalid = token.valid === false;
-
-            if (isStale || isInvalid) {
-                staleTokens.push({
-                    studentId: token.user_id,
-                    tokenHash: token.token_hash,
-                    platform: token.platform || 'unknown',
-                    lastSeen: lastSeenDate.toISOString(),
-                    valid: token.valid,
-                });
-            }
-        }
+        const staleTokens = (staleRes.data || []).map((token) => ({
+            studentId: token.user_id,
+            tokenHash: token.token_hash,
+            platform: token.platform || 'unknown',
+            lastSeen: new Date(token.last_seen).toISOString(),
+            valid: token.valid,
+        }));
 
         return NextResponse.json({
             summary: {
                 totalTokens,
                 validTokens,
-                staleOrInvalidTokens: staleTokens.length,
+                staleOrInvalidTokens,
                 olderThanDays,
             },
-            staleTokens: staleTokens.slice(0, 100),
+            staleTokens,
         });
     },
     {

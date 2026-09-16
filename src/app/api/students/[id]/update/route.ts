@@ -1,6 +1,7 @@
-﻿import { getById,update } from '@/domains/student';
+import { getById,update } from '@/domains/student';
 import { verifyApiAuth } from '@/lib/security/api-auth';
 import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
+import { normalizeShift } from '@/lib/utils/shift-utils';
 import { NextResponse } from 'next/server';
 
 export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -35,7 +36,6 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       if (ALLOWED_FIELDS.has(key)) {
         if (key === 'shift') {
           // Students may ONLY have 'Morning' or 'Evening' - use canonical validation
-          const { normalizeShift } = await import('@/lib/utils/shift-utils');
           const normalized = normalizeShift(value as string);
           if (normalized !== 'Morning' && normalized !== 'Evening') {
             console.warn(`Invalid shift value rejected: ${value}`);
@@ -61,38 +61,34 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       }
     }
 
-    const unifiedUpdateData = {
+    const unifiedUpdateData: Record<string, any> = {
       ...updatedStudentData,
-      busId: updatedStudentData.busId || updatedStudentData.busId,
-      routeId: updatedStudentData.routeId || updatedStudentData.routeId,
+      busId: updatedStudentData.busId || student.busId,
+      routeId: updatedStudentData.routeId || student.routeId,
       updatedAt: new Date().toISOString(),
     };
 
+
     await update(id, unifiedUpdateData);
 
-    const freshStudent = await getById(id);
-    if (!freshStudent) {
-      return NextResponse.json({ error: 'Student not found after update' }, { status: 404 });
-    }
-
     const responseStudent = {
-      id: freshStudent.id || freshStudent.uid,
-      name: freshStudent.fullName || freshStudent.name || '',
-      email: freshStudent.email || '',
-      phone: freshStudent.phone || '',
-      alternatePhone: freshStudent.altPhone || '',
-      enrollmentId: freshStudent.enrollmentId || '',
-      gender: freshStudent.gender || '',
-      dob: freshStudent.dob || '',
-      faculty: freshStudent.faculty || '',
-      department: freshStudent.department || '',
-      parentName: freshStudent.parentName || '',
-      parentPhone: freshStudent.parentPhone || '',
-      busAssigned: freshStudent.busId || freshStudent.busId || '',
-      routeId: freshStudent.routeId || freshStudent.routeId || '',
-      profilePhotoUrl: freshStudent.profilePhotoUrl || '',
-      address: freshStudent.address || '',
-      bloodGroup: freshStudent.bloodGroup || '',
+      id: student.id || student.uid,
+      name: unifiedUpdateData.fullName ?? unifiedUpdateData.name ?? student.fullName ?? student.name ?? '',
+      email: unifiedUpdateData.email ?? student.email ?? '',
+      phone: unifiedUpdateData.phone ?? student.phone ?? '',
+      alternatePhone: student.altPhone || '',
+      enrollmentId: unifiedUpdateData.enrollmentId ?? student.enrollmentId ?? '',
+      gender: student.gender || '',
+      dob: unifiedUpdateData.dob ?? student.dob ?? '',
+      faculty: unifiedUpdateData.faculty ?? student.faculty ?? '',
+      department: unifiedUpdateData.department ?? student.department ?? '',
+      parentName: unifiedUpdateData.parentName ?? student.parentName ?? '',
+      parentPhone: unifiedUpdateData.parentPhone ?? student.parentPhone ?? '',
+      busAssigned: student.busId || '',
+      routeId: student.routeId || '',
+      profilePhotoUrl: unifiedUpdateData.profilePhotoUrl !== undefined ? (unifiedUpdateData.profilePhotoUrl || '') : (student.profilePhotoUrl || ''),
+      address: unifiedUpdateData.address ?? student.address ?? '',
+      bloodGroup: unifiedUpdateData.bloodGroup ?? student.bloodGroup ?? '',
     };
 
     return NextResponse.json(responseStudent);

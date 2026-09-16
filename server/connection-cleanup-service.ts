@@ -15,7 +15,8 @@ export class ConnectionCleanupService {
   }
 
   cleanupAll(): void {
-    for (const [socketId] of connectionRegistry.getAll()) {
+    const socketIds = Array.from(connectionRegistry.getSocketIds());
+    for (const socketId of socketIds) {
       this.cleanup(socketId);
     }
   }

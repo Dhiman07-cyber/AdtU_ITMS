@@ -1,4 +1,4 @@
-﻿import { createAuditEvent } from '@/domains/audit';
+import { createAuditEvent } from '@/domains/audit';
 import { deleteStudent,deleteUser,getAllStudents,getStudentById } from '@/domains/identity';
 import { decrementBusCapacity } from '@/lib/busCapacityService';
 import { isSeatReleaseAtSoftBlockEnabled,wasSeatReleased } from '@/lib/config/capacity-flags';
@@ -7,6 +7,7 @@ import { adminAuth,adminDb } from '@/lib/firebase-admin';
 import { withSecurity } from '@/lib/security/api-security';
 import { RateLimits } from '@/lib/security/rate-limiter';
 import { SimulateDeadlinesSchema } from '@/lib/security/validation-schemas';
+import { deleteUserTokens } from '@/lib/services/fcm-token-service';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import { deriveAcademicLifecycle } from '@/lib/utils/deadline-computation';
 import { v2 as cloudinary } from 'cloudinary';
@@ -89,116 +90,137 @@ export const POST = withSecurity(
         });
 
         if (manualMode) {
-            selectedForSoftBlock.forEach((uid: string) => { const s = allStudents.find(st => st.uid === uid); if (s && !eligibleForSoftBlock.find(st => st.uid === uid)) eligibleForSoftBlock.push(s); });
-            selectedForHardDelete.forEach((uid: string) => { const s = allStudents.find(st => st.uid === uid); if (s && !eligibleForHardDelete.find(st => st.uid === uid)) eligibleForHardDelete.push(s); });
+            const studentMap = new Map(allStudents.map(st => [st.uid, st]));
+            const softBlockSet = new Set(eligibleForSoftBlock.map(st => st.uid));
+            for (const uid of selectedForSoftBlock) {
+                const s = studentMap.get(uid);
+                if (s && !softBlockSet.has(uid)) {
+                    eligibleForSoftBlock.push(s);
+                    softBlockSet.add(uid);
+                }
+            }
+            const hardDeleteSet = new Set(eligibleForHardDelete.map(st => st.uid));
+            for (const uid of selectedForHardDelete) {
+                const s = studentMap.get(uid);
+                if (s && !hardDeleteSet.has(uid)) {
+                    eligibleForHardDelete.push(s);
+                    hardDeleteSet.add(uid);
+                }
+            }
         }
 
         if (execute && !dryRun) {
             const executionResults = { softBlocked: 0, hardDeleted: 0, errors: [] as string[] };
             const releaseSeatAtSoftBlock = isSeatReleaseAtSoftBlockEnabled();
+            const BATCH_SIZE = 10;
             
-            for (const student of eligibleForSoftBlock) {
-                try {
-                    // Re-read student from PostgreSQL
-                    const sbData = await getStudentById(student.uid);
-                    if (!sbData) { continue; }
-                    
-                    // Idempotency: only release/transition a student who is still active.
-                    if (sbData.status !== 'active') { continue; }
+            for (let i = 0; i < eligibleForSoftBlock.length; i += BATCH_SIZE) {
+                const chunk = eligibleForSoftBlock.slice(i, i + BATCH_SIZE);
+                await Promise.all(chunk.map(async (student) => {
+                    try {
+                        // Re-read student from PostgreSQL
+                        const sbData = await getStudentById(student.uid);
+                        if (!sbData) return;
+                        
+                        // Idempotency: only release/transition a student who is still active.
+                        if (sbData.status !== 'active') return;
 
-                    const nowIso = new Date().toISOString();
-                    const sbBusId = sbData.busId || sbData.busId;
-                    const sbShift = sbData.shift;
+                        const nowIso = new Date().toISOString();
+                        const sbBusId = sbData.busId;
+                        const sbShift = sbData.shift;
 
-                    // Call the atomic RPC to soft-block and release the seat
-                    const supabase = getSupabaseServer();
-                    const { data: rpcResult, error: rpcError } = await supabase.rpc('soft_block_student_with_seat_release', {
-                        p_student_uid: student.uid,
-                        p_bus_id: releaseSeatAtSoftBlock ? sbBusId : null,
-                        p_shift: sbShift,
-                        p_release_seat: releaseSeatAtSoftBlock,
-                        p_soft_blocked_at: nowIso,
-                        p_seat_released_at: nowIso
-                    });
+                        // Call the atomic RPC to soft-block and release the seat
+                        const supabase = getSupabaseServer();
+                        const { data: rpcResult, error: rpcError } = await supabase.rpc('soft_block_student_with_seat_release', {
+                            p_student_uid: student.uid,
+                            p_bus_id: releaseSeatAtSoftBlock ? sbBusId : null,
+                            p_shift: sbShift,
+                            p_release_seat: releaseSeatAtSoftBlock,
+                            p_soft_blocked_at: nowIso,
+                            p_seat_released_at: nowIso
+                        });
 
-                    if (rpcError) {
-                        executionResults.errors.push(`Soft block failed for ${student.uid}: ${rpcError.message}`);
-                    } else if (!rpcResult || !rpcResult.success) {
-                        executionResults.errors.push(`Soft block failed for ${student.uid}: ${rpcResult?.error || 'Unknown RPC warning'}`);
-                    } else {
-                        executionResults.softBlocked++;
+                        if (rpcError) {
+                            executionResults.errors.push(`Soft block failed for ${student.uid}: ${rpcError.message}`);
+                        } else if (!rpcResult || !rpcResult.success) {
+                            executionResults.errors.push(`Soft block failed for ${student.uid}: ${rpcResult?.error || 'Unknown RPC warning'}`);
+                        } else {
+                            executionResults.softBlocked++;
 
-                        if (releaseSeatAtSoftBlock && sbBusId) {
-                            void createAuditEvent({
-                                action: 'seat_released',
-                                actor_id: 'system',
-                                actor_name: 'System (Simulation)',
-                                actor_role: 'admin',
-                                target_id: student.uid,
-                                target_type: 'student',
-                                target_name: sbData.fullName || '',
-                                category: 'system',
-                                summary: 'Seat released during simulation',
-                                severity: 'low',
-                                metadata: {
-                                    reason: 'soft_block_simulation',
-                                    busId: sbBusId,
-                                    shift: sbData.shift || null,
-                                    at: nowIso,
-                                },
-                            });
+                            if (releaseSeatAtSoftBlock && sbBusId) {
+                                void createAuditEvent({
+                                    action: 'seat_released',
+                                    actor_id: 'system',
+                                    actor_name: 'System (Simulation)',
+                                    actor_role: 'admin',
+                                    target_id: student.uid,
+                                    target_type: 'student',
+                                    target_name: sbData.fullName || '',
+                                    category: 'system',
+                                    summary: 'Seat released during simulation',
+                                    severity: 'low',
+                                    metadata: {
+                                        reason: 'soft_block_simulation',
+                                        busId: sbBusId,
+                                        shift: sbData.shift || null,
+                                        at: nowIso,
+                                    },
+                                });
+                            }
                         }
-                    }
-                } catch (err: any) { executionResults.errors.push(`Soft block failed for ${student.uid}: ${err.message}`); }
+                    } catch (err: any) { executionResults.errors.push(`Soft block failed for ${student.uid}: ${err.message}`); }
+                }));
             }
 
-            for (const student of eligibleForHardDelete) {
-                try {
-                    const studentData = await getStudentById(student.uid);
-                    if (!studentData) { continue; }
-
-                    const profilePhotoUrl = studentData?.profilePhotoUrl || studentData?.profileImage || studentData?.photoUrl;
-                    if (profilePhotoUrl && cloudinary.config().api_key) {
-                        try {
-                            const url = new URL(profilePhotoUrl);
-                            const parts = url.pathname.split('/');
-                            const uploadIdx = parts.findIndex(p => p === 'upload');
-                            if (uploadIdx !== -1) {
-                                const after = parts.slice(uploadIdx + 1);
-                                const publicIdWithExt = after.filter(p => !p.startsWith('v') || isNaN(Number(p.substring(1)))).join('/');
-                                const publicId = publicIdWithExt.split('.').slice(0, -1).join('.');
-                                await cloudinary.uploader.destroy(publicId);
-                            }
-                        } catch (e) {}
-                    }
-
-                    // Delete FCM tokens from PostgreSQL
-                    const { deleteUserTokens } = await import('@/lib/services/fcm-token-service');
-                    await deleteUserTokens(student.uid);
-
-                    const waitingFlags = await adminDb.collection('waiting_flags').where('student_uid', '==', student.uid).limit(400).get();
-                    if (!waitingFlags.empty) { const b = adminDb.batch(); waitingFlags.docs.forEach((d: any) => b.delete(d.ref)); await b.commit(); }
-
-                    // DEDUP GUARD: skip decrement if the seat was already released at soft block.
-                    const busId = studentData?.busId || studentData?.busId;
-                    if (busId && !wasSeatReleased(studentData)) {
-                        await decrementBusCapacity(busId, student.uid, studentData?.shift).catch(() => {});
-                    }
-
+            for (let i = 0; i < eligibleForHardDelete.length; i += BATCH_SIZE) {
+                const chunk = eligibleForHardDelete.slice(i, i + BATCH_SIZE);
+                await Promise.all(chunk.map(async (student) => {
                     try {
-                        const userRecord = await adminAuth.getUser(student.uid);
-                        if (userRecord.providerData.some((p: any) => p.providerId === 'google.com')) {
-                            await adminAuth.updateUser(student.uid, { providerToDelete: 'google.com' });
+                        const studentData = await getStudentById(student.uid);
+                        if (!studentData) return;
+
+                        const profilePhotoUrl = studentData?.profilePhotoUrl || studentData?.profileImage || studentData?.photoUrl;
+                        if (profilePhotoUrl && cloudinary.config().api_key) {
+                            try {
+                                const url = new URL(profilePhotoUrl);
+                                const parts = url.pathname.split('/');
+                                const uploadIdx = parts.findIndex(p => p === 'upload');
+                                if (uploadIdx !== -1) {
+                                    const after = parts.slice(uploadIdx + 1);
+                                    const publicIdWithExt = after.filter(p => !p.startsWith('v') || isNaN(Number(p.substring(1)))).join('/');
+                                    const publicId = publicIdWithExt.split('.').slice(0, -1).join('.');
+                                    await cloudinary.uploader.destroy(publicId);
+                                }
+                            } catch (e) {}
                         }
-                        await adminAuth.deleteUser(student.uid);
-                    } catch (e) {}
 
-                    // Delete from PostgreSQL
-                    await deleteStudent(student.uid);
-                    await deleteUser(student.uid).catch(() => {});
+                        // Delete FCM tokens from PostgreSQL (hoisted import)
+                        await deleteUserTokens(student.uid);
 
-                    executionResults.hardDeleted++;
-                } catch (err: any) { executionResults.errors.push(`Hard delete failed for ${student.uid}: ${err.message}`); }
+                        const waitingFlags = await adminDb.collection('waiting_flags').where('student_uid', '==', student.uid).limit(400).get();
+                        if (!waitingFlags.empty) { const b = adminDb.batch(); waitingFlags.docs.forEach((d: any) => b.delete(d.ref)); await b.commit(); }
+
+                        // DEDUP GUARD: skip decrement if the seat was already released at soft block.
+                        const busId = studentData?.busId;
+                        if (busId && !wasSeatReleased(studentData)) {
+                            await decrementBusCapacity(busId, student.uid, studentData?.shift).catch(() => {});
+                        }
+
+                        try {
+                            const userRecord = await adminAuth.getUser(student.uid);
+                            if (userRecord.providerData.some((p: any) => p.providerId === 'google.com')) {
+                                await adminAuth.updateUser(student.uid, { providerToDelete: 'google.com' });
+                            }
+                            await adminAuth.deleteUser(student.uid);
+                        } catch (e) {}
+
+                        // Delete from PostgreSQL
+                        await deleteStudent(student.uid);
+                        await deleteUser(student.uid).catch(() => {});
+
+                        executionResults.hardDeleted++;
+                    } catch (err: any) { executionResults.errors.push(`Hard delete failed for ${student.uid}: ${err.message}`); }
+                }));
             }
 
             return NextResponse.json({

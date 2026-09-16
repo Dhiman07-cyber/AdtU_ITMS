@@ -177,6 +177,12 @@ CREATE TABLE IF NOT EXISTS buses (
     morning_load    INTEGER NOT NULL DEFAULT 0 CHECK (morning_load >= 0),
     evening_load    INTEGER NOT NULL DEFAULT 0 CHECK (evening_load >= 0),
     current_members INTEGER NOT NULL DEFAULT 0,
+    model           TEXT,
+    year            INTEGER,
+    route_id        TEXT,
+    route_name      TEXT,
+    last_started_at TIMESTAMPTZ,
+    last_ended_at   TIMESTAMPTZ,
     status          TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'maintenance')),
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -208,30 +214,60 @@ CREATE TABLE IF NOT EXISTS routes (
 -- ── 3.4 Application Domain ────────────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS applications (
-    id                  TEXT PRIMARY KEY,
-    applicant_uid       TEXT NOT NULL,
-    application_type    TEXT NOT NULL DEFAULT 'new' CHECK (application_type IN ('new', 'renewal')),
-    status              TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'pending', 'approved', 'rejected')),
-    shift               TEXT NOT NULL CHECK (shift IN ('Morning', 'Evening')),
-    preferred_bus_id    TEXT,
-    preferred_route_id  TEXT,
-    stop_name           TEXT,
-    academic_year       TEXT,
-    semester            TEXT,
-    documents           JSONB DEFAULT '{}',
-    payment_status      TEXT DEFAULT 'unpaid',
-    payment_amount      NUMERIC(10,2),
-    payment_id          TEXT,
-    reviewed_by         TEXT,
-    reviewed_at         TIMESTAMPTZ,
-    rejection_reason    TEXT,
-    review_locked_by    TEXT,
-    review_locked_at    TIMESTAMPTZ,
-    renewal_original_bus_id TEXT,
-    renewal_original_route_id TEXT,
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    application_id              TEXT PRIMARY KEY,
+    applicant_uid               TEXT NOT NULL,
+    applicant_email             TEXT,
+    email                       TEXT,
+    state                       TEXT NOT NULL DEFAULT 'draft' CHECK (state IN ('draft', 'awaiting_verification', 'verified', 'submitted', 'verified_upcoming', 'pending_seat_allocation', 'approved', 'rejected', 'expired')),
+    application_type            TEXT NOT NULL DEFAULT 'fresh' CHECK (application_type IN ('fresh', 'future', 'renewal', 'renewal_after_soft_block', 'new')),
+    form_data                   JSONB DEFAULT '{}',
+    state_history               JSONB DEFAULT '[]',
+    target_session              JSONB,
+    pending_verifier            TEXT,
+    verification_attempts       INTEGER DEFAULT 0,
+    verified_at                 TIMESTAMPTZ,
+    verified_by                 TEXT,
+    verified_by_id              TEXT,
+    submitted_at                TIMESTAMPTZ,
+    submitted_by                TEXT,
+    approved_at                 TIMESTAMPTZ,
+    approved_by                 TEXT,
+    approved_by_id              TEXT,
+    application_version         TEXT,
+    needs_capacity_review       BOOLEAN DEFAULT FALSE,
+    reassignment_reason         TEXT,
+    has_alternative_buses       BOOLEAN DEFAULT FALSE,
+    payment_id                  TEXT,
+    eligible_approval           TIMESTAMPTZ,
+    linked_student_uid          TEXT,
+    verified_upcoming_at        TIMESTAMPTZ,
+    verified_upcoming_by        TEXT,
+    verified_upcoming_by_id     TEXT,
+    pending_seat_allocation_at  TIMESTAMPTZ,
+    assigned_driver_id          TEXT,
+    assigned_driver_name        TEXT,
+    expired_at                  TIMESTAMPTZ,
+    expiry_reason               TEXT,
+    eligible_reminder_sent_at   TIMESTAMPTZ,
+    bus_id                      TEXT,
+    route_id                    TEXT,
+    stop_name                   TEXT,
+    shift                       TEXT,
+    session_start_year          INTEGER,
+    session_end_year            INTEGER,
+    processing_lock             TEXT,
+    processing_lease_expires_at TIMESTAMPTZ,
+    processing_started_at       TIMESTAMPTZ,
+    processing_result           JSONB,
+    processing_completed_at     TIMESTAMPTZ,
+    created_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_by                  TEXT
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_applications_active_student_session 
+ON applications (applicant_uid, session_start_year) 
+WHERE state NOT IN ('rejected', 'cancelled', 'expired');
 
 -- ── 3.5 Financial Domain (Payments Ledger) ─────────────────────────────────────
 
@@ -267,6 +303,19 @@ CREATE TABLE IF NOT EXISTS public.payments (
 );
 
 -- ── 3.6 Realtime & Operations Domain ──────────────────────────────────────────
+
+
+CREATE TABLE IF NOT EXISTS public.processed_payments (
+    payment_id TEXT PRIMARY KEY,
+    order_id TEXT,
+    processed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at TIMESTAMPTZ NOT NULL,
+    amount NUMERIC,
+    enrollment_id TEXT,
+    user_id TEXT,
+    source TEXT DEFAULT 'system',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 
 CREATE TABLE IF NOT EXISTS public.active_trips (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -388,6 +437,10 @@ CREATE TABLE IF NOT EXISTS public.reassignment_logs (
   status TEXT NOT NULL DEFAULT 'pending',
   records_count INTEGER NOT NULL DEFAULT 0,
   details JSONB NOT NULL DEFAULT '{}'::jsonb,
+  summary TEXT,
+  changes JSONB NOT NULL DEFAULT '[]'::jsonb,
+  meta JSONB NOT NULL DEFAULT '{}'::jsonb,
+  rollback_of TEXT,
   bus_id TEXT,
   driver_id TEXT,
   route_id TEXT,
@@ -488,7 +541,13 @@ CREATE INDEX IF NOT EXISTS idx_driver_profiles_status ON driver_profiles(status)
 CREATE INDEX IF NOT EXISTS idx_driver_profiles_is_reserved ON driver_profiles(is_reserved);
 
 CREATE INDEX IF NOT EXISTS idx_applications_applicant_uid ON applications(applicant_uid);
-CREATE INDEX IF NOT EXISTS idx_applications_status ON applications(status);
+CREATE INDEX IF NOT EXISTS idx_applications_state ON applications(state);
+CREATE INDEX IF NOT EXISTS idx_applications_state_type ON applications(state, application_type);
+CREATE INDEX IF NOT EXISTS idx_applications_bus_id ON applications(bus_id);
+CREATE INDEX IF NOT EXISTS idx_buses_route_id ON buses(route_id);
+CREATE INDEX IF NOT EXISTS idx_reassignment_logs_rollback_of ON reassignment_logs(rollback_of);
+CREATE INDEX IF NOT EXISTS idx_notifications_sender_user_id ON notifications(sender_user_id);
+CREATE INDEX IF NOT EXISTS idx_processed_payments_expires_at ON processed_payments(expires_at);
 CREATE INDEX IF NOT EXISTS idx_applications_preferred_bus_id ON applications(preferred_bus_id);
 
 CREATE INDEX IF NOT EXISTS idx_payments_student_uid ON payments(student_uid);
@@ -1509,7 +1568,18 @@ BEGIN
         RETURN jsonb_build_object('success', false, 'error', 'Invalid shift: ' || COALESCE(p_shift, 'NULL'));
     END IF;
 
-    -- 2. Lock bus row and check capacity atomically
+    -- 2. Lock student profile row to preserve exact original state for rollback compensation
+    SELECT uid, status, valid_until, session_end_year, session_duration, soft_block, hard_block, seat_released_at, last_processed_application_id
+    INTO v_student
+    FROM student_profiles
+    WHERE uid = p_student_uid
+    FOR UPDATE;
+
+    IF NOT FOUND THEN
+        RETURN jsonb_build_object('success', false, 'error', 'Student profile not found: ' || p_student_uid);
+    END IF;
+
+    -- 3. Lock bus row and check capacity atomically
     SELECT id, capacity, morning_load, evening_load
     INTO v_bus
     FROM buses
@@ -1520,7 +1590,7 @@ BEGIN
         RETURN jsonb_build_object('success', false, 'error', 'Bus ' || p_bus_id || ' not found');
     END IF;
 
-    -- 3. Verify capacity has room
+    -- 4. Verify capacity has room
     IF v_normalized_shift = 'morning' THEN
         IF v_bus.morning_load >= v_bus.capacity THEN
             RETURN jsonb_build_object('success', false, 'error', 'CAPACITY_FULL', 'busId', p_bus_id, 'shift', p_shift);
@@ -1535,12 +1605,12 @@ BEGIN
         v_new_evening := v_bus.evening_load + 1;
     END IF;
 
-    -- 4. Increment bus capacity
+    -- 5. Increment bus capacity
     UPDATE buses
     SET morning_load = v_new_morning, evening_load = v_new_evening, current_members = v_new_morning + v_new_evening, updated_at = NOW()
     WHERE id = p_bus_id;
 
-    -- 5. Update student profile (re-activate, extend validity)
+    -- 6. Update student profile (re-activate, extend validity)
     UPDATE student_profiles SET
         status           = 'active',
         valid_until      = p_valid_until,
@@ -1562,7 +1632,7 @@ BEGIN
         RETURN jsonb_build_object('success', false, 'error', 'Student profile not found or not updated: ' || p_student_uid);
     END IF;
 
-    -- 6. Finalize application → approved (preserve for audit trail)
+    -- 7. Finalize application → approved (preserve for audit trail)
     UPDATE applications SET
         state                       = 'approved',
         approved_at                 = NOW(),
@@ -1579,8 +1649,17 @@ BEGIN
     GET DIAGNOSTICS v_app_updated = ROW_COUNT;
 
     IF v_app_updated <> 1 THEN
-        -- Compensate both student and bus
-        UPDATE student_profiles SET status = 'soft_blocked', seat_released_at = NOW(), updated_at = NOW()
+        -- Compensate both student and bus restoring exact original values
+        UPDATE student_profiles SET
+            status                        = v_student.status,
+            valid_until                   = v_student.valid_until,
+            session_end_year              = v_student.session_end_year,
+            session_duration              = v_student.session_duration,
+            soft_block                    = v_student.soft_block,
+            hard_block                    = v_student.hard_block,
+            seat_released_at              = v_student.seat_released_at,
+            last_processed_application_id = v_student.last_processed_application_id,
+            updated_at                    = NOW()
         WHERE uid = p_student_uid;
         UPDATE buses
         SET morning_load = v_bus.morning_load, evening_load = v_bus.evening_load, current_members = v_bus.morning_load + v_bus.evening_load, updated_at = NOW()
@@ -1858,6 +1937,57 @@ REVOKE EXECUTE ON FUNCTION public.activate_session_batch(INTEGER) FROM authentic
 REVOKE EXECUTE ON FUNCTION public.activate_session_batch(INTEGER) FROM anon;
 GRANT  EXECUTE ON FUNCTION public.activate_session_batch(INTEGER) TO service_role;
 
+-- ── 8.5.7b claim_application_for_activation & release ───────────────────────
+CREATE OR REPLACE FUNCTION public.claim_application_for_activation(
+    p_application_id TEXT,
+    p_lock_id TEXT,
+    p_lease_minutes INTEGER DEFAULT 5
+)
+RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+    v_app JSONB;
+BEGIN
+    UPDATE public.applications
+    SET processing_lock = p_lock_id,
+        processing_started_at = NOW(),
+        processing_lease_expires_at = NOW() + (p_lease_minutes || ' minutes')::INTERVAL
+    WHERE application_id = p_application_id
+      AND state IN ('verified_upcoming', 'pending_seat_allocation')
+      AND (processing_lock IS NULL OR processing_lease_expires_at < NOW())
+    RETURNING to_jsonb(public.applications.*) INTO v_app;
+
+    RETURN v_app;
+END;
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.claim_application_for_activation(TEXT, TEXT, INTEGER) FROM public;
+REVOKE EXECUTE ON FUNCTION public.claim_application_for_activation(TEXT, TEXT, INTEGER) FROM authenticated;
+REVOKE EXECUTE ON FUNCTION public.claim_application_for_activation(TEXT, TEXT, INTEGER) FROM anon;
+GRANT EXECUTE ON FUNCTION public.claim_application_for_activation(TEXT, TEXT, INTEGER) TO service_role;
+
+CREATE OR REPLACE FUNCTION public.release_application_activation_claim(
+    p_application_id TEXT,
+    p_lock_id TEXT
+)
+RETURNS BOOLEAN LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+    UPDATE public.applications
+    SET processing_lock = NULL,
+        processing_started_at = NULL,
+        processing_lease_expires_at = NULL
+    WHERE application_id = p_application_id
+      AND processing_lock = p_lock_id;
+
+    RETURN FOUND;
+END;
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.release_application_activation_claim(TEXT, TEXT) FROM public;
+REVOKE EXECUTE ON FUNCTION public.release_application_activation_claim(TEXT, TEXT) FROM authenticated;
+REVOKE EXECUTE ON FUNCTION public.release_application_activation_claim(TEXT, TEXT) FROM anon;
+GRANT EXECUTE ON FUNCTION public.release_application_activation_claim(TEXT, TEXT) TO service_role;
+
+
 
 -- ── 8.5.8 reassign_students_atomically ──────────────────────────────────────
 -- Caller: fleet.repository.pg.ts:285
@@ -1924,9 +2054,12 @@ BEGIN
             SELECT bus_decrement_capacity(v_from_bus_id, v_old_shift) INTO v_cap_result;
         END IF;
 
-        -- Increment to-bus capacity using student's NEW shift
+        -- Increment to-bus capacity using student's NEW shift and enforce capacity guard
         IF v_to_bus_id IS NOT NULL AND v_to_bus_id <> '' THEN
             SELECT bus_increment_capacity(v_to_bus_id, v_new_shift) INTO v_cap_result;
+            IF v_cap_result->>'error' IS NOT NULL THEN
+                RAISE EXCEPTION 'Capacity exceeded during reassignment for bus %: %', v_to_bus_id, v_cap_result->>'error';
+            END IF;
         END IF;
 
         -- Resolve stop_name override if provided

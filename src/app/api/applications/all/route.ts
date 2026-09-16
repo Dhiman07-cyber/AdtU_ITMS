@@ -26,8 +26,18 @@ export async function GET(request: NextRequest) {
     const offset = parseInt(searchParams.get('offset') || '0', 10);
 
     const applications = await getAllPaginated(limit, offset);
+    const hasMore = applications.length === limit;
 
-    return NextResponse.json({ applications });
+    return NextResponse.json(
+      { applications, hasMore },
+      {
+        headers: {
+          'X-Has-More': String(hasMore),
+          'X-Page-Offset': String(offset),
+          'X-Page-Limit': String(limit),
+        },
+      }
+    );
   } catch (error: any) {
     console.error('Error fetching applications:', error);
     return NextResponse.json(

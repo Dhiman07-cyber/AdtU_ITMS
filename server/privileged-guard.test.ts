@@ -77,8 +77,10 @@ describe('Privileged Authenticator Token Boundary', () => {
     (process.env as any).NODE_ENV = 'test';
 
     const fakeReq: any = {
-      url: `/?token=${token}`,
-      headers: {},
+      url: '/',
+      headers: {
+        authorization: `Bearer ${token}`,
+      },
     };
 
     const res = await authenticateSocket(fakeReq);
@@ -90,10 +92,27 @@ describe('Privileged Authenticator Token Boundary', () => {
     expect(JSON.stringify(res)).not.toContain(token);
   });
 
+  it('rejects tokens passed via URL query parameter (AUTH-03 / SEC-04)', async () => {
+    const token = 'test-long-secret-key-12345';
+    process.env.WS_PRIVILEGED_TOKEN = token;
+    (process.env as any).NODE_ENV = 'test';
+
+    const fakeReq: any = {
+      url: `/?token=${token}`,
+      headers: {},
+    };
+
+    const res = await authenticateSocket(fakeReq);
+    expect(res.authenticated).toBe(false);
+    expect(res.role).toBeUndefined();
+  });
+
   it('invalid token cannot establish role=server', async () => {
     const fakeReq: any = {
-      url: '/?token=invalid-random-token-attempt',
-      headers: {},
+      url: '/',
+      headers: {
+        authorization: 'Bearer invalid-random-token-attempt',
+      },
     };
 
     const res = await authenticateSocket(fakeReq);

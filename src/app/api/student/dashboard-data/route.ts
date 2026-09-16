@@ -23,23 +23,22 @@ export const GET = withSecurity(
         const uid = auth.uid;
         const supabase = getSupabaseServer();
 
-        // 1. Fetch Student Profile from PostgreSQL
-        let studentData: Record<string, any> | null = null;
-        try {
-            studentData = await getByUid(uid) as Record<string, any> | null;
-        } catch {
-            studentData = null;
-        }
-
-        if (!studentData) {
-            // Check if student has an application in PostgreSQL
-            const { data: appRow } = await supabase
+        // 1. Fetch Student Profile and Application fallback in parallel
+        const [studentDataRes, appRes] = await Promise.all([
+            getByUid(uid).catch(() => null),
+            supabase
                 .from('applications')
-                .select('*')
+                .select('application_id, state, applicant_email, form_data, target_session, bus_id, route_id, stop_name, shift, created_at')
                 .eq('applicant_uid', uid)
                 .order('created_at', { ascending: false })
                 .limit(1)
-                .maybeSingle();
+                .maybeSingle(),
+        ]);
+
+        const studentData = studentDataRes as Record<string, any> | null;
+
+        if (!studentData) {
+            const appRow = appRes?.data;
 
             if (appRow) {
                 const appState = appRow.state;

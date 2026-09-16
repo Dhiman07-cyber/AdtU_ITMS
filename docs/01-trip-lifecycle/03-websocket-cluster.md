@@ -58,7 +58,7 @@ Communication over the WebSocket connection adheres to a strict framing protocol
 
 ### 3.1 Authentication Handshake
 
-Every connection begins in an unauthenticated state. The client must transmit an `auth` message within 15 seconds, or the socket is forcefully closed.
+Every connection begins in an unauthenticated state. The client must transmit an `auth` message within 5 seconds (`AUTH_TIMEOUT_MS = 5000`), or the socket is forcefully closed with code 1008/4001. URL query parameters (`?token=...`) are strictly disabled in production.
 
 **Client Request:**
 ```json
@@ -234,4 +234,17 @@ After the new patch, the internal bridge was updated to use dedicated `WS_SERVER
 1. The Next.js API server connects to the dedicated WebSocket server using a clean URL path (`/ws`) with zero credentials in the address bar or HTTP request line.
 2. Upon connection `open`, the internal transport transmits an encrypted JSON authentication envelope over the established socket.
 3. The WebSocket server verifies the secret, assigns `{ authenticated: true, uid: 'server', role: 'server' }`, and grants unthrottled broadcast privileges to publish driver location telemetry across subscriber channels.
+
+---
+
+### 4.6 Cross-Node Active Session Invalidation & Role Revocation (`role_invalidate`)
+
+When administrators modify permissions, demote roles, or suspend user accounts in the PostgreSQL database:
+1. The administrative API publishes the modified `uid` to the Redis channel `role_invalidate`.
+2. All WebSocket server instances in the cluster listen on `role_invalidate`:
+   - Purge handshake cache entries (`invalidateTokenAuthCache(uid)`).
+   - Query `sessionManager.getByUid(uid)` to locate all active sessions for that user on the current node.
+   - Forcefully close each active socket with code `4401` (`Role revoked or permissions modified - please re-authenticate`).
+   - Unregister connections from `connectionRegistry` and delete session state from `sessionManager`.
+This ensures that a demoted user cannot maintain elevated privileges merely by keeping an existing socket connection open.
 

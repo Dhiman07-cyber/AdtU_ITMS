@@ -32,6 +32,7 @@ import {
 	getLegalConfig,
 	getSystemConfig,
 	getUiConfig,
+	invalidateConfigCache,
 	updateLandingConfig,
 	updateLegalConfig,
 	updateSystemConfig,
@@ -76,6 +77,7 @@ const ACTIVATION_MARKER = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  invalidateConfigCache();
 });
 
 describe('Config Service', () => {

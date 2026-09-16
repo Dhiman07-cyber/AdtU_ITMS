@@ -4,6 +4,7 @@ import type WebSocket from 'ws';
 import type { Session } from './session-manager';
 
 const channelSubscriptions = new Map<string, Set<string>>();
+const EMPTY_SET: ReadonlySet<string> = new Set<string>();
 
 export class SubscriptionManager {
   subscribe(socketId: string, channel: string, ws: WebSocket, session: Session): void {
@@ -35,8 +36,8 @@ export class SubscriptionManager {
     session.subscriptions.clear();
   }
 
-  getSubscribers(channel: string): string[] {
-    return Array.from(channelSubscriptions.get(channel) || []);
+  getSubscribers(channel: string): ReadonlySet<string> {
+    return channelSubscriptions.get(channel) ?? EMPTY_SET;
   }
 
   getChannelCount(): number {

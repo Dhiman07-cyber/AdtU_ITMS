@@ -50,32 +50,27 @@ export class WebSocketServer {
       });
 
       // ── Authentication ──────────────────────────────────────────────────────
-      // Phase-04: Two auth paths are supported simultaneously:
+      // Two auth paths are supported:
       //   Path A (DEPRECATED): Token in URL query string
       //     - Works for existing clients during migration window.
       //     - Logged at 'warn' level to measure adoption progress.
-      //     - Will be removed in Phase-05 once all clients migrate.
       //   Path B (PREFERRED): Token in first WebSocket message
       //     - Client sends { type: 'auth', token: '<firebase_id_token>' }
       //       within AUTH_TIMEOUT_MS after connection opens.
-      //     - Token never appears in server access logs.
-      //     - Client must handle 'auth_required' if timeout expires.
+      //     - Token never appears in server access logs or the upgrade URL.
+      //     - Client must handle 'auth_required' if the timeout expires.
       // ────────────────────────────────────────────────────────────────────────
       const AUTH_TIMEOUT_MS = 5000;
-      // Substring `includes('token=')` would also match `reconnect_token=` — a
-      // reconnect URL then wrongly took Path A, authenticateSocket found no
-      // `token` param, and the socket was closed before Path B auth ever ran.
-      // Test for a real `token` query param instead.
       const urlHasToken = (() => {
         try { return !!request.url && new URL(request.url, 'http://localhost').searchParams.has('token'); }
         catch { return false; }
       })();
 
       // Buffer every message received while authentication is in flight.
-      // Without this, subscribe/presence messages sent immediately after
-      // 'auth' (Path B) or right after the WS handshake (Path A) are silently
-      // dropped while Firebase verification (100-500ms) is running — a real
-      // race: the client sends subscribe on open and never resends it.
+      // Without this, subscribe/presence messages sent immediately after the
+      // 'auth' frame are silently dropped while Firebase verification
+      // (100-500ms) is running — the client sends subscribe on open and never
+      // resends it.
       const preAuthBuffer: any[] = [];
       const bufferMessage = (data: any) => {
         if (preAuthBuffer.length >= PRE_AUTH_BUFFER_LIMIT) {
@@ -91,14 +86,19 @@ export class WebSocketServer {
       let auth;
 
       if (urlHasToken) {
-        // Path A (deprecated): authenticate from URL query string immediately.
+        if (process.env.NODE_ENV === 'production') {
+          // SEC-04: Reject query parameter authentication in production to prevent credential leakage in logs & URLs
+          logger.warn('ws_url_token_rejected_prod', { ip });
+          ws.close(4001, 'URL query token authentication is disabled in production. Use first-message auth.');
+          return;
+        }
+        // Path A (deprecated for development/testing only): authenticate from URL query string immediately.
         auth = await authenticateSocket(request);
         if (auth.authenticated) {
           logger.warn('ws_url_token_deprecated', {
             uid: auth.uid,
             ip,
-            // NOTE: Do NOT log the token itself — only a deprecation signal.
-            message: 'Client authenticated via URL token. Migrate to first-message auth (Phase-05).',
+            message: 'Client authenticated via URL token. Migrate to first-message auth.',
           });
         }
       } else {
@@ -321,7 +321,7 @@ export class WebSocketServer {
   }
 
   broadcastToChannel(channel: string, event: string, payload: Record<string, unknown>): void {
-    const subscriberIds = subscriptionManager.getSubscribers(channel);
+    const subscriberIds = Array.from(subscriptionManager.getSubscribers(channel));
     if (subscriberIds.length === 0) {
       // Critical diagnostic: if we reach here for a bus_location channel, the
       // broadcast was received but NO subscriber was registered — either the
@@ -335,30 +335,27 @@ export class WebSocketServer {
     const msg = encodeMsg({ type: 'message', channel, event, payload });
     let sent = 0;
 
-    for (let i = 0; i < subscriberIds.length; i += MAX_BATCH_SIZE) {
-      const batch = subscriberIds.slice(i, i + MAX_BATCH_SIZE);
-      for (const socketId of batch) {
-        const entry = connectionRegistry.get(socketId);
-        // Send only to sockets that are OPEN and not already saturated. A socket
-        // whose writable buffer is full will silently drop (or delay) additional
-        // frames — enqueueOffline gives the message a durable retry path instead.
-        if (entry && entry.ws.readyState === entry.ws.OPEN && entry.ws.bufferedAmount < MAX_BUFFERED_AMOUNT) {
-          entry.ws.send(msg, (err: Error | undefined) => {
-            if (err) {
-              metricsService.inc('errors');
-              logger.warn('broadcast_send_error', {
-                socketId,
-                uid: entry.session.uid,
-                channel,
-                event,
-                error: err.message,
-              });
-            }
-          });
-          sent++;
-        } else if (entry) {
-          enqueueOffline(entry.session.uid, channel, event, payload);
-        }
+    for (const socketId of subscriberIds) {
+      const entry = connectionRegistry.get(socketId);
+      // Send only to sockets that are OPEN and not already saturated. A socket
+      // whose writable buffer is full will silently drop (or delay) additional
+      // frames — enqueueOffline gives the message a durable retry path instead.
+      if (entry && entry.ws.readyState === entry.ws.OPEN && entry.ws.bufferedAmount < MAX_BUFFERED_AMOUNT) {
+        entry.ws.send(msg, (err: Error | undefined) => {
+          if (err) {
+            metricsService.inc('errors');
+            logger.warn('broadcast_send_error', {
+              socketId,
+              uid: entry.session.uid,
+              channel,
+              event,
+              error: err.message,
+            });
+          }
+        });
+        sent++;
+      } else if (entry) {
+        enqueueOffline(entry.session.uid, channel, event, payload);
       }
     }
 
@@ -373,35 +370,40 @@ export class WebSocketServer {
       return;
     }
 
-    const uniqueSockets = new Set<string>();
+    // Build a map: socketId → the channel it subscribed through.
+    // A socket may appear in multiple channels; use the first match (deterministic).
+    const socketToChannel = new Map<string, string>();
     for (const channel of channels) {
-      const subs = subscriptionManager.getSubscribers(channel);
-      for (let i = 0; i < subs.length; i++) {
-        uniqueSockets.add(subs[i]);
+      const subs = Array.from(subscriptionManager.getSubscribers(channel));
+      for (const sid of subs) {
+        if (!socketToChannel.has(sid)) {
+          socketToChannel.set(sid, channel);
+        }
       }
     }
 
-    const primaryChannel = channels[0];
-    const msg = encodeMsg({ type: 'message', channel: primaryChannel, event, payload });
     let sent = 0;
-    const socketIds = Array.from(uniqueSockets);
-
-    for (let i = 0; i < socketIds.length; i += MAX_BATCH_SIZE) {
-      const batch = socketIds.slice(i, i + MAX_BATCH_SIZE);
-      for (const socketId of batch) {
-        const entry = connectionRegistry.get(socketId);
-        if (entry && entry.ws.readyState === entry.ws.OPEN) {
-          entry.ws.send(msg);
-          sent++;
-        } else if (entry) {
-          enqueueOffline(entry.session.uid, primaryChannel, event, payload);
-        }
+    for (const [socketId, channel] of socketToChannel) {
+      const entry = connectionRegistry.get(socketId);
+      if (entry && entry.ws.readyState === entry.ws.OPEN && entry.ws.bufferedAmount < MAX_BUFFERED_AMOUNT) {
+        // Encode with the subscriber's own channel so client routing fires correctly.
+        const msg = encodeMsg({ type: 'message', channel, event, payload });
+        entry.ws.send(msg, (err: Error | undefined) => {
+          if (err) {
+            metricsService.inc('errors');
+            logger.warn('broadcast_send_error', { socketId, uid: entry.session.uid, channel, event, error: err.message });
+          }
+        });
+        sent++;
+      } else if (entry) {
+        enqueueOffline(entry.session.uid, channel, event, payload);
       }
     }
 
     metricsService.inc('messagesSent', sent);
     metricsService.inc('broadcastsSent');
   }
+
 
   shutdown(callback?: () => void): void {
     this.shuttingDown = true;

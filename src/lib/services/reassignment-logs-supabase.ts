@@ -151,20 +151,7 @@ class ReassignmentLogsService {
         }
 
         try {
-            // First, delete all existing logs of the same type (except rollbacks)
-            // This ensures only ONE doc per reassignment type is stored
-            if (payload.type !== 'rollback') {
-                const { error: deleteError } = await this.getClient()
-                    .from('reassignment_logs')
-                    .delete()
-                    .eq('type', payload.type);
-
-                if (deleteError) {
-                    console.warn(`[ReassignmentLogsService] Cleanup warning for ${payload.type}:`, deleteError);
-                } else {
-                    console.log(`[ReassignmentLogsService] Cleaned up old ${payload.type} logs`);
-                }
-            }
+            // Direct append — preserve all historical reassignment snapshots for deterministic rollback.
 
             // Now insert the new log
             const { data, error } = await this.getClient()

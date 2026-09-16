@@ -84,28 +84,50 @@ function cleanConfigForStorage(config: Record<string, unknown>): Record<string, 
   return cleaned;
 }
 
+// ─── Cache Layer ─────────────────────────────────────────────────────────────
+
+const CONFIG_CACHE_TTL_MS = 5 * 60 * 1000; // 5-minute TTL
+const configMemoryCache = new Map<string, { data: any; expiresAt: number }>();
+
+export function invalidateConfigCache(key?: string): void {
+  if (key) {
+    configMemoryCache.delete(key);
+  } else {
+    configMemoryCache.clear();
+  }
+}
+
 // ─── System Config ───────────────────────────────────────────────────────────
 
 export async function getSystemConfig(): Promise<ConfigResult<SystemConfig>> {
+  const cached = configMemoryCache.get('config');
+  if (cached && Date.now() < cached.expiresAt) {
+    return cached.data;
+  }
+
   if (!adminDb) {
     throw new Error('Firebase Admin SDK is not initialized. Please try again later.');
   }
 
   const doc = await adminDb.collection('settings').doc('config').get();
   if (!doc.exists) {
-    return {
+    const fallback: ConfigResult<SystemConfig> = {
       data: { appName: 'AdtU Bus Services', busFee: { amount: 5000, version: 1 } } as any,
       updatedAt: null,
       updatedByUid: null,
     };
+    configMemoryCache.set('config', { data: fallback, expiresAt: Date.now() + CONFIG_CACHE_TTL_MS });
+    return fallback;
   }
 
   const data = doc.data() as SystemConfig;
-  return {
+  const result: ConfigResult<SystemConfig> = {
     data: data,
     updatedAt: data.lastUpdated || data.updatedAt || null,
     updatedByUid: data.updatedBy || null,
   };
+  configMemoryCache.set('config', { data: result, expiresAt: Date.now() + CONFIG_CACHE_TTL_MS });
+  return result;
 }
 
 export async function updateSystemConfig(
@@ -125,12 +147,18 @@ export async function updateSystemConfig(
   cleaned.updatedBy = updatedByUid;
 
   await adminDb.collection('settings').doc('config').set(cleaned, { merge: true });
+  configMemoryCache.delete('config');
   return cleaned as SystemConfig;
 }
 
 // ─── Landing Config ──────────────────────────────────────────────────────────
 
 export async function getLandingConfig(): Promise<ConfigResult<LandingConfig>> {
+  const cached = configMemoryCache.get('landing');
+  if (cached && Date.now() < cached.expiresAt) {
+    return cached.data;
+  }
+
   const defaultConfig: LandingConfig = {
     heroTitle: 'AdtU Bus Services',
     heroSubtitle: 'Smart Campus Transit Portal',
@@ -149,19 +177,23 @@ export async function getLandingConfig(): Promise<ConfigResult<LandingConfig>> {
   try {
     const doc = await adminDb.collection('settings').doc('landing').get();
     if (!doc.exists) {
-      return {
+      const fallback: ConfigResult<LandingConfig> = {
         data: defaultConfig,
         updatedAt: null,
         updatedByUid: null,
       };
+      configMemoryCache.set('landing', { data: fallback, expiresAt: Date.now() + CONFIG_CACHE_TTL_MS });
+      return fallback;
     }
 
     const data = doc.data() as LandingConfig;
-    return {
+    const result: ConfigResult<LandingConfig> = {
       data: data,
       updatedAt: data.updatedAt || data.lastUpdated || null,
       updatedByUid: data.updatedBy || null,
     };
+    configMemoryCache.set('landing', { data: result, expiresAt: Date.now() + CONFIG_CACHE_TTL_MS });
+    return result;
   } catch (error) {
     console.warn('[getLandingConfig] Firestore read failed, returning fallback config:', error);
     return {
@@ -185,22 +217,30 @@ export async function updateLandingConfig(
 
   const merged = { ...previous, ...data, updatedAt: new Date().toISOString(), updatedBy: updatedByUid };
   await adminDb.collection('settings').doc('landing').set(merged, { merge: true });
+  configMemoryCache.delete('landing');
 }
 
 // ─── UI Config ───────────────────────────────────────────────────────────────
 
 export async function getUiConfig(): Promise<ConfigResult<UiConfig> | null> {
+  const cached = configMemoryCache.get('ui');
+  if (cached && Date.now() < cached.expiresAt) {
+    return cached.data;
+  }
+
   if (!adminDb) return null;
 
   const doc = await adminDb.collection('settings').doc('ui').get();
   if (!doc.exists) return null;
 
   const data = doc.data() as UiConfig;
-  return {
+  const result: ConfigResult<UiConfig> = {
     data,
     updatedAt: data.updatedAt || data.lastUpdated || null,
     updatedByUid: data.updatedBy || null,
   };
+  configMemoryCache.set('ui', { data: result, expiresAt: Date.now() + CONFIG_CACHE_TTL_MS });
+  return result;
 }
 
 export async function updateUiConfig(
@@ -216,30 +256,41 @@ export async function updateUiConfig(
 
   const merged = { ...previous, ...data, updatedAt: new Date().toISOString(), updatedBy: updatedByUid };
   await adminDb.collection('settings').doc('ui').set(merged, { merge: true });
+  configMemoryCache.delete('ui');
 }
 
 // ─── Legal Config (Privacy / Terms) ──────────────────────────────────────────
 
 export async function getLegalConfig(type: 'privacy' | 'terms'): Promise<ConfigResult<LegalConfig>> {
+  const cacheKey = `legal:${type}`;
+  const cached = configMemoryCache.get(cacheKey);
+  if (cached && Date.now() < cached.expiresAt) {
+    return cached.data;
+  }
+
   if (!adminDb) {
     throw new Error('Firebase Admin SDK is not initialized. Please try again later.');
   }
 
   const doc = await adminDb.collection('settings').doc(type).get();
   if (!doc.exists) {
-    return {
+    const fallback: ConfigResult<LegalConfig> = {
       data: { title: type === 'privacy' ? 'Privacy Policy' : 'Terms of Service', sections: [] },
       updatedAt: null,
       updatedByUid: null,
     };
+    configMemoryCache.set(cacheKey, { data: fallback, expiresAt: Date.now() + CONFIG_CACHE_TTL_MS });
+    return fallback;
   }
 
   const data = doc.data() as LegalConfig;
-  return {
+  const result: ConfigResult<LegalConfig> = {
     data: data,
     updatedAt: (data as any).updatedAt || (data as any).lastUpdated || null,
     updatedByUid: (data as any).updatedBy || null,
   };
+  configMemoryCache.set(cacheKey, { data: result, expiresAt: Date.now() + CONFIG_CACHE_TTL_MS });
+  return result;
 }
 
 export async function updateLegalConfig(
@@ -256,6 +307,7 @@ export async function updateLegalConfig(
 
   const merged = { ...previous, ...data, updatedAt: new Date().toISOString(), updatedBy: updatedByUid };
   await adminDb.collection('settings').doc(type).set(merged, { merge: true });
+  configMemoryCache.delete(`legal:${type}`);
 }
 
 // ─── System Markers ──────────────────────────────────────────────────────────

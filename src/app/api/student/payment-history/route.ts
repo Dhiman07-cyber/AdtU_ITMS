@@ -27,12 +27,14 @@ export const GET = withSecurity(
             );
         }
 
-        // 2. Fetch payment history using paymentsSupabaseService
-        // ✅ This properly decrypts sensitive fields (student_name, offline_transaction_id)
-        const payments = await paymentsSupabaseService.getPaymentsByStudentUid(
-            targetStudentUid,
-            { limit, offset }
-        );
+        // 2. Fetch payment history and student info in parallel — independent queries.
+        const [payments, studentData] = await Promise.all([
+            paymentsSupabaseService.getPaymentsByStudentUid(targetStudentUid, { limit, offset }),
+            getByUid(targetStudentUid).catch((err: unknown) => {
+                console.warn('Could not fetch student info:', err);
+                return null;
+            }),
+        ]);
 
         // 3. Transform payments for response (already decrypted by paymentsSupabaseService)
         const paymentHistory = payments.map((p: PaymentRecord) => ({
@@ -67,18 +69,11 @@ export const GET = withSecurity(
             currentValidity = sorted[0].valid_until || null;
         }
 
-        // 6. Get student basic info from PostgreSQL
-        let studentName = 'Unknown';
-        let studentId = null;
-        try {
-            const studentData = await getByUid(targetStudentUid) as Record<string, any> | null;
-            if (studentData) {
-                studentName = studentData.name || studentData.fullName || 'Unknown';
-                studentId = studentData.enrollmentId || studentData.id || null;
-            }
-        } catch (err) {
-            console.warn('Could not fetch student info:', err);
-        }
+        // 6. Extract student info from parallel-resolved data
+        const sd = studentData as Record<string, any> | null;
+        const studentName = sd?.name || sd?.fullName || 'Unknown';
+        const studentId = sd?.enrollmentId || sd?.id || null;
+
 
         return NextResponse.json({
             success: true,

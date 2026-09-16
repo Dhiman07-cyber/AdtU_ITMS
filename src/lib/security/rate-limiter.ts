@@ -131,21 +131,20 @@ async function checkRateLimitDistributed(
 
     try {
         const key = `rl:${identifier}`;
-        const incrRes = await fetch(`${UPSTASH_URL}/incr/${encodeURIComponent(key)}`, {
+        const pipelineRes = await fetch(`${UPSTASH_URL}/pipeline`, {
             method: 'POST',
-            headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` },
+            headers: {
+                Authorization: `Bearer ${UPSTASH_TOKEN}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify([
+                ['INCR', key],
+                ['EXPIRE', key, windowSec, 'NX'],
+            ]),
             cache: 'no-store',
         });
-        const incrJson = await incrRes.json();
-        const count = Number(incrJson?.result || 0);
-
-        if (count === 1) {
-            await fetch(`${UPSTASH_URL}/expire/${encodeURIComponent(key)}/${windowSec}`, {
-                method: 'POST',
-                headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` },
-                cache: 'no-store',
-            });
-        }
+        const pipelineJson = await pipelineRes.json();
+        const count = Number(pipelineJson?.[0]?.result || 0);
 
         if (count > maxRequests) {
             return { allowed: false, remaining: 0, resetIn: windowMs, limit: maxRequests };
@@ -159,6 +158,7 @@ async function checkRateLimitDistributed(
     } catch {
         return checkRateLimit(identifier, maxRequests, windowMs);
     }
+
 }
 
 /**

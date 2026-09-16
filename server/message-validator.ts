@@ -4,6 +4,9 @@ const MAX_EVENT_LENGTH = 64;
 
 const seenNonces = new Map<string, number>();
 const NONCE_EXPIRY = 30000;
+// Hard cap: at ~100 bytes/entry, 50K entries ≈ 5MB. Beyond this an attacker
+// is flooding unique nonces — reject rather than grow unboundedly.
+const MAX_NONCES = 50_000;
 
 const nonceCleanupTimer = setInterval(() => {
   const now = Date.now();
@@ -12,6 +15,7 @@ const nonceCleanupTimer = setInterval(() => {
 if (nonceCleanupTimer && typeof nonceCleanupTimer.unref === 'function') {
   nonceCleanupTimer.unref();
 }
+
 
 export function stopMessageValidator(): void {
   clearInterval(nonceCleanupTimer);
@@ -52,6 +56,11 @@ export function validateMessage(parsed: any): ValidationResult {
 export function checkReplay(nonce: string): boolean {
   const key = `nonce:${nonce}`;
   if (seenNonces.has(key)) return false;
+  // Bound memory strictly: evict oldest entry in O(1) if at capacity to prevent DoS lockouts
+  if (seenNonces.size >= MAX_NONCES) {
+    const oldestKey = seenNonces.keys().next().value;
+    if (oldestKey) seenNonces.delete(oldestKey);
+  }
   seenNonces.set(key, Date.now());
   return true;
 }

@@ -117,3 +117,16 @@ The infrastructure services reside on an isolated internal bridge network (`itms
   - `redis:6379` is bound exclusively to `127.0.0.1` on the host and accessible over the Docker `itms` network.
   - `nextjs:3000`, `ws1:3001`, and `ws2:3001` are private to the bridge network.
   - Prometheus and Alertmanager scrape metrics over Docker DNS (`ws1:9090`, `nextjs:3000`).
+
+---
+
+## 6. Client IP Identification & Anti-Spoofing Architecture
+
+### The Client Spoofing Risk
+When an incoming request passes through reverse proxies, naive implementations extract `X-Forwarded-For.split(',')[0]`. If a client supplies `X-Forwarded-For: 10.0.0.1`, NGINX's `$proxy_add_x_forwarded_for` appends the real remote address (`10.0.0.1, <real_ip>`). Taking the first element allows attackers to spoof arbitrary client IPs, evading rate limits and brute-force throttles.
+
+### The Defensive Architecture
+The application (`src/proxy.ts`, `src/lib/security/api-security.ts`, and sensitive admin routes) enforces strict IP extraction precedence:
+1. **`X-Real-IP`**: Evaluated first. Set directly by NGINX using `$remote_addr` (`proxy_set_header X-Real-IP $remote_addr;`). The client cannot forge or overwrite this header.
+2. **`CF-Connecting-IP`**: Used when fronted by Cloudflare CDN edges.
+3. **Rightmost Element of `X-Forwarded-For`**: When `X-Forwarded-For` is evaluated, the application inspects `parts[parts.length - 1]`, corresponding to the IP address appended by the closest trusted reverse proxy hop, completely defeating client-side header spoofing.

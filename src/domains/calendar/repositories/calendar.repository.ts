@@ -28,7 +28,18 @@ const getOrdinal = (day: number): string => {
   }
 };
 
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5-minute TTL
+let activeConfigCache: { data: DeadlineConfig; expiresAt: number } | null = null;
+
+export function invalidateActiveConfigCache(): void {
+  activeConfigCache = null;
+}
+
 export async function findActiveConfig(): Promise<DeadlineConfig> {
+  if (activeConfigCache && Date.now() < activeConfigCache.expiresAt) {
+    return activeConfigCache.data;
+  }
+
   if (!adminDb) {
     throw new Error('Firebase Admin SDK is not initialized. Please try again later.');
   }
@@ -164,6 +175,7 @@ export async function findActiveConfig(): Promise<DeadlineConfig> {
     },
   };
 
+  activeConfigCache = { data: config, expiresAt: Date.now() + CACHE_TTL_MS };
   return config;
 }
 
@@ -194,6 +206,7 @@ export async function saveConfig(config: DeadlineConfig, updatedByUid?: string):
   };
 
   await adminDb.collection(SETTINGS_COLLECTION).doc(DEADLINE_DOC_ID).set(payload, { merge: true });
+  invalidateActiveConfigCache();
 }
 
 

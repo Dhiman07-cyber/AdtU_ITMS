@@ -62,18 +62,28 @@ function deriveKey(salt: Buffer, secret: string = ENCRYPTION_KEY): Buffer {
     checkKeys();
     const cacheKey = salt.toString('hex') + ':' + secret;
     const cached = derivedKeyCache.get(cacheKey);
-    if (cached) return cached;
+    if (cached) {
+        // Refresh LRU position
+        derivedKeyCache.delete(cacheKey);
+        derivedKeyCache.set(cacheKey, cached);
+        return cached;
+    }
 
     const derived = crypto.pbkdf2Sync(secret, salt, ITERATION_COUNT, KEY_LENGTH, 'sha256');
 
     if (derivedKeyCache.size >= MAX_KEY_CACHE_SIZE) {
-        const keys = Array.from(derivedKeyCache.keys());
-        for (let i = 0; i < 1000; i++) {
-            derivedKeyCache.delete(keys[i]);
+        let evicted = 0;
+        for (const key of derivedKeyCache.keys()) {
+            derivedKeyCache.delete(key);
+            if (++evicted >= 1000) break;
         }
     }
     derivedKeyCache.set(cacheKey, derived);
     return derived;
+}
+
+export function clearDerivedKeyCache(): void {
+    derivedKeyCache.clear();
 }
 
 // ============================================================================
@@ -137,8 +147,9 @@ export function encryptQRCodeData(
     const authTag = cipher.getAuthTag();
 
     // Combine: version (1 byte) + salt (16 bytes) + iv (16 bytes) + authTag (16 bytes) + encrypted
+    // Combine: version (1 byte) + salt (16 bytes) + iv (16 bytes) + authTag (16 bytes) + encrypted
     const combined = Buffer.concat([
-        Buffer.from([1]), // Version byte
+        Buffer.from([2]), // Version 2 byte (128-bit HMAC signature)
         salt,
         iv,
         authTag,
@@ -150,8 +161,8 @@ export function encryptQRCodeData(
     hmac.update(combined);
     const signature = hmac.digest();
 
-    // Combine with signature
-    const finalBuffer = Buffer.concat([combined, signature.subarray(0, 8)]); // First 8 bytes of HMAC
+    // Combine with 16-byte (128-bit) signature (NEW-06)
+    const finalBuffer = Buffer.concat([combined, signature.subarray(0, 16)]);
 
     return finalBuffer.toString('base64url');
 }
@@ -167,7 +178,7 @@ export function decryptQRCodeData(token: string): QRCodePayload | null {
         // Decode from base64url
         const buffer = Buffer.from(token, 'base64url');
 
-        // Minimum size check
+        // Minimum size check (header + salt + iv + authTag + min-encrypted + min-sig)
         if (buffer.length < 1 + SALT_LENGTH + IV_LENGTH + AUTH_TAG_LENGTH + 8 + 1) {
             console.warn('QR token too short');
             return null;
@@ -179,10 +190,13 @@ export function decryptQRCodeData(token: string): QRCodePayload | null {
         const version = buffer[offset];
         offset += 1;
 
-        if (version !== 1) {
+        if (version !== 1 && version !== 2) {
             console.warn('Unsupported QR token version:', version);
             return null;
         }
+
+        // Version 2 uses 16-byte (128-bit) HMAC; Version 1 uses legacy 8-byte HMAC
+        const sigLength = version === 2 ? 16 : 8;
 
         const salt = buffer.subarray(offset, offset + SALT_LENGTH);
         offset += SALT_LENGTH;
@@ -193,14 +207,14 @@ export function decryptQRCodeData(token: string): QRCodePayload | null {
         const authTag = buffer.subarray(offset, offset + AUTH_TAG_LENGTH);
         offset += AUTH_TAG_LENGTH;
 
-        const signatureFromToken = buffer.subarray(buffer.length - 8);
-        const encryptedWithoutSig = buffer.subarray(offset, buffer.length - 8);
-        const combinedWithoutSig = buffer.subarray(0, buffer.length - 8);
+        const signatureFromToken = buffer.subarray(buffer.length - sigLength);
+        const encryptedWithoutSig = buffer.subarray(offset, buffer.length - sigLength);
+        const combinedWithoutSig = buffer.subarray(0, buffer.length - sigLength);
 
         // Verify HMAC signature
         const hmac = crypto.createHmac('sha256', SIGNING_KEY);
         hmac.update(combinedWithoutSig);
-        const expectedSignature = hmac.digest().subarray(0, 8);
+        const expectedSignature = hmac.digest().subarray(0, sigLength);
 
         if (!crypto.timingSafeEqual(signatureFromToken, expectedSignature)) {
             console.warn('QR token signature verification failed - possible tampering');
@@ -245,12 +259,18 @@ export function quickValidateQRToken(token: string): boolean {
 
         if (buffer.length < 50) return false;
 
-        const signatureFromToken = buffer.subarray(buffer.length - 8);
-        const combinedWithoutSig = buffer.subarray(0, buffer.length - 8);
+        const version = buffer[0];
+        if (version !== 1 && version !== 2) return false;
+
+        const sigLength = version === 2 ? 16 : 8;
+        if (buffer.length < sigLength + 1) return false;
+
+        const signatureFromToken = buffer.subarray(buffer.length - sigLength);
+        const combinedWithoutSig = buffer.subarray(0, buffer.length - sigLength);
 
         const hmac = crypto.createHmac('sha256', SIGNING_KEY);
         hmac.update(combinedWithoutSig);
-        const expectedSignature = hmac.digest().subarray(0, 8);
+        const expectedSignature = hmac.digest().subarray(0, sigLength);
 
         return crypto.timingSafeEqual(signatureFromToken, expectedSignature);
     } catch {
@@ -298,10 +318,10 @@ export function createSecurePaymentReference(
     hmac.update(dataString);
     const signature = hmac.digest('hex');
 
-    // Combine data with signature
+    // Combine data with signature (32 hex chars = 128 bits, NEW-07)
     const signedData = {
         ...data,
-        signature: signature.substring(0, 16) // First 16 chars for brevity
+        signature: signature.substring(0, 32)
     };
 
     // Encode as base64
@@ -317,11 +337,17 @@ export function verifySecurePaymentReference(reference: string): SecurePaymentDa
         const decoded = JSON.parse(Buffer.from(reference, 'base64url').toString('utf8'));
 
         const { signature, ...data } = decoded;
+        if (!signature || typeof signature !== 'string') return null;
 
         // Recreate signature
         const hmac = crypto.createHmac('sha256', SIGNING_KEY);
         hmac.update(JSON.stringify(data));
-        const expectedSignature = hmac.digest('hex').substring(0, 16);
+        const fullExpected = hmac.digest('hex');
+
+        // Support both 32-char (128-bit) and legacy 16-char (64-bit) references
+        const sigLen = signature.length;
+        if (sigLen !== 16 && sigLen !== 32) return null;
+        const expectedSignature = fullExpected.substring(0, sigLen);
 
         if (!crypto.timingSafeEqual(
             Buffer.from(signature),

@@ -35,39 +35,27 @@ export const GET = withSecurity(
       const fallbackCount = { count: 0, data: null, error: null };
       const fallbackList = { data: [], count: 0, error: null };
 
-      // ── 1. Fire ALL distributed queries in parallel (PG + Firestore + Supabase) ──
+      // ── 1. Fire ALL distributed queries in parallel (PG RPCs + Firestore + Supabase) ──
       const [
-        totalStudentsSnap,
-        activeStudentsSnap,
-        morningStudentsSnap,
-        eveningStudentsSnap,
-        expiredStudentsSnap,
+        studentAggRes,
+        applicationAggRes,
         driversSnap,
         allBusesFromPg,
         routesList,
-        pendingAppsSnap,
-        verificationSnap,
-        renewalSnap,
         feedbackSnap,
         statusSnap,
         paymentsSnap,
         systemConfigResult,
         deadlineConfig
       ] = await Promise.all([
-        safeQuery(supabase.from('student_profiles').select('*', { count: 'exact', head: true }), fallbackCount),
-        safeQuery(supabase.from('student_profiles').select('*', { count: 'exact', head: true }).eq('status', 'active'), fallbackCount),
-        safeQuery(supabase.from('student_profiles').select('*', { count: 'exact', head: true }).ilike('shift', 'Morning'), fallbackCount),
-        safeQuery(supabase.from('student_profiles').select('*', { count: 'exact', head: true }).ilike('shift', 'Evening'), fallbackCount),
-        safeQuery(supabase.from('student_profiles').select('*', { count: 'exact', head: true }).eq('status', 'expired'), fallbackCount),
+        safeQuery<any>(supabase.rpc('get_student_profile_counts'), { data: null, error: null }),
+        safeQuery<any>(supabase.rpc('get_application_counts'), { data: null, error: null }),
         safeQuery(supabase.from('driver_profiles').select('*', { count: 'exact', head: true }), fallbackCount),
         safeQuery(getAllBuses(), []),
         safeQuery(routeService.getAll(), []),
-        safeQuery(supabase.from('applications').select('*', { count: 'exact', head: true }).eq('state', 'submitted'), fallbackCount),
-        safeQuery(supabase.from('applications').select('*', { count: 'exact', head: true }).eq('state', 'awaiting_verification'), fallbackCount),
-        safeQuery(supabase.from('applications').select('*', { count: 'exact', head: true }).eq('state', 'submitted').in('application_type', ['renewal', 'renewal_after_soft_block']), fallbackCount),
         adminDb ? safeQuery(adminDb.collection('feedbacks').where('createdAt', '>=', sevenDaysAgo).count().get().then(snap => ({ data: () => ({ count: snap.data().count }) })), { data: () => ({ count: 0 }) }) : Promise.resolve({ data: () => ({ count: 0 }) }),
         safeQuery(supabase.from('active_trips').select('trip_id, bus_id, route_id, driver_id, start_time').eq('status', 'active'), fallbackList),
-        safeQuery(supabase.from('payments').select('amount, source'), fallbackList),
+        safeQuery(supabase.from('payments').select('amount, payment_method, method'), fallbackList),
         safeQuery(getSystemConfig(), null),
         safeQuery<any>(getDeadlineConfig(), null)
       ]);
@@ -93,12 +81,19 @@ export const GET = withSecurity(
         allBuses.push({ ...bus, currentMembers, totalCapacity: capacity, usagePct });
       }
 
-      // ── 3. Process Students (PostgreSQL counts) ──
-      const totalStudents = totalStudentsSnap.count || 0;
-      const activeStudents = activeStudentsSnap.count || 0;
-      const morningStudents = morningStudentsSnap.count || 0;
-      const eveningStudents = eveningStudentsSnap.count || 0;
-      const expiredStudents = expiredStudentsSnap.count || 0;
+      // ── 3. Process Students & Applications (PostgreSQL RPC counts) ──
+      const studentAgg = (studentAggRes?.data as any)?.[0];
+      const totalStudents = Number(studentAgg?.total_students || 0);
+      const activeStudents = Number(studentAgg?.active_students || 0);
+      const morningStudents = Number(studentAgg?.morning_students || 0);
+      const eveningStudents = Number(studentAgg?.evening_students || 0);
+      const expiredStudents = Number(studentAgg?.expired_students || 0);
+
+      const appAgg = (applicationAggRes?.data as any)?.[0];
+      const pendingApplications = Number(appAgg?.pending_apps || 0);
+      const pendingVerifications = Number(appAgg?.verification_apps || 0);
+      const renewalRequests = Number(appAgg?.renewal_apps || 0);
+
 
       // ── 4. Process Active Trips (Supabase active_trips) ──
       const activeTripData = (statusSnap.data || []).map((trip: any) => {
@@ -115,11 +110,11 @@ export const GET = withSecurity(
         };
       });
 
-      // ── 5. Process Payments (Supabase processed_payments) ──
+      // ── 5. Process Payments (Supabase payments ledger) ──
       let onlinePayments = 0, offlinePayments = 0, totalRevenue = 0;
       (paymentsSnap.data || []).forEach((p: any) => {
-        const source = (p.source || p.method || '').toLowerCase().trim();
-        if (source === 'online' || source === 'razorpay') onlinePayments++;
+        const method = (p.payment_method || p.method || p.source || '').toLowerCase().trim();
+        if (method === 'online' || method === 'razorpay') onlinePayments++;
         else offlinePayments++;
         totalRevenue += Number(p.amount || 0);
       });
@@ -143,9 +138,9 @@ export const GET = withSecurity(
         totalDrivers: driversSnap.count || 0, activeDrivers, totalBuses: busesArray.length,
         operationalBuses, activeBuses: statusSnap.data?.length || 0,
         enrouteBuses: statusSnap.data?.length || 0,
-        pendingApplications: pendingAppsSnap.count || 0,
-        pendingVerifications: verificationSnap.count || 0,
-        renewalRequests: renewalSnap.count || 0,
+        pendingApplications,
+        pendingVerifications,
+        renewalRequests,
         feedbacksCount: feedbackSnap.data ? feedbackSnap.data().count : 0,
         highLoadBusCount, totalRevenue, onlinePayments, offlinePayments,
         configDates, allBuses, allRoutes, activeTrips: activeTripData,

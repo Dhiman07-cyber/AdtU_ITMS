@@ -6,9 +6,6 @@ import { WaitingFlagPostSchema } from '@/lib/security/validation-schemas';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import { NextResponse } from 'next/server';
 
-// Initialize Supabase client
-const supabase = getSupabaseServer();
-
 /**
  * GPS Accuracy Validator
  */
@@ -18,6 +15,8 @@ export const POST = withSecurity(
   async (request, { auth, body, requestId }) => {
     const startTime = Date.now();
     const studentUid = auth.uid;
+    // Request-scoped client — avoids stale singleton across Next.js route compilations.
+    const supabase = getSupabaseServer();
     const {
       busId,
       routeId,

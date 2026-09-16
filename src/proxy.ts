@@ -30,14 +30,21 @@ const IP_CACHE_MAX = 50_000;      // prevent unbounded memory growth
 function checkGlobalRateLimit(ip: string): { allowed: boolean; remaining: number } {
     const now = Date.now();
 
-    // Evict expired entries periodically (every ~1000 checks)
+    // Bounded eviction when at capacity: scan up to 1500 front entries instead of all 50,000
     if (ipRequestCounts.size > IP_CACHE_MAX) {
+        let checked = 0;
         for (const [key, entry] of ipRequestCounts) {
             if (now > entry.resetTime) ipRequestCounts.delete(key);
+            if (++checked >= 1500) break;
         }
+        // If still at/above cap, FIFO-evict 500 oldest entries in O(K)
         if (ipRequestCounts.size >= IP_CACHE_MAX) {
-            const keys = Array.from(ipRequestCounts.keys()).slice(0, 1000);
-            for (const k of keys) ipRequestCounts.delete(k);
+            let evicted = 0;
+            for (const key of ipRequestCounts.keys()) {
+                if (evicted >= 500) break;
+                ipRequestCounts.delete(key);
+                evicted++;
+            }
         }
     }
 
@@ -162,12 +169,15 @@ const STATIC_EXTENSIONS = [
 // ============================================================================
 
 function getClientIp(request: NextRequest): string {
-    return (
-        request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
-        request.headers.get('x-real-ip') ||
-        request.headers.get('cf-connecting-ip') ||
-        '127.0.0.1'
-    );
+    const realIp = request.headers.get('x-real-ip') || request.headers.get('cf-connecting-ip');
+    if (realIp) return realIp.trim();
+
+    const xff = request.headers.get('x-forwarded-for');
+    if (xff) {
+        const parts = xff.split(',').map(s => s.trim()).filter(Boolean);
+        if (parts.length > 0) return parts[parts.length - 1];
+    }
+    return '127.0.0.1';
 }
 
 function isStaticFile(pathname: string): boolean {
@@ -220,18 +230,18 @@ const STATIC_ALLOWED_ORIGINS: Set<string> = (() => {
     return new Set([...origins, ...explicit]);
 })();
 
-function isOriginAllowed(origin: string): boolean {
+export function isOriginAllowed(origin: string): boolean {
     if (STATIC_ALLOWED_ORIGINS.has(origin)) return true;
-    if (origin.endsWith('.vercel.app')) return true;
+    if (process.env.VERCEL_URL && origin === `https://${process.env.VERCEL_URL}`) return true;
+    if (process.env.VERCEL_PROJECT_PRODUCTION_URL && origin === `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`) return true;
     if (process.env.NODE_ENV === 'development' && origin.startsWith('http://localhost:')) return true;
     return false;
 }
 
-
 /**
  * Validate Origin / Referer for CSRF protection
  */
-function validateOrigin(request: NextRequest): boolean {
+export function validateOrigin(request: NextRequest): boolean {
     const method = request.method;
 
     // Only validate state-changing methods
@@ -242,32 +252,36 @@ function validateOrigin(request: NextRequest): boolean {
     const origin = request.headers.get('origin');
     const referer = request.headers.get('referer');
 
-    // Webhooks and cron jobs may not have an origin
+    // Webhooks and cron jobs have independent signature/secret auth
     if (request.nextUrl.pathname.includes('/webhook/') || isCronRoute(request.nextUrl.pathname)) {
         return true;
     }
 
-    // API routes called from server components won't have origin
-    if (!origin && !referer) {
-        // Allow server-to-server calls in production (Vercel internal)
-        return true;
-    }
-
-    // Check origin header
-    if (origin && isOriginAllowed(origin)) {
-        return true;
+    // Check origin header first
+    if (origin) {
+        return isOriginAllowed(origin);
     }
 
     // Fallback to referer
     if (referer) {
         try {
             const refererUrl = new URL(referer);
-            if (isOriginAllowed(refererUrl.origin)) return true;
+            return isOriginAllowed(refererUrl.origin);
         } catch {
-            // Invalid referer URL — reject
+            return false;
         }
     }
 
+    // If neither Origin nor Referer is present, allow ONLY non-browser API clients
+    // that authenticate via Bearer token or internal server token (browsers cannot send
+    // custom headers in simple cross-origin requests).
+    const authHeader = request.headers.get('authorization');
+    const internalToken = request.headers.get('x-internal-token');
+    if ((authHeader && authHeader.startsWith('Bearer ')) || internalToken) {
+        return true;
+    }
+
+    // Reject browser-like state-changing requests without Origin or Referer
     return false;
 }
 

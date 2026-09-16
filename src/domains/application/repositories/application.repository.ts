@@ -21,6 +21,8 @@ import {
 	pgRemove,
 	pgUpdate,
 	pgUpsert,
+	pgClaimForActivation,
+	pgReleaseActivationClaim,
 } from './application.repository.pg';
 
 export async function findByApplicationId(applicationId: string): Promise<Application | null> {
@@ -70,4 +72,20 @@ export async function count(): Promise<number> {
   return pgCount();
 }
 
+export async function claimForActivation(
+  applicationId: string,
+  lockId: string,
+  leaseMinutes = 5
+): Promise<Application | null> {
+  return pgClaimForActivation(applicationId, lockId, leaseMinutes);
+}
+
+export async function releaseActivationClaim(
+  applicationId: string,
+  lockId: string
+): Promise<boolean> {
+  return pgReleaseActivationClaim(applicationId, lockId);
+}
+
 export type { Application };
+

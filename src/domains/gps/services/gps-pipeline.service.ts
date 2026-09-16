@@ -2,6 +2,7 @@ import { appLogger } from '@/lib/logger';
 import { ErrorClass } from '@/lib/error-classes';
 import { MAX_CLOCK_SKEW_MS,normalizeLocationUpdate } from './gps-normalizer.service';
 import { checkActiveTrip } from './gps-persistence.service';
+import { atomicGpsGuardAndUpdate, clearGpsState, seedGpsState } from './gps-redis-guard';
 import type { LastLocation, LocationUpdate, LocationUpdateNormalized, PipelineResult } from './types';
 
 // NOTE: live enforcement here is bounds, speed/heading/accuracy caps,
@@ -69,12 +70,14 @@ function validateJump(n: LocationUpdateNormalized, last: LastLocation): string |
   return null;
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// Process-local last-location store
+// Used by: WS socket-router (seeded positions), trip-status DB fallback,
+//          and as a synchronous read path for getLastLocationForBus callers.
+// NOT used for the primary jump/replay guard in the HTTP GPS pipeline
+// (that uses the Redis-backed atomic guard — see gps-redis-guard.ts).
+// ──────────────────────────────────────────────────────────────────────────────
 const inMemoryLastLocations = new Map<string, LastLocation>();
-// Last RAW client timestamps per bus (unclamped). The normalizer rewrites
-// far-skewed client timestamps to server time, so comparing only normalized
-// timestamps lets replays through (rewritten time ≈ now ≈ accepted). Ordering
-// must use the original client clock, which is monotonic for a stable device
-// even when that clock is wrong in absolute terms.
 const inMemoryLastRawTs = new Map<string, number>();
 
 function getRawClientTime(raw: LocationUpdate): number | null {
@@ -84,39 +87,52 @@ function getRawClientTime(raw: LocationUpdate): number | null {
   return Number.isFinite(ms) ? ms : null;
 }
 
-export function clearInMemoryLastLocation(busId: string): void {
-  if (!busId) return;
-  inMemoryLastLocations.delete(busId);
-  inMemoryLastRawTs.delete(busId);
-  if (busId.startsWith('bus_')) {
-    inMemoryLastLocations.delete(busId.replace('bus_', ''));
-    inMemoryLastRawTs.delete(busId.replace('bus_', ''));
-  } else {
-    inMemoryLastLocations.delete(`bus_${busId}`);
-    inMemoryLastRawTs.delete(`bus_${busId}`);
-  }
+export function getBusIdVariations(busId: string): string[] {
+  if (!busId) return [];
+  return busId.startsWith('bus_') ? [busId, busId.replace('bus_', '')] : [busId, `bus_${busId}`];
 }
 
+/**
+ * Clear process-local GPS state for a bus and also evict from Redis.
+ * Called when a trip ends to reset the guard for the next trip.
+ */
+export function clearInMemoryLastLocation(busId: string): void {
+  if (!busId) return;
+  for (const id of getBusIdVariations(busId)) {
+    inMemoryLastLocations.delete(id);
+    inMemoryLastRawTs.delete(id);
+  }
+  // Best-effort Redis eviction — does not block the caller.
+  clearGpsState(busId).catch(() => { /* ignore */ });
+}
+
+/**
+ * Seed the process-local position cache (used by WS socket-router to set
+ * the initial anchor when a driver connects via WebSocket).
+ * Does NOT update the Redis guard state — the HTTP pipeline manages that.
+ */
 export function setInMemoryLastLocation(busId: string, loc: LastLocation): void {
   if (busId) {
     inMemoryLastLocations.set(busId, loc);
-    // Keep the raw-clock guard coherent with a seeded anchor: the anchor's
-    // own timestamp is the best available raw clock for it.
     const rawMs = new Date(loc.timestamp).getTime();
     if (Number.isFinite(rawMs)) inMemoryLastRawTs.set(busId, rawMs);
     else inMemoryLastRawTs.delete(busId);
+    // Keep memLast (in gps-redis-guard) coherent with this anchor so the
+    // memory-fallback guard applies duplicate/replay checks correctly in
+    // single-instance (no-Redis) mode.
+    const tsMs = Number.isFinite(rawMs) ? rawMs : Date.now();
+    const lat = typeof loc.lat === 'string' ? parseFloat(loc.lat) : loc.lat;
+    const lng = typeof loc.lng === 'string' ? parseFloat(loc.lng) : loc.lng;
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+      seedGpsState(busId, lat, lng, tsMs);
+    }
   }
 }
 
+/** Read last accepted location from the process-local cache. */
 export function getLastLocationForBus(busId: string): LastLocation | null {
   if (!busId) return null;
-  const busVariations = [busId];
-  if (busId.startsWith('bus_')) {
-    busVariations.push(busId.replace('bus_', ''));
-  } else {
-    busVariations.push(`bus_${busId}`);
-  }
-  for (const id of busVariations) {
+  for (const id of getBusIdVariations(busId)) {
     const loc = inMemoryLastLocations.get(id);
     if (loc) return loc;
   }
@@ -157,43 +173,52 @@ export async function processLocationUpdate(raw: LocationUpdate): Promise<Pipeli
     return { accepted: false, reason: session.reason, normalized };
   }
 
-  const lastLoc = inMemoryLastLocations.get(normalized.busId);
-  // Replay guard: the raw client clock must advance relative to the last
-  // accepted packet's raw clock. A replayed/stale packet carries an older
-  // raw timestamp even though normalization clamped it to ~now.
+  // ── Multi-instance-safe jump/replay guard ──────────────────────────────────
+  // atomicGpsGuardAndUpdate executes a Lua script in Redis that atomically
+  // reads the current state, runs all guard checks, and writes the new state
+  // in a single round-trip. This ensures correctness when the same bus's
+  // packets arrive at different Next.js containers.
+  // Falls back to process-local in-memory guard when Redis is unavailable.
   const rawTime = getRawClientTime(raw);
-  const lastRaw = inMemoryLastRawTs.get(normalized.busId);
-  if (rawTime !== null && lastRaw !== undefined && rawTime < lastRaw) {
-    const reason = 'Out-of-order GPS packet (older than last accepted location)';
-    appLogger.warn('gps', 'location_rejected', { ...logCtx, reason, errorClass: ErrorClass.GPS_OUT_OF_ORDER, latencyMs: Date.now() - start });
+  const guardResult = await atomicGpsGuardAndUpdate(
+    normalized.busId,
+    normalized.lat,
+    normalized.lng,
+    normalized.timestamp.getTime(),
+    rawTime,
+  );
+
+  if (guardResult !== 'ok') {
+    const errorClassMap: Record<string, string> = {
+      stale_raw: ErrorClass.GPS_OUT_OF_ORDER,
+      out_of_order: ErrorClass.GPS_OUT_OF_ORDER,
+      jump: ErrorClass.GPS_JUMP_TOO_LARGE,
+      speed: ErrorClass.GPS_SPEED_EXCEEDED,
+      duplicate: ErrorClass.GPS_DUPLICATE_TIMESTAMP,
+      redis_unavailable: ErrorClass.DATABASE_UNAVAILABLE,
+    };
+    const reasonMap: Record<string, string> = {
+      stale_raw: 'Out-of-order GPS packet (older than last accepted location)',
+      out_of_order: 'Out-of-order GPS packet (older than last accepted location)',
+      jump: `Location jump too large`,
+      speed: `Calculated speed exceeds limit (200 km/h)`,
+      duplicate: 'Duplicate timestamp with significant coordinate jump',
+      redis_unavailable: 'GPS guard cluster coordination unavailable; packet rejected to preserve spatial safety',
+    };
+    const reason = reasonMap[guardResult] || `GPS packet rejected: ${guardResult}`;
+    const errorClass = errorClassMap[guardResult] || ErrorClass.GPS_INVALID_COORDINATES;
+    appLogger.warn('gps', 'location_rejected', { ...logCtx, reason, errorClass, guardResult, latencyMs: Date.now() - start });
     return { accepted: false, reason, normalized };
   }
-  if (lastLoc) {
-    const jumpError = validateJump(normalized, lastLoc);
-    if (jumpError) {
-      const errorClass = jumpError.includes('out-of-order')
-        ? ErrorClass.GPS_OUT_OF_ORDER
-        : jumpError.includes('duplicate')
-        ? ErrorClass.GPS_DUPLICATE_TIMESTAMP
-        : jumpError.includes('jump')
-        ? ErrorClass.GPS_JUMP_TOO_LARGE
-        : ErrorClass.GPS_SPEED_EXCEEDED;
-      appLogger.warn('gps', 'location_rejected', { ...logCtx, reason: jumpError, errorClass, latencyMs: Date.now() - start });
-      return { accepted: false, reason: jumpError, normalized };
-    }
-  }
 
+  // Keep the process-local cache in sync so getLastLocationForBus() returns
+  // a fresh value for the WS server fallback and trip-status DB readers.
   inMemoryLastLocations.set(normalized.busId, {
     lat: normalized.lat,
     lng: normalized.lng,
     timestamp: normalized.timestamp.toISOString(),
   });
   if (rawTime !== null) {
-    // Bound the stored raw clock to receipt time + skew. A single far-future
-    // fix (wall-clock glitch) must not poison the guard and stall legitimate
-    // fixes until the device clock catches up — worst stall is ~MAX_SKEW.
-    // Past-side values are stored verbatim so stable-but-wrong clocks stay
-    // monotonic and usable.
     inMemoryLastRawTs.set(normalized.busId, Math.min(rawTime, Date.now() + MAX_CLOCK_SKEW_MS));
   }
 

@@ -20,6 +20,10 @@ export class ConnectionRegistry {
     return connections.size;
   }
 
+  getSocketIds(): IterableIterator<string> {
+    return connections.keys();
+  }
+
   getAll(): Map<string, { ws: WebSocket; session: Session }> {
     return new Map(connections);
   }

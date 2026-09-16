@@ -17,8 +17,8 @@
 
 import { emitEvent } from '@/domains/realtime/event-emitter';
 import { clearInMemoryLastLocation } from '@/domains/gps/services/gps-pipeline.service';
+import { verifyCronAuth } from '@/lib/security/cron-auth';
 import { getSupabaseServer } from '@/lib/supabase-server';
-import crypto from 'crypto';
 import { NextResponse } from 'next/server';
 
 // Configuration — 10 minutes; university buses commonly pass through
@@ -27,22 +27,6 @@ import { NextResponse } from 'next/server';
 const HEARTBEAT_TIMEOUT_SECONDS = 600;
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-// SECURITY: Fail-closed cron auth verification
-function verifyCronAuth(request: Request): boolean {
-    const authHeader = request.headers.get('authorization');
-    const cronSecret = process.env.CRON_SECRET;
-
-    // SECURITY: Fail-closed — if CRON_SECRET is not configured, deny all
-    if (!cronSecret) {
-        console.error('🚫 CRON_SECRET not configured — blocking cron request');
-        return false;
-    }
-
-    const providedToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : '';
-    if (providedToken.length !== cronSecret.length) return false;
-    return crypto.timingSafeEqual(Buffer.from(providedToken), Buffer.from(cronSecret));
-}
 
 export async function GET(request: Request) {
     // Verify cron auth

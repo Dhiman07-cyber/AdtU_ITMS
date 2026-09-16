@@ -18,7 +18,7 @@ interface BusLocation {
 
 export const useBusLocation = (busId: string, token?: string | null, externalClient?: WebSocketClient | null) => {
   const [currentLocation, setCurrentLocation] = useState<BusLocation | null>(null);
-  const [history, setHistory] = useState<BusLocation[]>([]);
+  const historyRef = useRef<BusLocation[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const isMountedRef = useRef(true);
@@ -71,10 +71,7 @@ export const useBusLocation = (busId: string, token?: string | null, externalCli
     };
 
     setCurrentLocation(cleanLocation);
-    setHistory((prev) => {
-      const next = [...prev, cleanLocation];
-      return next.slice(-50);
-    });
+    historyRef.current = [...historyRef.current, cleanLocation].slice(-50);
     setLoading(false);
     // E2E observability hook (dev only): mirrors the post-guard state the map
     // effect consumes, so automated tests can assert the marker would move.
@@ -139,13 +136,14 @@ export const useBusLocation = (busId: string, token?: string | null, externalCli
 
     if (!busId) {
       setCurrentLocation(null);
-      setHistory([]);
+      historyRef.current = [];
       setLoading(false);
       return;
     }
     setCurrentLocation(null);
-    setHistory([]);
+    historyRef.current = [];
     setLoading(true);
+
 
     let isSubscribed = true;
 
@@ -331,5 +329,5 @@ export const useBusLocation = (busId: string, token?: string | null, externalCli
     };
   }, [busId, token, externalClient]);
 
-  return { currentLocation, history, loading, error };
+  return { currentLocation, history: historyRef.current, loading, error };
 };

@@ -78,6 +78,7 @@ export async function resolveRouteId(busId: string, preferredRouteId?: string): 
 }
 
 const routeNamesCache = new Map<string, { name: string; expiresAt: number }>();
+const pendingResolutions = new Map<string, Promise<string>>();
 const ROUTE_CACHE_TTL_MS = 5 * 60 * 1000;
 
 export async function resolveRouteName(routeId: string): Promise<string> {
@@ -88,14 +89,29 @@ export async function resolveRouteName(routeId: string): Promise<string> {
     return cached.name;
   }
 
-  const supabase = getSupabaseServer();
-  const { data: route } = await supabase.from('routes').select('name, route_name').eq('id', routeId).maybeSingle();
-  const resolvedName = route?.name || route?.route_name || routeId;
-
-  if (routeNamesCache.size > 500) {
-    routeNamesCache.clear();
+  // Prevent thundering herd on concurrent cache misses
+  const existing = pendingResolutions.get(routeId);
+  if (existing) {
+    return existing;
   }
-  routeNamesCache.set(routeId, { name: resolvedName, expiresAt: Date.now() + ROUTE_CACHE_TTL_MS });
 
-  return resolvedName;
+  const promise = (async () => {
+    try {
+      const supabase = getSupabaseServer();
+      const { data: route } = await supabase.from('routes').select('name, route_name').eq('id', routeId).maybeSingle();
+      const resolvedName = route?.name || route?.route_name || routeId;
+
+      if (routeNamesCache.size > 500) {
+        routeNamesCache.clear();
+      }
+      routeNamesCache.set(routeId, { name: resolvedName, expiresAt: Date.now() + ROUTE_CACHE_TTL_MS });
+
+      return resolvedName;
+    } finally {
+      pendingResolutions.delete(routeId);
+    }
+  })();
+
+  pendingResolutions.set(routeId, promise);
+  return promise;
 }

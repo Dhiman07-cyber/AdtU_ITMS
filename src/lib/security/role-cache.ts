@@ -7,9 +7,14 @@
  * Migration status: SLICE 1 (users) — PostgreSQL.
  * Role resolution reads from PostgreSQL users table only.
  * No Firestore fallback. No dual-read. One runtime owner.
+ *
+ * Multi-instance invalidation: invalidateCachedRole publishes to a Redis
+ * pub/sub channel so other Next.js instances also drop their local copy.
+ * Falls back to local-only behaviour when REDIS_URL is not configured.
  */
 
 import { getUserById } from '@/domains/identity';
+import { initRoleCacheRedis, publishRoleInvalidation } from './role-cache-redis';
 
 // ============================================================================
 // CONFIGURATION
@@ -44,6 +49,20 @@ if (typeof setInterval !== 'undefined' && !(globalThis as any).__roleCacheCleanu
             if (now > entry.expiresAt) _roleCache.delete(key);
         }
     }, 10 * 60 * 1000);
+}
+
+// ============================================================================
+// Redis bridge bootstrap (once per process)
+// ============================================================================
+
+// Initialize lazily: if no REDIS_URL this is a no-op, so it is always safe.
+// The handler is called when a remote invalidation arrives via pub/sub so the
+// receiving instance deletes that uid from its own local cache.
+if (typeof setInterval !== 'undefined' && !(globalThis as any).__roleCacheRedisBridgeStarted) {
+    (globalThis as any).__roleCacheRedisBridgeStarted = true;
+    initRoleCacheRedis((uid: string) => {
+        _roleCache.delete(uid);
+    });
 }
 
 // ============================================================================
@@ -110,9 +129,18 @@ export function setCachedRole(uid: string, entry: { role: string; name: string; 
 
 /**
  * Invalidate cached role for a user (e.g., after role change).
+ *
+ * Local deletion is immediate. A Redis pub/sub publish propagates the
+ * invalidation to all other Next.js instances asynchronously (best-effort).
+ * The worst case on Redis failure is that remote caches expire within the
+ * normal 5-minute TTL.
  */
 export function invalidateCachedRole(uid: string): void {
     _roleCache.delete(uid);
+    // Broadcast to all other Next.js instances via Redis pub/sub.
+    // This is best-effort: if Redis is down or not configured, the invalidation
+    // is local-only and remote caches will expire after their TTL (5 min).
+    publishRoleInvalidation(uid);
 }
 
 /**

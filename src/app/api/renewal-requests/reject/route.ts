@@ -1,4 +1,5 @@
 import * as Application from '@/domains/application';
+import { getUserById } from '@/domains/identity';
 import { deleteAsset,extractPublicId } from '@/lib/cloudinary-server';
 import { adminAuth } from '@/lib/firebase-admin';
 import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
@@ -29,14 +30,13 @@ export async function POST(request: NextRequest) {
     const uid = decodedToken.uid;
 
     const body = await request.json();
-    const { requestId, rejectorName, rejectorId, reason } = body;
+    const { requestId, reason } = body;
 
-    if (!requestId || !rejectorName || !rejectorId || !reason) {
-      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+    if (!requestId || !reason) {
+      return NextResponse.json({ error: 'Missing required fields: requestId, reason' }, { status: 400 });
     }
 
     // Verify user is admin or moderator
-    const { getUserById } = await import('@/domains/identity');
     const userProfile = await getUserById(uid);
     if (!userProfile || !['admin', 'moderator'].includes(userProfile.role)) {
       return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 });
@@ -70,11 +70,13 @@ export async function POST(request: NextRequest) {
     }
 
     // ── Core rejection via Application domain ─────────────────────────
+    // Rejector identity comes exclusively from the server-verified token + DB profile.
+    // Client-supplied rejectorId / rejectorName are intentionally ignored.
     const result = await Application.reject(
       requestId,
       {
         uid,
-        name: userProfile.fullName || userProfile.name || rejectorName,
+        name: userProfile.fullName || userProfile.name || uid,
         role: userProfile.role,
       },
       reason

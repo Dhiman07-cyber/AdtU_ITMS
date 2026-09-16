@@ -4,6 +4,45 @@
  */
 
 import { getSystemConfig,updateSystemConfig } from '@/domains/admin';
+import { getAdminById } from '@/domains/identity';
+import { pgInsertNotification } from '@/domains/notification/repositories/notification.repository.pg';
+
+/**
+ * Sends a system-wide announcement notification when bus fees change.
+ */
+export async function notifyBusFeeChange(
+  adminUid: string,
+  oldAmount: number,
+  newAmount: number
+): Promise<boolean> {
+  try {
+    const adminData = await getAdminById(adminUid);
+    const adminName = adminData?.name || adminData?.fullName || 'Admin';
+
+    const notificationContent = `The bus fee for the upcoming session has been revised from ₹${oldAmount.toLocaleString('en-IN')} to ₹${newAmount.toLocaleString('en-IN')}. ` +
+      `Please update your payment plans accordingly. For any queries, contact the administration office.`;
+
+    await pgInsertNotification({
+      title: '💰 Bus Fee Update - Important Notice',
+      content: notificationContent,
+      type: 'announcement',
+      sender: {
+        userId: adminUid,
+        userName: adminName,
+        userRole: 'admin',
+      },
+      target: {
+        type: 'all_users',
+      },
+      recipientIds: [],
+      readByUserIds: [],
+    });
+    return true;
+  } catch (error) {
+    console.error('[notifyBusFeeChange] Failed to send announcement notification:', error);
+    return false;
+  }
+}
 
 export interface BusFeeData {
   amount: number;

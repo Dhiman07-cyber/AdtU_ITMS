@@ -41,6 +41,7 @@ export class WebSocketClient {
   private destroyed = false;
   private paused = false;
   private pendingSubscriptions = new Set<string>();
+  private confirmedSubscriptions = new Set<string>();
   private currentPresence: Record<string, unknown> | null = null;
   private currentToken: string;
   private visibilityHandler: (() => void) | null = null;
@@ -136,6 +137,7 @@ export class WebSocketClient {
     this.ws.onopen = () => {
       if (this.destroyed) { this.close(); return; }
       this.reconnectAttempts = 0;
+      this.confirmedSubscriptions.clear();
       this.emitStatus('connected');
       this.startPing();
       // Phase-04: Send auth as first message (preferred path).
@@ -165,14 +167,17 @@ export class WebSocketClient {
           }
         } else if (msg.type === 'subscribed') {
           this.pendingSubscriptions.delete(msg.channel);
+          this.confirmedSubscriptions.add(msg.channel);
         } else if (msg.type === 'auth_ok') {
           const store = getStorage();
           if (msg.data?.reconnect_token && store) {
             store.setItem(STORAGE_KEY, msg.data.reconnect_token);
           }
-          // Re-affirm channel subscriptions on auth_ok
+          // Only re-subscribe channels that haven't been confirmed yet
           for (const ch of this.handlers.keys()) {
-            this.send({ type: 'subscribe', channel: ch });
+            if (!this.confirmedSubscriptions.has(ch)) {
+              this.send({ type: 'subscribe', channel: ch });
+            }
           }
         } else if (msg.type === 'auth_required') {
           this.handleAuthRequired();
@@ -250,6 +255,7 @@ export class WebSocketClient {
   unsubscribe(channel: string): void {
     this.handlers.delete(channel);
     this.pendingSubscriptions.delete(channel);
+    this.confirmedSubscriptions.delete(channel);
     if (this.isConnected()) this.send({ type: 'unsubscribe', channel });
   }
 
@@ -289,8 +295,16 @@ export class WebSocketClient {
 
   private scheduleReconnect(): void {
     if (this.destroyed || this.paused) return;
-    if (this.reconnectAttempts >= (this.config.reconnectMaxRetries || 10)) {
+    const maxRetries = this.config.reconnectMaxRetries || 10;
+    if (this.reconnectAttempts >= maxRetries) {
       this.emitStatus('error');
+      // W9: Deep-sleep recovery retry every 60s instead of permanent dead state
+      this.reconnectTimer = setTimeout(() => {
+        if (!this.destroyed && !this.paused) {
+          this.reconnectAttempts = maxRetries;
+          this.connectInternal();
+        }
+      }, 60000);
       return;
     }
     this.emitStatus('reconnecting');

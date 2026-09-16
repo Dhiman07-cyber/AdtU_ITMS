@@ -6,7 +6,12 @@ export async function getUpdaterInfo(
     _adminDb: any,
     userId: string
 ): Promise<{ name: string; roleOrEmployeeId: string }> {
-    const adminData = await getAdminById(userId);
+    const [adminData, modData, userData] = await Promise.all([
+        getAdminById(userId),
+        getModeratorById(userId),
+        getUserById(userId),
+    ]);
+
     if (adminData) {
         return {
             name: (adminData as any).fullName || (adminData as any).name || 'Admin',
@@ -14,7 +19,6 @@ export async function getUpdaterInfo(
         };
     }
 
-    const modData = await getModeratorById(userId);
     if (modData) {
         return {
             name: (modData as any).fullName || (modData as any).name || 'Moderator',
@@ -22,11 +26,10 @@ export async function getUpdaterInfo(
         };
     }
 
-    const userData = await getUserById(userId);
     if (userData) {
         return {
             name: (userData as any).fullName || (userData as any).name || (userData as any).email || 'Unknown User',
-            roleOrEmployeeId: 'Unknown'
+            roleOrEmployeeId: (userData as any).role || 'Unknown'
         };
     }
 

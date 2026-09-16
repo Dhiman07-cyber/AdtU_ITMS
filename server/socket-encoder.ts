@@ -1,8 +1,8 @@
 export function encode(data: Record<string, unknown>): string {
-  return JSON.stringify({
-    ...data,
-    timestamp: data.timestamp || new Date().toISOString(),
-  });
+  if (data.timestamp) {
+    return JSON.stringify(data);
+  }
+  return JSON.stringify(Object.assign({}, data, { timestamp: new Date().toISOString() }));
 }
 
 export function encodeMessage(channel: string, event: string, payload: Record<string, unknown>): string {

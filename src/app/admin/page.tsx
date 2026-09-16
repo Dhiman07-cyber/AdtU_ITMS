@@ -335,8 +335,22 @@ export default function EnhancedAdminDashboard() {
     { name: 'Morning', value: realCounts.morningStudents || 0, color: '#f97316' }
   ];
 
+  // Pre-build buses-by-route map in O(B) to eliminate O(R×B) nested filter
+  const busesByRouteId = new Map<string, any[]>();
+  for (const bus of allBuses) {
+    const rId = bus.routeId || bus.route?.routeId;
+    if (rId) {
+      const list = busesByRouteId.get(rId);
+      if (list) {
+        list.push(bus);
+      } else {
+        busesByRouteId.set(rId, [bus]);
+      }
+    }
+  }
+
   const routeOccupancy = allRoutes.map((route: any) => {
-      const routeBuses = allBuses.filter((b: any) => b.routeId === route.routeId || b.route?.routeId === route.routeId);
+      const routeBuses = busesByRouteId.get(route.routeId) || [];
 
       if (routeBuses.length === 0) {
         return {

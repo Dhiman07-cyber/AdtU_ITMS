@@ -32,8 +32,9 @@ export function enqueueOffline(uid: string, channel: string, event: string, payl
   if (!queues.has(uid)) queues.set(uid, []);
   const q = queues.get(uid)!;
   if (q.length >= MAX_QUEUE_SIZE) {
-    q.shift();
-    metricsService.inc('queueDropped');
+    const dropCount = Math.max(1, Math.floor(MAX_QUEUE_SIZE * 0.1));
+    q.splice(0, dropCount);
+    metricsService.inc('queueDropped', dropCount);
   }
   q.push({ channel, event, payload, queuedAt: Date.now() });
 }

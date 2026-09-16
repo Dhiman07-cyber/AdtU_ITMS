@@ -1,3 +1,4 @@
+import { verifyCronAuth } from '@/lib/security/cron-auth';
 import { upsertMarker } from '@/domains/admin';
 import { createAuditEvent,SYSTEM_ACTOR,type AuditEventInsert } from '@/domains/audit';
 import { getStudentById,getStudentsByStatuses,updateStudent } from '@/domains/identity';
@@ -11,7 +12,6 @@ import { getSupabaseServer } from '@/lib/supabase-server';
 import { computeBlockDatesFromValidUntil } from '@/lib/utils/deadline-computation';
 import { shouldBlockAccessFromStoredDates,shouldHardDeleteFromStoredDates } from '@/lib/utils/renewal-utils';
 import { v2 as cloudinary } from 'cloudinary';
-import crypto from 'crypto';
 import { NextRequest,NextResponse } from 'next/server';
 
 // Configure Cloudinary
@@ -35,20 +35,7 @@ if (process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME) {
  */
 export async function GET(request: NextRequest) {
     try {
-        // 1. Authorization Check (CRITICAL)
-        const authHeader = request.headers.get('Authorization');
-        const cronSecret = process.env.CRON_SECRET;
-
-        // In production, strictly enforce CRON_SECRET. 
-        // For dev/testing, you might allow manual overrides or disable this check carefully.
-        if (!cronSecret) {
-            console.error('🚫 CRON_SECRET not configured — blocking cron request');
-            return NextResponse.json({ error: 'Server configuration error' }, { status: 500 });
-        }
-        const providedToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : '';
-        const secretsMatch = providedToken.length === cronSecret.length &&
-            crypto.timingSafeEqual(Buffer.from(providedToken), Buffer.from(cronSecret));
-        if (!secretsMatch) {
+        if (!verifyCronAuth(request)) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
         }
 
@@ -147,14 +134,16 @@ export async function GET(request: NextRequest) {
                     console.log(`   validUntil: ${validUntilStr}`);
                     console.log(`   status: ${studentData.status}`);
                     
-                    // SAFETY CHECK: Verify student is actually expired
+                    // SAFETY CHECK: Verify student is actually expired (Fail-closed on missing or malformed timestamp)
                     const today = new Date();
-                    if (validUntilStr) {
-                        const validUntilDate = new Date(validUntilStr);
-                        if (validUntilDate > today) {
-                            console.warn(`🛡️ SAFETY CANCELLED: Student ${uid} has validUntil ${validUntilStr} which is in the future. Skipping deletion.`);
-                            continue;
-                        }
+                    if (!validUntilStr) {
+                        console.warn(`🛡️ SAFETY CANCELLED: Student ${uid} has missing/null validUntil. Failing closed to prevent accidental deletion.`);
+                        continue;
+                    }
+                    const validUntilDate = new Date(validUntilStr);
+                    if (isNaN(validUntilDate.getTime()) || validUntilDate > today) {
+                        console.warn(`🛡️ SAFETY CANCELLED: Student ${uid} has invalid or future validUntil (${validUntilStr}). Skipping deletion.`);
+                        continue;
                     }
                     
                     // SAFETY CHECK: Don't delete if student was recently active (last 30 days)

@@ -34,10 +34,12 @@ export const GET = withSecurity(
             }, { status: 400 });
         }
 
-        // SECURITY: Students may only query their own assigned bus.
+        // Resolve student profile once — reused for both the bus-assignment security
+        // check and the shift-compatibility check below. Avoids duplicate DB call.
+        let studentProfile: { busId?: string | null; shift?: string | null } | null = null;
         if (auth.role === 'student') {
-            const resolved = await getStudentProfileAndShift(auth.uid);
-            const studentBusId = resolved.busId;
+            studentProfile = await getStudentProfileAndShift(auth.uid);
+            const studentBusId = studentProfile.busId;
             if (studentBusId && studentBusId !== busId && studentBusId !== busId.replace('bus_', '') && `bus_${studentBusId}` !== busId) {
                 return NextResponse.json({
                     tripActive: false,
@@ -54,10 +56,8 @@ export const GET = withSecurity(
             busVariations.push(`bus_${busId}`);
         }
 
-        // PERF: Use singleton Supabase client instead of creating one per request
         const supabase = getSupabaseServer();
 
-        // Query active_trips for active trips in PostgreSQL lock table.
         const { data: rows, error } = await supabase
             .from('active_trips')
             .select('trip_id, bus_id, driver_id, route_id, shift, status, start_time, last_heartbeat, expires_at')
@@ -70,7 +70,7 @@ export const GET = withSecurity(
         const data = rows && rows.length > 0 ? rows[0] : null;
 
         if (error) {
-            console.error('❌ Error querying active_trips:', error);
+            console.error('Error querying active_trips:', error);
             return NextResponse.json({
                 tripActive: false,
                 error: 'An unexpected error occurred',
@@ -79,12 +79,9 @@ export const GET = withSecurity(
         }
 
         if (data) {
-            // Check shift compatibility for student role
-            if (auth.role === 'student') {
-                const resolved = await getStudentProfileAndShift(auth.uid);
-
-                if (resolved.shift && !isShiftCompatible(resolved.shift, data.shift)) {
-                    console.log(`ℹ️ Trip active for bus ${busId} but shift incompatible (student: ${resolved.shift}, trip: ${data.shift})`);
+            // Check shift compatibility for student role using already-resolved profile.
+            if (auth.role === 'student' && studentProfile) {
+                if (studentProfile.shift && !isShiftCompatible(studentProfile.shift, data.shift)) {
                     return NextResponse.json({
                         tripActive: false,
                         tripData: null,
@@ -92,12 +89,6 @@ export const GET = withSecurity(
                     });
                 }
             }
-
-            console.log(`✅ Active trip found for bus ${busId}:`, {
-                tripId: data.trip_id,
-                status: data.status,
-                startedAt: data.start_time
-            });
 
             const { getLastLocationForBus } = await import('@/domains/gps');
             const lastLoc = getLastLocationForBus(busId);
@@ -112,9 +103,6 @@ export const GET = withSecurity(
                     timestamp: lastLoc.timestamp,
                 };
             } else {
-                // WS cache miss (e.g. right after a WS server restart) — fall
-                // back to the throttled persisted position. The row is deleted
-                // when the trip ends, so it cannot leak a previous trip's spot.
                 const { data: dbLoc } = await supabase
                     .from('bus_locations')
                     .select('lat, lng, timestamp')

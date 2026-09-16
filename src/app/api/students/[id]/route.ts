@@ -1,4 +1,4 @@
-import { getByEnrollmentId,getById,getByUid } from '@/domains/student';
+import { getById } from '@/domains/student';
 import { verifyApiAuth } from '@/lib/security/api-auth';
 import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
 import { getSupabaseServer } from '@/lib/supabase-server';
@@ -16,13 +16,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
 
     const { id } = await params;
     const cleanId = decodeURIComponent(id || '').trim();
-    let student = await getById(cleanId);
-    if (!student) {
-      student = await getByUid(cleanId);
-    }
-    if (!student) {
-      student = await getByEnrollmentId(cleanId);
-    }
+    const student = await getById(cleanId);
 
     if (!student) {
       return NextResponse.json({ error: 'Student not found' }, { status: 404 });

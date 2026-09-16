@@ -10,6 +10,12 @@
 
 import { z } from 'zod';
 
+// Common Validators
+export const UIDSchema = z.string().min(1).max(128).regex(/^[a-zA-Z0-9_-]+$/, 'Invalid UID format');
+export const EmailSchema = z.string().email().max(255);
+export const PhoneSchema = z.string().regex(/^[+]?[0-9]{10,15}$/, 'Invalid phone number');
+export const DateSchema = z.coerce.date();
+
 export const UidOnlySchema = z.object({
     uid: z.string().min(1).max(128),
 });
@@ -20,7 +26,30 @@ export const DeleteStudentSchema = z.object({
 
 export const UpdateStudentSchema = z.object({
     uid: z.string().min(1).max(128),
-}).passthrough();
+    fullName: z.string().max(200).optional(),
+    name: z.string().max(200).optional(),
+    email: z.string().email().optional(),
+    phone: PhoneSchema.optional(),
+    phoneNumber: PhoneSchema.optional(),
+    alternatePhone: PhoneSchema.optional(),
+    parentName: z.string().max(200).optional(),
+    parentPhone: PhoneSchema.optional(),
+    address: z.string().max(500).optional(),
+    dob: z.string().max(50).optional(),
+    bloodGroup: z.string().max(10).optional(),
+    busId: z.string().max(100).nullable().optional(),
+    busNumber: z.string().max(100).nullable().optional(),
+    routeId: z.string().max(100).nullable().optional(),
+    routeName: z.string().max(200).nullable().optional(),
+    stop_name: z.string().max(200).nullable().optional(),
+    shift: z.enum(['Morning', 'Evening', 'morning', 'evening', 'Both']).optional(),
+    status: z.enum(['active', 'soft_blocked', 'hard_blocked', 'expired', 'inactive']).optional(),
+    validUntil: z.string().max(100).nullable().optional(),
+    semester: z.union([z.string(), z.number()]).optional(),
+    department: z.string().max(200).optional(),
+    enrollmentId: z.string().max(100).optional(),
+    profilePhotoUrl: z.string().url().nullable().optional(),
+}).strict();
 
 export const BusFeeQuerySchema = z.object({
     history: z.string().optional().transform(v => v === 'true'),
@@ -121,14 +150,6 @@ export const SimulateDeadlinesSchema = z.object({
     syncSessionYear: z.boolean().optional(),
 });
 
-// ============================================================================
-// Common Validators
-// ============================================================================
-
-export const UIDSchema = z.string().min(1).max(128).regex(/^[a-zA-Z0-9_-]+$/, 'Invalid UID format');
-export const EmailSchema = z.string().email().max(255);
-export const PhoneSchema = z.string().regex(/^[+]?[0-9]{10,15}$/, 'Invalid phone number');
-export const DateSchema = z.coerce.date();
 export const ProxyORSSchema = z.object({
     action: z.enum(['directions', 'geocode']),
     coordinates: z.array(z.array(z.number())).optional(),
@@ -187,7 +208,7 @@ export const VerifyReceiptSchema = z.object({
         busId: z.string().max(100).optional(),
         routeId: z.string().max(100).optional(),
         source: z.string().max(50).optional(),
-    }).passthrough().optional(),
+    }).strict().optional(),
 });
 
 // ============================================================================
@@ -405,6 +426,7 @@ export const LocationUpdateBodySchema = z.object({
     heading: z.union([z.number(), z.string().transform(Number)]).optional(),
     timestamp: z.union([z.number(), z.string()]).optional(),
     tripId: z.string().max(200).optional(),
+    deviceId: z.string().max(200).optional(),
 });
 
 // ============================================================================
@@ -433,9 +455,17 @@ export const AddModeratorSchema = z.object({
 
 export const UpdateModeratorSchema = z.object({
     fullName: z.string().max(200).optional(),
+    name: z.string().max(200).optional(),
     phone: z.string().max(20).optional(),
+    phoneNumber: z.string().max(20).optional(),
+    alternatePhone: z.string().max(20).optional(),
     profilePhotoUrl: z.string().url().nullable().optional(),
-}).passthrough();
+    faculty: z.string().max(200).optional(),
+    assignedFaculty: z.string().max(200).optional(),
+    joiningDate: z.string().max(100).optional(),
+    dob: z.string().max(50).optional(),
+    status: z.enum(['active', 'inactive', 'suspended']).optional(),
+}).strict();
 
 export const UpdatePermissionsSchema = z.object({
     permissions: z.object({
@@ -514,31 +544,20 @@ export function validateInput<T>(
     schema: z.ZodSchema<T>,
     input: unknown
 ): ValidationResult<T> {
-    try {
-        const data = schema.parse(input);
-        return { success: true, data };
-    } catch (error: unknown) {
-        const zodError = error instanceof z.ZodError ? error : null;
-        const errorLike = error as ZodErrorLike;
-
-        if (zodError || errorLike.name === 'ZodError') {
-            const issues = zodError
-                ? zodError.issues.map((i) => `${i.path.map(String).join('.')}: ${i.message}`)
-                : (errorLike.issues || []).map((i) => `${(i.path || []).join('.')}: ${i.message || 'Invalid value'}`);
-            if (process.env.NODE_ENV !== 'test') {
-                console.error('[validateInput] ❌ Validation failed:', issues);
-            }
-            return {
-                success: false,
-                error: `Validation failed: ${issues.join(', ')}`,
-                details: zodError || undefined
-            };
-        }
-        if (process.env.NODE_ENV !== 'test') {
-            console.error('[validateInput] ❌ Non-Zod error:', error);
-        }
-        return { success: false, error: 'Invalid input' };
+    const result = schema.safeParse(input);
+    if (result.success) {
+        return { success: true, data: result.data };
     }
+
+    const issues = result.error.issues.map((i) => `${i.path.map(String).join('.')}: ${i.message}`);
+    if (process.env.NODE_ENV !== 'test') {
+        console.error('[validateInput] ❌ Validation failed:', issues);
+    }
+    return {
+        success: false,
+        error: `Validation failed: ${issues.join(', ')}`,
+        details: result.error
+    };
 }
 
 /**

@@ -41,7 +41,7 @@ import { getAllByState } from '@/domains/application';
 import * as applicationRepo from '@/domains/application/repositories/application.repository';
 import { createAuditEvent,SYSTEM_ACTOR } from '@/domains/audit';
 import * as fleetService from '@/domains/fleet/services/fleet.service';
-import { createStudent,createUser } from '@/domains/identity';
+import { createStudent,createUser,getUsersByRole } from '@/domains/identity';
 import * as Notification from '@/domains/notification';
 import * as routeService from '@/domains/route';
 import { findAlternatives } from '@/domains/seat/repositories/seat.repository';
@@ -173,11 +173,15 @@ export async function activateUpcomingSessionApplications(opts: {
   }
 
   // Check remaining verified_upcoming applications for the current session
-  const remainingApps = await getAllByState('verified_upcoming');
-  const hasRemainingForCurrentSession = remainingApps.some(app => {
-    const targetStartYear = Number((app as any).targetSession?.startYear);
-    return targetStartYear === currentSessionStartYear;
-  });
+  // If failures or pending seat allocations occurred, eligible applications definitely remain
+  let hasRemainingForCurrentSession = summary.pendingSeatAllocation > 0 || summary.failed > 0;
+  if (!hasRemainingForCurrentSession) {
+    const remainingApps = await getAllByState('verified_upcoming');
+    hasRemainingForCurrentSession = remainingApps.some(app => {
+      const targetStartYear = Number((app as any).targetSession?.startYear);
+      return targetStartYear === currentSessionStartYear;
+    });
+  }
 
   // Write activation marker only if NO eligible verified_upcoming applications remain
   if (!hasRemainingForCurrentSession) {
@@ -236,7 +240,20 @@ async function activateOne(
 
   const nowIso = new Date().toISOString();
 
+  // Atomically claim application lease to prevent concurrent activation races (e.g. cron vs admin)
+  const lockId = `activation_${trigger}_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+  const claimedApp = await applicationRepo.claimForActivation(appId, lockId).catch((err) => {
+    console.warn(`[session-activation] Failed to claim lease for application ${appId}:`, err?.message || err);
+    return null;
+  });
+
+  if (!claimedApp) {
+    // Another process has already claimed or activated this application
+    return 'skipped';
+  }
+
   // Reusable activation helper for a target bus.
+
   const attemptActivationWithBus = async (targetBusId: string, targetRouteId: string, isAlternative: boolean) => {
     const studentDoc = {
       address: formData.address,
@@ -296,8 +313,9 @@ async function activateOne(
     // 3. Increment capacity via Fleet PG (atomic RPC).
     const capacityResult = await fleetService.incrementBusCapacity(targetBusId, shift);
     if (!capacityResult.success) {
-      throw new Error(capacityResult.error || `Failed to increment capacity for bus ${targetBusId}`);
+      throw new CapacityFullError(capacityResult.error || `Failed to increment capacity for bus ${targetBusId}`);
     }
+
     // 4. Secure the user and student_profiles records in database (atomic post-capacity-increment write)
     try {
       await createUser({
@@ -379,6 +397,7 @@ async function activateOne(
     return 'activated';
   } catch (err: any) {
     if (err instanceof StateChangedError) {
+      await applicationRepo.releaseActivationClaim(appId, lockId).catch(() => {});
       return 'skipped';
     }
 
@@ -398,7 +417,10 @@ async function activateOne(
             );
             return 'activated';
           } catch (altErr: any) {
-            if (altErr instanceof StateChangedError) return 'skipped';
+            if (altErr instanceof StateChangedError) {
+              await applicationRepo.releaseActivationClaim(appId, lockId).catch(() => {});
+              return 'skipped';
+            }
             if (!(altErr instanceof CapacityFullError)) {
               throw altErr;
             }
@@ -417,6 +439,9 @@ async function activateOne(
           state: 'pending_seat_allocation',
           updatedAt: nowIso
         });
+
+        // Release processing lock so manual review or subsequent runs can inspect/re-evaluate
+        await applicationRepo.releaseActivationClaim(appId, lockId).catch(() => {});
 
         void createAuditEvent({
           action: 'application_pending_seat_allocation',
@@ -447,14 +472,18 @@ async function activateOne(
           );
         }
       } catch (e: any) {
+        await applicationRepo.releaseActivationClaim(appId, lockId).catch(() => {});
         if (e instanceof StateChangedError) return 'skipped';
         return { failed: `pending-state-write failed: ${e?.message || e}` };
       }
       return 'pending';
     }
+
+    await applicationRepo.releaseActivationClaim(appId, lockId).catch(() => {});
     return { failed: err?.message || String(err) };
   }
 }
+
 
 async function notifyStudentActivated(app: Application, formData: any, validUntil: string): Promise<void> {
   await Notification.createNotification(
@@ -514,8 +543,8 @@ async function notifyPendingSeatAllocation(appId: string, app: Application, form
 
   // Notify admins and moderators via D1 Identity domain (PostgreSQL)
   const [admins, moderators] = await Promise.all([
-    (await import('@/domains/identity')).getUsersByRole('admin'),
-    (await import('@/domains/identity')).getUsersByRole('moderator'),
+    getUsersByRole('admin'),
+    getUsersByRole('moderator'),
   ]);
   const recipients = Array.from(new Set([
     ...admins.map((u: any) => u.uid || u.id),

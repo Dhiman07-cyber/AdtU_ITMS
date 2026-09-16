@@ -1,3 +1,4 @@
+import { getByApplicantUid } from '@/domains/application';
 import { checkBusCapacity,incrementBusCapacity } from '@/domains/fleet';
 import { getUserById } from '@/domains/identity';
 import { getByUid as getStudentByUid,update as updateStudent } from '@/domains/student';
@@ -152,7 +153,6 @@ export async function POST(request: NextRequest) {
         }
 
         // D8: Check for existing pending renewal application from PostgreSQL
-        const { getByApplicantUid } = await import('@/domains/application');
         const pendingRenewalApp = await getByApplicantUid(studentUid);
 
         if (pendingRenewalApp &&
