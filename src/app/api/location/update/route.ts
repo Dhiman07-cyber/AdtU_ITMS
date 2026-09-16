@@ -14,27 +14,25 @@ export const POST = withSecurity(
     const driverUid = auth.uid;
 
     const requestDeviceId = deviceId || (request instanceof Request ? request.headers.get('x-device-id') : (request as any).headers?.get?.('x-device-id'));
-    if (requestDeviceId) {
-      const supabase = getSupabaseServer();
-      const { data: sessionData } = await supabase
-        .from('device_sessions')
-        .select('device_id, last_active_at')
-        .eq('user_id', driverUid)
-        .eq('feature', 'driver_location_share')
-        .order('last_active_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+    const supabase = getSupabaseServer();
+    const { data: sessionData } = await supabase
+      .from('device_sessions')
+      .select('device_id, last_active_at')
+      .eq('user_id', driverUid)
+      .eq('feature', 'driver_location_share')
+      .order('last_active_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
-      if (sessionData) {
-        const sessionAge = Date.now() - new Date(sessionData.last_active_at).getTime();
-        if (sessionAge <= 30000 && sessionData.device_id !== requestDeviceId) {
-          return NextResponse.json({
-            success: false,
-            error: 'Active session exists on another device. Location update rejected.',
-            code: 'ANOTHER_DEVICE_ACTIVE',
-            requestId,
-          }, { status: 403 });
-        }
+    if (sessionData) {
+      const sessionAge = Date.now() - new Date(sessionData.last_active_at).getTime();
+      if (sessionAge <= 30000 && (!requestDeviceId || sessionData.device_id !== requestDeviceId)) {
+        return NextResponse.json({
+          success: false,
+          error: 'Active session exists on another device. Location update rejected.',
+          code: 'ANOTHER_DEVICE_ACTIVE',
+          requestId,
+        }, { status: 403 });
       }
     }
 
@@ -83,7 +81,6 @@ export const POST = withSecurity(
     // the trip lock expires 10 minutes after start and the student sees "Trip Inactive"
     // even though GPS HTTP 200 continues. The 600s TTL matches acquire_trip_lock /
     // extend_trip_lock RPCs (LOCK_TTL_SECONDS = 600 in trip-lock-service.ts).
-    const supabase = getSupabaseServer();
     const nowMs = Date.now();
     if (shouldWriteHeartbeat(busId, nowMs)) {
       const extendedExpiresAt = new Date(nowMs + 600 * 1000).toISOString();

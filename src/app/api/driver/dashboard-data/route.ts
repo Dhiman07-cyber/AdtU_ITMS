@@ -19,7 +19,7 @@ export const GET = withSecurity(
         const [profileQueryRes, activeTripRes] = await Promise.all([
             supabase
                 .from('driver_profiles')
-                .select('uid, full_name, license_number, employee_id, joining_date, status')
+                .select('uid, full_name, license_number, employee_id, joining_date, status, bus_id, route_id')
                 .eq('uid', uid)
                 .maybeSingle(),
             supabase
@@ -51,6 +51,8 @@ export const GET = withSecurity(
                 employee_id: 'N/A',
                 joining_date: new Date().toISOString(),
                 status: 'active',
+                bus_id: null,
+                route_id: null,
                 created_at: new Date().toISOString(),
                 updated_at: new Date().toISOString(),
             };
@@ -64,8 +66,8 @@ export const GET = withSecurity(
 
         const activeTrip = activeTripRes.data;
         const isTripActive = !!activeTrip;
-        const busId = activeTrip?.bus_id || null;
-        const routeId = activeTrip?.route_id || null;
+        const busId = activeTrip?.bus_id || driverProfile?.bus_id || null;
+        const routeId = activeTrip?.route_id || driverProfile?.route_id || null;
 
         // 3. Fetch Bus details, Route details, Student counts, and Active Waiting Flags
         const [busResult, routeResult, totalStudentsRes, morningStudentsRes, eveningStudentsRes, waitingFlagsRes] = await Promise.all([

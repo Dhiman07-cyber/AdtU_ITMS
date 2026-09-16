@@ -276,13 +276,19 @@ CREATE TABLE IF NOT EXISTS public.payments (
   student_uid TEXT NOT NULL,
   amount NUMERIC(10,2) NOT NULL,
   currency TEXT NOT NULL DEFAULT 'INR',
-  payment_method TEXT NOT NULL,
-  status TEXT NOT NULL,
+  payment_method TEXT,
+  method TEXT,
+  status TEXT NOT NULL DEFAULT 'Pending',
   order_id TEXT,
   payment_id TEXT UNIQUE,
+  razorpay_payment_id TEXT,
+  razorpay_order_id TEXT,
   receipt_id TEXT,
-  academic_year TEXT NOT NULL,
-  session_end_year INTEGER NOT NULL,
+  academic_year TEXT,
+  session_start_year INTEGER,
+  session_end_year INTEGER,
+  duration_years INTEGER,
+  transaction_date TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   notes TEXT,
@@ -290,6 +296,8 @@ CREATE TABLE IF NOT EXISTS public.payments (
   student_id TEXT,
   offline_transaction_id TEXT,
   document_signature TEXT,
+  approved_by JSONB,
+  approved_at TIMESTAMPTZ,
   fee_tier TEXT,
   bus_id TEXT,
   route_id TEXT,
@@ -301,6 +309,16 @@ CREATE TABLE IF NOT EXISTS public.payments (
   valid_until TIMESTAMPTZ,
   metadata JSONB
 );
+
+-- Ensure optional columns exist if table already exists in older schema
+ALTER TABLE public.payments ADD COLUMN IF NOT EXISTS method TEXT;
+ALTER TABLE public.payments ADD COLUMN IF NOT EXISTS razorpay_payment_id TEXT;
+ALTER TABLE public.payments ADD COLUMN IF NOT EXISTS razorpay_order_id TEXT;
+ALTER TABLE public.payments ADD COLUMN IF NOT EXISTS session_start_year INTEGER;
+ALTER TABLE public.payments ADD COLUMN IF NOT EXISTS duration_years INTEGER;
+ALTER TABLE public.payments ADD COLUMN IF NOT EXISTS transaction_date TIMESTAMPTZ;
+ALTER TABLE public.payments ADD COLUMN IF NOT EXISTS approved_by JSONB;
+ALTER TABLE public.payments ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ;
 
 -- ── 3.6 Realtime & Operations Domain ──────────────────────────────────────────
 
@@ -544,15 +562,19 @@ CREATE INDEX IF NOT EXISTS idx_applications_applicant_uid ON applications(applic
 CREATE INDEX IF NOT EXISTS idx_applications_state ON applications(state);
 CREATE INDEX IF NOT EXISTS idx_applications_state_type ON applications(state, application_type);
 CREATE INDEX IF NOT EXISTS idx_applications_bus_id ON applications(bus_id);
+CREATE INDEX IF NOT EXISTS idx_applications_created_at ON applications(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_buses_route_id ON buses(route_id);
 CREATE INDEX IF NOT EXISTS idx_reassignment_logs_rollback_of ON reassignment_logs(rollback_of);
+CREATE INDEX IF NOT EXISTS idx_reassignment_logs_status ON reassignment_logs(status);
 CREATE INDEX IF NOT EXISTS idx_notifications_sender_user_id ON notifications(sender_user_id);
 CREATE INDEX IF NOT EXISTS idx_processed_payments_expires_at ON processed_payments(expires_at);
-CREATE INDEX IF NOT EXISTS idx_applications_preferred_bus_id ON applications(preferred_bus_id);
+CREATE INDEX IF NOT EXISTS idx_processed_payments_order_id ON processed_payments(order_id);
 
 CREATE INDEX IF NOT EXISTS idx_payments_student_uid ON payments(student_uid);
 CREATE INDEX IF NOT EXISTS idx_payments_payment_id ON payments(payment_id);
 CREATE INDEX IF NOT EXISTS idx_payments_order_id ON payments(order_id);
+CREATE INDEX IF NOT EXISTS idx_payments_razorpay_payment_id ON payments(razorpay_payment_id);
+CREATE INDEX IF NOT EXISTS idx_payments_razorpay_order_id ON payments(razorpay_order_id);
 CREATE INDEX IF NOT EXISTS idx_payments_status ON payments(status);
 CREATE INDEX IF NOT EXISTS idx_payments_created_at ON payments(created_at DESC);
 
@@ -1457,7 +1479,7 @@ CREATE OR REPLACE FUNCTION public.soft_block_student_with_seat_release(
     p_soft_blocked_at  TIMESTAMPTZ,
     p_seat_released_at TIMESTAMPTZ
 )
-RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $
+RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE
     v_student         RECORD;
     v_normalized_shift TEXT;
@@ -1528,13 +1550,60 @@ EXCEPTION WHEN OTHERS THEN
     END IF;
     RAISE;
 END;
-$;
+$$;
 
 REVOKE EXECUTE ON FUNCTION public.soft_block_student_with_seat_release(TEXT,TEXT,TEXT,BOOLEAN,TIMESTAMPTZ,TIMESTAMPTZ) FROM public;
 REVOKE EXECUTE ON FUNCTION public.soft_block_student_with_seat_release(TEXT,TEXT,TEXT,BOOLEAN,TIMESTAMPTZ,TIMESTAMPTZ) FROM authenticated;
 REVOKE EXECUTE ON FUNCTION public.soft_block_student_with_seat_release(TEXT,TEXT,TEXT,BOOLEAN,TIMESTAMPTZ,TIMESTAMPTZ) FROM anon;
 GRANT  EXECUTE ON FUNCTION public.soft_block_student_with_seat_release(TEXT,TEXT,TEXT,BOOLEAN,TIMESTAMPTZ,TIMESTAMPTZ) TO service_role;
 
+
+-- ── 8.5.1b increment_expiry_reminder_count ─────────────────────────────────
+-- Caller: src/lib/expiry-check.ts
+-- Prevents duplicate expiry reminders when cron or manual executions race on the same day.
+-- Locks the student row (FOR UPDATE) so concurrent calls are serialized.
+CREATE OR REPLACE FUNCTION public.increment_expiry_reminder_count(p_uid TEXT)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    v_last_sent TIMESTAMPTZ;
+    v_today     DATE := CURRENT_DATE;  -- UTC date
+BEGIN
+    -- Lock the target row for the duration of this transaction.
+    SELECT last_expiry_reminder_sent_at
+      INTO v_last_sent
+      FROM student_profiles
+     WHERE uid = p_uid
+       FOR UPDATE;
+
+    -- If no row found, nothing to do.
+    IF NOT FOUND THEN
+        RETURN FALSE;
+    END IF;
+
+    -- Already reminded today -- idempotent, return FALSE so caller skips notification
+    IF v_last_sent IS NOT NULL AND v_last_sent::DATE = v_today THEN
+        RETURN FALSE;
+    END IF;
+
+    -- First reminder for today -- increment counter and stamp timestamp.
+    UPDATE student_profiles
+       SET expiry_reminder_count      = COALESCE(expiry_reminder_count, 0) + 1,
+           last_expiry_reminder_sent_at = NOW(),
+           updated_at                  = NOW()
+     WHERE uid = p_uid;
+
+    RETURN TRUE;
+END;
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.increment_expiry_reminder_count(TEXT) FROM public;
+REVOKE EXECUTE ON FUNCTION public.increment_expiry_reminder_count(TEXT) FROM authenticated;
+REVOKE EXECUTE ON FUNCTION public.increment_expiry_reminder_count(TEXT) FROM anon;
+GRANT EXECUTE ON FUNCTION public.increment_expiry_reminder_count(TEXT) TO service_role;
 
 -- ── 8.5.2 approve_renewal_with_seat ─────────────────────────────────────────
 -- Caller: application.service.ts:279 (approve renewal_after_soft_block path)
@@ -1553,10 +1622,11 @@ CREATE OR REPLACE FUNCTION public.approve_renewal_with_seat(
     p_soft_block      TIMESTAMPTZ DEFAULT NULL,
     p_hard_block      TIMESTAMPTZ DEFAULT NULL
 )
-RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $
+RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE
     v_normalized_shift TEXT;
     v_bus              RECORD;
+    v_student          RECORD;
     v_new_morning      INTEGER;
     v_new_evening      INTEGER;
     v_student_updated  INTEGER;
@@ -1679,7 +1749,7 @@ BEGIN
 EXCEPTION WHEN OTHERS THEN
     RAISE;
 END;
-$;
+$$;
 
 REVOKE EXECUTE ON FUNCTION public.approve_renewal_with_seat(TEXT,TEXT,TEXT,TEXT,TEXT,TIMESTAMPTZ,INTEGER,TEXT,TIMESTAMPTZ,TIMESTAMPTZ) FROM public;
 REVOKE EXECUTE ON FUNCTION public.approve_renewal_with_seat(TEXT,TEXT,TEXT,TEXT,TEXT,TIMESTAMPTZ,INTEGER,TEXT,TIMESTAMPTZ,TIMESTAMPTZ) FROM authenticated;
@@ -1698,7 +1768,7 @@ RETURNS TABLE(
     evening_students BIGINT,
     expired_students BIGINT
 )
-LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
     SELECT
         COUNT(*)                                                        AS total_students,
         COUNT(*) FILTER (WHERE status = 'active')                       AS active_students,
@@ -1706,7 +1776,7 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $
         COUNT(*) FILTER (WHERE LOWER(shift) = 'evening')                AS evening_students,
         COUNT(*) FILTER (WHERE status IN ('soft_blocked', 'expired'))   AS expired_students
     FROM public.student_profiles;
-$;
+$$;
 
 REVOKE EXECUTE ON FUNCTION public.get_student_profile_counts() FROM public;
 REVOKE EXECUTE ON FUNCTION public.get_student_profile_counts() FROM authenticated;
@@ -1722,14 +1792,14 @@ RETURNS TABLE(
     verification_apps BIGINT,
     renewal_apps      BIGINT
 )
-LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
     SELECT
         COUNT(*) FILTER (WHERE state IN ('draft', 'submitted'))                               AS pending_apps,
         COUNT(*) FILTER (WHERE state IN ('awaiting_verification', 'verified'))                AS verification_apps,
         COUNT(*) FILTER (WHERE application_type IN ('renewal', 'renewal_after_soft_block')
                            AND state NOT IN ('approved', 'rejected'))                         AS renewal_apps
     FROM public.applications;
-$;
+$$;
 
 REVOKE EXECUTE ON FUNCTION public.get_application_counts() FROM public;
 REVOKE EXECUTE ON FUNCTION public.get_application_counts() FROM authenticated;
@@ -1742,7 +1812,7 @@ GRANT  EXECUTE ON FUNCTION public.get_application_counts() TO service_role;
 --                     waiting_flags, fcm_tokens for a given student UID.
 -- The single-transaction boundary prevents partial deletion states.
 CREATE OR REPLACE FUNCTION public.delete_student_cascade_v1(p_student_uid TEXT)
-RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $
+RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE
     v_notifications_deleted  INTEGER := 0;
     v_waiting_flags_deleted  INTEGER := 0;
@@ -1794,7 +1864,7 @@ BEGIN
 EXCEPTION WHEN OTHERS THEN
     RAISE;
 END;
-$;
+$$;
 
 REVOKE EXECUTE ON FUNCTION public.delete_student_cascade_v1(TEXT) FROM public;
 REVOKE EXECUTE ON FUNCTION public.delete_student_cascade_v1(TEXT) FROM authenticated;
@@ -1807,7 +1877,7 @@ GRANT  EXECUTE ON FUNCTION public.delete_student_cascade_v1(TEXT) TO service_rol
 -- Returns: { success, busesCleaned, studentsCleaned }
 -- Atomically: clears route from buses → clears route/bus from students → deletes route.
 CREATE OR REPLACE FUNCTION public.delete_route_cascade_v1(p_route_id TEXT)
-RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $
+RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE
     v_buses_cleaned    INTEGER := 0;
     v_students_cleaned INTEGER := 0;
@@ -1851,7 +1921,7 @@ BEGIN
 EXCEPTION WHEN OTHERS THEN
     RAISE;
 END;
-$;
+$$;
 
 REVOKE EXECUTE ON FUNCTION public.delete_route_cascade_v1(TEXT) FROM public;
 REVOKE EXECUTE ON FUNCTION public.delete_route_cascade_v1(TEXT) FROM authenticated;
@@ -1870,7 +1940,7 @@ GRANT  EXECUTE ON FUNCTION public.delete_route_cascade_v1(TEXT) TO service_role;
 -- creation, bus-pass, notifications) is orchestrated by TypeScript. This RPC
 -- handles the database-level state transitions atomically.
 CREATE OR REPLACE FUNCTION public.activate_session_batch(p_session_year INTEGER)
-RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $
+RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE
     v_app            RECORD;
     v_processed      INTEGER := 0;
@@ -1930,7 +2000,7 @@ BEGIN
         'errors',    v_errors
     );
 END;
-$;
+$$;
 
 REVOKE EXECUTE ON FUNCTION public.activate_session_batch(INTEGER) FROM public;
 REVOKE EXECUTE ON FUNCTION public.activate_session_batch(INTEGER) FROM authenticated;
@@ -1997,7 +2067,7 @@ GRANT EXECUTE ON FUNCTION public.release_application_activation_claim(TEXT, TEXT
 -- decrementing source and incrementing destination capacity per student
 -- and recalculating bus capacity counts for 100% precision.
 CREATE OR REPLACE FUNCTION public.reassign_students_atomically(p_plans JSONB)
-RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $
+RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE
     v_plan           JSONB;
     v_student        RECORD;
@@ -2087,9 +2157,14 @@ BEGIN
         WHERE b.id = v_to_bus_id OR b.bus_number = v_to_bus_id;
     END LOOP;
 
-    RETURN jsonb_build_object('success', true, 'processed', v_processed);
+    RETURN jsonb_build_object(
+        'success',   true,
+        'processed', v_processed
+    );
+EXCEPTION WHEN OTHERS THEN
+    RAISE;
 END;
-$;
+$$;
 
 REVOKE EXECUTE ON FUNCTION public.reassign_students_atomically(JSONB) FROM public;
 REVOKE EXECUTE ON FUNCTION public.reassign_students_atomically(JSONB) FROM authenticated;
@@ -2140,7 +2215,7 @@ CREATE OR REPLACE FUNCTION public.execute_reassignment_rollback(
     p_actor_label TEXT,
     p_changes JSONB
 )
-RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $
+RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE
     v_orig_status TEXT;
     v_orig_changes JSONB;
@@ -2263,7 +2338,7 @@ BEGIN
         'reverted_docs', to_jsonb(v_reverted_docs)
     );
 END;
-$;
+$$;
 
 REVOKE EXECUTE ON FUNCTION public.reassign_students_atomically(JSONB) FROM public;
 REVOKE EXECUTE ON FUNCTION public.reassign_students_atomically(JSONB) FROM authenticated;
@@ -2474,7 +2549,7 @@ END $$;
 -- =============================================================================
 -- 9. FUNCTION EXECUTION GRANTS & ACCESS CONTROL
 -- =============================================================================
-DO $
+DO $$
 DECLARE
   r RECORD;
 BEGIN
@@ -2497,6 +2572,9 @@ BEGIN
         'execute_reassignment_rollback',
         'approve_application',
         'approve_renewal_with_seat',
+        'increment_expiry_reminder_count',
+        'claim_application_for_activation',
+        'release_application_activation_claim',
         'reject_application',
         'finalize_application_approval',
         'finalize_application_rejection',
@@ -2515,7 +2593,7 @@ BEGIN
     EXECUTE format('REVOKE ALL ON FUNCTION %s FROM anon, authenticated', r.proc_name);
     EXECUTE format('GRANT EXECUTE ON FUNCTION %s TO service_role', r.proc_name);
   END LOOP;
-END $;
+END $$;
 
 -- Read-only inspection and analytics functions: grant to authenticated & service_role
 GRANT EXECUTE ON FUNCTION public.bus_check_capacity(TEXT, TEXT) TO authenticated, service_role;

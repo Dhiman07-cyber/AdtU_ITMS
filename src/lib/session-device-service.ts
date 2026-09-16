@@ -77,7 +77,10 @@ async function callDeviceSessionAPI(
 
     const response = await fetch('/api/driver/device-session', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${idToken}`
+        },
         body: JSON.stringify({
             idToken,
             action,

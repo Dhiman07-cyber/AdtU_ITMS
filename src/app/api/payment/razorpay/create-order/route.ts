@@ -1,10 +1,10 @@
 import { getSystemConfig } from '@/domains/admin';
 import { getByUid as getStudentByUid } from '@/domains/student';
-import { createRazorpayOrder,generateReceiptId } from '@/lib/payment/razorpay.service';
+import { createRazorpayOrder, generateReceiptId } from '@/lib/payment/razorpay.service';
 import { withSecurity } from '@/lib/security/api-security';
 import { RateLimits } from '@/lib/security/rate-limiter';
 import { CreateOrderSchema } from '@/lib/security/validation-schemas';
-import { NextRequest,NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 
 type CreateOrderBody = z.infer<typeof CreateOrderSchema>;
@@ -109,28 +109,27 @@ export const POST = withSecurity<CreateOrderBody>(
 
 // OPTIONS method for CORS - Production safe
 export async function OPTIONS(request: NextRequest) {
-  const origin = request.headers.get('origin') || '';
+    const origin = request.headers.get('origin') || '';
 
-  // SECURITY: Define allowed origins
-  const allowedOrigins: string[] = [
-    'https://adtu-bus.vercel.app',
-    'https://adtu-bus-xq.vercel.app',
-    process.env.NEXT_PUBLIC_APP_URL || '',
-  ].filter(Boolean);
+    // SECURITY: Define allowed origins
+    const allowedOrigins: string[] = [
+        'https://adtu-itms.vercel.app',
+        process.env.NEXT_PUBLIC_APP_URL || '',
+    ].filter(Boolean);
 
-  // Check if origin is allowed (includes Vercel preview deployments)
-  const isVercelPreview = /^https:\/\/.*\.vercel\.app$/.test(origin);
-  const isLocalhost = process.env.NODE_ENV === 'development' &&
-    (origin === 'http://localhost:3000' || origin === 'http://127.0.0.1:3000');
-  const isAllowed = allowedOrigins.includes(origin) || isVercelPreview || isLocalhost;
+    // Check if origin is allowed (includes Vercel preview deployments)
+    const isVercelPreview = /^https:\/\/.*\.vercel\.app$/.test(origin);
+    const isLocalhost = process.env.NODE_ENV === 'development' &&
+        (origin === 'http://localhost:3000' || origin === 'http://127.0.0.1:3000');
+    const isAllowed = allowedOrigins.includes(origin) || isVercelPreview || isLocalhost;
 
-  return new NextResponse(null, {
-    status: 200,
-    headers: {
-      'Access-Control-Allow-Origin': isAllowed ? origin : (allowedOrigins[0] || ''),
-      'Access-Control-Allow-Methods': 'POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-      'Access-Control-Max-Age': '86400', // 24 hours
-    },
-  });
+    return new NextResponse(null, {
+        status: 200,
+        headers: {
+            'Access-Control-Allow-Origin': isAllowed ? origin : (allowedOrigins[0] || ''),
+            'Access-Control-Allow-Methods': 'POST, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+            'Access-Control-Max-Age': '86400', // 24 hours
+        },
+    });
 }

@@ -239,12 +239,13 @@ export default function DriverLiveTrackingPage() {
 
   // Subscribe to wait requests
   useEffect(() => {
-    if (!busData?.busId || !currentUser) return;
+    if (!busData?.busId || !currentUser || !wsClientReady) return;
 
     console.log("👂 Subscribing to wait requests via WS for bus:", busData.busId);
 
     const wsClient = wsClientRef.current;
     if (wsClient) {
+      wsClient.setPresence({ busId: busData.busId });
       wsClient.subscribe(`driver_wait_request_${busData.busId}`, (payload: any) => {
         console.log("📣 Received wait request:", payload);
         setActiveWaitRequest({
@@ -780,6 +781,11 @@ export default function DriverLiveTrackingPage() {
       console.log('🔍 Device session check:', sessionCheck);
 
       if (sessionCheck.hasActiveSession && !sessionCheck.isCurrentDevice) {
+        if (sessionCheck.serviceUnavailable) {
+          console.warn('⚠️ Device session service unavailable during background check; ignoring conflict.');
+          setDeviceConflict({ hasConflict: false });
+          return;
+        }
         // Another device is actively sharing location
         setDeviceConflict({
           hasConflict: true,
@@ -1071,14 +1077,17 @@ export default function DriverLiveTrackingPage() {
     // (Bypassing direct WS location stream to prevent unvalidated duplicate broadcasts)
     try {
       const idToken = await currentUser?.getIdToken();
+      const deviceId = currentDeviceId.current || getOrCreateDeviceId();
       const response = await fetch("/api/location/update", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${idToken}`,
+          "x-device-id": deviceId,
         },
         body: JSON.stringify({
           idToken,
+          deviceId,
           busId: resolvedBus,
           routeId: routeData?.routeId || routeData?.id || busData?.route_id || 'unassigned',
           lat: currentLocation.lat,
@@ -1226,6 +1235,11 @@ export default function DriverLiveTrackingPage() {
       // Session check
       const sessionCheck = await checkDeviceSession(currentUser.uid, 'driver_location_share');
       if (sessionCheck.hasActiveSession && !sessionCheck.isCurrentDevice) {
+        if (sessionCheck.serviceUnavailable) {
+          setInitiatingTrip(false);
+          addToast('Could not verify device session due to network issue. Please retry.', 'error');
+          return;
+        }
         setDeviceConflict({
           hasConflict: true,
           otherDeviceId: sessionCheck.otherDeviceId,

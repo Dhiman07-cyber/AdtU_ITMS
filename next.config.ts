@@ -9,6 +9,10 @@ const nextConfig: NextConfig = {
     'localhost',
     '127.0.0.1:3000',
     'localhost:3000',
+    'adtu-itms.vercel.app',
+    'https://adtu-itms.vercel.app',
+    '*.devtunnels.ms',
+    '2g747pzk-3000.inc1.devtunnels.ms',
   ],
   // Performance optimizations
   // Next.js 16 Compiler automatic memoization
@@ -52,6 +56,13 @@ const nextConfig: NextConfig = {
     // Faster builds in development
     serverActions: {
       bodySizeLimit: '10mb',
+      allowedOrigins: [
+        'adtu-itms.vercel.app',
+        'https://adtu-itms.vercel.app',
+        'localhost:3000',
+        '*.devtunnels.ms',
+        'https://2g747pzk-3000.inc1.devtunnels.ms',
+      ],
     },
 
     // Note: optimizeCss can cause issues with Turbopack, disable for dev
@@ -214,7 +225,7 @@ const nextConfig: NextConfig = {
             ? "connect-src 'self' ws://* wss://* ws: wss: https://fonts.openmaptiles.org https://demotiles.maplibre.org https://*.razorpay.com https://api.razorpay.com wss://*.supabase.co https://*.supabase.co https://*.supabase.in https://firestore.googleapis.com https://securetoken.googleapis.com https://identitytoolkit.googleapis.com https://*.googleapis.com https://apis.google.com https://accounts.google.com https://www.google.com https://www.googletagmanager.com https://analytics.google.com https://www.google-analytics.com https://api.cloudinary.com https://*.cloudinary.com https://vercel.live https://*.vercel.live https://vitals.vercel-insights.com"
             : "connect-src 'self' ws://localhost:* ws://127.0.0.1:* ws://* wss://* ws: wss: http://localhost:* https://*.devtunnels.ms https://fonts.openmaptiles.org https://demotiles.maplibre.org https://*.razorpay.com https://api.razorpay.com wss://*.supabase.co https://*.supabase.co https://*.supabase.in https://firestore.googleapis.com https://securetoken.googleapis.com https://identitytoolkit.googleapis.com https://*.googleapis.com https://apis.google.com https://accounts.google.com https://www.google.com https://www.googletagmanager.com https://analytics.google.com https://www.google-analytics.com https://api.cloudinary.com https://*.cloudinary.com https://vercel.live https://*.vercel.live https://vitals.vercel-insights.com",
           "frame-src 'self' https://api.razorpay.com https://checkout.razorpay.com https://accounts.google.com https://*.firebaseapp.com https://vercel.live https://*.vercel.live https://www.google.com",
-          "frame-ancestors 'self' https://accounts.google.com https://*.firebaseapp.com",
+          "frame-ancestors 'self' https://accounts.google.com https://*.firebaseapp.com https://adtu-itms.vercel.app",
           "media-src 'self' blob: data: https://*.supabase.co https://*.supabase.in",
           "base-uri 'self'",
           "form-action 'self' https://api.razorpay.com https://accounts.google.com",

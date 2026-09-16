@@ -1,6 +1,6 @@
 import { getByApplicantUid } from '@/domains/application';
-import { isPaymentProcessed,processCapturedPayment } from '@/lib/payment/payment.service';
-import { fetchOrderDetails,fetchOrderPayments,fetchPaymentDetails } from '@/lib/payment/razorpay.service';
+import { isPaymentProcessed, processCapturedPayment } from '@/lib/payment/payment.service';
+import { fetchOrderDetails, fetchOrderPayments, fetchPaymentDetails } from '@/lib/payment/razorpay.service';
 import { withSecurity } from '@/lib/security/api-security';
 import { RateLimits } from '@/lib/security/rate-limiter';
 import { paymentsSupabaseService } from '@/lib/services/payments-supabase';
@@ -17,7 +17,7 @@ const localCache = new Map<string, number>();
 
 async function isRecoveryThrottled(uid: string): Promise<boolean> {
     const key = `payment-recovery:${uid}`;
-    
+
     if (UPSTASH_URL && UPSTASH_TOKEN) {
         try {
             // Try to set the key with NX (only if it doesn't exist) and EX (expire in seconds)
@@ -26,7 +26,7 @@ async function isRecoveryThrottled(uid: string): Promise<boolean> {
                 headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` },
                 cache: 'no-store',
             });
-            
+
             if (res.ok) {
                 const data = await res.json();
                 // Upstash returns { result: "OK" } if it was set, or { result: null } if not set
@@ -41,7 +41,7 @@ async function isRecoveryThrottled(uid: string): Promise<boolean> {
             return false; // Skip throttle on Redis fetch errors
         }
     }
-    
+
     // In-memory fallback for local development when credentials are NOT configured
     const now = Date.now();
     const lastCheck = localCache.get(uid);
@@ -55,7 +55,7 @@ async function isRecoveryThrottled(uid: string): Promise<boolean> {
 const withTimeout = <T>(promise: Promise<T>, timeoutMs: number): Promise<T> => {
     return Promise.race([
         promise,
-        new Promise<T>((_, reject) => 
+        new Promise<T>((_, reject) =>
             setTimeout(() => reject(new Error('Razorpay Gateway Timeout')), timeoutMs)
         )
     ]);
@@ -130,12 +130,12 @@ export const GET = withSecurity(
         // Collect all verified IDs belonging to target student for Ownership validation
         const allowedPaymentIds = new Set<string>();
         const allowedOrderIds = new Set<string>();
-        
+
         if (appPaymentId) allowedPaymentIds.add(appPaymentId);
         if (appOrderId) allowedOrderIds.add(appOrderId);
         if (renewalPaymentId) allowedPaymentIds.add(renewalPaymentId);
         if (renewalOrderId) allowedOrderIds.add(renewalOrderId);
-        
+
         studentPayments.forEach(p => {
             if (p.payment_id) allowedPaymentIds.add(p.payment_id);
             if (p.razorpay_payment_id) allowedPaymentIds.add(p.razorpay_payment_id);
@@ -342,7 +342,7 @@ export const GET = withSecurity(
 
 export async function OPTIONS(request: Request) {
     const origin = request.headers.get('origin') || '';
-    const allowedOrigins = ['https://adtu-bus.vercel.app', 'https://adtu-bus-xq.vercel.app', process.env.NEXT_PUBLIC_APP_URL || ''].filter(Boolean);
+    const allowedOrigins = ['https://adtu-itms.vercel.app', process.env.NEXT_PUBLIC_APP_URL || ''].filter(Boolean);
     const isVercelPreview = /^https:\/\/.*\.vercel\.app$/.test(origin);
     const isLocalhost = process.env.NODE_ENV === 'development' && (origin === 'http://localhost:3000' || origin === 'http://127.0.0.1:3000');
     const isAllowed = allowedOrigins.includes(origin) || isVercelPreview || isLocalhost;

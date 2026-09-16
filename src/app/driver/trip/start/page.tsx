@@ -21,7 +21,6 @@ import {
 import { useRouter } from "next/navigation";
 import { useEffect,useRef,useState } from "react";
 
-type TripMode = "dev" | "production";
 type Step = "select-bus" | "scan-qr" | "select-shift" | "confirming" | "done" | "error";
 
 interface BusInfo {
@@ -36,21 +35,17 @@ export default function StartTripPage() {
   const { currentUser, userData } = useAuth();
   const router = useRouter();
 
-  const configMode: TripMode = (process.env.NEXT_PUBLIC_TRIP_INITIATION_MODE as TripMode) ||
-    (process.env.NODE_ENV === "development" ? "dev" : "production");
-
-  const [mode] = useState<TripMode>(configMode);
-  const [step, setStep] = useState<Step>(configMode === "production" ? "scan-qr" : "select-bus");
+  const [step, setStep] = useState<Step>("select-bus");
   const [buses, setBuses] = useState<BusInfo[]>([]);
   const [selectedBus, setSelectedBus] = useState<BusInfo | null>(null);
   const [selectedShift, setSelectedShift] = useState<"Morning" | "Evening" | null>(null);
-  const [loading, setLoading] = useState(configMode !== "production");
+  const [loading, setLoading] = useState(true);
   const [resolvingQR, setResolvingQR] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<{ tripId: string } | null>(null);
 
   useEffect(() => {
-    if (!currentUser?.uid || configMode === "production") return;
+    if (!currentUser?.uid) return;
     const fetchBuses = async () => {
       try {
         const res = await authApiFetch(currentUser, "/api/driver/available-buses");
@@ -65,7 +60,7 @@ export default function StartTripPage() {
       }
     };
     fetchBuses();
-  }, [currentUser, configMode]);
+  }, [currentUser]);
 
   const selectBus = (bus: BusInfo) => {
     setSelectedBus(bus);
@@ -143,8 +138,7 @@ export default function StartTripPage() {
     if (step === "select-bus" || step === "scan-qr") {
       router.push("/driver");
     } else if (step === "select-shift") {
-      if (mode === "dev") setStep("select-bus");
-      else setStep("scan-qr");
+      setStep("select-bus");
     } else if (step === "confirming") {
       setStep("select-shift");
     } else {
@@ -153,7 +147,7 @@ export default function StartTripPage() {
   };
 
   const reset = () => {
-    setStep(configMode === "production" ? "scan-qr" : "select-bus");
+    setStep("select-bus");
     setSelectedBus(null);
     setSelectedShift(null);
     setError(null);

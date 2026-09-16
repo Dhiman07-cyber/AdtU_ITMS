@@ -11,7 +11,7 @@
  * - Request method validation
  */
 
-import { NextRequest,NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
 // ============================================================================
 // RATE LIMITING (Edge-compatible, in-memory)
@@ -214,8 +214,7 @@ function isCronRoute(pathname: string): boolean {
 const STATIC_ALLOWED_ORIGINS: Set<string> = (() => {
     const origins = [
         process.env.NEXT_PUBLIC_APP_URL || '',
-        'https://adtu-bus.vercel.app',
-        'https://adtu-bus-xq.vercel.app',
+        'https://adtu-itms.vercel.app',
     ].filter(Boolean);
 
     if (process.env.NODE_ENV === 'development') {
@@ -235,6 +234,7 @@ export function isOriginAllowed(origin: string): boolean {
     if (process.env.VERCEL_URL && origin === `https://${process.env.VERCEL_URL}`) return true;
     if (process.env.VERCEL_PROJECT_PRODUCTION_URL && origin === `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`) return true;
     if (process.env.NODE_ENV === 'development' && origin.startsWith('http://localhost:')) return true;
+    if (process.env.NODE_ENV === 'development' && origin.includes('.devtunnels.ms')) return true;
     return false;
 }
 
@@ -327,9 +327,9 @@ export async function proxy(request: NextRequest) {
     }
 
     // ── 4. Global IP rate limiting (DDoS protection) ──
-    const isLoadTestBypass = process.env.STAGING_MODE === 'true' && 
-                             process.env.LOAD_TEST_SECRET && 
-                             request.headers.get('x-load-test-bypass') === process.env.LOAD_TEST_SECRET;
+    const isLoadTestBypass = process.env.STAGING_MODE === 'true' &&
+        process.env.LOAD_TEST_SECRET &&
+        request.headers.get('x-load-test-bypass') === process.env.LOAD_TEST_SECRET;
 
     const rateLimit = checkGlobalRateLimit(clientIp);
     if (!isLoadTestBypass && !rateLimit.allowed) {

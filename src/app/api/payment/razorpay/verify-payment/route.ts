@@ -1,8 +1,8 @@
 import { processCapturedPayment } from '@/lib/payment/payment.service';
 import {
-	fetchOrderDetails,
-	fetchPaymentDetails,
-	verifyRazorpaySignature,
+    fetchOrderDetails,
+    fetchPaymentDetails,
+    verifyRazorpaySignature,
 } from '@/lib/payment/razorpay.service';
 import { withSecurity } from '@/lib/security/api-security';
 import { RateLimits } from '@/lib/security/rate-limiter';
@@ -199,7 +199,7 @@ export const POST = withSecurity<VerifyPaymentBody>(
 
 export async function OPTIONS(request: Request) {
     const origin = request.headers.get('origin') || '';
-    const allowedOrigins = ['https://adtu-bus.vercel.app', 'https://adtu-bus-xq.vercel.app', process.env.NEXT_PUBLIC_APP_URL || ''].filter(Boolean);
+    const allowedOrigins = ['https://adtu-itms.vercel.app', process.env.NEXT_PUBLIC_APP_URL || ''].filter(Boolean);
     const isVercelPreview = /^https:\/\/.*\.vercel\.app$/.test(origin);
     const isLocalhost = process.env.NODE_ENV === 'development' && (origin === 'http://localhost:3000' || origin === 'http://127.0.0.1:3000');
     const isAllowed = allowedOrigins.includes(origin) || isVercelPreview || isLocalhost;

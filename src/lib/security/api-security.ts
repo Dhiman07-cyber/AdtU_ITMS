@@ -117,7 +117,7 @@ function extractToken(request: Request, body: any, allowBodyToken: boolean): str
 // IP EXTRACTION
 // ============================================================================
 
-function getClientIp(request: Request): string {
+export function getClientIp(request: Request): string {
     const realIp = request.headers.get('x-real-ip') || request.headers.get('cf-connecting-ip');
     if (realIp) return realIp.trim();
 
@@ -181,11 +181,17 @@ function getAllowedOriginHosts(): Set<string> {
     if (appUrl) {
         try { hosts.add(new URL(appUrl).host); } catch {}
     }
-    hosts.add('adtu-bus.vercel.app');
-    hosts.add('adtu-bus-xq.vercel.app');
+    hosts.add('adtu-itms.vercel.app');
     if (process.env.NODE_ENV === 'development') {
         hosts.add('localhost:3000');
         hosts.add('127.0.0.1:3000');
+    }
+    const explicit = (process.env.ALLOWED_ORIGINS || '')
+        .split(',')
+        .map(s => s.trim())
+        .filter(Boolean);
+    for (const o of explicit) {
+        try { hosts.add(new URL(o).host); } catch { hosts.add(o); }
     }
     return hosts;
 }
