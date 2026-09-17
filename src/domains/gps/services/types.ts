@@ -71,4 +71,7 @@ export interface LastLocation {
   lat: number;
   lng: number;
   timestamp: string;
+  speed?: number | null;
+  heading?: number | null;
+  accuracy?: number | null;
 }

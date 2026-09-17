@@ -217,6 +217,9 @@ export async function processLocationUpdate(raw: LocationUpdate): Promise<Pipeli
     lat: normalized.lat,
     lng: normalized.lng,
     timestamp: normalized.timestamp.toISOString(),
+    speed: normalized.speed,
+    heading: normalized.heading,
+    accuracy: normalized.accuracy,
   });
   if (rawTime !== null) {
     inMemoryLastRawTs.set(normalized.busId, Math.min(rawTime, Date.now() + MAX_CLOCK_SKEW_MS));

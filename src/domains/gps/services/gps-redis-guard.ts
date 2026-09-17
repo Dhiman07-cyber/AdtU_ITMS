@@ -60,24 +60,6 @@ interface GpsRedisState {
   buffer: Buffer;
 }
 
-function getState(): GpsRedisState {
-  const g = globalThis as any;
-  if (!g.__gpsRedis) {
-    g.__gpsRedis = {
-      socket: null,
-      ready: false,
-      reconnectTimer: null,
-      host: '127.0.0.1',
-      port: 6379,
-      password: undefined,
-      generation: 0,
-      pending: [],
-      buffer: Buffer.alloc(0),
-    } as GpsRedisState;
-  }
-  return g.__gpsRedis as GpsRedisState;
-}
-
 // ──────────────────────────────────────────────────────────────────────────────
 // URL parsing
 // ──────────────────────────────────────────────────────────────────────────────
@@ -94,6 +76,25 @@ function parseRedisUrl(urlStr?: string): { host: string; port: number; password?
   } catch {
     return { host: '127.0.0.1', port: 6379 };
   }
+}
+
+function getState(): GpsRedisState {
+  const g = globalThis as any;
+  if (!g.__gpsRedis) {
+    const parsed = parseRedisUrl(process.env.REDIS_URL);
+    g.__gpsRedis = {
+      socket: null,
+      ready: false,
+      reconnectTimer: null,
+      host: parsed.host,
+      port: parsed.port,
+      password: parsed.password,
+      generation: 0,
+      pending: [],
+      buffer: Buffer.alloc(0),
+    } as GpsRedisState;
+  }
+  return g.__gpsRedis as GpsRedisState;
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -416,6 +417,15 @@ function ensureInit(): void {
   connectGpsRedis(state);
 }
 
+async function waitForReady(state: GpsRedisState, timeoutMs = 400): Promise<boolean> {
+  if (state.ready) return true;
+  const start = Date.now();
+  while (!state.ready && Date.now() - start < timeoutMs) {
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  return state.ready;
+}
+
 /**
  * Atomically check GPS guard conditions and update state.
  *
@@ -435,6 +445,10 @@ export async function atomicGpsGuardAndUpdate(
 ): Promise<GpsGuardResult> {
   ensureInit();
   const state = getState();
+
+  if (!state.ready && process.env.REDIS_URL) {
+    await waitForReady(state, 400);
+  }
 
   if (state.ready && state.socket && !state.socket.destroyed) {
     try {
@@ -507,4 +521,14 @@ export async function clearGpsState(busId: string): Promise<void> {
 export function seedGpsState(busId: string, lat: number, lng: number, ts: number): void {
   memLast.set(busId, { lat, lng, ts, rawTs: ts });
 }
+
+// Eagerly initialize connection if REDIS_URL is present at module load
+if (typeof process !== 'undefined' && process.env?.REDIS_URL) {
+  try {
+    ensureInit();
+  } catch {
+    // best-effort eager init
+  }
+}
+
 
