@@ -14,6 +14,7 @@ import { createContext,useContext,useEffect,useState } from 'react';
 
 
 import { FCMTokenManager } from '@/components/FCMTokenManager';
+import FloatingPermissionBanner from '@/components/FloatingPermissionBanner';
 import MapRuntimeBootstrap from '@/components/maps/MapRuntimeBootstrap';
 
 interface SidebarContextType {
@@ -63,11 +64,15 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   // Determine if we're on privacy policy page (has custom layout)
   const isPrivacyPage = pathname === '/privacy-policy';
 
+  // Determine if we're on fleet map or verification pages (no footer required)
+  const isFleetMapPage = pathname === '/admin/fleet-map' || pathname === '/moderator/fleet-map' || pathname?.startsWith('/admin/fleet-map') || pathname?.startsWith('/moderator/fleet-map');
+  const isVerificationPage = pathname === '/admin/verification' || pathname === '/moderator/verification' || pathname?.startsWith('/admin/verification') || pathname?.startsWith('/moderator/verification');
+
   // Show navbar/footer based on specific page logic
-  // Update: Only hide footer on /apply/form, but hide global navbar on all /apply and /contact routes
+  // Update: Hide footer on /apply/form, terms, privacy, fleet-map and verification routes
   const showNavAndFooter = !authLoading && !isLandingPage && !isLoginPage && !isApplyPage && !isContactPage && !isTermsPage && !isPrivacyPage && currentUser;
   const showGlobalNavbar = showNavAndFooter; // Follow the existing logic for navbar
-  const showGlobalFooter = !authLoading && !isLandingPage && !isLoginPage && !isApplyFormPage && !isApplyLandingPage && !isContactPage && !isTermsPage && !isPrivacyPage && currentUser;
+  const showGlobalFooter = !authLoading && !isLandingPage && !isLoginPage && !isApplyFormPage && !isApplyLandingPage && !isContactPage && !isTermsPage && !isPrivacyPage && !isFleetMapPage && !isVerificationPage && currentUser;
 
   // Show sidebar for admin/moderator only after auth is ready
   const showSidebar = !authLoading && (isAdminArea || isModeratorArea) && currentUser && userData;
@@ -138,7 +143,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                       : 'var(--sidebar-width-expanded) minmax(0, 1fr)',
                     gridTemplateRows: '1fr auto',
                     minHeight: 'calc(100dvh - 48px)', // Subtract navbar height
-                    transition: 'grid-template-columns 300ms cubic-bezier(0.2, 0.8, 0.2, 1)'
+                    transition: isFleetMapPage ? 'none' : 'grid-template-columns 300ms cubic-bezier(0.2, 0.8, 0.2, 1)'
                   }}
                 >
                   {/* Sidebar Column - Hidden on mobile (shown via drawer) */}
@@ -164,10 +169,24 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                     style={{
                       gridColumn: 2,
                       gridRow: 1,
-                      paddingTop: (pathname === '/admin' || pathname === '/moderator') ? '0' : 'clamp(1rem, 3vw, 2rem)',
-                      paddingRight: (pathname === '/admin' || pathname === '/moderator') ? '0' : 'clamp(1rem, 3vw, 2rem)',
-                      paddingLeft: (pathname === '/admin' || pathname === '/moderator') ? '0' : 'clamp(1rem, 3vw, 2rem)',
-                      paddingBottom: (pathname === '/admin' || pathname === '/moderator') ? '0' : '2rem'
+                      paddingTop: isFleetMapPage
+                        ? '48px'
+                        : (pathname === '/admin' || pathname === '/moderator')
+                        ? '0'
+                        : 'clamp(1rem, 3vw, 2rem)',
+                      paddingRight: (pathname === '/admin' || pathname === '/moderator' || isFleetMapPage)
+                        ? '0'
+                        : 'clamp(1rem, 3vw, 2rem)',
+                      paddingLeft: (pathname === '/admin' || pathname === '/moderator' || isFleetMapPage)
+                        ? '0'
+                        : 'clamp(1rem, 3vw, 2rem)',
+                      paddingBottom: (pathname === '/admin' || pathname === '/moderator' || isFleetMapPage)
+                        ? '0'
+                        : '2rem',
+                      overflow: isFleetMapPage ? 'hidden' : undefined,
+                      height: isFleetMapPage ? '100dvh' : undefined,
+                      maxHeight: isFleetMapPage ? '100dvh' : undefined,
+                      boxSizing: 'border-box'
                     }}
                   >
                     {children}
@@ -194,6 +213,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 )}
               </>
             )}
+
+            {/* Floating Permission Banner (straddles bottom nav on mobile) */}
+            <FloatingPermissionBanner />
 
             {/* PWA Install Prompt - Only shows on landing page */}
             <PWAInstallPrompt />
