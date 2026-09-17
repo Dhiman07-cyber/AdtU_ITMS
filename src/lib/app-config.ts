@@ -1,4 +1,10 @@
-export const APP_NAME = "AdtU Bus Services";
+export const isProduction =
+    process.env.NODE_ENV === 'production' ||
+    process.env.VERCEL_ENV === 'production' ||
+    process.env.NEXT_PUBLIC_VERCEL_ENV === 'production';
+
+export const APP_NAME = isProduction ? "AdtU ItmS" : "ITMS Dev";
+export const APP_ICON = isProduction ? "/Bus_Icon.png" : "/adtu-logo.png";
 export const APP_VERSION = "v2.4.0";
 
 export interface SystemConfig {

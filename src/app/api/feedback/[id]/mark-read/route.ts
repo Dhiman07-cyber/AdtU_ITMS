@@ -1,5 +1,5 @@
 import { readFeedback,updateFeedback } from '@/lib/feedback-utils';
-import { adminDb,auth } from '@/lib/firebase-admin';
+import { auth } from '@/lib/firebase-admin';
 import { resolveUserRole } from '@/lib/security/role-cache';
 import { getUpdaterInfo } from '@/lib/utils/updatedBy';
 import { NextRequest,NextResponse } from 'next/server';
@@ -52,7 +52,7 @@ export async function PATCH(
     }
 
     // Determine read_by string
-    const updaterInfo = await getUpdaterInfo(adminDb, userId);
+    const updaterInfo = await getUpdaterInfo(userId);
     let readByString = userId;
     if (userRole.role === 'admin') {
       readByString = `${updaterInfo.name} (Admin)`;

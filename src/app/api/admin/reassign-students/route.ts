@@ -1,7 +1,6 @@
 import { createAuditEvent,type AuditActorRole } from '@/domains/audit';
 import { getAllBuses,reassignStudentsAtomically } from '@/domains/fleet';
 import { getStudentById } from '@/domains/identity';
-import { adminDb } from '@/lib/firebase-admin';
 import { withSecurity } from '@/lib/security/api-security';
 import { requireAdminPermission } from '@/lib/security/moderator-permissions';
 import { RateLimits } from '@/lib/security/rate-limiter';
@@ -82,7 +81,7 @@ export const POST = withSecurity<ReassignStudentsBody>(
         const actorInfoPromise = (async () => {
             let label = auth.name || 'System';
             if (currentUserRole === 'admin' || currentUserRole === 'moderator') {
-                const info = await getUpdaterInfo(adminDb, currentUserUid);
+                const info = await getUpdaterInfo(currentUserUid);
                 label = currentUserRole === 'admin'
                     ? `${info.name} (Admin)`
                     : `${info.name} (${info.roleOrEmployeeId})`;

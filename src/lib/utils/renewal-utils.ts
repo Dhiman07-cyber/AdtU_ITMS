@@ -6,7 +6,6 @@
 
 import { DeadlineConfig } from '@/lib/types/deadline-config';
 import { SimulationConfig } from '@/lib/types/simulation-config';
-import { Timestamp } from 'firebase/firestore';
 import { deriveAcademicLifecycle } from './deadline-computation';
 
 const MONTH_NAMES = [
@@ -74,12 +73,7 @@ export function formatRenewalDate(dateString: string): string {
   });
 }
 
-/**
- * Convert ISO string to Firestore Timestamp
- */
-export function toFirestoreTimestamp(isoString: string): Timestamp {
-  return Timestamp.fromDate(new Date(isoString));
-}
+
 
 /**
  * Check if student should be soft-blocked (after soft block date, not renewed)

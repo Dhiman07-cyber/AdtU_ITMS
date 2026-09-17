@@ -3,7 +3,7 @@ import { deleteStudent,deleteUser,getAllStudents,getStudentById } from '@/domain
 import { decrementBusCapacity } from '@/lib/busCapacityService';
 import { isSeatReleaseAtSoftBlockEnabled,wasSeatReleased } from '@/lib/config/capacity-flags';
 import { getDeadlineConfig } from '@/lib/deadline-config-service';
-import { adminAuth,adminDb } from '@/lib/firebase-admin';
+import { adminAuth } from '@/lib/firebase-admin';
 import { withSecurity } from '@/lib/security/api-security';
 import { RateLimits } from '@/lib/security/rate-limiter';
 import { SimulateDeadlinesSchema } from '@/lib/security/validation-schemas';
@@ -197,8 +197,9 @@ export const POST = withSecurity(
                         // Delete FCM tokens from PostgreSQL (hoisted import)
                         await deleteUserTokens(student.uid);
 
-                        const waitingFlags = await adminDb.collection('waiting_flags').where('student_uid', '==', student.uid).limit(400).get();
-                        if (!waitingFlags.empty) { const b = adminDb.batch(); waitingFlags.docs.forEach((d: any) => b.delete(d.ref)); await b.commit(); }
+                        // Delete waiting flags from Supabase PostgreSQL
+                        const supabase = getSupabaseServer();
+                        await supabase.from('waiting_flags').delete().eq('student_uid', student.uid);
 
                         // DEDUP GUARD: skip decrement if the seat was already released at soft block.
                         const busId = studentData?.busId;

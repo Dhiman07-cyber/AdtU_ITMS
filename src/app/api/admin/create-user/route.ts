@@ -77,7 +77,7 @@ export const POST = withSecurity<CreateUserBody>(
 
         // 1. Parallelize initial validation & configuration fetching
         const [approverInfo, systemConfigResult, deadlineConfig] = await Promise.all([
-            getUpdaterInfo(adminAuth, currentUserUid),
+            getUpdaterInfo(currentUserUid),
             getSystemConfig(),
             getDeadlineConfig()
         ]);

@@ -1,5 +1,5 @@
 import { reject } from '@/domains/application';
-import { adminAuth,adminDb } from '@/lib/firebase-admin';
+import { adminAuth } from '@/lib/firebase-admin';
 import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
 import { resolveUserRole } from '@/lib/security/role-cache';
 import { getUpdaterInfo } from '@/lib/utils/updatedBy';
@@ -22,7 +22,7 @@ export async function POST(request: NextRequest) {
 
     const [userRole, updaterInfo] = await Promise.all([
       resolveUserRole(uid),
-      getUpdaterInfo(adminDb, uid),
+      getUpdaterInfo(uid),
     ]);
 
     if (!userRole.role) {

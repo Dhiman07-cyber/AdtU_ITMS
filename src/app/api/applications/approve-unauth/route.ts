@@ -1,5 +1,5 @@
 import { approveUnauth } from '@/domains/application';
-import { adminAuth,adminDb } from '@/lib/firebase-admin';
+import { adminAuth } from '@/lib/firebase-admin';
 import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
 import { resolveUserRole } from '@/lib/security/role-cache';
 import { safeErrorMessage } from '@/lib/security/safe-error';
@@ -34,7 +34,7 @@ export async function POST(request: NextRequest) {
     if (!userRole.role) {
       return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 });
     }
-    const updaterInfo = await getUpdaterInfo(adminDb, moderatorUid);
+    const updaterInfo = await getUpdaterInfo(moderatorUid);
 
     const permissionDenied = await requireModeratorPermission(
       {

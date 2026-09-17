@@ -77,6 +77,10 @@ If you are a new engineer or contributor joining the project, read through the s
 - **[Realtime Failure Matrix](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/06-evidence-and-verification/REALTIME_FAILURE_MATRIX.md)**: Failure mode analysis, split-brain scenarios, and recovery behaviors across Redis and WebSockets.
 - **[PR-001 Architecture Patch](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/06-evidence-and-verification/PR-001.md)**: Detailed patch documentation for payment crypto caching, gateway concurrency, and font optimizations.
 
+### [07. GPS & Location Integrity](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/07-gps/)
+- **[GPS Forensic Audit & Verification Report (Ruth)](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/07-gps/ADTU_ITMS_GPS_REAL_WORLD_FORENSIC_AUDIT_RUTH.md)**: Master audit report certifying Source-to-Screen pipeline, answers to Sir's 10 questions with measured distributions, real-browser Playwright simulation, route deviation hysteresis, and hardware transition readiness.
+- **[GPS Forensic Audit Final Report](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/07-gps/ADTU_ITMS_GPS_FORENSIC_AUDIT_FINAL_REPORT.md)**: Canonical submission copy covering waiting-flag abuse testing, live fleet radar map, and Docker build performance optimizations.
+
 ---
 
 ## 🛠️ Essential Development & Operational Commands

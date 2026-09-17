@@ -3,7 +3,6 @@ import { getAdminById,getModeratorById,getUserById } from '@/domains/identity';
 // ponytail: only getUpdaterInfo is used externally — 4 dead exports removed
 
 export async function getUpdaterInfo(
-    _adminDb: any,
     userId: string
 ): Promise<{ name: string; roleOrEmployeeId: string }> {
     const [adminData, modData, userData] = await Promise.all([

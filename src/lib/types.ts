@@ -1,4 +1,5 @@
-import { Timestamp } from 'firebase/firestore';
+// Standalone Timestamp type definition (compatible with ISO strings, Dates, and Firestore timestamp shapes)
+export type Timestamp = { seconds: number; nanoseconds: number; toDate?: () => Date } | string | Date;
 
 // Base User type
 export interface User {

@@ -22,7 +22,7 @@
 
 import { getAllDrivers,getAllStudents,getStudentsByBusIds,getStudentsByRouteIds,getStudentsByShift,getUsersByRole,getValidFcmTokensForUsers } from '@/domains/identity';
 import { pgInsertNotification } from '@/domains/notification/repositories/notification.repository.pg';
-import { adminDb,adminMessaging } from '@/lib/firebase-admin';
+import { adminMessaging } from '@/lib/firebase-admin';
 import { NotificationType,TargetType,UserRole } from '@/lib/notifications/types';
 import { withSecurity } from '@/lib/security/api-security';
 import { safeErrorMessage } from '@/lib/security/safe-error';
@@ -270,12 +270,6 @@ async function sendFCMNotifications(
 export const POST = withSecurity(
   async (request, { auth, body, requestId }) => {
     try {
-      if (!adminDb) {
-        return NextResponse.json(
-          { success: false, error: 'Server configuration error' },
-          { status: 500 }
-        );
-      }
 
       const {
         type = 'notice',

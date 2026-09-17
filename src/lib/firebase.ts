@@ -16,7 +16,7 @@ const firebaseConfig = {
   measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID,
 };
 
-// Initialize Firebase Client SDK
+// Initialize Firebase Client SDK (Auth, Firestore, Messaging, Storage)
 let app: ReturnType<typeof getApp>;
 let auth: ReturnType<typeof getAuth>;
 let db: Firestore;
@@ -64,3 +64,4 @@ try {
 }
 
 export { app,auth,db,messaging,storage };
+

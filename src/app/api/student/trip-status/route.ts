@@ -100,12 +100,15 @@ export const GET = withSecurity(
                     driverUid: data.driver_id,
                     lat: lastLoc.lat,
                     lng: lastLoc.lng,
+                    speed: lastLoc.speed != null ? Number(lastLoc.speed) : 0,
+                    heading: lastLoc.heading != null ? Number(lastLoc.heading) : 0,
+                    accuracy: lastLoc.accuracy ?? 10,
                     timestamp: lastLoc.timestamp,
                 };
             } else {
                 const { data: dbLoc } = await supabase
                     .from('bus_locations')
-                    .select('lat, lng, timestamp')
+                    .select('lat, lng, speed, heading, accuracy, timestamp')
                     .eq('bus_id', data.bus_id)
                     .order('timestamp', { ascending: false })
                     .limit(1)
@@ -116,6 +119,9 @@ export const GET = withSecurity(
                         driverUid: data.driver_id,
                         lat: dbLoc.lat,
                         lng: dbLoc.lng,
+                        speed: dbLoc.speed !== undefined && dbLoc.speed !== null ? Number(dbLoc.speed) : 0,
+                        heading: dbLoc.heading !== undefined && dbLoc.heading !== null ? Number(dbLoc.heading) : 0,
+                        accuracy: dbLoc.accuracy,
                         timestamp: dbLoc.timestamp,
                     };
                 }
