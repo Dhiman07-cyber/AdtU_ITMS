@@ -26,7 +26,7 @@ export class DriverAgent {
   readonly uid: string;
   readonly busId: string;
   readonly routeId: string;
-  private idToken: string;
+  readonly idToken: string;
   private gps = new RouteGps(`driver-route-seed`);
   ws: WsAgent | null = null;
   private stopFlag = false;

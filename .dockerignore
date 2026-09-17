@@ -25,3 +25,16 @@ Dockerfile
 dist
 coverage
 *.log
+security-tools
+artifacts
+e2e
+supabase
+terraform
+alertmanager
+grafana
+prometheus
+nginx
+.vercel
+*.exe
+*.zip
+*.tar.gz

@@ -123,6 +123,7 @@ services:
       # WS port. The WS_PORT is 3001 inside the container (same as the ws1 service).
       - WS_HOST=ws1
       - WS_PORT=3001
+      - WS_SERVER_URL=ws://ws1:3001/ws
       # Staging load-test harness (scripts/staging/master-simulation.ts):
       # STAGING_MODE + LOAD_TEST_SECRET enable the proxy-level IP rate-limit
       # bypass (x-load-test-bypass header) so high-volume simulated users are

@@ -101,5 +101,6 @@ export const ESTIMATED_DAILY_RECONNECTS = 10;
 /**
  * Static application name constant.
  */
-export const APP_NAME = "AdtU Bus Services";
+export const APP_NAME = "AdtU ITMS";
+
 

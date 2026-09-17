@@ -59,8 +59,9 @@ function deploy() {
     // 3. Generate release manifest (evidence of what is being deployed)
     step('Release Manifest Generation', 'npx tsx scripts/generate-release-manifest.ts');
 
-    // 4. Build Docker images (always --no-cache to prevent stale layer issues)
-    step('Docker Image Build', 'docker compose build --no-cache');
+    // 4. Build Docker images (cached by default; set NO_CACHE=1 for fresh layers)
+    const noCacheFlag = process.env.NO_CACHE === '1' || process.argv.includes('--no-cache') ? ' --no-cache' : '';
+    step('Docker Image Build', `docker compose build${noCacheFlag}`);
 
     // 5. Start the stack
     step('Stack Startup', 'docker compose up -d');

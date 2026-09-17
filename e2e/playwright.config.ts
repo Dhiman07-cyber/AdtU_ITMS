@@ -12,6 +12,8 @@ export default defineConfig({
     baseURL: process.env.APP_URL || 'http://127.0.0.1:3000',
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
+    permissions: ['geolocation'],
+    geolocation: { latitude: 26.144, longitude: 91.736 },
   },
   expect: { timeout: 10000 },
   projects: [
