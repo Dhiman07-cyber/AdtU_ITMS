@@ -196,6 +196,32 @@ function getAllowedOriginHosts(): Set<string> {
     return hosts;
 }
 
+export function isOriginAllowed(origin: string): boolean {
+    if (!origin) return false;
+    try {
+        const parsed = new URL(origin);
+        const host = parsed.host;
+        const hostname = parsed.hostname;
+
+        // In development, allow localhost/127.0.0.1 on any port and dev tunnels
+        if (process.env.NODE_ENV === 'development') {
+            if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') return true;
+            if (hostname.endsWith('.devtunnels.ms') || hostname.endsWith('.ngrok-free.app')) return true;
+        }
+
+        if (!cachedAllowedHosts) {
+            cachedAllowedHosts = getAllowedOriginHosts();
+        }
+
+        if (cachedAllowedHosts.has(host) || cachedAllowedHosts.has(hostname)) return true;
+        if (hostname.endsWith('.vercel.app') || hostname.endsWith('.adtu.in')) return true;
+
+        return false;
+    } catch {
+        return false;
+    }
+}
+
 export function withSecurity<T = any>(
     handler: SecureHandler<T>,
     options: SecurityOptions<T> = {}
@@ -218,22 +244,30 @@ export function withSecurity<T = any>(
         const pathname = reqUrl.pathname;
         const url = pathname;
 
+        // ── Cross-Origin Preflight (OPTIONS) ──
+        if (method === 'OPTIONS') {
+            const origin = request.headers.get('origin') || '*';
+            const allowed = isOriginAllowed(origin);
+            const allowOrigin = allowed && origin !== '*' ? origin : (origin === '*' ? '*' : '');
+            return new NextResponse(null, {
+                status: 204,
+                headers: {
+                    'Access-Control-Allow-Origin': allowOrigin || '*',
+                    'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
+                    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Requested-With, Accept, Pragma, Cache-Control',
+                    'Access-Control-Allow-Credentials': 'true',
+                    'Access-Control-Max-Age': '86400',
+                },
+            });
+        }
+
         try {
             // ── 0. CSRF origin check for state-changing methods ──
 
             if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
                 const origin = request.headers.get('origin');
                 if (origin) {
-                    if (!cachedAllowedHosts) {
-                        cachedAllowedHosts = getAllowedOriginHosts();
-                    }
-                    let isAllowed = false;
-                    try {
-                        const originHost = new URL(origin).host;
-                        isAllowed = cachedAllowedHosts.has(originHost);
-                    } catch {
-                        isAllowed = false;
-                    }
+                    const isAllowed = isOriginAllowed(origin);
 
                     if (!isAllowed) {
                         console.warn(`[${requestId}] CSRF: Rejected origin ${origin} for ${method} ${pathname}`);
@@ -385,6 +419,12 @@ export function withSecurity<T = any>(
             response.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate');
             response.headers.set('Pragma', 'no-cache');
             response.headers.set('X-Content-Type-Options', 'nosniff');
+
+            const reqOrigin = request.headers.get('origin');
+            if (reqOrigin && isOriginAllowed(reqOrigin)) {
+                response.headers.set('Access-Control-Allow-Origin', reqOrigin);
+                response.headers.set('Access-Control-Allow-Credentials', 'true');
+            }
 
             return response;
 

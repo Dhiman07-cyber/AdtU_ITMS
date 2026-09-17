@@ -13,7 +13,7 @@ ts-debug.log*
 tsconfig.tsbuildinfo
 test-results/
 artifacts/
-
+Demo_Commit_message.txt
 
 # Environment files - CRITICAL: Never commit secrets!
 .env

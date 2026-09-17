@@ -1,6 +1,12 @@
 // Import the functions you need from the SDKs you need
 import { getApp,getApps,initializeApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
+import { 
+  browserLocalPersistence, 
+  browserPopupRedirectResolver, 
+  getAuth, 
+  indexedDBLocalPersistence, 
+  initializeAuth 
+} from 'firebase/auth';
 import { Firestore,getFirestore } from 'firebase/firestore';
 import { getMessaging,Messaging } from 'firebase/messaging';
 import { getStorage } from 'firebase/storage';
@@ -27,7 +33,16 @@ try {
   if (typeof window !== 'undefined') {
     // Browser environment initialization
     app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
-    auth = getAuth(app);
+    try {
+      // Use indexedDBLocalPersistence with automatic fallback to browserLocalPersistence (localStorage).
+      // This prevents "Database is closing/hidden" errors when browsers background or throttle IndexedDB.
+      auth = initializeAuth(app, {
+        persistence: [indexedDBLocalPersistence, browserLocalPersistence],
+        popupRedirectResolver: browserPopupRedirectResolver,
+      });
+    } catch {
+      auth = getAuth(app);
+    }
     auth.useDeviceLanguage();
 
     try {

@@ -11,6 +11,8 @@ import { Analytics as VercelAnalytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import type { Metadata } from 'next';
 import { APP_NAME } from '@/lib/app-config';
+import Analytics from '@/components/Analytics';
+import { Suspense } from 'react';
 import '../styles/animations.css';
 import './globals.css';
 
@@ -75,6 +77,9 @@ export default function RootLayout({
 
       <head />
       <body className="min-h-dvh bg-background text-foreground" suppressHydrationWarning>
+        <Suspense fallback={null}>
+          <Analytics />
+        </Suspense>
         <MobileErrorHandler />
         <SimpleErrorBoundary>
           <ThemeProvider>

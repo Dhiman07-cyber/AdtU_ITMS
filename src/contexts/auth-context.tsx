@@ -2,7 +2,7 @@
 
 import { auth } from '@/lib/firebase';
 import { setSigningOut } from '@/lib/firestore-error-handler';
-import { User,signInWithGoogle } from '@/lib/user-service';
+import { User, signInWithGoogle, getSafeIdToken } from '@/lib/user-service';
 import { User as FirebaseUser,onAuthStateChanged } from 'firebase/auth';
 import { ReactNode,createContext,useCallback,useContext,useEffect,useMemo,useRef,useState } from 'react';
 
@@ -166,8 +166,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         // Step 2: Fetch user data from PostgreSQL via API
         try {
+          const token = await getSafeIdToken(user);
           const response = await fetch('/api/auth/user', {
-            headers: { 'Authorization': `Bearer ${await user.getIdToken()}` },
+            headers: { 'Authorization': `Bearer ${token}` },
           });
 
           if (!isMounted) return;

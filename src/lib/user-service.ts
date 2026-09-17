@@ -9,17 +9,52 @@ import {
 export type { Driver,Moderator,Student,User } from '@/lib/types';
 export type UserRole = 'admin' | 'moderator' | 'driver' | 'student';
 
+/**
+ * Safe ID token getter that retries if IndexedDB is in transient closing/hidden state
+ */
+export async function getSafeIdToken(user: any, forceRefresh = false, retries = 3, delayMs = 300): Promise<string> {
+  if (!user || typeof user.getIdToken !== 'function') return '';
+  try {
+    return await user.getIdToken(forceRefresh);
+  } catch (err: any) {
+    const msg = (err?.message || '').toLowerCase();
+    const isTransient = msg.includes('closing') || msg.includes('hidden') || err?.code === 'auth/internal-error';
+    if (isTransient && retries > 0) {
+      await new Promise(r => setTimeout(r, delayMs));
+      return getSafeIdToken(user, forceRefresh, retries - 1, delayMs * 1.5);
+    }
+    throw err;
+  }
+}
+
+/**
+ * Resilient signInWithPopup wrapper that retries on transient IndexedDB lock / pagehide
+ */
+async function safeSignInWithPopup(authInstance: any, provider: GoogleAuthProvider, retries = 2, delayMs = 400): Promise<any> {
+  try {
+    return await signInWithPopup(authInstance, provider);
+  } catch (err: any) {
+    const msg = (err?.message || '').toLowerCase();
+    const isDbClosing = msg.includes('closing') || msg.includes('hidden') || err?.code === 'auth/internal-error';
+    if (isDbClosing && retries > 0) {
+      await new Promise(r => setTimeout(r, delayMs));
+      return safeSignInWithPopup(authInstance, provider, retries - 1, delayMs * 1.5);
+    }
+    throw err;
+  }
+}
+
 // Function to sign in a user with Google (client-safe)
 export async function signInWithGoogle() {
   try {
     const provider = new GoogleAuthProvider();
-    const result = await signInWithPopup(auth, provider);
+    const result = await safeSignInWithPopup(auth, provider);
     const user = result.user;
 
     // Look up user in PostgreSQL via secure API endpoint (client-safe)
     let userData: any = null;
     try {
-      const token = await user.getIdToken();
+      const token = await getSafeIdToken(user);
       const response = await fetch('/api/auth/user', {
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -40,7 +75,7 @@ export async function signInWithGoogle() {
 
     // User not found in PostgreSQL - create unauthUser entry for tracking
     try {
-      const token = await user.getIdToken();
+      const token = await getSafeIdToken(user);
 
       const response = await fetch('/api/unauth-users/create', {
         method: 'POST',

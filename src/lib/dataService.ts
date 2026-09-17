@@ -1,4 +1,5 @@
 import { getAuth } from 'firebase/auth';
+import { getSafeIdToken } from './user-service';
 
 import type {
 	Moderator,
@@ -41,7 +42,7 @@ async function getAuthHeaders(): Promise<Record<string, string>> {
     const auth = getAuth();
     const currentUser = auth.currentUser;
     if (currentUser) {
-      const idToken = await currentUser.getIdToken();
+      const idToken = await getSafeIdToken(currentUser);
       return { Authorization: `Bearer ${idToken}` };
     }
   } catch (err) {
