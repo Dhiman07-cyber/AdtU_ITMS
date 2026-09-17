@@ -1,6 +1,7 @@
 "use client";
 
 import { PremiumPageLoader } from "@/components/LoadingSpinner";
+import { usePageShellLoader } from "@/hooks/usePageShellLoader";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card,CardContent,CardDescription,CardHeader,CardTitle } from "@/components/ui/card";
@@ -104,7 +105,7 @@ const StudentImage = ({
         alt={alt}
         fill
         sizes={`${size}px`}
-        quality={100}
+        quality={80}
         priority={size > 100}
         unoptimized={false}
         className={`rounded-full object-cover ${className}`}
@@ -130,6 +131,7 @@ export default function DriverStudentsPage() {
   const [driverData, setDriverData] = useState<any>(null);
   const [students, setStudents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const { showLoader } = usePageShellLoader(loading, 3500);
   const [error, setError] = useState("");
   const [acknowledging, setAcknowledging] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
@@ -224,8 +226,8 @@ export default function DriverStudentsPage() {
     }
   };
 
-  if (loading) {
-    return <PremiumPageLoader message="Loading Students" subMessage="Fetching directory..." />;
+  if (showLoader) {
+    return <PremiumPageLoader message="Loading Students" subMessage="Fetching directory..." maxDurationMs={3500} />;
   }
 
   if (error) {
@@ -246,7 +248,7 @@ export default function DriverStudentsPage() {
     );
   }
 
-  if (!driverData) {
+  if (!loading && !driverData) {
     return (
       <div className="flex-1 min-h-[calc(100dvh-120px)] flex items-center justify-center p-4">
         <Card className="w-full max-w-md">

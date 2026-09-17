@@ -12,7 +12,8 @@ import { useRouter } from "next/navigation";
 import { useEffect,useMemo,useState } from "react";
 // Migrated: Server-side API → PostgreSQL (no Firestore client reads)
 import { StatusBadge } from "@/components/application/status-badge";
-import { PremiumPageLoader } from '@/components/LoadingSpinner';
+import { CardLoader, PremiumPageLoader } from '@/components/LoadingSpinner';
+import { usePageShellLoader } from '@/hooks/usePageShellLoader';
 import type { AlternativeBusData } from '@/components/smart-allocation/AlternativeBusPicker';
 import AlternativeBusPicker from '@/components/smart-allocation/AlternativeBusPicker';
 import type { BusData as RPBusData,StudentData as RPStudentData } from '@/components/smart-allocation/ReassignmentPanel';
@@ -119,6 +120,9 @@ export default function ModeratorApplicationsPage() {
     pageSize: 50, orderByField: 'busNumber', orderDirection: 'asc',
     autoRefresh: false,
   });
+
+  const isDataLoading = loading || loadingRenewals || routesLoading || busesLoading;
+  const { showLoader } = usePageShellLoader(isDataLoading && pendingApplications.length === 0, 3500);
 
   const [error, setError] = useState("");
   const [activeSection, setActiveSection] = useState<'applications' | 'upcoming' | 'renewals'>('applications');
@@ -1035,9 +1039,15 @@ export default function ModeratorApplicationsPage() {
         </div>
       )}
 
-      {loading || loadingRenewals || routesLoading || busesLoading ? (
+      {showLoader ? (
         <div className="flex-1 min-h-[calc(100dvh-48px)] flex justify-center items-center">
-          <PremiumPageLoader message="Fetching data..." />
+          <PremiumPageLoader message="Fetching data..." maxDurationMs={3500} />
+        </div>
+      ) : isDataLoading && filteredData.length === 0 ? (
+        <div className="space-y-4">
+          <CardLoader />
+          <CardLoader />
+          <CardLoader />
         </div>
       ) : filteredData.length === 0 ? (
         <Card className="bg-[#12131A]/40 border-white/[0.05]">

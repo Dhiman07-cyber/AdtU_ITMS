@@ -2,7 +2,7 @@
 
 import Avatar from '@/components/Avatar';
 import { ExportButton } from '@/components/ExportButton';
-import { PremiumPageLoader } from '@/components/LoadingSpinner';
+import { PremiumPageLoader, TableLoader } from '@/components/LoadingSpinner';
 import { Button } from "@/components/ui/button";
 import {
 	Card,
@@ -515,9 +515,15 @@ export default function AdminDrivers() {
                 )}
               </Table>
               {filteredDrivers.length === 0 && (
-                <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-xs text-gray-500 min-h-[220px]">
-                  No drivers found
-                </div>
+                isLoading ? (
+                  <div className="p-6">
+                    <TableLoader rows={5} columns={6} />
+                  </div>
+                ) : (
+                  <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-xs text-gray-500 min-h-[220px]">
+                    No drivers found
+                  </div>
+                )
               )}
             </div>
           </div>

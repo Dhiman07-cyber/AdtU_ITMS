@@ -39,6 +39,7 @@ import { useEffect,useState } from 'react';
 
 
 import { PremiumPageLoader } from "@/components/LoadingSpinner";
+import { usePageShellLoader } from "@/hooks/usePageShellLoader";
 
 export default function StudentDashboard() {
   const { userData, currentUser } = useAuth();
@@ -147,8 +148,21 @@ export default function StudentDashboard() {
     // Run active trip check immediately
     checkActiveTrip();
 
-    // Fast 5s interval check as fallback
-    const interval = setInterval(checkActiveTrip, 5000);
+    // Passive 30s background safety check (WebSocket push handles real-time transitions)
+    const interval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        checkActiveTrip();
+      }
+    }, 30000);
+
+    const handleVisibility = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        checkActiveTrip();
+      }
+    };
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', handleVisibility);
+    }
 
     const init = async () => {
       try {
@@ -176,6 +190,9 @@ export default function StudentDashboard() {
     return () => {
       isCancelled = true;
       clearInterval(interval);
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', handleVisibility);
+      }
       wsClient?.disconnect();
     };
   }, [studentData?.bus_id, studentData?.busId, busData?.id, busData?.busId, busData?.bus_id, currentUser]);
@@ -190,7 +207,9 @@ export default function StudentDashboard() {
   // Note: Expiration checking is handled by AuthContext's isExpired state
   // No need for additional blocking logic here as it's already handled in StudentAuthWrapper
 
-  if (loading) {
+  const { showLoader } = usePageShellLoader(loading, 3500);
+
+  if (showLoader) {
     return <PremiumPageLoader message="Loading Dashboard" subMessage="Preparing your student portal..." />;
   }
 

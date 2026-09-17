@@ -2,6 +2,7 @@
 
 import { PremiumPageLoader } from '@/components/LoadingSpinner';
 import { useAuth } from '@/contexts/auth-context';
+import { usePageShellLoader } from '@/hooks/usePageShellLoader';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import { useEffect,useState } from 'react';
@@ -331,8 +332,8 @@ export default function EnhancedAdminDashboard() {
     });
 
   const studentDistribution = [
-    { name: 'Evening', value: realCounts.eveningStudents || 0, color: '#3b82f6' },
-    { name: 'Morning', value: realCounts.morningStudents || 0, color: '#f97316' }
+    { name: 'Morning', value: realCounts.morningStudents || 0, color: '#f97316' },
+    { name: 'Evening', value: realCounts.eveningStudents || 0, color: '#3b82f6' }
   ];
 
   // Pre-build buses-by-route map in O(B) to eliminate O(R×B) nested filter
@@ -403,7 +404,10 @@ export default function EnhancedAdminDashboard() {
   }, [allDataLoading]);
 
 
-  if (allDataLoading && realCounts.totalStudents === 0 && realCounts.totalBuses === 0) {
+  const isInitialBlank = allDataLoading && realCounts.totalStudents === 0 && realCounts.totalBuses === 0;
+  const { showLoader } = usePageShellLoader(isInitialBlank, 3500);
+
+  if (showLoader) {
     return <PremiumPageLoader fullScreen message="Curating Dashboard Experience..." subMessage="Fetching system status and analytics..." />;
   }
 

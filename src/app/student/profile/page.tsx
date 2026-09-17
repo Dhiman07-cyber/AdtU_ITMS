@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import StudentQRDisplay from "@/components/bus-pass/StudentQRDisplay";
 import ProfileImageUpdateModal from "@/components/ProfileImageUpdateModal";
@@ -219,6 +219,8 @@ export default function StudentProfilePage() {
                         <img
                           src={safeImageSrc(studentData.profilePhotoUrl)}
                           alt={studentData.fullName || 'Student'}
+                          loading="lazy"
+                          decoding="async"
                           className="w-full h-full object-cover rounded-full"
                           onError={() => {
                             console.warn('Profile image failed to load');

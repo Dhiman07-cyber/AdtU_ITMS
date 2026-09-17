@@ -10,6 +10,7 @@ import { suppressConsoleWarnings } from '@/lib/console-suppress';
 import { Analytics as VercelAnalytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import type { Metadata } from 'next';
+import { APP_NAME } from '@/lib/app-config';
 import '../styles/animations.css';
 import './globals.css';
 
@@ -23,35 +24,33 @@ declare global {
 // Suppress Next.js 15 params warnings in development
 suppressConsoleWarnings();
 
-const appName = 'AdtU Bus Services';
-
 export const metadata: Metadata = {
   title: {
-    template: `%s | ${appName}`,
-    default: `${appName} - Integrated Transit Management System`,
+    template: `%s | ${APP_NAME}`,
+    default: `${APP_NAME} - Integrated Transit Management System`,
   },
-  description: 'AdtU ITMS is a comprehensive real-time bus tracking and transit management system for Assam down town University students, drivers, and administration.',
+  description: `${APP_NAME} is a comprehensive real-time bus tracking and transit management system for Assam down town University students, drivers, and administration.`,
   keywords: ['AdtU', 'Assam down town University', 'Bus Tracking', 'Transit Management', 'Student Transport', 'ITMS'],
   authors: [{ name: 'AdtU IT Cell' }],
   creator: 'Assam down town University',
   openGraph: {
-    title: `${appName} - Integrated Transit Management System`,
+    title: `${APP_NAME} - Integrated Transit Management System`,
     description: 'Real-time bus tracking, smart passes, and secure payment management for AdtU transport services.',
     url: 'https://bus.adtu.in',
-    siteName: appName,
+    siteName: APP_NAME,
     locale: 'en_IN',
     type: 'website',
   },
   twitter: {
     card: 'summary_large_image',
-    title: `${appName} - Integrated Transit Management`,
+    title: `${APP_NAME} - Integrated Transit Management`,
     description: 'Real-time bus tracking and transport management for AdtU.',
   },
   manifest: '/manifest.json',
   appleWebApp: {
     capable: true,
     statusBarStyle: 'default',
-    title: appName,
+    title: APP_NAME,
   },
   icons: {
     icon: '/favicon.ico',

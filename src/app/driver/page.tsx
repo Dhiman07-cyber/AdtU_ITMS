@@ -1,6 +1,7 @@
 "use client";
 
 import { PremiumPageLoader } from "@/components/LoadingSpinner";
+import { usePageShellLoader } from "@/hooks/usePageShellLoader";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card,CardContent,CardHeader } from "@/components/ui/card";
@@ -275,7 +276,9 @@ export default function DriverDashboard() {
     }
   }, [userData, router]);
 
-  if (loading) {
+  const { showLoader } = usePageShellLoader(loading, 3500);
+
+  if (showLoader) {
     return (
       <div className="flex-1 min-h-[calc(100dvh-120px)] flex items-center justify-center bg-gray-50 dark:bg-[#020817]">
         <PremiumPageLoader

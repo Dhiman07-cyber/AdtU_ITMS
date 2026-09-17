@@ -2,6 +2,8 @@
 
 import ErrorBoundary from "@/components/ErrorBoundary";
 import { PremiumPageLoader } from "@/components/LoadingSpinner";
+import { usePageShellLoader } from "@/hooks/usePageShellLoader";
+import LocationPermissionGate from "@/components/LocationPermissionGate";
 import LocationPermissionModal from "@/components/LocationPermissionModal";
 import TransportEntitlementGuard from "@/components/transport/TransportEntitlementGuard";
 import { Badge } from "@/components/ui/badge";
@@ -51,6 +53,7 @@ function StudentBusLive() {
   const [busData, setBusData] = useState<any>(null);
   const [routeData, setRouteData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const { showLoader } = usePageShellLoader(loading, 3500);
   const [waiting, setWaiting] = useState(false);
   const [waitingFlagId, setWaitingFlagId] = useState<string | null>(null);
   const [stops, setStops] = useState<any[]>([]);
@@ -203,11 +206,11 @@ function StudentBusLive() {
     }
   };
 
-  if (loading) {
-    return <PremiumPageLoader message="Loading Bus Details..." subMessage="Fetching bus status and schedule..." />;
+  if (showLoader) {
+    return <PremiumPageLoader message="Loading Bus Details..." subMessage="Fetching bus status and schedule..." maxDurationMs={3500} />;
   }
 
-  if (!studentData) {
+  if (!loading && !studentData) {
     return (
       <div className="flex-1 min-h-[calc(100dvh-120px)] flex items-center justify-center p-4">
         <Card className="w-full max-w-md">
@@ -535,7 +538,9 @@ function StudentBusLive() {
 export default function StudentBusPage() {
   return (
     <TransportEntitlementGuard>
-      <StudentBusLive />
+      <LocationPermissionGate role="student">
+        <StudentBusLive />
+      </LocationPermissionGate>
     </TransportEntitlementGuard>
   );
 }

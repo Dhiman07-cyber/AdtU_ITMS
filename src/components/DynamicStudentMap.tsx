@@ -151,6 +151,7 @@ function DynamicStudentMap({
               ...data,
               lat: Number(data.lat),
               lng: Number(data.lng),
+              speed: data.speed !== undefined ? Number(data.speed) : undefined,
               heading: data.heading !== undefined ? Number(data.heading) : 0,
             });
           }
@@ -226,6 +227,7 @@ function DynamicStudentMap({
                   ...loc,
                   lat: Number(loc.lat),
                   lng: Number(loc.lng),
+                  speed: loc.speed !== undefined ? Number(loc.speed) : undefined,
                   heading: loc.heading ? Number(loc.heading) : 0,
                 });
               }
@@ -414,7 +416,15 @@ function DynamicStudentMap({
                 </div>
                 <div className="flex items-center justify-between">
                   <span>Speed:</span>
-                  <span className="font-medium">{busLocation.speed?.toFixed(1) || 0} km/h</span>
+                  <span className="font-medium">
+                    {(() => {
+                      if (busLocation.speed === undefined || busLocation.speed === null) return "0 km/h";
+                      const raw = Number(busLocation.speed);
+                      if (isNaN(raw) || raw <= 0) return "0 km/h";
+                      const kmh = raw > 45 ? raw : raw * 3.6;
+                      return `${kmh.toFixed(1)} km/h`;
+                    })()}
+                  </span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span>Last Update:</span>

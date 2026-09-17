@@ -1,6 +1,7 @@
 "use client";
 
-import { PremiumPageLoader } from "@/components/LoadingSpinner";
+import { PremiumPageLoader, CardLoader, MetricCardSkeleton } from "@/components/LoadingSpinner";
+import { usePageShellLoader } from "@/hooks/usePageShellLoader";
 import { Badge } from "@/components/ui/badge";
 import { Card,CardContent,CardDescription,CardHeader,CardTitle } from "@/components/ui/card";
 import { useAuth } from "@/contexts/auth-context";
@@ -40,6 +41,7 @@ export default function ModeratorDashboard() {
   const [driverStatuses, setDriverStatuses] = useState<DriverStatus[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
+  const { showLoader } = usePageShellLoader(loading, 3500);
   const [error, setError] = useState<string | null>(null);
 
   // Redirect if user is not a moderator
@@ -86,8 +88,8 @@ export default function ModeratorDashboard() {
     fetchData();
   }, []);
 
-  if (loading) {
-    return <PremiumPageLoader message="Loading Moderator Dashboard..." subMessage="Preparing system controls..." />;
+  if (showLoader) {
+    return <PremiumPageLoader message="Loading Moderator Dashboard..." subMessage="Preparing system controls..." maxDurationMs={3500} />;
   }
 
   return (
@@ -109,7 +111,15 @@ export default function ModeratorDashboard() {
         </CardHeader>
         <CardContent>
           {driverStatuses.length === 0 ? (
-            <p className="text-muted-foreground">No driver statuses available</p>
+            loading ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <MetricCardSkeleton />
+                <MetricCardSkeleton />
+                <MetricCardSkeleton />
+              </div>
+            ) : (
+              <p className="text-muted-foreground">No driver statuses available</p>
+            )
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {driverStatuses.map((status) => (
@@ -148,7 +158,14 @@ export default function ModeratorDashboard() {
         </CardHeader>
         <CardContent>
           {notifications.length === 0 ? (
-            <p className="text-muted-foreground">No notifications available</p>
+            loading ? (
+              <div className="space-y-3">
+                <CardLoader />
+                <CardLoader />
+              </div>
+            ) : (
+              <p className="text-muted-foreground">No notifications available</p>
+            )
           ) : (
             <div className="space-y-3">
               {notifications.map((notification) => (

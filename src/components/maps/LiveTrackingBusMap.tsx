@@ -17,6 +17,8 @@ const GuwahatiBusMap = dynamic(() => import("@/components/maps/GuwahatiBusMap"),
 export type LiveTrackingBusMapProps = {
     busId: string;
     busNumber?: string;
+    routeId?: string;
+    routeName?: string;
     journeyActive?: boolean;
     isFullScreen?: boolean;
     onToggleFullScreen?: () => void;
@@ -28,6 +30,7 @@ export type LiveTrackingBusMapProps = {
     studentLocation?: { lat: number; lng: number; accuracy?: number } | null;
     onShowQrCode?: () => void;
     currentLocation?: any;
+    speed?: number;
     loading?: boolean;
     /** Shown on Google Maps only (route polyline + stop pins). */
     route_stops?: RouteStopLite[];

@@ -2,7 +2,8 @@
 
 import Avatar from '@/components/Avatar';
 import { ExportButton } from '@/components/ExportButton';
-import { PremiumPageLoader } from '@/components/LoadingSpinner';
+import { PremiumPageLoader, TableLoader } from '@/components/LoadingSpinner';
+import { usePageShellLoader } from '@/hooks/usePageShellLoader';
 import { Button } from "@/components/ui/button";
 import {
 	Card,
@@ -453,8 +454,9 @@ export default function AdminStudents() {
   // AND we are strictly in a loading state.
   // This prevents the page from "jumping" during search or refresh.
   const showFullPageLoader = authLoading || (isLoading && students.length === 0 && !searchResults);
+  const { showLoader } = usePageShellLoader(showFullPageLoader, 3500);
 
-  if (showFullPageLoader) {
+  if (showLoader) {
     return <PremiumPageLoader message="Curating Student Directory..." subMessage="Fetching student profiles and status..." />;
   }
 
@@ -620,9 +622,15 @@ export default function AdminStudents() {
                   )}
                 </Table>
                 {uniqueFilteredStudents.length === 0 && (
-                  <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-[11px] text-gray-500 min-h-[220px]">
-                    No students found
-                  </div>
+                  isLoading ? (
+                    <div className="p-6">
+                      <TableLoader rows={6} columns={7} />
+                    </div>
+                  ) : (
+                    <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-[11px] text-gray-500 min-h-[220px]">
+                      No students found
+                    </div>
+                  )
                 )}
               </div>
             </div>

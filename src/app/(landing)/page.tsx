@@ -159,6 +159,7 @@ function LandingVideo() {
               muted
               loop
               playsInline
+              preload="metadata"
               className="w-full h-full object-cover"
               onLoadedData={handleVideoLoaded}
               onError={handleVideoError}

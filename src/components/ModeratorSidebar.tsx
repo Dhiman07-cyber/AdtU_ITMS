@@ -14,6 +14,7 @@ import {
 	GraduationCap,
 	IdCard,
 	LayoutDashboard,
+	Map,
 	MessageSquareQuote,
 	QrCode,
 	RotateCcw,
@@ -73,6 +74,7 @@ const moderatorNavGroups: NavGroup[] = [
     items: [
       { href: '/moderator/buses', label: 'Buses', icon: Bus, color: 'text-amber-400' },
       { href: '/moderator/routes', label: 'Routes', icon: RouteIcon, color: 'text-emerald-400' },
+      { href: '/moderator/fleet-map', label: 'Fleet Map', icon: Map, color: 'text-emerald-400' },
     ]
   },
   {

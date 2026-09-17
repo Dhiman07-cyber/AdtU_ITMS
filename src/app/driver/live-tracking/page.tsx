@@ -2,6 +2,8 @@
 
 import ErrorBoundary from "@/components/ErrorBoundary";
 import { PremiumPageLoader } from "@/components/LoadingSpinner";
+import LocationPermissionGate from "@/components/LocationPermissionGate";
+import { usePageShellLoader } from "@/hooks/usePageShellLoader";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -21,8 +23,7 @@ import { formatIdForDisplay } from "@/lib/utils";
 import { Activity, AlertCircle, Bus, CheckCircle, Clock, Flag, Loader2, MapPin, Moon, Navigation, PlayCircle, StopCircle, Sun, XCircle } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { useScreenWakeLock } from "@/hooks/useScreenWakeLock";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 // Dynamically import components to avoid SSR issues
 const BrowserCompatibilityBanner = dynamic(() => import('@/components/BrowserCompatibilityBanner'), {
@@ -79,6 +80,7 @@ export default function DriverLiveTrackingPage() {
   const [busData, setBusData] = useState<any>(null);
   const [routeData, setRouteData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const { showLoader } = usePageShellLoader(loading, 3500);
 
   // Trip state
   const [tripActive, setTripActive] = useState(false);
@@ -104,19 +106,24 @@ export default function DriverLiveTrackingPage() {
   const resolvedBusIdRef = useRef<string | null>(null);
   const wakeLockRef = useRef<any>(null); // Screen wake lock to prevent screen from turning off
 
-  // Map center
-  const [mapCenter, setMapCenter] = useState<[number, number]>([0, 0]); // Default center
-
-
-  // Map Full Screen State
+  // Map Full Screen State - Automatically syncs with trip status
   const [isFullScreenMap, setIsFullScreenMap] = useState(false);
 
-  // Exit full screen mode automatically when trip ends
+  // Automatically enter fullscreen when trip starts, exit when trip ends
   useEffect(() => {
-    if (!tripActive && isFullScreenMap) {
-      setIsFullScreenMap(false);
+    setIsFullScreenMap(tripActive);
+  }, [tripActive]);
+
+  // Lock body scroll when in fullscreen map mode to eliminate layout shifts
+  useEffect(() => {
+    if (isFullScreenMap) {
+      const originalOverflow = document.body.style.overflow;
+      document.body.style.overflow = 'hidden';
+      return () => {
+        document.body.style.overflow = originalOverflow;
+      };
     }
-  }, [tripActive, isFullScreenMap]);
+  }, [isFullScreenMap]);
 
   // Scanner Modal State
   const [isScannerOpen, setIsScannerOpen] = useState(false);
@@ -315,7 +322,6 @@ export default function DriverLiveTrackingPage() {
           setCurrentLocation({ lat: latitude, lng: longitude, accuracy: gpsAccuracy });
           setSpeed(gpsSpeed || 0);
           setAccuracy(gpsAccuracy);
-          setMapCenter([latitude, longitude]);
 
           console.log("✅ Location obtained (lower accuracy):", { gpsAccuracy });
           addToast("GPS tracking started (using network location)", "warning");
@@ -326,9 +332,8 @@ export default function DriverLiveTrackingPage() {
               const { latitude, longitude, speed: gpsSpeed, accuracy: gpsAccuracy } = position.coords;
 
               setCurrentLocation({ lat: latitude, lng: longitude, accuracy: gpsAccuracy });
-              setSpeed(gpsSpeed || 0);
-              setAccuracy(gpsAccuracy);
-              setMapCenter([latitude, longitude]);
+              setSpeed((prev) => (Math.abs(prev - (gpsSpeed || 0)) > 0.2 ? (gpsSpeed || 0) : prev));
+              setAccuracy((prev) => (Math.abs(prev - gpsAccuracy) > 3 ? gpsAccuracy : prev));
             },
             (error) => {
               console.warn("⚠️ Watch error (lower accuracy):", error.code, error.message);
@@ -347,7 +352,6 @@ export default function DriverLiveTrackingPage() {
           const defaultLat = 26.1445;
           const defaultLng = 91.7362;
           setCurrentLocation({ lat: defaultLat, lng: defaultLng, accuracy: 500, isFallback: true } as any);
-          setMapCenter([defaultLat, defaultLng]);
           setAccuracy(500);
           addToast("⚠️ Location access denied or unavailable. UI showing campus placeholder. Real GPS required to start broadcast.", "warning");
         },
@@ -368,7 +372,6 @@ export default function DriverLiveTrackingPage() {
         setCurrentLocation({ lat: latitude, lng: longitude, accuracy: gpsAccuracy, isFallback: false } as any);
         setSpeed(gpsSpeed || 0);
         setAccuracy(gpsAccuracy);
-        setMapCenter([latitude, longitude]);
 
         console.log("✅ Initial location obtained (high accuracy):", { gpsAccuracy });
         addToast("GPS tracking started", "success");
@@ -379,9 +382,8 @@ export default function DriverLiveTrackingPage() {
             const { latitude, longitude, speed: gpsSpeed, accuracy: gpsAccuracy, heading: gpsHeading } = position.coords;
 
             setCurrentLocation({ lat: latitude, lng: longitude, accuracy: gpsAccuracy, heading: gpsHeading ?? 0 } as any);
-            setSpeed(gpsSpeed || 0);
-            setAccuracy(gpsAccuracy);
-            setMapCenter([latitude, longitude]);
+            setSpeed((prev) => (Math.abs(prev - (gpsSpeed || 0)) > 0.2 ? (gpsSpeed || 0) : prev));
+            setAccuracy((prev) => (Math.abs(prev - gpsAccuracy) > 3 ? gpsAccuracy : prev));
           },
           (error) => {
             console.error("❌ Geolocation watch error:", { code: error.code, message: error.message });
@@ -432,7 +434,6 @@ export default function DriverLiveTrackingPage() {
           const defaultLat = 26.1445;
           const defaultLng = 91.7362;
           setCurrentLocation({ lat: defaultLat, lng: defaultLng, accuracy: 500, isFallback: true } as any);
-          setMapCenter([defaultLat, defaultLng]);
           setAccuracy(500);
           addToast(" GPS timeout. Map updated to campus default.", "warning");
         }
@@ -539,12 +540,12 @@ export default function DriverLiveTrackingPage() {
           if (resolvedBusId) resolvedBusIdRef.current = resolvedBusId;
           if (result.tripActive) {
             setTripActive(true);
+            setIsFullScreenMap(true);
             setTripId(result.tripData?.tripId || result.tripData?.trip_id || null);
             if (result.tripData?.current_location) {
               const loc = result.tripData.current_location;
               if (loc.lat && loc.lng) {
                 setCurrentLocation({ lat: loc.lat, lng: loc.lng, accuracy: loc.accuracy || 10 });
-                setMapCenter([loc.lat, loc.lng]);
               }
             }
             startLocationTracking();
@@ -1012,7 +1013,7 @@ export default function DriverLiveTrackingPage() {
     };
 
     fetchFlags();
-    const pollInterval = setInterval(fetchFlags, 8000);
+    const pollInterval = setInterval(fetchFlags, 30000);
 
     return () => {
       console.log("🔕 [WAITING_FLAG_PIPELINE Step 6/6] Unsubscribing from:", `waiting_flags_${targetBusId}`);
@@ -1022,8 +1023,7 @@ export default function DriverLiveTrackingPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wsClientReady, targetBusId, currentUser]);
 
-  // Screen Wake Lock - Keep screen on during driver tracking
-  useScreenWakeLock(true);
+  // Screen Wake Lock is actively managed by the wakeLock effect above when tripActive is true.
 
   // Auto pickup logic is handled below in the "Distance-based auto-pickup" effect.
 
@@ -1261,6 +1261,7 @@ export default function DriverLiveTrackingPage() {
         const data = await res.json();
         manuallyEndedTripRef.current = false;
         setTripActive(true);
+        setIsFullScreenMap(true);
         setTripId(data.tripId);
         setShowStartTripModal(false);
 
@@ -1276,7 +1277,6 @@ export default function DriverLiveTrackingPage() {
         const defaultLng = 91.7362;
         if (!currentLocation) {
           setCurrentLocation({ lat: defaultLat, lng: defaultLng, accuracy: 500, isFallback: true } as any);
-          setMapCenter([defaultLat, defaultLng]);
           setAccuracy(500);
         }
 
@@ -1366,7 +1366,6 @@ export default function DriverLiveTrackingPage() {
         setTripId(null);
         setCurrentLocation(null);
         setWaitingFlags([]);
-        setMapCenter([26.1445, 91.7362]);
 
         // Auto-exit fullscreen when trip ends
         setIsFullScreenMap(false);
@@ -1435,13 +1434,79 @@ export default function DriverLiveTrackingPage() {
     }
   };
 
+  // Mark student as boarded
+  const handleMarkBoarded = useCallback(async (studentId: string) => {
+    try {
+      const idToken = await currentUser?.getIdToken();
+      const response = await fetch("/api/driver/mark-boarded", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({
+          idToken,
+          flagId: studentId,
+        }),
+      });
 
-  if (loading) {
+      if (response.ok) {
+        setWaitingFlags((prev) => prev.filter((flag) => flag.id !== studentId));
+        addToast("Student marked as boarded", "success");
+      }
+    } catch (error) {
+      console.error("Error marking student as boarded:", error);
+      addToast("Failed to mark student as boarded", "error");
+    }
+  }, [currentUser, addToast]);
+
+  // Memoized waiting students list with Haversine distance to prevent heavy recalculations on every render frame
+  const formattedWaitingStudents = useMemo(() => {
+    if (!waitingFlags || waitingFlags.length === 0) return [];
+    const curLat = currentLocation?.lat;
+    const curLng = currentLocation?.lng;
+
+    return waitingFlags
+      .map((flag) => {
+        const targetLat = flag.stop_lat || flag.lat;
+        const targetLng = flag.stop_lng || flag.lng;
+        let distance: number | undefined = undefined;
+
+        if (curLat && curLng && targetLat && targetLng) {
+          const R = 6371; // km
+          const dLat = ((targetLat - curLat) * Math.PI) / 180;
+          const dLon = ((targetLng - curLng) * Math.PI) / 180;
+          const a =
+            Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos((curLat * Math.PI) / 180) *
+              Math.cos((targetLat * Math.PI) / 180) *
+              Math.sin(dLon / 2) *
+              Math.sin(dLon / 2);
+          const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+          distance = R * c;
+        }
+
+        return {
+          ...flag,
+          distance,
+          stop_lat: targetLat,
+          stop_lng: targetLng,
+          accuracy: 50,
+          stop_name: flag.stop_name || undefined,
+          status: flag.status as 'waiting' | 'acknowledged' | 'boarded' | 'raised',
+        };
+      })
+      .sort((a, b) => (a.distance ?? 9999) - (b.distance ?? 9999));
+  }, [waitingFlags, currentLocation?.lat, currentLocation?.lng]);
+
+
+  if (showLoader) {
     return (
       <div className="flex-1 min-h-[calc(100dvh-120px)] flex items-center justify-center bg-gray-50 dark:bg-[#020817]">
         <PremiumPageLoader
           message="Initiating Real-time Tracking..."
           subMessage="Connecting to GPS and route services..."
+          maxDurationMs={3500}
         />
       </div>
     );
@@ -1616,8 +1681,9 @@ export default function DriverLiveTrackingPage() {
 
 
   return (
-    <ErrorBoundary>
-      <div className="flex-1 bg-[#0A0D16] min-h-screen pb-24 md:pb-6 text-white font-sans">
+    <LocationPermissionGate role="driver">
+      <ErrorBoundary>
+        <div className="flex-1 bg-[#0A0D16] min-h-screen pb-24 md:pb-6 text-white font-sans">
         {/* WAIT REQUEST OVERLAY */}
         {activeWaitRequest && (
           <div className="fixed inset-0 z-[10001] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in zoom-in duration-200">
@@ -1692,303 +1758,132 @@ export default function DriverLiveTrackingPage() {
             </Card>
           </div>
         )}
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 md:py-8 space-y-8">
-          {/* Enhanced Live Location Sharing Card */}
-          <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-purple-600 via-blue-600 to-cyan-600 p-1 animate-fade-in shadow-2xl shadow-blue-500/10">
-            <div className="absolute inset-0 bg-gradient-to-r from-purple-600 via-blue-600 to-cyan-600 opacity-30 blur-3xl" />
-            <div className="relative bg-[#0F1423]/95 backdrop-blur-xl rounded-3xl p-5 md:p-8 lg:p-10 border border-white/5">
-              {/* Desktop Layout */}
-              <div className="hidden md:flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  <div className="p-3 rounded-2xl bg-gradient-to-br from-blue-500 to-purple-600 shadow-lg animate-float">
-                    <Bus className="h-5 w-5 md:h-6 md:w-6 text-white" />
-                  </div>
-                  <div>
-                    <h1 className="text-2xl md:text-3xl lg:text-4xl font-bold text-white">Live Location Sharing</h1>
-                    <p className="text-white/60 text-sm md:text-base mt-1 font-medium">Share your bus location in real-time</p>
-                  </div>
-                </div>
-                <Badge className={`px-4 py-2 text-sm md:text-lg font-semibold border-0 ${tripActive
-                  ? 'bg-gradient-to-r from-green-500 to-emerald-600 text-white shadow-lg shadow-green-500/20'
-                  : 'bg-gradient-to-r from-gray-600 to-gray-700 text-white'
-                  }`}>
-                  {tripActive ? "Trip Active" : "Trip Inactive"}
-                </Badge>
-              </div>
-
-              {/* Mobile Layout - Enhanced Premium Design */}
-              <div className="md:hidden space-y-5">
-                {/* Header Section */}
-                <div className="flex items-center gap-4">
-                  <div className="relative">
-                    <div className="absolute inset-0 bg-blue-500 blur-lg opacity-40 animate-pulse"></div>
-                    <div className="relative p-3.5 rounded-2xl bg-gradient-to-br from-blue-500 to-purple-600 shadow-xl border border-white/10 shrink-0">
-                      <Bus className="h-6 w-6 text-white" />
-                    </div>
-                  </div>
-                  <div className="flex-1">
-                    <h1 className="text-xl font-bold text-white tracking-tight">Live Location Sharing</h1>
-                    <p className="text-white/60 text-[13px] mt-0.5 font-medium leading-tight">Share your bus location in real-time</p>
-                  </div>
-                </div>
-
-                {/* Status Section */}
-                <div className="flex justify-start pt-1">
-                  <div className={`px-5 py-2.5 rounded-full shadow-lg border-2 ${tripActive
-                    ? 'bg-gradient-to-r from-green-500/10 to-emerald-600/10 text-green-400 border-green-500/30'
-                    : 'bg-gradient-to-r from-gray-500/10 to-gray-600/10 text-gray-400 border-gray-500/30'
-                    }`}>
-                    <div className="flex items-center gap-2.5">
-                      <div className={`w-2 h-2 rounded-full ${tripActive ? 'bg-green-400 animate-pulse shadow-[0_0_10px_rgba(74,222,128,0.5)]' : 'bg-gray-500'}`}></div>
-                      <span className="text-xs font-black uppercase tracking-widest">{tripActive ? "Trip Active" : "Trip Inactive"}</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Trip Status Card - Enhanced Premium Design */}
-          <Card className="group relative overflow-hidden p-0 gap-0 bg-[#0F1423] border-white/5 shadow-2xl transition-all duration-300 rounded-[2rem]">
-            <CardHeader className="bg-[#161C2E] px-6 py-4 border-b border-white/5">
-              <CardTitle className="flex items-center gap-3 text-white">
-                <div className="p-2.5 rounded-xl bg-blue-500/10 border border-blue-500/20 group-hover:bg-blue-500/20 transition-colors">
-                  <Navigation className="h-5 w-5 text-blue-400" />
-                </div>
-                <span className="text-lg font-bold tracking-tight">Trip Control</span>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="p-5 space-y-6">
-              {/* Enhanced Bus Info Grid */}
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5 md:gap-6">
-                {/* Bus Number Card */}
-                <div className="group/item bg-[#161C2E] rounded-2xl p-3.5 border border-white/5 hover:border-blue-500/30 transition-all duration-300">
-                  <div className="flex items-center gap-2.5 mb-2">
-                    <div className="p-1.5 rounded-lg bg-blue-500/10">
-                      <Bus className="h-3.5 w-3.5 text-blue-400" />
-                    </div>
-                    <p className="text-[10px] font-bold text-blue-400/80 uppercase tracking-[0.1em] whitespace-nowrap">Bus Number</p>
-                  </div>
-                  <p className="text-[13px] md:text-sm font-black text-white">{busData?.busNumber || busData?.bus_number || 'Select Bus'}</p>
-                </div>
-
-                {/* Route Card */}
-                <div className="group/item bg-[#161C2E] rounded-2xl p-3.5 border border-white/5 hover:border-purple-500/30 transition-all duration-300">
-                  <div className="flex items-center gap-2.5 mb-2">
-                    <div className="p-1.5 rounded-lg bg-purple-500/10">
-                      <MapPin className="h-3.5 w-3.5 text-purple-400" />
-                    </div>
-                    <p className="text-[10px] font-bold text-purple-400/80 uppercase tracking-[0.1em] whitespace-nowrap">Route</p>
-                  </div>
-                  <p className="text-[13px] md:text-sm font-black text-white">{routeData?.routeName || routeData?.route_name || 'Select Route'}</p>
-                </div>
-
-                {/* Speed Card */}
-                <div className="group/item bg-[#161C2E] rounded-2xl p-3.5 border border-white/5 hover:border-green-500/30 transition-all duration-300">
-                  <div className="flex items-center gap-2.5 mb-2">
-                    <div className="p-1.5 rounded-lg bg-green-500/10">
-                      <Activity className="h-3.5 w-3.5 text-green-400" />
-                    </div>
-                    <p className="text-[10px] font-bold text-green-400/80 uppercase tracking-[0.1em] whitespace-nowrap">Speed</p>
-                  </div>
-                  <p className="text-[13px] md:text-sm font-black text-white">{(speed * 3.6).toFixed(1)} km/h</p>
-                </div>
-
-                {/* GPS Accuracy Card */}
-                <div className="group/item bg-[#161C2E] rounded-2xl p-3.5 border border-white/5 hover:border-orange-500/30 transition-all duration-300">
-                  <div className="flex items-center gap-2.5 mb-2">
-                    <div className="p-1.5 rounded-lg bg-orange-500/10">
-                      <Navigation className="h-3.5 w-3.5 text-orange-400" />
-                    </div>
-                    <p className="text-[9px] font-bold text-orange-400/80 uppercase tracking-[0.1em] whitespace-nowrap">GPS Accuracy</p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <p className={`text-[13px] md:text-sm font-black ${accuracy > 100 ? 'text-red-400' : accuracy > 50 ? 'text-yellow-400' : 'text-green-400'}`}>
-                      {accuracy.toFixed(1)}m
-                    </p>
-                    <div className={`w-2 h-2 rounded-full ${tripActive ? 'animate-pulse' : ''} ${accuracy <= 20 ? 'bg-green-400 shadow-[0_0_8px_rgba(74,222,128,0.4)]' :
-                      accuracy <= 50 ? 'bg-blue-400' :
-                        accuracy <= 100 ? 'bg-yellow-400' : 'bg-red-400'
-                      }`} />
-                  </div>
-                </div>
-              </div>
-
-              {/* Enhanced Trip Controls */}
-              <div className="flex gap-4">
-                {!tripActive ? (
-                  <Button
-                    onClick={handleStartTrip}
-                    disabled={loading}
-                    className="group relative flex-1 bg-gradient-to-r from-green-500 via-emerald-500 to-green-600 hover:from-green-600 hover:via-emerald-600 hover:to-green-700 text-white font-bold py-6 text-lg shadow-xl hover:shadow-2xl transition-all duration-300 hover:scale-[1.02] rounded-xl overflow-hidden"
-                  >
-                    <div className="absolute inset-0 bg-gradient-to-r from-white/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
-                    <div className="relative flex items-center justify-center gap-3">
-                      <div className="p-1 rounded-full bg-white/20 group-hover:bg-white/30 transition-colors duration-300">
-                        <PlayCircle className="h-5 w-5 group-hover:scale-110 transition-transform duration-300" />
-                      </div>
-                      <span className="tracking-wide">Start Trip</span>
-                    </div>
-                  </Button>
-                ) : (
-                  <Button
-                    onClick={handleEndTrip}
-                    disabled={loading}
-                    className="group relative flex-1 bg-gradient-to-r from-red-500 via-red-600 to-red-700 hover:from-red-600 hover:via-red-700 hover:to-red-800 text-white font-bold py-6 text-lg shadow-xl hover:shadow-2xl transition-all duration-300 hover:scale-[1.02] rounded-xl overflow-hidden"
-                  >
-                    <div className="absolute inset-0 bg-gradient-to-r from-white/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
-                    <div className="relative flex items-center justify-center gap-3">
-                      <div className="p-1 rounded-full bg-white/20 group-hover:bg-white/30 transition-colors duration-300">
-                        <StopCircle className="h-5 w-5 group-hover:scale-110 transition-transform duration-300" />
-                      </div>
-                      <span className="tracking-wide">End Trip</span>
-                    </div>
-                  </Button>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Waiting Flags */}
-          {waitingFlags.length > 0 && (
-            <div className="space-y-2 animate-slide-up">
-              <h3 className="text-sm font-bold text-white/60 ml-1 flex items-center gap-2 mb-3">
-                <div className="p-1 px-2 rounded-lg bg-orange-500/10 border border-orange-500/20">
-                  <Flag className="h-4 w-4 text-orange-400" />
-                </div>
-                Waiting Students ({waitingFlags.length})
-              </h3>
-              {waitingFlags
-                .map((flag) => {
-                  // Support both new and legacy coordinate fields
-                  const targetLat = flag.stop_lat || flag.lat;
-                  const targetLng = flag.stop_lng || flag.lng;
-
-                  // Calculate distance if driver location is available
-                  if (currentLocation && currentLocation.lat && currentLocation.lng && targetLat && targetLng) {
-                    // Haversine formula for distance calculation
-                    const R = 6371; // Radius of earth in km
-                    const dLat = (targetLat - currentLocation.lat) * Math.PI / 180;
-                    const dLon = (targetLng - currentLocation.lng) * Math.PI / 180;
-                    const a =
-                      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-                      Math.cos(currentLocation.lat * Math.PI / 180) * Math.cos(targetLat * Math.PI / 180) *
-                      Math.sin(dLon / 2) * Math.sin(dLon / 2);
-                    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-                    const distance = R * c; // Distance in km
-                    return { ...flag, distance };
-                  }
-                  return { ...flag, distance: undefined };
-                })
-                .sort((a, b) => (a.distance || 999) - (b.distance || 999)) // Sort by distance
-                .map((flag) => (
-                  <div key={flag.id} className="flex items-center justify-between p-3.5 bg-[#161C2E] rounded-[1.25rem] border border-white/5 shadow-xl animate-in slide-in-from-right duration-300">
-                    <div className="flex items-center gap-3.5">
-                      <div className="relative">
-                        <div className="absolute inset-0 bg-orange-500/20 blur-md rounded-full"></div>
-                        <div className="relative h-10 w-10 rounded-full bg-gradient-to-br from-orange-400 to-red-500 flex items-center justify-center text-white font-black text-sm border-2 border-[#161C2E] shadow-lg">
-                          {flag.student_name.charAt(0)}
-                        </div>
-                      </div>
-                      <div>
-                        <p className="font-bold text-sm text-white">{flag.student_name}</p>
-                        <div className="flex items-center gap-2 text-[11px] text-white/50 font-medium">
-                          <span className="text-orange-400">{flag.distance ? `${(flag.distance * 1000).toFixed(0)}m away` : 'Waiting'}</span>
-                          <span className="opacity-30">•</span>
-                          <span className="truncate max-w-[120px]">{flag.stop_name || "Custom Stop"}</span>
-                        </div>
-                      </div>
-                    </div>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleAcknowledgeFlag(flag.id)}
-                      className="h-8 text-xs bg-orange-50 text-orange-700 hover:bg-orange-100 hover:text-orange-800 border-orange-200 dark:bg-orange-900/20 dark:text-orange-300 dark:hover:bg-orange-900/40 dark:border-orange-800"
-                    >
-                      Acknowledge
-                    </Button>
-                  </div>
-                ))}
-            </div>
-          )}
-
-          {/* Uber-like Full Screen Map */}
-          <div className={`transition-all duration-300 shadow-2xl overflow-hidden ${isFullScreenMap
-            ? "fixed inset-0 z-[10000] h-[100dvh] w-screen rounded-none"
-            : "h-[450px] md:h-[calc(100vh-20rem)] md:min-h-[600px] rounded-3xl"
-            } ${isScannerOpen ? 'blur-sm opacity-50 pointer-events-none' : ''}`}>
+        {/* Active Trip Mode: Display ONLY the full-screen map HUD */}
+        {tripActive ? (
+          <div
+            className={`transition-all duration-300 shadow-2xl overflow-hidden ${
+              isFullScreenMap
+                ? "fixed inset-0 z-[10000] h-[100dvh] w-screen rounded-none"
+                : "max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 h-[calc(100vh-6rem)] min-h-[600px] rounded-3xl"
+            } ${isScannerOpen ? "blur-sm opacity-50 pointer-events-none" : ""}`}
+          >
             <LiveTrackingDriverMap
               driverLocation={currentLocation}
-              waitingStudents={waitingFlags.map(flag => {
-                // Support both new and legacy coordinate fields
-                const targetLat = flag.stop_lat || flag.lat;
-                const targetLng = flag.stop_lng || flag.lng;
-
-                // Calculate distance for sorting and display
-                let distance = undefined;
-                if (currentLocation && targetLat && targetLng) {
-                  const R = 6371; // Radius of earth in km
-                  const dLat = (targetLat - currentLocation.lat) * Math.PI / 180;
-                  const dLon = (targetLng - currentLocation.lng) * Math.PI / 180;
-                  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-                    Math.cos(currentLocation.lat * Math.PI / 180) * Math.cos(targetLat * Math.PI / 180) *
-                    Math.sin(dLon / 2) * Math.sin(dLon / 2);
-                  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-                  distance = R * c;
-                }
-
-                return {
-                  ...flag,
-                  distance,
-                  stop_lat: targetLat,
-                  stop_lng: targetLng,
-                  accuracy: 50, // Default accuracy for student markers
-                  stop_name: flag.stop_name || undefined,
-                  status: flag.status as 'waiting' | 'acknowledged' | 'boarded' | 'raised'
-                };
-              })
-                .sort((a, b) => (a.distance ?? 9999) - (b.distance ?? 9999))}
-              tripActive={tripActive}
-              busNumber={busData?.busNumber}
-              routeName={routeData?.routeName}
+              waitingStudents={formattedWaitingStudents}
+              tripActive={true}
+              busNumber={busData?.busNumber || busData?.bus_number}
+              routeName={routeData?.routeName || routeData?.route_name}
               speed={speed}
               accuracy={accuracy}
               onQrScan={() => setIsScannerOpen(true)}
               onAcknowledgeStudent={handleAcknowledgeFlag}
-              onMarkBoarded={async (studentId) => {
-                // Mark student as boarded
-                try {
-                  const idToken = await currentUser?.getIdToken();
-                  const response = await fetch("/api/driver/mark-boarded", {
-                    method: "POST",
-                    headers: {
-                      "Content-Type": "application/json",
-                      Authorization: `Bearer ${idToken}`,
-                    },
-                    body: JSON.stringify({
-                      idToken,
-                      flagId: studentId,
-                    }),
-                  });
-
-                  if (response.ok) {
-                    setWaitingFlags((prev) => prev.filter((flag) => flag.id !== studentId));
-                    addToast("Student marked as boarded", "success");
-                  }
-                } catch (error) {
-                  console.error("Error marking student as boarded:", error);
-                  addToast("Failed to mark student as boarded", "error");
-                }
-              }}
+              onMarkBoarded={handleMarkBoarded}
               isFullScreen={isFullScreenMap}
-              onToggleFullScreen={() => setIsFullScreenMap(!isFullScreenMap)}
-              showStatsOnMobile={isFullScreenMap}
-              primaryActionLabel={tripActive ? "End Trip" : "Start Trip"}
-              primaryActionColor={tripActive ? "red" : "green"}
-              onPrimaryAction={tripActive ? handleEndTrip : handleStartTrip}
+              onToggleFullScreen={() => setIsFullScreenMap((prev) => !prev)}
+              showStatsOnMobile={true}
+              primaryActionLabel="End Trip"
+              primaryActionColor="red"
+              onPrimaryAction={handleEndTrip}
             />
           </div>
-        </div>
+        ) : (
+          /* Inactive Mode: Show ONLY the Live Location Sharing card at the top, and the map below it (second card with 4 inner cards removed) */
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 md:py-8 space-y-6 animate-fade-in">
+            {/* Top Card: Live Bus Tracker Header */}
+            <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-purple-600 via-blue-600 to-cyan-600 p-1 shadow-2xl shadow-blue-500/10 transition-all">
+              <div className="absolute inset-0 bg-gradient-to-r from-purple-600 via-blue-600 to-cyan-600 opacity-30 blur-3xl" />
+              <div className="relative bg-[#0F1423]/95 backdrop-blur-xl rounded-3xl p-5 md:p-7 border border-white/5">
+                {/* Desktop Layout */}
+                <div className="hidden md:flex items-center justify-between">
+                  <div className="flex items-center gap-4">
+                    <div className="p-3.5 rounded-2xl bg-gradient-to-br from-blue-500 to-purple-600 shadow-lg animate-float">
+                      <Bus className="h-6 w-6 text-white" />
+                    </div>
+                    <div>
+                      <h1 className="text-2xl md:text-3xl font-bold text-white tracking-tight">Live Location Sharing</h1>
+                      <p className="text-white/60 text-sm mt-0.5 font-medium">Share your bus location in real-time</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <Badge className="px-4 py-2 text-sm font-semibold border-0 bg-gray-800/80 text-gray-300">
+                      Trip Inactive
+                    </Badge>
+                    <Button
+                      onClick={handleStartTrip}
+                      disabled={loading}
+                      className="group relative bg-gradient-to-r from-emerald-500 via-green-500 to-teal-600 hover:from-emerald-600 hover:via-green-600 hover:to-teal-700 text-white font-bold px-7 py-3 text-base shadow-xl hover:shadow-2xl shadow-green-500/20 rounded-2xl cursor-pointer transition-all hover:scale-[1.02] active:scale-95"
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <PlayCircle className="h-5 w-5 group-hover:scale-110 transition-transform" />
+                        <span>Start Trip</span>
+                      </div>
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Mobile Layout */}
+                <div className="md:hidden space-y-4">
+                  <div className="flex items-center gap-3.5">
+                    <div className="relative">
+                      <div className="absolute inset-0 bg-blue-500 blur-lg opacity-40 animate-pulse"></div>
+                      <div className="relative p-3.5 rounded-2xl bg-gradient-to-br from-blue-500 to-purple-600 shadow-xl border border-white/10 shrink-0">
+                        <Bus className="h-6 w-6 text-white" />
+                      </div>
+                    </div>
+                    <div className="flex-1">
+                      <h1 className="text-xl font-bold text-white tracking-tight">Live Location Sharing</h1>
+                      <p className="text-white/60 text-[13px] mt-0.5 font-medium leading-tight">Share your bus location in real-time</p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-3 pt-1">
+                    <div className="px-4 py-2 rounded-full border border-gray-500/30 bg-gray-500/10 text-gray-400">
+                      <div className="flex items-center gap-2">
+                        <div className="w-2 h-2 rounded-full bg-gray-500" />
+                        <span className="text-xs font-black uppercase tracking-widest">Trip Inactive</span>
+                      </div>
+                    </div>
+                    <Button
+                      onClick={handleStartTrip}
+                      disabled={loading}
+                      size="sm"
+                      className="bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white font-bold px-5 py-2.5 shadow-lg shadow-green-500/25 rounded-xl cursor-pointer active:scale-95"
+                    >
+                      <PlayCircle className="h-4 w-4 mr-1.5" />
+                      Start Trip
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Map Container */}
+            <div
+              className={`h-[480px] md:h-[calc(100vh-18rem)] md:min-h-[550px] rounded-3xl overflow-hidden shadow-2xl border border-white/5 transition-all duration-300 ${
+                isScannerOpen ? "blur-sm opacity-50 pointer-events-none" : ""
+              }`}
+            >
+              <LiveTrackingDriverMap
+                driverLocation={currentLocation}
+                waitingStudents={formattedWaitingStudents}
+                tripActive={false}
+                busNumber={busData?.busNumber || busData?.bus_number}
+                routeName={routeData?.routeName || routeData?.route_name}
+                speed={speed}
+                accuracy={accuracy}
+                onQrScan={() => setIsScannerOpen(true)}
+                onAcknowledgeStudent={handleAcknowledgeFlag}
+                onMarkBoarded={handleMarkBoarded}
+                isFullScreen={false}
+                onToggleFullScreen={() => setIsFullScreenMap(true)}
+                showStatsOnMobile={false}
+                primaryActionLabel="Start Trip"
+                primaryActionColor="green"
+                onPrimaryAction={handleStartTrip}
+              />
+            </div>
+          </div>
+        )}
 
         {/* Browser Compatibility Banner */}
         <BrowserCompatibilityBanner />
@@ -2138,5 +2033,6 @@ export default function DriverLiveTrackingPage() {
         )}
       </div>
     </ErrorBoundary>
+    </LocationPermissionGate>
   );
 }

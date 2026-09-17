@@ -24,22 +24,14 @@ export default function StudentDistribution({ distribution, totalStudents }: Stu
   const morningPercent = totalStudents > 0 ? Math.round((morningData.value / totalStudents) * 100) : 0;
   const eveningPercent = totalStudents > 0 ? Math.round((eveningData.value / totalStudents) * 100) : 0;
 
-  const [activeIndex, setActiveIndex] = useState(-1);
+  const [hoveredShift, setHoveredShift] = useState<'Morning' | 'Evening' | null>(null);
   const [isMounted, setIsMounted] = useState(false);
 
   useEffect(() => {
     setIsMounted(true);
   }, []);
 
-  const activeData = activeIndex !== -1 ? distribution[activeIndex] : null;
-
-  const onPieEnter = (_: any, index: number) => {
-    setActiveIndex(index);
-  };
-
-  const onPieLeave = () => {
-    setActiveIndex(-1);
-  };
+  const activeData = hoveredShift === 'Morning' ? morningData : hoveredShift === 'Evening' ? eveningData : null;
 
   return (
     <Card className="relative overflow-hidden bg-[#0a0b14] border-white/5 shadow-2xl h-full transition-colors duration-300 hover:bg-[#0f101f] flex flex-col">
@@ -68,7 +60,7 @@ export default function StudentDistribution({ distribution, totalStudents }: Stu
             <div className="absolute w-[108px] h-[108px] rounded-full border border-white/5 bg-[#0a0b14] shadow-inner flex flex-col items-center justify-center z-20 transition-all duration-700 pointer-events-none">
               <span className={cn(
                 "text-3xl font-bold drop-shadow-lg transition-all duration-500",
-                activeData?.name === 'Morning' ? "text-amber-400" : activeData?.name === 'Evening' ? "text-indigo-400" : "text-white"
+                hoveredShift === 'Morning' ? "text-amber-400" : hoveredShift === 'Evening' ? "text-indigo-400" : "text-white"
               )}>
                 {activeData ? activeData.value : totalStudents}
               </span>
@@ -121,11 +113,11 @@ export default function StudentDistribution({ distribution, totalStudents }: Stu
                         strokeDashoffset="0"
                         className="transition-all duration-500 hover:cursor-pointer"
                         style={{
-                          filter: activeIndex === 0 ? "url(#glow-orange)" : "none",
-                          opacity: activeIndex === -1 ? 0.75 : activeIndex === 0 ? 1.0 : 0.35
+                          filter: hoveredShift === 'Morning' ? "url(#glow-orange)" : "none",
+                          opacity: hoveredShift === null ? 0.75 : hoveredShift === 'Morning' ? 1.0 : 0.35
                         }}
-                        onMouseEnter={() => onPieEnter(0, 0)}
-                        onMouseLeave={onPieLeave}
+                        onMouseEnter={() => setHoveredShift('Morning')}
+                        onMouseLeave={() => setHoveredShift(null)}
                       />
                     )}
 
@@ -142,11 +134,11 @@ export default function StudentDistribution({ distribution, totalStudents }: Stu
                         strokeDashoffset={-morningLength}
                         className="transition-all duration-500 hover:cursor-pointer"
                         style={{
-                          filter: activeIndex === 1 ? "url(#glow-indigo)" : "none",
-                          opacity: activeIndex === -1 ? 0.75 : activeIndex === 1 ? 1.0 : 0.35
+                          filter: hoveredShift === 'Evening' ? "url(#glow-indigo)" : "none",
+                          opacity: hoveredShift === null ? 0.75 : hoveredShift === 'Evening' ? 1.0 : 0.35
                         }}
-                        onMouseEnter={() => onPieEnter(0, 1)}
-                        onMouseLeave={onPieLeave}
+                        onMouseEnter={() => setHoveredShift('Evening')}
+                        onMouseLeave={() => setHoveredShift(null)}
                       />
                     )}
                   </g>
@@ -159,20 +151,20 @@ export default function StudentDistribution({ distribution, totalStudents }: Stu
           <div className="flex-1 flex flex-col gap-4 w-full md:max-w-[280px]">
             <motion.div 
                animate={{ 
-                 scale: activeData?.name === 'Morning' ? 1.05 : 1,
-                 x: activeData?.name === 'Morning' ? 10 : 0,
-                 backgroundColor: activeData?.name === 'Morning' ? 'rgba(245, 158, 11, 0.08)' : 'rgba(255, 255, 255, 0.03)'
+                 scale: hoveredShift === 'Morning' ? 1.05 : 1,
+                 x: hoveredShift === 'Morning' ? 10 : 0,
+                 backgroundColor: hoveredShift === 'Morning' ? 'rgba(245, 158, 11, 0.08)' : 'rgba(255, 255, 255, 0.03)'
                }}
                className="flex items-center p-3.5 rounded-3xl border border-white/5 hover:border-amber-500/20 transition-all group overflow-hidden relative hover:cursor-pointer"
-               onMouseEnter={() => onPieEnter(0, 0)}
-               onMouseLeave={onPieLeave}
+               onMouseEnter={() => setHoveredShift('Morning')}
+               onMouseLeave={() => setHoveredShift(null)}
             >
               <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity">
                 <Sun className="w-12 h-12 text-amber-500" />
               </div>
               <div className={cn(
                 "w-11 h-11 rounded-2xl border flex items-center justify-center mr-4 transition-all",
-                activeData?.name === 'Morning' ? "bg-amber-500/20 border-amber-500/40" : "bg-amber-500/10 border-amber-500/20"
+                hoveredShift === 'Morning' ? "bg-amber-500/20 border-amber-500/40" : "bg-amber-500/10 border-amber-500/20"
               )}>
                 <Sun className="w-5 h-5 text-amber-500" />
               </div>
@@ -187,20 +179,20 @@ export default function StudentDistribution({ distribution, totalStudents }: Stu
 
             <motion.div 
                animate={{ 
-                 scale: activeData?.name === 'Evening' ? 1.05 : 1,
-                 x: activeData?.name === 'Evening' ? 10 : 0,
-                 backgroundColor: activeData?.name === 'Evening' ? 'rgba(99, 102, 241, 0.08)' : 'rgba(255, 255, 255, 0.03)'
+                 scale: hoveredShift === 'Evening' ? 1.05 : 1,
+                 x: hoveredShift === 'Evening' ? 10 : 0,
+                 backgroundColor: hoveredShift === 'Evening' ? 'rgba(99, 102, 241, 0.08)' : 'rgba(255, 255, 255, 0.03)'
                }}
                className="flex items-center p-3.5 rounded-3xl border border-white/5 hover:border-indigo-500/20 transition-all group overflow-hidden relative hover:cursor-pointer"
-               onMouseEnter={() => onPieEnter(0, 1)}
-               onMouseLeave={onPieLeave}
+               onMouseEnter={() => setHoveredShift('Evening')}
+               onMouseLeave={() => setHoveredShift(null)}
             >
               <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity">
                 <Moon className="w-12 h-12 text-indigo-500" />
               </div>
               <div className={cn(
                 "w-11 h-11 rounded-2xl border flex items-center justify-center mr-4 transition-all",
-                activeData?.name === 'Evening' ? "bg-indigo-500/20 border-indigo-500/40" : "bg-indigo-500/10 border-indigo-500/20"
+                hoveredShift === 'Evening' ? "bg-indigo-500/20 border-indigo-500/40" : "bg-indigo-500/10 border-indigo-500/20"
               )}>
                 <Moon className="w-5 h-5 text-indigo-500" />
               </div>

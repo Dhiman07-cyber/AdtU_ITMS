@@ -1,7 +1,9 @@
 "use client";
 
 import ErrorBoundary from "@/components/ErrorBoundary";
-import { PremiumPageLoader } from "@/components/LoadingSpinner";
+import { MapContainerSkeleton, PremiumPageLoader } from "@/components/LoadingSpinner";
+import { usePageShellLoader } from "@/hooks/usePageShellLoader";
+import LocationPermissionGate from "@/components/LocationPermissionGate";
 import TransportEntitlementGuard from "@/components/transport/TransportEntitlementGuard";
 import { Button } from "@/components/ui/button";
 import { Card,CardContent,CardHeader,CardTitle } from "@/components/ui/card";
@@ -958,18 +960,25 @@ function TrackBusLive() {
   };
 
 
-  // Show loading while auth is loading
-  if (loading) {
-    return <PremiumPageLoader message="Loading Bus Tracker" subMessage="Preparing tracking interface..." />;
+  const isInitialLoading = loading || (dataLoading && (!busData || !routeData));
+  const { showLoader } = usePageShellLoader(isInitialLoading, 3500);
+
+  if (showLoader) {
+    return <PremiumPageLoader message="Loading Bus Tracker" subMessage="Preparing live transit interface..." />;
   }
 
-  // NOTE (Phase 3): the soft-block / entitlement gate that used to live here has
-  // moved UP to <TransportEntitlementGuard> (see default export). This component
-  // only ever mounts for students who currently own transport access, so all the
-  // realtime subscriptions above are guaranteed to run only for entitled students.
-
-  if (dataLoading) {
-    return <PremiumPageLoader message="Loading Bus Tracker" subMessage="Initializing maps and fetching real-time location..." />;
+  if (dataLoading && (!busData || !routeData)) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-purple-50/20 dark:from-gray-950 dark:via-blue-950/20 dark:to-purple-950/10">
+        <div className="container mx-auto px-4 pb-4 pt-20 md:px-6 md:pb-6 md:pt-24 space-y-6">
+          <div className="rounded-3xl p-6 bg-white/10 dark:bg-gray-900/40 backdrop-blur-md border border-white/10 animate-pulse space-y-4">
+            <div className="h-8 w-48 bg-white/10 rounded-lg" />
+            <div className="h-4 w-64 bg-white/5 rounded-md" />
+          </div>
+          <MapContainerSkeleton className="h-[450px] md:h-[550px]" />
+        </div>
+      </div>
+    );
   }
 
   if (!busData || !routeData) {
@@ -1082,6 +1091,8 @@ function TrackBusLive() {
               <LiveTrackingBusMap
                 busId={targetBusId}
                 busNumber={busData?.busNumber || busData?.bus_number || targetBusId}
+                routeId={routeData?.routeId || routeData?.id || busData?.route_id || 'route_4'}
+                routeName={routeData?.routeName || routeData?.route_name || busData?.route_name}
                 journeyActive={tripActive}
                 isFullScreen={isFullScreenMap}
                 onToggleFullScreen={() => setIsFullScreenMap(!isFullScreenMap)}
@@ -1089,6 +1100,7 @@ function TrackBusLive() {
                 studentLocation={studentLocation}
                 onShowQrCode={() => setShowQrCode(true)}
                 currentLocation={busLocation}
+                speed={busLocation?.speed}
                 loading={busLocationLoading}
                 route_stops={routeData?.stops?.map((s: { name: string; lat: number; lng: number; sequence?: number }) => ({
                   name: s.name,
@@ -1398,7 +1410,9 @@ function TrackBusLive() {
 export default function StudentTrackBusPage() {
   return (
     <TransportEntitlementGuard>
-      <TrackBusLive />
+      <LocationPermissionGate role="student">
+        <TrackBusLive />
+      </LocationPermissionGate>
     </TransportEntitlementGuard>
   );
 }

@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 /**
  * Student Bus Pass Page
@@ -15,6 +15,7 @@
 
 import InlineQRDisplay from "@/components/bus-pass/InlineQRDisplay";
 import { PremiumPageLoader } from "@/components/LoadingSpinner";
+import { usePageShellLoader } from "@/hooks/usePageShellLoader";
 import { Button } from "@/components/ui/button";
 import { Card,CardContent } from "@/components/ui/card";
 import { useAuth } from "@/contexts/auth-context";
@@ -41,6 +42,7 @@ export default function StudentBusPassPage() {
   const [busData, setBusData] = useState<any>(null);
   const [routeData, setRouteData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const { showLoader } = usePageShellLoader(loading, 3500);
 
   // Single Firestore read on page load - fetches student document including UID
   useEffect(() => {
@@ -117,11 +119,11 @@ export default function StudentBusPassPage() {
   // page, the dashboard, the profile, and the server verify endpoints all agree.
   const isActive = hasTransportEntitlement(studentData);
 
-  if (loading) {
-    return <PremiumPageLoader message="Loading Bus Pass" subMessage="Fetching your details..." />;
+  if (showLoader) {
+    return <PremiumPageLoader message="Loading Bus Pass" subMessage="Fetching your details..." maxDurationMs={3500} />;
   }
 
-  if (!studentData) {
+  if (!loading && !studentData) {
     return (
       <div className="flex-1 min-h-[calc(100dvh-120px)] flex items-center justify-center">
         <Card className="max-w-md mx-4">

@@ -10,7 +10,9 @@ import MapFallbackUI from "./MapFallbackUI";
 interface GuwahatiBusMapProps {
   busId: string;
   busNumber?: string;
+  routeId?: string;
   routeName?: string;
+  routeGeometry?: Array<{ lat: number; lng: number }> | null;
   speed?: number;
   accuracy?: number;
   journeyActive?: boolean;
@@ -23,7 +25,7 @@ interface GuwahatiBusMapProps {
   primaryActionDisabled?: boolean;
   studentLocation?: { lat: number; lng: number; accuracy?: number } | null;
   onShowQrCode?: () => void;
-  currentLocation?: { lat: number; lng: number; accuracy?: number; heading?: number; timestamp?: string; busId?: string } | null;
+  currentLocation?: { lat: number; lng: number; accuracy?: number; heading?: number; speed?: number; timestamp?: string; busId?: string } | null;
   loading?: boolean;
 }
 
@@ -44,7 +46,9 @@ function getDistanceText(pos1: { lat: number, lng: number } | null | undefined, 
 export default function GuwahatiBusMap({
   busId,
   busNumber,
+  routeId,
   routeName,
+  routeGeometry,
   speed,
   accuracy,
   journeyActive = false,
@@ -162,7 +166,15 @@ export default function GuwahatiBusMap({
               ? [studentLocation.lat, studentLocation.lng]
               : undefined
           }
-          busPosition={(busLocation && (busLocation.lat !== 0 || busLocation.lng !== 0)) ? { lat: busLocation.lat, lng: busLocation.lng, heading: busLocation.heading } : null}
+          busPosition={(busLocation && (busLocation.lat !== 0 || busLocation.lng !== 0)) ? {
+            lat: busLocation.lat,
+            lng: busLocation.lng,
+            heading: busLocation.heading,
+            speed: busLocation.speed ?? speed,
+            accuracy: busLocation.accuracy ?? accuracy,
+          } : null}
+          routeId={routeId || (busLocation as any)?.routeId || (busLocation as any)?.route_id}
+          routeGeometry={routeGeometry}
           points={points}
           restrictToGuwahati={true}
           onFatalError={handleFatal}
@@ -199,7 +211,14 @@ export default function GuwahatiBusMap({
 
                   <p className="text-[9px] font-black uppercase text-blue-600/60 dark:text-blue-400/60 mb-0.5">Speed</p>
                   <p className="text-[13px] font-black text-blue-600 dark:text-blue-300">
-                    {speed ? `${Math.round(speed * 3.6)} km/h` : "0 km/h"}
+                    {(() => {
+                      const rawSpeed = speed !== undefined && speed !== null ? speed : (busLocation as any)?.speed;
+                      if (!rawSpeed || isNaN(Number(rawSpeed)) || Number(rawSpeed) <= 0) return "0 km/h";
+                      const numSpeed = Number(rawSpeed);
+                      // If rawSpeed is already > 45, it might be in km/h; otherwise convert m/s to km/h (* 3.6)
+                      const kmh = numSpeed > 45 ? Math.round(numSpeed) : Math.round(numSpeed * 3.6);
+                      return `${kmh} km/h`;
+                    })()}
                   </p>
                 </div>
               </div>

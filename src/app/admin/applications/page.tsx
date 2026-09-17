@@ -1055,7 +1055,7 @@ export default function AdminApplicationsPage() {
       {/* Content Area */}
       {(loading || loadingRenewals || routesLoading || busesLoading) && pendingApplications.length === 0 ? (
         <div className="flex justify-center items-center h-96">
-          <PremiumPageLoader message="Fetching data..." />
+          <PremiumPageLoader message="Fetching data..." maxDurationMs={3500} />
         </div>
       ) : (
         <>

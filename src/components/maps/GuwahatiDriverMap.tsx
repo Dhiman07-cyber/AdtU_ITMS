@@ -130,38 +130,7 @@ export default function GuwahatiDriverMap({
 
 
 
-  if (!tripActive) {
-    return (
-      <div className="dark w-full h-full min-h-[400px] bg-[#0a0f1e] rounded-3xl flex items-center justify-center relative overflow-hidden border border-white/5 group p-6">
-        {/* Animated Background Gradients */}
-        <div className="absolute -top-[20%] -left-[10%] w-[60%] h-[60%] bg-blue-500/10 rounded-full blur-[120px] animate-pulse" />
-        <div className="absolute -bottom-[20%] -right-[10%] w-[60%] h-[60%] bg-indigo-500/10 rounded-full blur-[120px] animate-pulse" style={{ animationDelay: "2s" }} />
-
-        <div className="text-center p-6 relative z-10 max-w-sm mx-auto">
-          <div className="relative w-20 h-20 mx-auto mb-6">
-            <div className="absolute inset-0 rounded-full border-2 border-dashed border-blue-500/20 animate-[spin_10s_linear_infinite]" />
-            <div className="absolute inset-4 rounded-full bg-blue-500/10 animate-pulse" />
-            <div className="absolute inset-3 rounded-[1.5rem] bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center shadow-xl shadow-blue-500/20 group-hover:scale-110 transition-transform duration-500">
-              <MapPin className="w-8 h-8 text-white" />
-            </div>
-          </div>
-
-          <h3 className="text-xl font-black text-white mb-2 tracking-tight">
-            No Active Trip
-          </h3>
-          <p className="text-slate-400 text-xs font-medium leading-relaxed">
-            Live GPS tracking is currently offline. Click &quot;Start Trip&quot; above to initialize live tracking and route map.
-          </p>
-
-          <div className="mt-6 inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/5 border border-white/10">
-            <div className="w-1.5 h-1.5 rounded-full bg-slate-500" />
-            <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Trip Inactive</span>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
+  // Fatal error fallback
   if (fatal) {
     return (
       <div className="dark relative w-full h-full min-h-[400px] rounded-3xl overflow-hidden bg-slate-950">
@@ -283,10 +252,27 @@ export default function GuwahatiDriverMap({
                 {waitingStudents.length > 0 && <span className="absolute -top-1 -right-1 flex h-5 w-5 bg-emerald-500 text-white rounded-full text-[10px] items-center justify-center font-black shadow-lg shadow-emerald-500/40 border-2 border-white dark:border-[#1a2236]">{waitingStudents.length}</span>}
               </button>
               <div className="px-3 py-1.5 bg-white/90 dark:bg-slate-800/90 backdrop-blur-md shadow-lg border border-black/5 dark:border-white/10 rounded-xl text-xs font-black text-slate-700 dark:text-slate-200 uppercase tracking-widest">
-                AdtU ITMS
+                {tripActive ? "Trip Active" : "Trip Inactive"}
               </div>
             </div>
           </div>
+
+          {primaryActionLabel && (
+            <div className="absolute bottom-4 left-4 z-20 pointer-events-auto">
+              <Button
+                onClick={onPrimaryAction}
+                className={`rounded-2xl font-bold px-6 py-2.5 shadow-xl ${
+                  primaryActionColor === "red"
+                    ? "bg-red-600 hover:bg-red-700 text-white"
+                    : primaryActionColor === "blue"
+                    ? "bg-blue-600 hover:bg-blue-700 text-white"
+                    : "bg-emerald-600 hover:bg-emerald-700 text-white"
+                }`}
+              >
+                {primaryActionLabel}
+              </Button>
+            </div>
+          )}
 
           <div className="absolute bottom-4 right-4 z-20 flex flex-col gap-3 pointer-events-none">
             <button onClick={() => mapRef.current?.recenter()} className="pointer-events-auto w-10 h-10 bg-white/90 dark:bg-slate-800/90 backdrop-blur-md rounded-2xl shadow-lg border border-black/5 dark:border-white/10 flex items-center justify-center hover:scale-105 active:scale-95 transition-all text-blue-500">

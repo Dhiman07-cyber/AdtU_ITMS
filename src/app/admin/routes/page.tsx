@@ -1,7 +1,8 @@
 "use client";
 
 import { ExportButton } from '@/components/ExportButton';
-import { PremiumPageLoader } from '@/components/LoadingSpinner';
+import { PremiumPageLoader, TableLoader } from '@/components/LoadingSpinner';
+import { usePageShellLoader } from '@/hooks/usePageShellLoader';
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -155,6 +156,7 @@ export default function RoutesPage() {
   const [deleteItem, setDeleteItem] = useState<{ id: string; name: string } | null>(null);
 
   const isLoading = loadingRoutes || loadingBuses;
+  const { showLoader } = usePageShellLoader(isLoading && routesData.length === 0, 3500);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   const handleRefresh = async () => {
@@ -300,8 +302,8 @@ export default function RoutesPage() {
     }
   };
 
-  if (isLoading && routesData.length === 0) {
-    return <PremiumPageLoader message="Curating Transit Routes..." subMessage="Fetching route definitions and stops..." />;
+  if (showLoader) {
+    return <PremiumPageLoader message="Curating Transit Routes..." subMessage="Fetching route definitions and stops..." maxDurationMs={3500} />;
   }
 
   return (
@@ -507,9 +509,15 @@ export default function RoutesPage() {
                 )}
               </Table>
               {filteredRoutes.length === 0 && (
-                <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-xs text-muted-foreground min-h-[220px]">
-                  No routes found.
-                </div>
+                isLoading ? (
+                  <div className="p-6">
+                    <TableLoader rows={6} columns={6} />
+                  </div>
+                ) : (
+                  <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-xs text-muted-foreground min-h-[220px]">
+                    No routes found.
+                  </div>
+                )
               )}
             </div>
           </div>

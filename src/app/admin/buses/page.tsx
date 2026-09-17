@@ -1,66 +1,66 @@
 "use client";
 
 import { ExportButton } from '@/components/ExportButton';
-import { PremiumPageLoader } from '@/components/LoadingSpinner';
+import { PremiumPageLoader, TableLoader } from '@/components/LoadingSpinner';
 import { Button } from "@/components/ui/button";
 import {
-	Card,
-	CardContent
+  Card,
+  CardContent
 } from "@/components/ui/card";
 import {
-	Dialog,
-	DialogContent,
-	DialogDescription,
-	DialogFooter,
-	DialogHeader,
-	DialogTitle,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
 } from "@/components/ui/dialog";
 import {
-	DropdownMenu,
-	DropdownMenuContent,
-	DropdownMenuItem,
-	DropdownMenuLabel,
-	DropdownMenuSeparator,
-	DropdownMenuTrigger,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import {
-	Select,
-	SelectContent,
-	SelectItem,
-	SelectTrigger,
-	SelectValue,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from "@/components/ui/select";
 import {
-	Table,
-	TableBody,
-	TableCell,
-	TableHead,
-	TableHeader,
-	TableRow,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
 } from "@/components/ui/table";
 import { useToast } from '@/contexts/toast-context';
 import { deleteBus } from "@/lib/dataService";
 import { exportToExcel } from '@/lib/export-helpers';
 import { supabase } from '@/lib/supabase-client';
 import {
-	Bus,
-	Edit,
-	Eye,
-	Filter,
-	MoreHorizontal,
-	Plus,
-	Route as RouteIcon,
-	Search,
-	Trash2,
-	Users
+  Bus,
+  Edit,
+  Eye,
+  Filter,
+  MoreHorizontal,
+  Plus,
+  Route as RouteIcon,
+  Search,
+  Trash2,
+  Users
 } from "lucide-react";
 import { useRouter } from 'next/navigation';
-import { useCallback,useMemo,useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 // Migrated: Server-side API → PostgreSQL (no Firestore client reads)
 import { useTheme } from '@/components/theme-provider';
 import { useAuth } from '@/contexts/auth-context';
-import { invalidateCollectionCache,useApiCollection } from '@/hooks/useApiCollection';
+import { invalidateCollectionCache, useApiCollection } from '@/hooks/useApiCollection';
 import { useEventDrivenRefresh } from '@/hooks/useEventDrivenRefresh';
 import { cn } from '@/lib/utils';
 import { RefreshCw } from "lucide-react";
@@ -518,9 +518,9 @@ export default function BusesPage() {
                           <span className={cn(
                             "inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium",
                             (bus.status === 'active' || bus.status === 'idle' || bus.status === 'enroute') ? 'bg-green-500 text-white' :
-                            (bus.status === 'inactive' || bus.status === 'expired') ? 'bg-red-500 text-white' :
-                            (bus.status === 'maintenance') ? 'bg-yellow-500 text-white' :
-                            theme === 'dark' ? 'bg-gray-100 text-gray-800' : 'bg-gray-200 text-gray-700'
+                              (bus.status === 'inactive' || bus.status === 'expired') ? 'bg-red-500 text-white' :
+                                (bus.status === 'maintenance') ? 'bg-yellow-500 text-white' :
+                                  theme === 'dark' ? 'bg-gray-100 text-gray-800' : 'bg-gray-200 text-gray-700'
                           )}>
                             {(() => {
                               const status = bus.status || 'active';
@@ -586,9 +586,15 @@ export default function BusesPage() {
                 )}
               </Table>
               {filteredBuses.length === 0 && (
-                <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-xs text-muted-foreground min-h-[220px]">
-                  No buses found
-                </div>
+                isLoading ? (
+                  <div className="p-6">
+                    <TableLoader rows={5} columns={7} />
+                  </div>
+                ) : (
+                  <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-xs text-muted-foreground min-h-[220px]">
+                    No buses found
+                  </div>
+                )
               )}
             </div>
           </div>

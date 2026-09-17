@@ -219,16 +219,25 @@ type Props = {
   theme: MapTheme;
   center?: [number, number];
   zoom?: number;
-  busPosition: { lat: number; lng: number; heading?: number; speed?: number } | null;
+  busPosition: { lat: number; lng: number; heading?: number; speed?: number; accuracy?: number } | null;
   primaryKind?: "bus" | "driver";
   points?: MapPoint[];
   restrictToGuwahati?: boolean;
   className?: string;
   onFatalError?: (message: string) => void;
   followBus?: boolean;
+  routeGeometry?: Array<{ lat: number; lng: number }> | null;
+  routeId?: string;
+  enableRouteAlignment?: boolean;
 };
 
 import { useScreenWakeLock } from "@/hooks/useScreenWakeLock";
+import {
+  alignBusPositionToRoute,
+  createInitialAlignmentState,
+  type RouteAlignmentState,
+} from "@/lib/maps/route-alignment-engine";
+import { getCanonicalRouteGeometry } from "@/domains/route/data/canonical-route-geometries";
 
 const GuwahatiMap = forwardRef<GuwahatiMapHandles, Props>(({
   theme,
@@ -241,6 +250,9 @@ const GuwahatiMap = forwardRef<GuwahatiMapHandles, Props>(({
   onFatalError,
   primaryKind = "bus",
   followBus = false,
+  routeGeometry,
+  routeId,
+  enableRouteAlignment = true,
 }, ref) => {
   // Prevent screen auto-off whenever map is active / full screened
   useScreenWakeLock(true);
@@ -306,7 +318,7 @@ const GuwahatiMap = forwardRef<GuwahatiMapHandles, Props>(({
 
     (async () => {
       try {
-        ensurePmtilesProtocolRegistered();
+        await ensurePmtilesProtocolRegistered();
         
         try {
           await preflightPmtiles(pmtilesUrl);
@@ -373,12 +385,32 @@ const GuwahatiMap = forwardRef<GuwahatiMapHandles, Props>(({
 
   const lastThemeRef = useRef<MapTheme>(theme);
   const lastKindRef = useRef(primaryKind);
+  const routeAlignmentStateRef = useRef<RouteAlignmentState>(createInitialAlignmentState());
+
+  // Reset alignment state if routeId or routeGeometry changes
+  useEffect(() => {
+    routeAlignmentStateRef.current = createInitialAlignmentState();
+  }, [routeId, routeGeometry]);
+
+  // Clean unmount of animation loop
+  useEffect(() => {
+    return () => {
+      if (busAnimationRef.current != null) {
+        cancelAnimationFrame(busAnimationRef.current);
+        busAnimationRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (!mapRef.current || !mapLoaded || !busPosition) {
       if (busAnimationRef.current != null) { cancelAnimationFrame(busAnimationRef.current); busAnimationRef.current = null; }
       if (busMarkerRef.current) { busMarkerRef.current.remove(); busMarkerRef.current = null; }
-      if (typeof window !== 'undefined') (window as any).__itmsMarkerPosition = null;
+      if (typeof window !== 'undefined') {
+        (window as any).__itmsMarkerPosition = null;
+        (window as any).__itmsRouteAlignStats = null;
+      }
+      routeAlignmentStateRef.current = createInitialAlignmentState();
       return;
     }
 
@@ -390,13 +422,67 @@ const GuwahatiMap = forwardRef<GuwahatiMapHandles, Props>(({
       return;
     }
 
+    // Resolve route geometry: explicitly passed geometry or canonical geometry by routeId
+    const activeRouteGeometry = routeGeometry || (routeId ? getCanonicalRouteGeometry(routeId) : null);
+
+    let displayLat = busLat;
+    let displayLng = busLng;
+    let isAligned = false;
+
+    if (enableRouteAlignment && activeRouteGeometry && activeRouteGeometry.length >= 2) {
+      const alignment = alignBusPositionToRoute(
+        {
+          lat: busLat,
+          lng: busLng,
+          heading: busHeading,
+          speed: busPosition.speed,
+          accuracy: busPosition.accuracy,
+        },
+        activeRouteGeometry,
+        routeAlignmentStateRef.current,
+        routeId || 'active'
+      );
+
+      displayLat = alignment.displayPoint.lat;
+      displayLng = alignment.displayPoint.lng;
+      isAligned = alignment.isSnapped;
+
+      if (typeof window !== 'undefined') {
+        const state = routeAlignmentStateRef.current;
+        (window as any).__itmsRouteAlignStats = {
+          mode: alignment.mode,
+          confidence: alignment.confidence,
+          isSnapped: alignment.isSnapped,
+          distanceToRouteMeters: alignment.distanceToRouteMeters,
+          consecutiveOffRouteCount: alignment.consecutiveOffRouteCount,
+          calculationTimeMs: alignment.calculationTimeMs,
+          rawPoint: alignment.rawPoint,
+          displayPoint: alignment.displayPoint,
+          snappedPoint: alignment.snappedPoint,
+          totalCalculations: state.totalCalculations,
+          avgCalculationTimeMs: state.totalCalculations > 0
+            ? Math.round((state.totalCalculationTimeMs / state.totalCalculations) * 1000) / 1000
+            : 0,
+          maxCalculationTimeMs: state.maxCalculationTimeMs,
+        };
+      }
+    }
+
     const pos = restrictToGuwahati
-      ? clampLatLngToBounds(busLat, busLng)
-      : { lat: busLat, lng: busLng, heading: busHeading };
+      ? clampLatLngToBounds(displayLat, displayLng)
+      : { lat: displayLat, lng: displayLng, heading: busHeading };
 
     // E2E observability: expose the marker's target position so Playwright
     // can verify the rendered marker follows the accepted GPS state.
-    (window as any).__itmsMarkerPosition = { lat: pos.lat, lng: pos.lng, heading: busHeading, atMs: Date.now() };
+    (window as any).__itmsMarkerPosition = {
+      lat: pos.lat,
+      lng: pos.lng,
+      heading: busHeading,
+      atMs: Date.now(),
+      isSnapped: isAligned,
+      rawLat: busLat,
+      rawLng: busLng,
+    };
 
     const themeChanged = lastThemeRef.current !== theme;
     const kindChanged = lastKindRef.current !== primaryKind;
@@ -428,7 +514,7 @@ const GuwahatiMap = forwardRef<GuwahatiMapHandles, Props>(({
         essential: true,
       });
     }
-  }, [busPosition?.lat, busPosition?.lng, busPosition?.heading, theme, primaryKind, mapLoaded, followBus]);
+  }, [busPosition?.lat, busPosition?.lng, busPosition?.heading, busPosition?.speed, busPosition?.accuracy, theme, primaryKind, mapLoaded, followBus, routeId, routeGeometry, enableRouteAlignment]);
 
 
   useEffect(() => {

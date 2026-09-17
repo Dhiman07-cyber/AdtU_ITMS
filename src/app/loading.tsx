@@ -12,13 +12,32 @@ export function PremiumPageLoader({
   noWrapper = false,
   fullScreen = false,
   className = "",
+  maxDurationMs = 4500,
+  onTimeout,
+  fallback,
 }: {
   message?: string;
   subMessage?: string;
   noWrapper?: boolean;
   fullScreen?: boolean;
   className?: string;
+  maxDurationMs?: number;
+  onTimeout?: () => void;
+  fallback?: React.ReactNode;
 }) {
+  const [timedOut, setTimedOut] = useState(false);
+
+  useEffect(() => {
+    if (!maxDurationMs) return;
+    const timer = setTimeout(() => {
+      setTimedOut(true);
+      onTimeout?.();
+    }, maxDurationMs);
+    return () => clearTimeout(timer);
+  }, [maxDurationMs, onTimeout]);
+
+  if (timedOut && fallback) return <>{fallback}</>;
+
   const content = (
     <div className="flex flex-col items-center gap-3.5 text-center">
       <div className="relative scale-110 sm:scale-125">
@@ -219,6 +238,96 @@ export function PageLoader({ message = "Please wait..." }: { message?: string })
         <div className="w-10 h-10 sm:w-12 sm:h-12 border-3 sm:border-4 border-gray-200 dark:border-gray-700 rounded-full animate-spin border-t-blue-600"></div>
       </div>
       <p className="text-base sm:text-lg font-medium text-gray-700 dark:text-gray-300">{message}</p>
+    </div>
+  );
+}
+
+/**
+ * Metric Card Skeleton (KPI Card)
+ */
+export function MetricCardSkeleton() {
+  return (
+    <div className="relative overflow-hidden rounded-2xl border border-white/5 bg-slate-900/40 p-5 backdrop-blur-md animate-pulse">
+      <div className="flex items-center justify-between gap-3 mb-4">
+        <div className="h-4 w-28 bg-white/10 rounded-md" />
+        <div className="h-9 w-9 bg-white/10 rounded-xl" />
+      </div>
+      <div className="h-7 w-20 bg-white/15 rounded-md mb-2" />
+      <div className="h-3 w-32 bg-white/5 rounded-md" />
+    </div>
+  );
+}
+
+/**
+ * Chart Skeleton
+ */
+export function ChartSkeleton({ height = 280 }: { height?: number }) {
+  return (
+    <div
+      style={{ height }}
+      className="w-full rounded-2xl border border-white/5 bg-slate-900/40 p-6 backdrop-blur-md animate-pulse flex flex-col justify-between"
+    >
+      <div className="flex justify-between items-center mb-4">
+        <div className="h-5 w-36 bg-white/10 rounded-md" />
+        <div className="h-4 w-20 bg-white/5 rounded-md" />
+      </div>
+      <div className="flex-1 flex items-end gap-3 pt-6 pb-2">
+        {Array.from({ length: 8 }).map((_, i) => (
+          <div
+            key={i}
+            className="flex-1 bg-white/10 rounded-t-lg transition-all"
+            style={{ height: `${20 + ((i * 17) % 70)}%` }}
+          />
+        ))}
+      </div>
+      <div className="h-3 w-full bg-white/5 rounded mt-3" />
+    </div>
+  );
+}
+
+/**
+ * Map Container Skeleton
+ */
+export function MapContainerSkeleton({ className = "h-[450px]" }: { className?: string }) {
+  return (
+    <div className={`w-full rounded-3xl border border-white/10 bg-slate-950/60 backdrop-blur-md flex flex-col items-center justify-center relative overflow-hidden animate-pulse ${className}`}>
+      <div className="absolute inset-0 bg-gradient-to-tr from-blue-500/5 via-indigo-500/5 to-purple-500/5" />
+      <div className="relative z-10 flex flex-col items-center gap-3 text-center">
+        <div className="w-12 h-12 rounded-full border-2 border-blue-400/30 flex items-center justify-center">
+          <div className="w-3 h-3 rounded-full bg-blue-500 animate-ping" />
+        </div>
+        <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Loading Transit Map...</p>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Module Error Fallback with Retry (Stage E — Isolated Errors)
+ */
+export function ModuleErrorFallback({
+  title = "Failed to load section",
+  error,
+  onRetry,
+}: {
+  title?: string;
+  error?: string | null;
+  onRetry?: () => void;
+}) {
+  return (
+    <div className="w-full rounded-2xl border border-rose-500/20 bg-rose-950/10 p-5 backdrop-blur-md flex flex-col sm:flex-row items-center justify-between gap-4">
+      <div className="space-y-1 text-center sm:text-left">
+        <p className="text-sm font-semibold text-rose-300">{title}</p>
+        <p className="text-xs text-rose-200/70">{error || "A temporary network error occurred."}</p>
+      </div>
+      {onRetry && (
+        <button
+          onClick={onRetry}
+          className="px-4 py-1.5 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 text-xs font-semibold border border-rose-500/30 transition-colors"
+        >
+          Retry
+        </button>
+      )}
     </div>
   );
 }

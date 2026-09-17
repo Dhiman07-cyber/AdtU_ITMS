@@ -1,6 +1,7 @@
 "use client";
 
 import { PremiumPageLoader } from '@/components/LoadingSpinner';
+import { usePageShellLoader } from '@/hooks/usePageShellLoader';
 import { useAuth } from '@/contexts/auth-context';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
@@ -203,8 +204,8 @@ export default function EnhancedModeratorDashboard() {
   });
 
   const studentDistribution = [
-    { name: 'Evening', value: realCounts.eveningStudents || 0, color: '#3b82f6' },
-    { name: 'Morning', value: realCounts.morningStudents || 0, color: '#f97316' }
+    { name: 'Morning', value: realCounts.morningStudents || 0, color: '#f97316' },
+    { name: 'Evening', value: realCounts.eveningStudents || 0, color: '#3b82f6' }
   ];
 
   const routeOccupancy = allRoutes.map((route: any) => {
@@ -253,7 +254,10 @@ export default function EnhancedModeratorDashboard() {
     feedbacksCount: realCounts.feedbacksCount
   };
 
-  if (authLoading || (realCounts.totalStudents === 0 && !cachedData)) {
+  const isInitialLoading = authLoading || (realCounts.totalStudents === 0 && !cachedData);
+  const { showLoader } = usePageShellLoader(isInitialLoading, 3500);
+
+  if (showLoader) {
     return <PremiumPageLoader fullScreen message="Curating Moderator Experience..." subMessage="Fetching system status and analytics..." />;
   }
 
