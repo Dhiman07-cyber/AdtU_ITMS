@@ -7,7 +7,6 @@
  * and payment receipts - matches driver's bus pass scanner UI exactly.
  */
 
-import { PremiumPageLoader } from '@/components/LoadingSpinner';
 import { PermissionDeniedCard } from "@/components/PermissionDeniedCard";
 import ReceiptVerificationModal from '@/components/ReceiptVerificationModal';
 import { Button } from '@/components/ui/button';
@@ -401,8 +400,12 @@ export default function ModeratorVerificationPage() {
         setCameraError(null);
     };
 
-    if (authLoading || permsLoading) {
-        return <PremiumPageLoader message="Loading Verification Scanner..." subMessage="Preparing scanner..." />;
+    if ((authLoading || permsLoading) && !currentUser) {
+        return (
+            <div className="min-h-screen bg-transparent flex flex-col items-center justify-center p-4">
+                <div className="w-full max-w-[500px] h-96 bg-zinc-900/50 border border-zinc-800 rounded-3xl animate-pulse" />
+            </div>
+        );
     }
 
     if (!permsLoading && !canGenerateVerificationCode) {
@@ -583,7 +586,7 @@ export default function ModeratorVerificationPage() {
                                         {/* Header with Logo */}
                                         <div className="w-full px-3 sm:px-4 py-2 sm:py-3 flex items-center justify-center border-b border-white/5 bg-gradient-to-r from-[#1a1b2e] to-[#0f1019] relative">
                                             <div className="flex items-center gap-2">
-                                                <Image src="/adtu-new-logo.svg" alt="AdtU" width={96} height={24} className="h-5 sm:h-7 w-auto flex-shrink-0" style={{ width: 'auto', height: 'auto' }} />
+                                                <Image src="/adtu-new-logo.svg" alt="AdtU" width={96} height={24} priority loading="eager" className="h-5 sm:h-7 w-auto flex-shrink-0" style={{ width: 'auto', height: 'auto' }} />
                                                 <span className="text-[9px] sm:text-xs font-bold text-white/70 tracking-wider">Assam down town University</span>
                                             </div>
                                         </div>

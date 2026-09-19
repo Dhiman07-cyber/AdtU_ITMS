@@ -12,8 +12,6 @@ import { Bell,MapPin,MapPinOff,Megaphone,Plus,RefreshCw,Zap } from "lucide-react
 import { useRouter } from 'next/navigation';
 import { useEffect,useMemo,useState } from "react";
 
-import { PremiumPageLoader } from "@/components/LoadingSpinner";
-
 export default function DriverNotificationsPage() {
   const router = useRouter();
   const { currentUser, userData, loading: authLoading } = useAuth();
@@ -83,13 +81,12 @@ export default function DriverNotificationsPage() {
     }
   }, [userData, router, authLoading]);
 
-  if (loading || authLoading) {
+  if (authLoading && !currentUser) {
     return (
-      <PremiumPageLoader
-        message="Syncing Notifications"
-        subMessage="Preparing your broadcast center..."
-        fullScreen
-      />
+      <div className="flex-1 min-h-screen p-6 max-w-5xl mx-auto space-y-6 animate-pulse">
+        <div className="h-10 w-48 bg-slate-200 dark:bg-zinc-800 rounded-md" />
+        <div className="h-64 bg-slate-100 dark:bg-zinc-900 rounded-xl border border-slate-200 dark:border-zinc-800" />
+      </div>
     );
   }
 
@@ -207,7 +204,13 @@ export default function DriverNotificationsPage() {
 
         {/* Notifications List */}
         <div className="space-y-4 md:space-y-6">
-          {filteredNotifications.length === 0 ? (
+          {loading && allNotifications.length === 0 ? (
+            <div className="space-y-4">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="h-32 bg-white/40 dark:bg-slate-900/40 rounded-3xl border border-slate-200/50 dark:border-slate-800/50 animate-pulse" />
+              ))}
+            </div>
+          ) : filteredNotifications.length === 0 ? (
             <Card className="bg-white/50 dark:bg-gray-900/50 border-gray-100 dark:border-gray-800 rounded-3xl py-24 text-center border-dashed">
               <div className="flex flex-col items-center gap-4">
                 <div className="w-20 h-20 bg-gray-50 dark:bg-gray-800/50 rounded-full flex items-center justify-center border border-gray-100 dark:border-gray-700">
@@ -223,12 +226,13 @@ export default function DriverNotificationsPage() {
             </Card>
           ) : (
             filteredNotifications.map((notification) => (
-              <NotificationCardV2
-                key={notification.id}
-                notification={notification}
-                onMarkAsRead={markAsRead}
-                onRefresh={refresh}
-              />
+              <div key={notification.id} style={{ contentVisibility: 'auto', containIntrinsicSize: '0 80px' }}>
+                <NotificationCardV2
+                  notification={notification}
+                  onMarkAsRead={markAsRead}
+                  onRefresh={refresh}
+                />
+              </div>
             ))
           )}
         </div>

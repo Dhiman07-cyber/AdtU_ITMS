@@ -2,7 +2,6 @@
 
 import EnhancedDatePicker from "@/components/enhanced-date-picker";
 import { OptimizedInput,OptimizedSelect,OptimizedTextarea } from '@/components/forms';
-import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import ProfileImageAddModal from '@/components/ProfileImageAddModal';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,7 +17,7 @@ import { Camera,RotateCcw,Trash2 } from "lucide-react";
 import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useEffect,useState } from 'react';
+import { startTransition, useEffect, useState } from 'react';
 
 export default function AddModeratorPage() {
   const { currentUser, userData, loading } = useAuth();
@@ -98,8 +97,10 @@ export default function AddModeratorPage() {
         const moderators = await getAllModerators();
         const nextNum = moderators.length + 1;
         const newId = `MB-${nextNum}`;
-        setFormData(prev => ({ ...prev, employeeId: newId }));
-        setDefaultEmployeeId(newId);
+        startTransition(() => {
+          setFormData(prev => ({ ...prev, employeeId: newId }));
+          setDefaultEmployeeId(newId);
+        });
       } catch (error) {
         console.error("Failed to fetch moderators count", error);
       }
@@ -376,8 +377,21 @@ export default function AddModeratorPage() {
     setFormData(prev => ({ ...prev, employeeId: defaultEmployeeId }));
   };
 
-  if (loading) {
-    return <PremiumPageLoader message="Preparing moderator form..." subMessage="Loading resources..." />;
+  if (loading && !currentUser) {
+    return (
+      <div className="itms-admin-form-container space-y-6 animate-pulse">
+        <div className="itms-page-header-container">
+          <div className="flex justify-between items-center mb-6">
+            <div>
+              <div className="h-9 w-48 bg-muted/60 rounded-xl mb-2" />
+              <div className="h-4 w-72 bg-muted/40 rounded-lg" />
+            </div>
+            <div className="h-8 w-20 bg-muted/40 rounded-lg" />
+          </div>
+        </div>
+        <div className="h-96 rounded-2xl bg-muted/20 border border-white/5" />
+      </div>
+    );
   }
 
   if (!currentUser || !userData || userData.role !== 'admin') {
@@ -385,26 +399,26 @@ export default function AddModeratorPage() {
   }
 
   return (
-    <div className="mt-10 py-4">
+    <div className="itms-admin-form-container space-y-6">
       {/* Header */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div className="itms-page-header-container">
         <div className="flex justify-between items-center mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-white mb-1">Add Moderator</h1>
-            <p className="text-gray-400 text-xs text-left">Register a new moderator in the system</p>
+            <h1 className="text-xl sm:text-2xl md:text-3xl font-bold tracking-tight text-foreground leading-tight pb-1">Add Moderator</h1>
+            <p className="text-muted-foreground mt-1 text-xs sm:text-sm text-left">Register a new moderator in the system</p>
           </div>
           <Link
             href="/admin/moderators"
-            className="inline-flex items-center px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white text-sm border border-white/20 hover:border-white/30 rounded-lg transition-colors"
+            className="inline-flex items-center px-3.5 py-1.5 bg-secondary/80 hover:bg-secondary text-secondary-foreground border border-border/50 text-xs font-medium rounded-lg transition-colors shadow-sm cursor-pointer"
           >
-            <span className="mr-1.5 text-sm">←</span>
+            <span className="mr-1.5 text-xs">←</span>
             Back
           </Link>
         </div>
       </div>
 
       {/* Main Content - Enhanced spacing and premium styling */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div className="w-full">
         <div className="bg-gradient-to-br from-[#0E0F12] to-[#1A1B23] rounded-2xl shadow-xl border border-white/10 p-4 sm:p-10">
           <form onSubmit={handleSubmit} className="space-y-4">
             {/* Profile Photo Section - Modal Position Picker */}

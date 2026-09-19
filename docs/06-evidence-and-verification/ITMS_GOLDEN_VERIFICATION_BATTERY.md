@@ -232,7 +232,7 @@ This document defines the canonical test battery (groups `G01` through `G29`) pr
 * **Data Verification:** `occupied_seats <= capacity` holds continuously.
 * **Runtime Topology:** PostgreSQL RPC with row-level locks.
 * **Evidence Level:** RPC Analysis & DB Proof.
-* **Status:** **PASS** (`docs/06-evidence-and-verification/CAPACITY_CONCURRENCY_EVIDENCE.md`).
+* **Status:** **PASS** (`docs/06-evidence-and-verification/ITMS_CONCURRENCY_EVIDENCE.md`).
 
 ### Group 21: SECURITY DEFINER Hardening (`G21_SECURITY_DEFINER`)
 * **Test ID:** `TEST-G21-01`

@@ -157,7 +157,7 @@ export const GET = withSecurity(
         // Get the operation log
         const { data: log, error } = await supabase
             .from('reassignment_logs')
-            .select('*')
+            .select('operation_id, type, status, actor_id, actor_label, summary, changes, logged_at, rollback_of')
             .eq('operation_id', operationId)
             .single();
 
@@ -244,7 +244,7 @@ export const POST = withSecurity(
         // Get the original operation
         const { data: originalLog, error: fetchError } = await supabase
             .from('reassignment_logs')
-            .select('*')
+            .select('operation_id, type, status, actor_id, actor_label, summary, changes, logged_at, rollback_of')
             .eq('operation_id', operationId)
             .single();
 

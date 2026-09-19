@@ -59,14 +59,22 @@ export async function POST(request: Request) {
       );
     }
 
-    // SECURITY: Verify driver profile exists in Supabase (authoritative source).
+    // SECURITY: Verify driver profile and get flag details in parallel
     const supabase = getSupabaseServer();
-    const { data: driverProfile } = await supabase
-      .from('driver_profiles')
-      .select('uid, full_name')
-      .eq('uid', driverUid)
-      .maybeSingle();
+    const [driverProfileRes, flagRes] = await Promise.all([
+      supabase
+        .from('driver_profiles')
+        .select('uid, full_name')
+        .eq('uid', driverUid)
+        .maybeSingle(),
+      supabase
+        .from('waiting_flags')
+        .select('id, bus_id, status, student_uid')
+        .eq('id', flagId)
+        .single()
+    ]);
 
+    const driverProfile = driverProfileRes.data;
     if (!driverProfile) {
       return NextResponse.json(
         { error: 'User is not authorized as a driver' },
@@ -74,14 +82,8 @@ export async function POST(request: Request) {
       );
     }
 
-    // Get flag details
-    const { data: flag, error: fetchError } = await supabase
-      .from('waiting_flags')
-      .select('*')
-      .eq('id', flagId)
-      .single();
-
-    if (fetchError || !flag) {
+    const flag = flagRes.data;
+    if (flagRes.error || !flag) {
       return NextResponse.json(
         { error: 'Waiting flag not found' },
         { status: 404 }
@@ -163,7 +165,7 @@ export async function POST(request: Request) {
       .update(updateData)
       .eq('id', flagId)
       .in('status', allowedPriorStatuses)
-      .select();
+      .select('id, status');
 
     if (updateError) {
       console.error('❌ Error updating flag:', updateError);

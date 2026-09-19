@@ -1,11 +1,11 @@
 "use client";
 
 import ErrorBoundary from "@/components/ErrorBoundary";
-import { MapContainerSkeleton, PremiumPageLoader } from "@/components/LoadingSpinner";
-import { usePageShellLoader } from "@/hooks/usePageShellLoader";
+import { MapContainerSkeleton } from "@/components/LoadingSpinner";
 import LocationPermissionGate from "@/components/LocationPermissionGate";
 import TransportEntitlementGuard from "@/components/transport/TransportEntitlementGuard";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Card,CardContent,CardHeader,CardTitle } from "@/components/ui/card";
 import { useAuth } from "@/contexts/auth-context";
 import { useToast } from "@/contexts/toast-context";
@@ -24,6 +24,7 @@ import {
 	Clock,
 	Flag,
 	Navigation,
+	QrCode,
 	X,
 	XCircle
 } from "lucide-react";
@@ -55,8 +56,6 @@ function TrackBusLive() {
   const { currentUser, userData, loading } = useAuth();
   const router = useRouter();
 
-  // Prevent screen auto-off while tracking bus map
-  useScreenWakeLock(true);
   const { addToast } = useToast();
 
   const [studentData, setStudentData] = useState<any>(null);
@@ -77,6 +76,9 @@ function TrackBusLive() {
   const [showManualLocation, setShowManualLocation] = useState(false);
   const [isFullScreenMap, setIsFullScreenMap] = useState(false);
   const [showQrCode, setShowQrCode] = useState(false); // Show student's QR code
+
+  // Keep screen awake ONLY when actively tracking a live trip, waiting, or in full-screen map mode
+  useScreenWakeLock(tripActive || isWaiting || isFullScreenMap);
 
   // New state for the 10s countdown
   const [pendingRaise, setPendingRaise] = useState(false);
@@ -597,7 +599,7 @@ function TrackBusLive() {
 
   // Calculate distance and ETA between bus and student
   useEffect(() => {
-    if (!busLocation || !studentLocation) {
+    if (!tripActive || !busLocation || !studentLocation) {
       setDistanceToBus(null);
       setEta(null);
       return;
@@ -693,44 +695,6 @@ function TrackBusLive() {
   }, [currentUser?.uid, targetBusId, wsClientReady, addToast]);
 
 
-  // Screen Wake Lock API
-  useEffect(() => {
-    let wakeLock: any = null;
-
-    const requestWakeLock = async () => {
-      try {
-        if ('wakeLock' in navigator) {
-          wakeLock = await (navigator as any).wakeLock.request('screen');
-          console.log('💡 Screen Wake Lock active');
-        }
-      } catch (err: any) {
-        if (err.name !== 'NotAllowedError') { // Ignore NotAllowedError from background tabs
-          console.error(`❌ Wake Lock error: ${err.name}, ${err.message}`);
-        }
-      }
-    };
-
-    // Request wake lock when trip is active or tracking or map is full screen
-    if (tripActive || isWaiting || busLocation || isFullScreenMap) {
-      requestWakeLock();
-    }
-
-    const handleVisibilityChange = async () => {
-      if (document.visibilityState === 'visible' && (tripActive || isWaiting || busLocation || isFullScreenMap)) {
-        await requestWakeLock();
-      }
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      if (wakeLock) {
-        wakeLock.release().catch(() => { });
-        wakeLock = null;
-      }
-    };
-  }, [tripActive, isWaiting, busLocation, isFullScreenMap]);
 
   // Raise waiting flag
   const handleRaiseWaitingFlag = async () => {
@@ -961,13 +925,8 @@ function TrackBusLive() {
 
 
   const isInitialLoading = loading || (dataLoading && (!busData || !routeData));
-  const { showLoader } = usePageShellLoader(isInitialLoading, 3500);
 
-  if (showLoader) {
-    return <PremiumPageLoader message="Loading Bus Tracker" subMessage="Preparing live transit interface..." />;
-  }
-
-  if (dataLoading && (!busData || !routeData)) {
+  if (isInitialLoading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-purple-50/20 dark:from-gray-950 dark:via-blue-950/20 dark:to-purple-950/10">
         <div className="container mx-auto px-4 pb-4 pt-20 md:px-6 md:pb-6 md:pt-24 space-y-6">
@@ -1316,7 +1275,7 @@ function TrackBusLive() {
                   {/* Header with university branding */}
                   <div className="relative px-5 py-4 bg-gradient-to-r from-[#1a1b2e] to-[#0f1019] border-b border-white/5">
                     <div className="flex items-center gap-3">
-                      <Image src="/adtu-new-logo.svg" alt="AdtU" width={112} height={28} className="h-7 w-auto" style={{ width: 'auto', height: 'auto' }} />
+                      <Image src="/adtu-new-logo.svg" alt="AdtU" width={112} height={28} priority loading="eager" className="h-7 w-auto" style={{ width: 'auto', height: 'auto' }} />
                       <div>
                         <span className="text-xs font-bold text-white/80 block">Assam down town University</span>
                         <span className="text-[10px] font-medium text-white/40">Digital Bus Pass</span>

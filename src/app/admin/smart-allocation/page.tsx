@@ -32,7 +32,6 @@ import { toast } from "react-hot-toast";
 
 // Premium UI Components
 import { ReassignmentHistoryModal } from "@/components/assignment/ReassignmentHistoryModal";
-import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import ReassignmentPanel from "@/components/smart-allocation/ReassignmentPanel";
 import ReassignmentSnackbar, {
   type RevertBufferData,
@@ -682,19 +681,24 @@ export default function SmartAllocationPage() {
     URL.revokeObjectURL(url);
   };
 
-  if (loading) {
-    return <PremiumPageLoader fullScreen message="Student Reassignment" subMessage="Loading allocation system..." />;
+  if (authLoading && !currentUser) {
+    return (
+      <div className="itms-admin-container space-y-6 animate-pulse">
+        <div className="h-10 w-64 bg-slate-200 dark:bg-zinc-800 rounded-md" />
+        <div className="h-64 bg-slate-100 dark:bg-zinc-900 rounded-xl border border-slate-200 dark:border-zinc-800" />
+      </div>
+    );
   }
 
   return (
-    <div className="mt-20 sm:mt-10 space-y-6 overflow-x-hidden max-w-full px-2 sm:px-0">
+    <div className="itms-admin-container space-y-6">
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4">
+      <div className="itms-page-header-container flex flex-col md:flex-row md:justify-between md:items-center gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-foreground">
+          <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-foreground leading-tight pb-1">
             Student Reassignment
           </h1>
-          <p className="text-muted-foreground mt-1">
+          <p className="text-muted-foreground mt-1 text-xs sm:text-sm">
             Smart stop allocation and bus management system
           </p>
         </div>
@@ -904,7 +908,12 @@ export default function SmartAllocationPage() {
               <CardContent className="p-0 flex-1">
                 <ScrollArea className="h-full max-h-[260px]">
                   <div className="p-3 space-y-2 pt-0">
-                    {allBusesByLoad.map((bus: BusData, index: number) => {
+                    {loading && allBusesByLoad.length === 0 ? (
+                      Array.from({ length: 4 }).map((_, i) => (
+                        <div key={i} className="h-16 rounded-lg bg-zinc-100 dark:bg-zinc-800/50 animate-pulse border border-zinc-200/50 dark:border-zinc-700/50" />
+                      ))
+                    ) : (
+                      allBusesByLoad.map((bus: BusData, index: number) => {
                       // Use shift-specific load count based on selected tab
                       const shiftLoad = shiftFilter === "morning"
                         ? (bus.load?.morningCount || 0)
@@ -1026,7 +1035,7 @@ export default function SmartAllocationPage() {
                           )}
                         </motion.div>
                       );
-                    })}
+                    }))}
 
                     {allBusesByLoad.length === 0 && (
                       <motion.div

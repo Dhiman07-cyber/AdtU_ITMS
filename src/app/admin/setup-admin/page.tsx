@@ -52,8 +52,9 @@ export default function SetupAdminPage() {
   };
 
   return (
-    <div className="mt-12 container mx-auto p-6 max-w-2xl">
-      <Card>
+    <div className="itms-admin-container space-y-6">
+      <div className="max-w-2xl mx-auto">
+        <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <UserPlus className="h-6 w-6" />
@@ -161,6 +162,7 @@ export default function SetupAdminPage() {
           </div>
         </CardContent>
       </Card>
+      </div>
     </div>
   );
 }

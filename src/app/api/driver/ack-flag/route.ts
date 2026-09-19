@@ -27,7 +27,7 @@ export const POST = withSecurity(
 
     // 1. Fetch the flag first — we need its bus_id to scope the trip check.
     const { data: flagData, error: flagError } = await supabase
-      .from('waiting_flags').select('*').eq('id', flagId).single();
+      .from('waiting_flags').select('id, bus_id, status, student_uid').eq('id', flagId).single();
 
     if (flagError || !flagData) {
       return NextResponse.json(
@@ -75,7 +75,7 @@ export const POST = withSecurity(
       })
       .eq('id', flagId)
       .in('status', ['raised', 'waiting'])
-      .select();
+      .select('id');
 
     if (updateError) {
       console.error('Error acknowledging flag:', updateError);

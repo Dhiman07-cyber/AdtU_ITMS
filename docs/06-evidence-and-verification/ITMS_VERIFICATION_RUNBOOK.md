@@ -50,15 +50,15 @@ npm run lint
 
 ### 2.3 Automated Test Suite (Vitest)
 ```bash
-npm test -- --run
+npm run test:run
 ```
-* **Expected Output:** 47 test files passed, 290 tests passed, 0 failures.
+* **Expected Output:** 48 test files passed, 314 tests passed, 0 failures.
 
 ### 2.4 Production Next.js Build
 ```bash
 npm run build
 ```
-* **Expected Output:** Code 0, optimized build with ~221 static/dynamic pages compiled.
+* **Expected Output:** Code 0, optimized build with 224 static/dynamic routes compiled via Next.js 16.3.0 Turbopack.
 
 ---
 

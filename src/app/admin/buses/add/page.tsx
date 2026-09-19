@@ -1,6 +1,5 @@
 "use client";
 
-import { PremiumPageLoader } from '@/components/LoadingSpinner';
 import { OptimizedInput,OptimizedSelect } from '@/components/forms';
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -15,7 +14,7 @@ import { Driver,Route } from "@/lib/types";
 import { Info,RotateCcw } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect,useState } from "react";
+import { startTransition, useEffect, useState } from "react";
 
 type BusFormData = {
   busId: string;
@@ -76,16 +75,16 @@ export default function AddBusPage() {
           getAllBuses()
         ]);
 
-        setRoutes(routesData);
-        setDrivers(driversData);
-
-        // Auto-generate Bus ID Number
         const nextNum = busesData.length + 1;
         const nextIdDisplay = nextNum.toString();
 
-        setBusData(prev => ({ ...prev, busId: nextIdDisplay, status: "active" }));
-        setDefaultBusIdValue(nextIdDisplay);
-        setBuses(busesData);
+        startTransition(() => {
+          setRoutes(routesData);
+          setDrivers(driversData);
+          setBusData(prev => ({ ...prev, busId: nextIdDisplay, status: "active" }));
+          setDefaultBusIdValue(nextIdDisplay);
+          setBuses(busesData);
+        });
 
         const savedData = localStorage.getItem('busFormData');
         if (savedData) {
@@ -93,7 +92,9 @@ export default function AddBusPage() {
             const parsedData = JSON.parse(savedData);
             let loadedBusId = parsedData.busId || nextIdDisplay;
             if (loadedBusId.startsWith('bus_')) loadedBusId = loadedBusId.replace('bus_', '');
-            setBusData(prev => ({ ...prev, ...parsedData, busId: loadedBusId }));
+            startTransition(() => {
+              setBusData(prev => ({ ...prev, ...parsedData, busId: loadedBusId }));
+            });
           } catch (e) {
             console.error(e);
           }
@@ -256,31 +257,44 @@ export default function AddBusPage() {
     addToast('Restored', 'info');
   };
 
-  if (authLoading || dataLoading) {
-    return <PremiumPageLoader message="Loading Bus Registration..." subMessage="Setting up form..." />;
+  if (authLoading && !currentUser) {
+    return (
+      <div className="itms-admin-form-container space-y-6 animate-pulse">
+        <div className="itms-page-header-container">
+          <div className="flex justify-between items-center mb-6">
+            <div>
+              <div className="h-9 w-48 bg-muted/60 rounded-xl mb-2" />
+              <div className="h-4 w-72 bg-muted/40 rounded-lg" />
+            </div>
+            <div className="h-8 w-20 bg-muted/40 rounded-lg" />
+          </div>
+        </div>
+        <div className="h-96 rounded-2xl bg-muted/20 border border-white/5" />
+      </div>
+    );
   }
 
   if (!currentUser || !userData || !['admin', 'moderator'].includes(userData.role)) return null;
 
   return (
-    <div className="mt-10 py-4 bg-[#010717] min-h-screen text-white">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div className="itms-admin-form-container space-y-6">
+      <div className="itms-page-header-container">
         <div className="flex justify-between items-center mb-6">
           <div>
-            <h1 className="text-3xl font-bold text-foreground">Add Bus</h1>
-            <p className="text-muted-foreground mt-1">Register a new bus in the fleet</p>
+            <h1 className="text-xl sm:text-2xl md:text-3xl font-bold tracking-tight text-foreground leading-tight pb-1">Add Bus</h1>
+            <p className="text-muted-foreground mt-1 text-xs sm:text-sm">Register a new bus in the fleet</p>
           </div>
           <Link
             href="/admin/buses"
-            className="inline-flex items-center px-3.5 py-1.5 bg-white/10 hover:bg-white/20 text-white text-sm border border-white/20 hover:border-white/30 rounded-lg transition-all duration-200 hover:shadow-md"
+            className="inline-flex items-center px-3.5 py-1.5 bg-secondary/80 hover:bg-secondary text-secondary-foreground border border-border/50 text-xs font-medium rounded-lg transition-colors shadow-sm cursor-pointer"
           >
-            <span className="mr-1.5 text-sm">←</span>
+            <span className="mr-1.5 text-xs">←</span>
             Back
           </Link>
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div className="w-full">
         {/* Darker Background */}
         <div className="bg-gradient-to-br from-[#0E0F12] to-[#1A1B23] rounded-2xl shadow-2xl border border-white/10 p-4 sm:p-10 hover:border-white/20 transition-all duration-300">
           <form onSubmit={handleSubmit} className="space-y-8">

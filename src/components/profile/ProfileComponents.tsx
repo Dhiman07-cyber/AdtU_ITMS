@@ -1,6 +1,5 @@
 "use client";
 
-import { PremiumPageLoader } from '@/components/LoadingSpinner';
 import { Avatar,AvatarFallback,AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -262,7 +261,19 @@ interface ProfileShellProps {
 
 export function ProfileShell({ loading, error, notFound, children }: ProfileShellProps) {
   if (loading) {
-    return <PremiumPageLoader message="Loading Profile..." subMessage="Fetching profile details..." />;
+    return (
+      <div className="flex-1 bg-gray-50 dark:bg-gray-950 py-4 sm:py-8 px-2 sm:px-4 pb-24 animate-pulse">
+        <div className="max-w-7xl mx-auto space-y-6">
+          {/* Header Card Skeleton */}
+          <div className="h-64 sm:h-72 rounded-3xl bg-white/60 dark:bg-gray-900/60 border border-gray-200/50 dark:border-gray-800/50 p-6 flex flex-col justify-between" />
+          {/* Two column grid Skeleton */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="h-80 rounded-2xl bg-white/60 dark:bg-gray-900/60 border border-gray-200/50 dark:border-gray-800/50" />
+            <div className="h-80 rounded-2xl bg-white/60 dark:bg-gray-900/60 border border-gray-200/50 dark:border-gray-800/50" />
+          </div>
+        </div>
+      </div>
+    );
   }
 
   if (error) {

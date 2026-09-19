@@ -49,7 +49,6 @@ import { Select,SelectContent,SelectItem,SelectTrigger,SelectValue } from '@/com
 import { Area,AreaChart,CartesianGrid,ResponsiveContainer,Tooltip,XAxis,YAxis } from 'recharts';
 
 import Avatar from '@/components/Avatar';
-import { PremiumPageLoader } from '@/components/LoadingSpinner';
 import { PaymentDetailModal } from '@/components/payment';
 
 interface StudentData {
@@ -672,8 +671,13 @@ export default function AdminRenewalServicePage() {
     }
   };
 
-  if (loading) {
-    return <PremiumPageLoader message="Initializing Renewal Console..." subMessage="Securing your payment environment..." />;
+  if (loading && !currentUser) {
+    return (
+      <div className="itms-admin-container space-y-6 animate-pulse">
+        <div className="h-10 w-64 bg-slate-200 dark:bg-zinc-800 rounded-md" />
+        <div className="h-64 bg-slate-100 dark:bg-zinc-900 rounded-xl border border-slate-200 dark:border-zinc-800" />
+      </div>
+    );
   }
 
   // Dashboard computed values
@@ -696,37 +700,36 @@ export default function AdminRenewalServicePage() {
   const CHART_COLORS = ['#8b5cf6', '#f97316'];
 
   return (
-    <div className="min-h-screen bg-transparent p-4">
-      <div className="max-w-7xl mx-auto py-8">
-        {/* Header */}
-        <div className="mb-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <h1 className="text-3xl font-bold text-foreground">
-              Renewal Management
-            </h1>
-            <p className="text-muted-foreground mt-1">
-              Manage student renewal requests and view payment history
-            </p>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <Button
-              onClick={handleManualRefresh}
-              disabled={isManualRefreshing}
-              className="group h-8 px-4 bg-white hover:bg-gray-50 text-gray-600 hover:text-blue-600 border border-gray-200 hover:border-blue-200 shadow-sm hover:shadow-lg hover:shadow-blue-500/10 font-bold text-[10px] uppercase tracking-widest rounded-lg transition-all duration-300 active:scale-95 disabled:opacity-50"
-            >
-              <RefreshCw className={`mr-2 h-3.5 w-3.5 transition-transform duration-500 ${isManualRefreshing ? 'animate-spin' : 'group-hover:rotate-180'}`} />
-              Refresh
-            </Button>
-            <Button
-              onClick={() => setShowExportDialog(true)}
-              className="h-8 px-4 bg-white hover:bg-gray-50 text-gray-600 hover:text-blue-600 border border-gray-200 hover:border-blue-200 shadow-sm hover:shadow-lg hover:shadow-blue-500/10 font-bold text-[10px] uppercase tracking-widest rounded-lg transition-all duration-300 active:scale-95"
-            >
-              <Download className="mr-2 h-3.5 w-3.5" />
-              Export
-            </Button>
-          </div>
+    <div className="itms-admin-container space-y-6">
+      {/* Header */}
+      <div className="itms-page-header-container mb-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-foreground leading-tight pb-1">
+            Renewal Management
+          </h1>
+          <p className="text-muted-foreground mt-1 text-xs sm:text-sm">
+            Manage student renewal requests and view payment history
+          </p>
         </div>
+
+        <div className="flex items-center gap-2">
+          <Button
+            onClick={handleManualRefresh}
+            disabled={isManualRefreshing}
+            className="group h-8 px-3.5 bg-white/80 dark:bg-zinc-800/80 hover:bg-zinc-50 dark:hover:bg-zinc-700/80 text-zinc-700 dark:text-zinc-200 hover:text-blue-600 dark:hover:text-blue-400 border border-zinc-200 dark:border-zinc-700/60 shadow-xs text-xs font-semibold rounded-lg transition-all duration-200 active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 transition-transform duration-500 ${isManualRefreshing ? 'animate-spin' : 'group-hover:rotate-180'}`} />
+            <span>Refresh</span>
+          </Button>
+          <Button
+            onClick={() => setShowExportDialog(true)}
+            className="group h-8 px-3.5 bg-white/80 dark:bg-zinc-800/80 hover:bg-zinc-50 dark:hover:bg-zinc-700/80 text-zinc-700 dark:text-zinc-200 hover:text-blue-600 dark:hover:text-blue-400 border border-zinc-200 dark:border-zinc-700/60 shadow-xs text-xs font-semibold rounded-lg transition-all duration-200 active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer"
+          >
+            <Download className="h-3.5 w-3.5" />
+            <span>Export</span>
+          </Button>
+        </div>
+      </div>
 
         {/* Tabs - Custom Theme Tabs */}
         <div className="mb-4">
@@ -1073,6 +1076,7 @@ export default function AdminRenewalServicePage() {
                       {renewalRequests.map((request, index) => (
                         <div
                           key={request.id}
+                          style={{ contentVisibility: 'auto', containIntrinsicSize: '0 48px' }}
                           className="relative bg-white dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg p-2 hover:shadow-md hover:border-green-400 dark:hover:border-green-600 transition-all group grid grid-cols-[36px_1.4fr_1.5fr_1.5fr_0.8fr_0.5fr_85px_220px] gap-2 items-center"
                         >
                           {/* Student Number Badge */}
@@ -1294,6 +1298,7 @@ export default function AdminRenewalServicePage() {
                       {enrichedTransactions.map((transaction, index) => (
                         <div
                           key={index}
+                          style={{ contentVisibility: 'auto', containIntrinsicSize: '0 80px' }}
                           className="relative bg-white dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800 rounded-lg shadow-sm hover:shadow-lg hover:border-blue-400 dark:hover:border-blue-500 transition-all duration-300 overflow-hidden"
                         >
                           <div className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-blue-500 via-indigo-500 to-blue-500"></div>
@@ -1781,7 +1786,6 @@ export default function AdminRenewalServicePage() {
           </DialogContent>
         </Dialog>
       </div>
-    </div>
   );
 }
 

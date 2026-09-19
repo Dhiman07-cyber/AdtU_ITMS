@@ -1,6 +1,5 @@
 "use client";
 
-import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -188,7 +187,12 @@ export default function EditNotificationPage({ params }: { params: Promise<{ id:
   };
 
   if (loading) {
-    return <PremiumPageLoader message="Loading notification details..." subMessage="Preparing editing tools..." />;
+    return (
+      <div className="itms-admin-container space-y-6 animate-pulse mt-15">
+        <div className="h-10 w-48 bg-slate-200 dark:bg-zinc-800 rounded-md" />
+        <div className="h-64 bg-slate-100 dark:bg-zinc-900 rounded-xl border border-slate-200 dark:border-zinc-800" />
+      </div>
+    );
   }
 
   if (!notification) {
@@ -205,23 +209,21 @@ export default function EditNotificationPage({ params }: { params: Promise<{ id:
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 py-8">
+    <div className="itms-admin-container space-y-6">
       {/* Header */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex justify-between items-center mb-6">
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Edit Notification</h1>
-          <Link 
-            href="/admin/notifications" 
-            className="text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
-          >
-            ← Back to Notifications
-          </Link>
-        </div>
+      <div className="itms-page-header-container flex justify-between items-center mb-6">
+        <h1 className="text-2xl font-bold tracking-tight text-foreground leading-tight pb-1">Edit Notification</h1>
+        <Link 
+          href="/admin/notifications" 
+          className="inline-flex items-center px-3.5 py-1.5 bg-secondary/80 hover:bg-secondary text-secondary-foreground border border-border/50 text-sm rounded-lg transition-colors shadow-sm"
+        >
+          ← Back to Notifications
+        </Link>
       </div>
 
       {/* Main Content - Removed Card container */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+      <div className="w-full">
+        <div className="bg-card rounded-2xl border border-border/60 shadow-sm p-6">
           <div className="mb-6">
             <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Edit Notification</h2>
             <p className="text-gray-600 dark:text-gray-400">

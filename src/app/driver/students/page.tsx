@@ -1,7 +1,5 @@
 "use client";
 
-import { PremiumPageLoader } from "@/components/LoadingSpinner";
-import { usePageShellLoader } from "@/hooks/usePageShellLoader";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card,CardContent,CardDescription,CardHeader,CardTitle } from "@/components/ui/card";
@@ -26,7 +24,7 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { useEffect,useState } from "react";
+import { startTransition, useEffect, useState } from "react";
 
 // Custom Image component with fallback
 const StudentImage = ({
@@ -131,7 +129,6 @@ export default function DriverStudentsPage() {
   const [driverData, setDriverData] = useState<any>(null);
   const [students, setStudents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const { showLoader } = usePageShellLoader(loading, 3500);
   const [error, setError] = useState("");
   const [acknowledging, setAcknowledging] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
@@ -155,21 +152,21 @@ export default function DriverStudentsPage() {
         console.log('🔍 Driver data fetched:', driver);
 
         if (driver) {
-          setDriverData(driver);
-
           // Fetch students on assigned bus
+          let busStudents: any[] = [];
           if (driver.busId) {
             console.log('🚌 Fetching students for bus ID:', driver.busId);
-            const busStudents = await getStudentsByBusId(driver.busId);
-            console.log('👥 Fetched students with profile pictures:', busStudents.map(s => ({
-              name: s.fullName || s.name,
-              profilePicture: s.profilePicture,
-              profilePhotoUrl: s.profilePhotoUrl
-            })));
-            setStudents(busStudents);
+            busStudents = await getStudentsByBusId(driver.busId);
           } else {
             console.log('⚠️ No assigned bus ID for driver:', driver);
           }
+
+          startTransition(() => {
+            setDriverData(driver);
+            if (busStudents.length > 0) {
+              setStudents(busStudents);
+            }
+          });
         } else {
           console.log('❌ Driver data not found');
           setError("Driver data not found");
@@ -226,8 +223,19 @@ export default function DriverStudentsPage() {
     }
   };
 
-  if (showLoader) {
-    return <PremiumPageLoader message="Loading Students" subMessage="Fetching directory..." maxDurationMs={3500} />;
+  if (loading && !driverData) {
+    return (
+      <div className="flex-1 pb-24 md:pb-12 bg-gradient-to-br from-background via-blue-50/30 to-purple-50/30 dark:from-gray-950 dark:via-blue-950/20 dark:to-purple-950/20">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-20 pb-4 md:pt-24 md:pb-6 space-y-6">
+          <div className="h-24 rounded-2xl bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 animate-pulse p-6" />
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {[1, 2, 3, 4, 5, 6].map((i) => (
+              <Card key={i} className="h-44 animate-pulse bg-white dark:bg-gray-900" />
+            ))}
+          </div>
+        </div>
+      </div>
+    );
   }
 
   if (error) {
@@ -491,6 +499,7 @@ export default function DriverStudentsPage() {
                   {filteredStudents.map((student) => (
                     <div
                       key={student.uid}
+                      style={{ contentVisibility: 'auto', containIntrinsicSize: '0 220px' }}
                       className="group relative overflow-hidden rounded-2xl border border-border bg-card hover:shadow-2xl transition-all duration-300 cursor-pointer"
                       onClick={() => router.push(`/driver/students/${student.uid}`)}
                     >

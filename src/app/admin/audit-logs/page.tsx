@@ -1,7 +1,6 @@
 "use client";
 
 import type { AuditLogResponse as AuditLog } from '@/app/api/admin/audit-logs/route';
-import { PremiumPageLoader } from '@/components/LoadingSpinner';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card,CardContent } from '@/components/ui/card';
@@ -39,7 +38,7 @@ import {
 	User
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { useCallback,useEffect,useState } from 'react';
+import { useEffect,useState } from 'react';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -152,6 +151,7 @@ function AuditCard({
 
   return (
     <Card
+      style={{ contentVisibility: 'auto', containIntrinsicSize: '0 80px' }}
       className="border border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.04] transition-colors cursor-pointer group"
       onClick={() => onViewDetails(log)}
     >
@@ -392,85 +392,93 @@ export default function AdminAuditLogsPage() {
   }, [searchQuery]);
 
   // Fetch logs
-  const fetchLogs = useCallback(
-    async (pageNum: number, refresh = false) => {
-      if (!currentUser) return;
-      if (refresh) setIsRefreshing(true);
-      else setIsLoading(true);
+  const fetchLogs = async (pageNum: number, refresh = false) => {
+    if (!currentUser) return;
+    if (refresh) setIsRefreshing(true);
+    else setIsLoading(true);
 
-      try {
-        const params = new URLSearchParams();
-        params.set('page', String(pageNum));
-        if (activeCategory !== 'all') params.set('category', activeCategory);
-        if (severityFilter) params.set('severity', severityFilter);
-        if (roleFilter) params.set('performedByRole', roleFilter);
-        if (debouncedSearch) params.set('search', debouncedSearch);
-        if (startDate) params.set('startDate', startDate);
-        if (endDate) params.set('endDate', endDate);
+    try {
+      const params = new URLSearchParams();
+      params.set('page', String(pageNum));
+      if (activeCategory !== 'all') params.set('category', activeCategory);
+      if (severityFilter) params.set('severity', severityFilter);
+      if (roleFilter) params.set('performedByRole', roleFilter);
+      if (debouncedSearch) params.set('search', debouncedSearch);
+      if (startDate) params.set('startDate', startDate);
+      if (endDate) params.set('endDate', endDate);
 
-        const response = await authApiFetch(currentUser, `/api/admin/audit-logs?${params.toString()}`);
+      const response = await authApiFetch(currentUser, `/api/admin/audit-logs?${params.toString()}`);
 
-        if (response.ok) {
-          const data: AuditLogsResponse = await response.json();
-          setLogs(data.logs);
-          setHasMore(data.hasMore);
-        } else {
-          showToast('Failed to load audit logs', 'error');
-        }
-      } catch {
+      if (response.ok) {
+        const data: AuditLogsResponse = await response.json();
+        setLogs(data.logs);
+        setHasMore(data.hasMore);
+      } else {
         showToast('Failed to load audit logs', 'error');
-      } finally {
-        setIsLoading(false);
-        setIsRefreshing(false);
       }
-    },
-    [currentUser, activeCategory, severityFilter, roleFilter, debouncedSearch, startDate, endDate, showToast]
-  );
+    } catch {
+      showToast('Failed to load audit logs', 'error');
+    } finally {
+      setIsLoading(false);
+      setIsRefreshing(false);
+    }
+  };
 
   useEffect(() => {
     if (currentUser && userData?.role === 'admin') {
       fetchLogs(page);
     }
-  }, [currentUser, userData, page, fetchLogs]);
+  }, [currentUser, userData, page, activeCategory, severityFilter, roleFilter, debouncedSearch, startDate, endDate]);
 
   // Reset page on filter change
   useEffect(() => {
     setPage(1);
   }, [activeCategory, severityFilter, roleFilter, debouncedSearch, startDate, endDate]);
 
-  const handleViewDetails = useCallback((log: AuditLog) => {
+  const handleViewDetails = (log: AuditLog) => {
     setSelectedLog(log);
     setDetailsOpen(true);
-  }, []);
+  };
 
-  const handleRefresh = useCallback(() => {
+  const handleRefresh = () => {
     fetchLogs(page, true);
-  }, [fetchLogs, page]);
+  };
 
-  if (loading || !currentUser || userData?.role !== 'admin') {
-    return <PremiumPageLoader />;
+  if (loading && !currentUser) {
+    return (
+      <div className="itms-admin-container space-y-6 animate-pulse">
+        <div className="h-10 w-48 bg-slate-200 dark:bg-zinc-800 rounded-md" />
+        <div className="h-64 bg-slate-100 dark:bg-zinc-900 rounded-xl border border-slate-200 dark:border-zinc-800" />
+      </div>
+    );
+  }
+
+  if (!currentUser || userData?.role !== 'admin') {
+    return null;
   }
 
   return (
-    <div className="space-y-4 pt-10 md:pt-8">
+    <div className="itms-admin-container space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold text-zinc-100">Audit Logs</h1>
-          <p className="text-xs text-zinc-500 mt-0.5">
-            Business activity audit trail — admin only
-          </p>
+      <div className="itms-page-header-container">
+        <div className="flex items-center justify-between w-full">
+          <div>
+            <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-zinc-100 leading-tight pb-1">Audit Logs</h1>
+            <p className="text-xs text-zinc-500 mt-0.5">
+              Business activity audit trail — admin only
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleRefresh}
+            disabled={isRefreshing}
+            className="group h-8 px-3.5 bg-white/80 dark:bg-zinc-800/80 hover:bg-zinc-50 dark:hover:bg-zinc-700/80 text-zinc-700 dark:text-zinc-200 hover:text-blue-600 dark:hover:text-blue-400 border border-zinc-200 dark:border-zinc-700/60 shadow-xs text-xs font-semibold rounded-lg transition-all duration-200 active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer"
+          >
+            <RefreshCw className={cn('h-3.5 w-3.5 transition-transform duration-500', isRefreshing ? 'animate-spin' : 'group-hover:rotate-180')} />
+            <span>Refresh</span>
+          </Button>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleRefresh}
-          disabled={isRefreshing}
-          className="border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.05] text-zinc-400"
-        >
-          <RefreshCw className={cn('h-3.5 w-3.5 mr-1.5', isRefreshing && 'animate-spin')} />
-          Refresh
-        </Button>
       </div>
 
       {/* Filters */}

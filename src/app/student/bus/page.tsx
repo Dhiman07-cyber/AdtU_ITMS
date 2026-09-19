@@ -1,8 +1,6 @@
 "use client";
 
 import ErrorBoundary from "@/components/ErrorBoundary";
-import { PremiumPageLoader } from "@/components/LoadingSpinner";
-import { usePageShellLoader } from "@/hooks/usePageShellLoader";
 import LocationPermissionGate from "@/components/LocationPermissionGate";
 import LocationPermissionModal from "@/components/LocationPermissionModal";
 import TransportEntitlementGuard from "@/components/transport/TransportEntitlementGuard";
@@ -30,7 +28,7 @@ import {
 } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
-import { useEffect,useState } from "react";
+import { startTransition, useEffect, useState } from "react";
 
 const DynamicStudentMap = dynamic(() => import('@/components/DynamicStudentMap'), {
   ssr: false,
@@ -53,7 +51,6 @@ function StudentBusLive() {
   const [busData, setBusData] = useState<any>(null);
   const [routeData, setRouteData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const { showLoader } = usePageShellLoader(loading, 3500);
   const [waiting, setWaiting] = useState(false);
   const [waitingFlagId, setWaitingFlagId] = useState<string | null>(null);
   const [stops, setStops] = useState<any[]>([]);
@@ -90,20 +87,22 @@ function StudentBusLive() {
 
         if (dashRes.ok) {
           const result = await dashRes.json();
-          if (result.student) setStudentData(result.student);
-          if (result.bus) setBusData(result.bus);
-          if (result.route) {
-            setRouteData(result.route);
-            setStops(result.route.stops || []);
-            if (result.route.stops && result.route.stops.length > 0) {
-              setSelectedStop(result.route.stops[0].stop_name);
+          startTransition(() => {
+            if (result.student) setStudentData(result.student);
+            if (result.bus) setBusData(result.bus);
+            if (result.route) {
+              setRouteData(result.route);
+              setStops(result.route.stops || []);
+              if (result.route.stops && result.route.stops.length > 0) {
+                setSelectedStop(result.route.stops[0].stop_name);
+              }
             }
-          }
-          setTripActive(!!result.tripActive);
-          if (result.activeWaitingFlag) {
-            setWaiting(true);
-            setWaitingFlagId(result.activeWaitingFlag.id);
-          }
+            setTripActive(!!result.tripActive);
+            if (result.activeWaitingFlag) {
+              setWaiting(true);
+              setWaitingFlagId(result.activeWaitingFlag.id);
+            }
+          });
         }
       } catch (error) {
         console.error("Error fetching student bus page data:", error);
@@ -206,8 +205,43 @@ function StudentBusLive() {
     }
   };
 
-  if (showLoader) {
-    return <PremiumPageLoader message="Loading Bus Details..." subMessage="Fetching bus status and schedule..." maxDurationMs={3500} />;
+  if (loading && !studentData) {
+    return (
+      <ErrorBoundary>
+        <div className="space-y-6">
+          <div className="flex justify-between items-center">
+            <div>
+              <div className="h-9 w-44 bg-gray-200 dark:bg-gray-800 rounded-xl animate-pulse" />
+              <div className="h-4 w-64 bg-gray-100 dark:bg-gray-900 rounded mt-2 animate-pulse" />
+            </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <Card className="animate-pulse">
+              <CardHeader>
+                <div className="h-6 w-36 bg-gray-200 dark:bg-gray-800 rounded" />
+                <div className="h-4 w-48 bg-gray-100 dark:bg-gray-900 rounded mt-1" />
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="h-10 bg-gray-100 dark:bg-gray-800 rounded-lg" />
+                <div className="h-10 bg-gray-100 dark:bg-gray-800 rounded-lg" />
+                <div className="h-10 bg-gray-100 dark:bg-gray-800 rounded-lg" />
+              </CardContent>
+            </Card>
+            <Card className="animate-pulse">
+              <CardHeader>
+                <div className="h-6 w-36 bg-gray-200 dark:bg-gray-800 rounded" />
+                <div className="h-4 w-48 bg-gray-100 dark:bg-gray-900 rounded mt-1" />
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="h-10 bg-gray-100 dark:bg-gray-800 rounded-lg" />
+                <div className="h-10 bg-gray-100 dark:bg-gray-800 rounded-lg" />
+                <div className="h-10 bg-gray-100 dark:bg-gray-800 rounded-lg" />
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      </ErrorBoundary>
+    );
   }
 
   if (!loading && !studentData) {

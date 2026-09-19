@@ -92,6 +92,9 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
       return NextResponse.json({ error: result.error || 'Failed to delete bus' }, { status: 500 });
     }
 
+    const { invalidateBusCache } = await import('@/domains/fleet/services/fleet.service');
+    invalidateBusCache(id);
+
     return NextResponse.json({ success: true, message: 'Bus deleted successfully' });
   } catch (error: any) {
     console.error('Error deleting bus:', error);

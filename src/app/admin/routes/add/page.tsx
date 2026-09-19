@@ -1,6 +1,5 @@
 "use client";
 
-import { PremiumPageLoader } from '@/components/LoadingSpinner';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -13,7 +12,7 @@ import { getAllRoutes } from "@/lib/dataService";
 import { GripVertical,MapPin,Plus,RotateCcw,X } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect,useRef,useState } from "react";
+import { startTransition, useEffect, useRef, useState } from "react";
 
 type Stop = {
   name: string;
@@ -61,10 +60,11 @@ export default function AddRoutePage() {
       try {
         const routes = await getAllRoutes();
         const nextNum = routes.length + 1;
-        // Display only number
         const displayId = nextNum.toString();
-        setRouteData(prev => ({ ...prev, routeId: displayId, routeName: `Route-${displayId}` }));
-        setDefaultRouteId(displayId);
+        startTransition(() => {
+          setRouteData(prev => ({ ...prev, routeId: displayId, routeName: `Route-${displayId}` }));
+          setDefaultRouteId(displayId);
+        });
       } catch (e) {
         console.error(e);
       } finally {
@@ -235,31 +235,44 @@ export default function AddRoutePage() {
     }
   };
 
-  if (authLoading || dataLoading) {
-    return <PremiumPageLoader message="Loading Route Registration..." subMessage="Setting up form..." />;
+  if (authLoading && !currentUser) {
+    return (
+      <div className="itms-admin-form-container space-y-6 animate-pulse">
+        <div className="itms-page-header-container">
+          <div className="flex justify-between items-center mb-6">
+            <div>
+              <div className="h-9 w-48 bg-muted/60 rounded-xl mb-2" />
+              <div className="h-4 w-72 bg-muted/40 rounded-lg" />
+            </div>
+            <div className="h-8 w-20 bg-muted/40 rounded-lg" />
+          </div>
+        </div>
+        <div className="h-96 rounded-2xl bg-muted/20 border border-white/5" />
+      </div>
+    );
   }
 
   if (!currentUser || !userData || !['admin', 'moderator'].includes(userData.role)) return null;
 
   return (
-    <div className="mt-10 py-4 bg-[#010717] min-h-screen text-white">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div className="itms-admin-form-container space-y-6">
+      <div className="itms-page-header-container">
         <div className="flex justify-between items-center mb-6">
           <div>
-            <h1 className="text-3xl font-bold text-foreground">Add Route</h1>
-            <p className="text-muted-foreground mt-1">Create a new bus route with stops</p>
+            <h1 className="text-xl sm:text-2xl md:text-3xl font-bold tracking-tight text-foreground leading-tight pb-1">Add Route</h1>
+            <p className="text-muted-foreground mt-1 text-xs sm:text-sm">Create a new bus route with stops</p>
           </div>
           <Link
             href="/admin/routes"
-            className="inline-flex items-center px-3.5 py-1.5 bg-white/10 hover:bg-white/20 text-white text-sm border border-white/20 hover:border-white/30 rounded-lg transition-all duration-200 hover:shadow-md"
+            className="inline-flex items-center px-3.5 py-1.5 bg-secondary/80 hover:bg-secondary text-secondary-foreground border border-border/50 text-xs font-medium rounded-lg transition-colors shadow-sm cursor-pointer"
           >
-            <span className="mr-1.5 text-sm">←</span>
+            <span className="mr-1.5 text-xs">←</span>
             Back
           </Link>
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div className="w-full">
         <div className="bg-gradient-to-br from-[#0E0F12] to-[#1A1B23] rounded-2xl shadow-2xl border border-white/10 p-4 sm:p-10 hover:border-white/20 transition-all duration-300">
           <form onSubmit={handleSubmit} className="space-y-8">
 

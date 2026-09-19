@@ -24,7 +24,7 @@ import {
 } from 'lucide-react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
-import { useEffect,useRef,useState } from 'react';
+import { startTransition, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
 // Verified student data interface
@@ -415,7 +415,9 @@ export default function DriverScanPassPage() {
 
       // Add to scanned students list
       if (resultWithId.status === 'success' && resultWithId.studentData) {
-        setScannedStudents(prev => [resultWithId, ...prev]);
+        startTransition(() => {
+          setScannedStudents(prev => [resultWithId, ...prev]);
+        });
         setScannerModalOpen(false); // Close modal on success
         stopScanning(); // Stop camera
         toast.success('Student verified successfully!');
@@ -727,12 +729,12 @@ export default function DriverScanPassPage() {
               {/* Cards List */}
               <div className="w-full space-y-4">
                 {scannedStudents.map((scanResult, index) => (
-                  <div key={scanResult.scanId || index} className={`relative w-full ${isVertical ? 'max-w-[380px]' : 'max-w-[600px]'} mx-auto bg-[#0f1019] rounded-[28px] overflow-hidden shadow-2xl border border-white/10`}>
+                  <div key={scanResult.scanId || index} style={{ contentVisibility: 'auto', containIntrinsicSize: '0 250px' }} className={`relative w-full ${isVertical ? 'max-w-[380px]' : 'max-w-[600px]'} mx-auto bg-[#0f1019] rounded-[28px] overflow-hidden shadow-2xl border border-white/10`}>
 
                     {/* Header with Logo */}
                     <div className="w-full px-4 py-3 flex items-center justify-between border-b border-white/5 bg-gradient-to-r from-[#1a1b2e] to-[#0f1019] relative">
                       <div className="flex items-center gap-2.5">
-                        <Image src="/adtu-new-logo.svg" alt="AdtU" width={96} height={24} className="h-6 w-auto flex-shrink-0" style={{ width: 'auto', height: 'auto' }} />
+                        <Image src="/adtu-new-logo.svg" alt="AdtU" width={96} height={24} priority loading="eager" className="h-6 w-auto flex-shrink-0" style={{ width: 'auto', height: 'auto' }} />
                         <span className="text-[10px] font-black text-white/90 uppercase tracking-wider">Assam down town University</span>
                       </div>
                       <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" />

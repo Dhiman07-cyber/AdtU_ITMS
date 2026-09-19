@@ -66,11 +66,14 @@ export const GET = withSecurity(
 
         const activeTrip = activeTripRes.data;
         const isTripActive = !!activeTrip;
-        const busId = activeTrip?.bus_id || driverProfile?.bus_id || null;
-        const routeId = activeTrip?.route_id || driverProfile?.route_id || null;
+        // As per dynamic bus assignment model: no driver is permanently assigned to any bus.
+        // busId and routeId are ONLY bound when the driver has an active trip.
+        const busId = activeTrip?.bus_id || null;
+        const routeId = activeTrip?.route_id || null;
 
-        // 3. Fetch Bus details, Route details, Student counts, and Active Waiting Flags
-        const [busResult, routeResult, totalStudentsRes, morningStudentsRes, eveningStudentsRes, waitingFlagsRes] = await Promise.all([
+        // 3. Fetch Bus details, Route details, Student counts, Active Waiting Flags, and Fleet Summary
+        const now = new Date().toISOString();
+        const [busResult, routeResult, totalStudentsRes, morningStudentsRes, eveningStudentsRes, waitingFlagsRes, allBusesRes, allActiveTripsRes] = await Promise.all([
             busId
                 ? supabase.from('buses').select('id, bus_number, status, current_members, capacity, route_id, morning_load, evening_load').eq('id', busId).maybeSingle()
                 : Promise.resolve({ data: null, error: null }),
@@ -87,8 +90,11 @@ export const GET = withSecurity(
                 ? supabase.from('student_profiles').select('uid', { count: 'exact', head: true }).eq('bus_id', busId).eq('status', 'active').eq('shift', 'Evening')
                 : Promise.resolve({ count: 0, error: null }),
             busId
-                ? supabase.from('waiting_flags').select('*').eq('bus_id', busId).in('status', ['raised', 'waiting', 'acknowledged']).order('created_at', { ascending: false })
-                : Promise.resolve({ data: null, error: null })
+                ? supabase.from('waiting_flags').select('id, student_uid, student_name, student_profile_photo, bus_id, route_id, stop_name, stop_lat, stop_lng, status, created_at, message').eq('bus_id', busId).in('status', ['raised', 'waiting', 'acknowledged']).order('created_at', { ascending: false })
+                : Promise.resolve({ data: null, error: null }),
+            // Fleet overview for available buses
+            supabase.from('buses').select('id, bus_number, status').neq('status', 'inactive'),
+            supabase.from('active_trips').select('bus_id').eq('status', 'active').gt('expires_at', now),
         ]);
 
         const bus = busResult.data || null;
@@ -96,6 +102,10 @@ export const GET = withSecurity(
         const studentCount = totalStudentsRes.count ?? bus?.current_members ?? 0;
         const morningCount = morningStudentsRes.count ?? bus?.morning_load ?? 0;
         const eveningCount = eveningStudentsRes.count ?? bus?.evening_load ?? 0;
+
+        const occupiedBusIds = new Set((allActiveTripsRes.data || []).map((t: any) => t.bus_id));
+        const availableBusesCount = (allBusesRes.data || []).filter((b: any) => !occupiedBusIds.has(b.id)).length;
+        const totalBusesCount = (allBusesRes.data || []).length;
 
         const rawFlags = waitingFlagsRes.data || [];
         const waitingFlags = rawFlags.map((f: any) => ({
@@ -151,6 +161,10 @@ export const GET = withSecurity(
             route: formattedRoute,
             studentCount,
             tripActive: isTripActive,
+            fleetSummary: {
+                availableBusesCount,
+                totalBusesCount,
+            },
             waitingFlags,
             tripData: activeTrip ? {
                 tripId: activeTrip.trip_id,

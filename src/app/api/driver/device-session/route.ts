@@ -33,7 +33,7 @@ export const POST = withSecurity(
             case 'check': {
                 const { data, error } = await supabase
                     .from('device_sessions')
-                    .select('*')
+                    .select('device_id, last_active_at')
                     .eq('user_id', userId)
                     .eq('feature', feature)
                     .order('last_active_at', { ascending: false })

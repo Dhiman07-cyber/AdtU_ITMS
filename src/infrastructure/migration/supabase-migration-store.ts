@@ -43,7 +43,7 @@ export class SupabaseMigrationStore implements MigrationStore {
   async findById(id: string): Promise<MigrationRecord | null> {
     const { data, error } = await this.db
       .from('migration_log')
-      .select('*')
+      .select('id, version, domain_id, status, started_at, completed_at, error, metadata, created_at, updated_at')
       .eq('id', id)
       .maybeSingle();
 
@@ -58,7 +58,7 @@ export class SupabaseMigrationStore implements MigrationStore {
   async findAll(): Promise<MigrationRecord[]> {
     const { data, error } = await this.db
       .from('migration_log')
-      .select('*')
+      .select('id, version, domain_id, status, started_at, completed_at, error, metadata, created_at, updated_at')
       .order('created_at', { ascending: true });
 
     if (error) {

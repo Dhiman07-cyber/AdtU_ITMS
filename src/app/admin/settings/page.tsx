@@ -1,6 +1,5 @@
 "use client";
 
-import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import { Button } from '@/components/ui/button';
 import { Card,CardContent,CardDescription,CardHeader,CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -87,19 +86,23 @@ export default function AdminSettingsPage() {
     }
   };
 
-  if (loading || loadingFees) {
-    return <PremiumPageLoader message="Loading System Settings..." subMessage="Fetching configs..." />;
+  if (loading && !currentUser) {
+    return (
+      <div className="itms-admin-container space-y-6 animate-pulse">
+        <div className="h-10 w-64 bg-slate-200 dark:bg-zinc-800 rounded-md" />
+        <div className="h-64 bg-slate-100 dark:bg-zinc-900 rounded-xl border border-slate-200 dark:border-zinc-800" />
+      </div>
+    );
   }
 
   return (
-    <div className="mt-12 py-8">
-      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">System Settings</h1>
-          <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-            Manage global system configurations
-          </p>
-        </div>
+    <div className="itms-admin-container space-y-6">
+      <div className="itms-page-header-container mb-6">
+        <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-foreground leading-tight pb-1">System Settings</h1>
+        <p className="text-xs sm:text-sm text-muted-foreground mt-1">
+          Manage global system configurations
+        </p>
+      </div>
 
         <Card>
           <CardHeader>
@@ -180,7 +183,6 @@ export default function AdminSettingsPage() {
             <p>• Both Shifts: ₹{(busFees * 1.5).toLocaleString('en-IN')} (1.5x)</p>
           </div>
         </div>
-      </div>
     </div>
   );
 }

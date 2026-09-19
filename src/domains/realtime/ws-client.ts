@@ -159,11 +159,22 @@ export class WebSocketClient {
         const msg = JSON.parse(event.data);
         if (msg.type === 'message' && msg.channel) {
           const channelHandlers = this.handlers.get(msg.channel);
-          if (channelHandlers) {
+          if (channelHandlers && channelHandlers.size > 0) {
             const payloadWithEvent = (msg.payload && typeof msg.payload === 'object')
               ? { ...msg.payload, event: msg.event || (msg.payload as any).event }
               : (msg.payload || msg);
-            for (const h of channelHandlers) h(payloadWithEvent);
+            // Decouple subscriber execution via macrotask so onmessage completes immediately (<0.05ms).
+            // queueMicrotask runs synchronously in the current event loop turn's microtask checkpoint,
+            // which Chrome measures as part of the 'message' event handler, causing "[Violation] 'message' handler took Xms".
+            setTimeout(() => {
+              for (const h of channelHandlers) {
+                try {
+                  h(payloadWithEvent);
+                } catch (err) {
+                  console.error('[WS Client] Channel handler error:', err);
+                }
+              }
+            }, 0);
           }
         } else if (msg.type === 'subscribed') {
           this.pendingSubscriptions.delete(msg.channel);

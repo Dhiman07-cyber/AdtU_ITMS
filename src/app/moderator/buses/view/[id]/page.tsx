@@ -1,6 +1,5 @@
-﻿"use client";
+"use client";
 
-import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import RouteJourney from "@/components/RouteJourney";
 import { Button } from "@/components/ui/button";
 import {
@@ -189,7 +188,32 @@ export default function ViewBusPage({ params }: { params: Promise<{ id: string }
   };
 
   if (loading) {
-    return <PremiumPageLoader message="Loading bus details..." subMessage="Fetching diagnostics..." />;
+    return (
+      <div className="mt-7 min-h-screen bg-transparent py-8 w-full overflow-x-hidden">
+        <div className="max-w-5xl mx-auto w-full max-w-[92vw] sm:max-w-5xl">
+          <div className="flex items-center justify-between mb-8 gap-2">
+            <div>
+              <h1 className="text-xl md:text-2xl font-bold text-white mb-1">Bus Details</h1>
+              <p className="text-gray-400 text-xs hidden md:block">Fetching bus diagnostics...</p>
+            </div>
+            <Link
+              href="/moderator/buses"
+              className="inline-flex items-center px-3 py-1.5 text-sm bg-white hover:bg-gray-100 text-black font-medium rounded-lg transition-all duration-200"
+            >
+              &lt;- Back
+            </Link>
+          </div>
+          <div className="bg-[#12131A] rounded-2xl border border-white/5 p-8 space-y-6 animate-pulse">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="h-32 bg-white/5 rounded-xl" />
+              <div className="h-32 bg-white/5 rounded-xl" />
+              <div className="h-32 bg-white/5 rounded-xl" />
+            </div>
+            <div className="h-64 bg-white/5 rounded-xl" />
+          </div>
+        </div>
+      </div>
+    );
   }
 
   // Helper to format ID (bus_1 -> Bus-1)

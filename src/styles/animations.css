@@ -999,11 +999,13 @@
 }
 
 /* ============================================================
-   DEVICE-SPECIFIC MOBILE HERO SECTION OVERRIDES
+   CONTINUOUS ADAPTIVE MOBILE HERO SECTION
+   Replaces brittle phone-model bands with continuous fluid scaling
+   while preserving golden baseline fidelity on all reference devices.
    ============================================================ */
 
-/* 1. iPhone SE (approx 375x667) */
-@media only screen and (max-width: 380px) and (max-height: 680px) {
+/* 1. Compact / Low-Height Viewports (width <= 380px OR height <= 680px, e.g. iPhone SE 375x667) */
+@media only screen and (max-width: 380px), only screen and (max-width: 767px) and (max-height: 680px) {
   .hero-section-container {
     padding-top: 0.75rem !important;
     padding-bottom: 0.25rem !important;
@@ -1074,27 +1076,12 @@
   }
 }
 
-/* 2. iPhone 14 Pro Max (approx 430x932) */
-@media only screen and (min-width: 415px) and (max-width: 440px) and (min-height: 920px) and (max-height: 945px) {
+/* 2. Fluid Tall Mobile Viewports (width: 381px–767px, height >= 800px)
+   Smoothly encompasses iPhone 12 Pro (390x844), Pixel 7 (412x915), iPhone 14 Pro Max (430x932)
+   and any intermediate/future phone dimensions without narrow range misses. */
+@media only screen and (min-width: 381px) and (max-width: 767px) and (min-height: 800px) {
   .hero-grid-container {
-    gap: 1.25rem !important;
-  }
-}
-
-/* 4. Pixel 7 / Samsung Galaxy S20 Ultra (approx 412x915) */
-@media only screen and (min-width: 400px) and (max-width: 415px) and (min-height: 900px) and (max-height: 920px) {
-  .hero-grid-container {
-    gap: 1.15rem !important;
-  }
-  .hero-text-column {
-    margin-top: -10px !important;
-  }
-}
-
-/* 5. iPhone 12 Pro (approx 390x844) */
-@media only screen and (min-width: 380px) and (max-width: 400px) and (min-height: 830px) and (max-height: 855px) {
-  .hero-grid-container {
-    gap: 1.15rem !important;
+    gap: clamp(1.15rem, 2.5vw, 1.25rem) !important;
   }
   .hero-text-column {
     margin-top: -10px !important;
@@ -1198,19 +1185,19 @@
 }
 
 /* ============================================================
-   APPLY FORM PAGE RECEIVED CARD MOBILE OVERRIDES
+   APPLY FORM PAGE RECEIVED CARD CONTINUOUS MOBILE OVERRIDES
    ============================================================ */
 
-/* 1. iPhone 12 Pro (390x844) & Pixel 7 / Samsung Galaxy S20 Ultra (412x915) */
-@media only screen and (min-width: 380px) and (max-width: 420px) and (min-height: 830px) and (max-height: 925px) {
+/* 1. Fluid Tall Mobile Viewports (height >= 800px) - iPhone 12/13/14/15/16 Pro, Pixel 7, Galaxy Ultra */
+@media only screen and (max-width: 767px) and (min-height: 800px) {
   .apply-received-container {
-    padding-top: 7.5rem !important;
-    padding-bottom: 4.5rem !important;
+    padding-top: clamp(6rem, 9vh, 7.5rem) !important;
+    padding-bottom: clamp(3.5rem, 5vh, 4.5rem) !important;
   }
 }
 
-/* 2. iPhone SE (375x667) - Sizing reductions */
-@media only screen and (max-width: 379px) and (max-height: 680px) {
+/* 2. Compact / Low-Height Viewports (width <= 380px OR height <= 680px) - iPhone SE & compact devices */
+@media only screen and (max-width: 380px), only screen and (max-width: 767px) and (max-height: 680px) {
   .apply-received-container {
     padding-top: 3.5rem !important;
     padding-bottom: 3.5rem !important;

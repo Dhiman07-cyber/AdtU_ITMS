@@ -163,7 +163,7 @@ This document establishes the permanent, non-negotiable architectural, security,
 ### `INV-PAY-002`: Provider Event Idempotency
 * **Statement:** Repeated processing of the same provider payment ID (webhook retries, client verify-payment collisions) produces zero duplicate business effects.
 * **Authoritative Boundary:** PostgreSQL `payments.payment_id` unique constraint + `paymentsSupabaseService.createPayment()` CAS logic.
-* **Verification Proof:** `src/lib/payment/__tests__/` and `docs/06-evidence-and-verification/PAYMENT_CONCURRENCY_EVIDENCE.md`.
+* **Verification Proof:** `src/lib/payment/__tests__/` and `docs/06-evidence-and-verification/ITMS_CONCURRENCY_EVIDENCE.md`.
 
 ### `INV-PAY-003`: Concurrent Distinct Payments for Same Renewal
 * **Statement:** Two distinct payment transactions executed concurrently for the same student academic session cannot allocate duplicate seats or double-renew validity.
@@ -187,7 +187,7 @@ This document establishes the permanent, non-negotiable architectural, security,
 ### `INV-CAP-001`: Occupied Seats Never Exceed Capacity
 * **Statement:** For every bus and shift, `occupied_seats <= capacity` at all times.
 * **Authoritative Boundary:** PostgreSQL CHECK constraints and transactional locking in `bus_increment_capacity` and `approve_renewal_with_seat`.
-* **Verification Proof:** `docs/06-evidence-and-verification/CAPACITY_CONCURRENCY_EVIDENCE.md`.
+* **Verification Proof:** `docs/06-evidence-and-verification/ITMS_CONCURRENCY_EVIDENCE.md`.
 
 ### `INV-CAP-002`: Authoritative Capacity RPC
 * **Statement:** Client and API route pre-checks are strictly advisory. The database RPC transaction (`bus_increment_capacity`) executes the authoritative seat check with row-level locks (`FOR UPDATE`).

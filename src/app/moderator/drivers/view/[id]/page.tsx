@@ -1,6 +1,5 @@
 "use client";
 
-import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import { Avatar,AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -164,7 +163,26 @@ export default function ViewDriverPage({ params }: { params: Promise<{ id: strin
   };
 
   if (loading) {
-    return <PremiumPageLoader message="Loading driver profile..." subMessage="Fetching details..." />;
+    return (
+      <div className="min-h-screen pb-12 mt-7 bg-gradient-to-br from-background via-background to-muted/20">
+        <div className="bg-card border-b border-border shadow-sm">
+          <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
+            <h1 className="text-lg md:text-xl font-black text-foreground tracking-tight">Driver Profile</h1>
+            <Link href="/moderator/drivers">
+              <Button variant="outline" className="h-7 px-2.5 py-1.5 rounded-lg text-xs shadow-sm">
+                &lt;- Back
+              </Button>
+            </Link>
+          </div>
+        </div>
+        <div className="max-w-7xl mx-auto px-4 py-8">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-pulse">
+            <div className="h-96 rounded-2xl bg-white/5" />
+            <div className="lg:col-span-2 h-96 rounded-2xl bg-white/5" />
+          </div>
+        </div>
+      </div>
+    );
   }
 
   if (!driver) {

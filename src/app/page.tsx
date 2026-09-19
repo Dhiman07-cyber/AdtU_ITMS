@@ -4,7 +4,7 @@ import LandingPage from '@/app/(landing)/page';
 import { PremiumPageLoader } from '@/components/LoadingSpinner';
 import { useAuth } from '@/contexts/auth-context';
 import { useRouter } from 'next/navigation';
-import { useEffect,useState } from 'react';
+import { useEffect, useState } from 'react';
 
 export default function Home() {
   const { currentUser, userData, loading, needsApplication } = useAuth();
@@ -13,7 +13,7 @@ export default function Home() {
   const [redirectFailed, setRedirectFailed] = useState(false);
 
   useEffect(() => {
-    // Don't do anything while still loading
+    // Don't do anything while still loading auth state
     if (loading) {
       return;
     }
@@ -38,15 +38,14 @@ export default function Home() {
       router.push('/apply/form');
     } else {
       // User is logged in but no userData and doesn't need application
-      // This could be a transient state - wait a bit, then show landing
+      // This could be a transient state - wait briefly, then fall back to landing
       console.log('⚠️ User logged in but no userData yet, waiting...');
 
-      // Set a timeout to prevent infinite waiting
       const timeout = setTimeout(() => {
         console.log('⚠️ Timeout waiting for userData, showing landing page');
         setRedirectFailed(true);
         setIsRedirecting(false);
-      }, 5000); // 5 second timeout
+      }, 5000);
 
       return () => clearTimeout(timeout);
     }
@@ -54,16 +53,22 @@ export default function Home() {
 
   // Show loading spinner only while checking auth
   if (loading) {
-    return <PremiumPageLoader message="Loading..." fullScreen />;
+    return <PremiumPageLoader message="Loading..." subMessage="Authenticating session..." fullScreen />;
   }
 
   // Show redirecting state only when we're actually redirecting
   if (isRedirecting && !redirectFailed) {
-    return <PremiumPageLoader message={needsApplication ? 'Redirecting to application...' : 'Redirecting...'} fullScreen />;
+    return (
+      <PremiumPageLoader
+        message={needsApplication ? 'Redirecting to application...' : 'Welcome back'}
+        subMessage={needsApplication ? 'Setting up your profile...' : `Redirecting to your ${userData?.role || ''} dashboard...`}
+        fullScreen
+      />
+    );
   }
 
   // Show landing page for:
-  // 1. Non-logged in users
+  // 1. Non-logged in users (guest / public)
   // 2. Users where redirect failed/timed out
   // 3. Any other fallback case
   return <LandingPage />;

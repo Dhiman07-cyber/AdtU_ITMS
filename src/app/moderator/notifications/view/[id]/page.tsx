@@ -1,6 +1,5 @@
 "use client";
 
-import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import { Button } from "@/components/ui/button";
 import { Card,CardContent,CardHeader,CardTitle } from "@/components/ui/card";
 import { ArrowLeft } from "lucide-react";
@@ -36,7 +35,25 @@ export default function ModeratorViewNotification() {
   }, [id]);
 
   if (loading) {
-    return <PremiumPageLoader message="Loading notification..." subMessage="Fetching content..." />;
+    return (
+      <div className="space-y-6 max-w-4xl mx-auto py-8">
+        <div className="flex items-center gap-4">
+          <Button variant="outline" size="icon" onClick={() => router.back()}>
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+          <h1 className="text-3xl font-bold">Notification Details</h1>
+        </div>
+        <Card className="animate-pulse">
+          <CardHeader>
+            <div className="h-6 bg-white/10 rounded w-1/3" />
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="h-4 bg-white/5 rounded w-1/4" />
+            <div className="h-24 bg-white/5 rounded w-full" />
+          </CardContent>
+        </Card>
+      </div>
+    );
   }
 
   if (!notification) {

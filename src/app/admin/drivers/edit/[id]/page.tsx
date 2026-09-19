@@ -1,6 +1,5 @@
 "use client";
 
-import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import ProfileImageAddModal from "@/components/ProfileImageAddModal";
 import EnhancedDatePicker from "@/components/enhanced-date-picker";
 import { Button } from "@/components/ui/button";
@@ -17,7 +16,7 @@ import { uploadImage } from '@/lib/upload';
 import { AlertTriangle,Camera,Info } from "lucide-react";
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { use,useEffect,useRef,useState } from 'react';
+import { startTransition, use, useEffect, useRef, useState } from 'react';
 
 // Define the form data type
 type DriverFormData = {
@@ -560,12 +559,43 @@ export default function EditDriverPage({ params }: { params: Promise<{ id: strin
   };
 
   if (loading) {
-    return <PremiumPageLoader message="Loading driver profile..." subMessage="Preparing editing tools..." />;
+    return (
+      <div className="itms-admin-container">
+        <div className="itms-page-header-container max-w-5xl mx-auto">
+          <div className="flex justify-between items-center mb-6">
+            <div>
+              <h1 className="text-2xl font-bold tracking-tight text-white mb-1 leading-tight pb-1">Edit Driver</h1>
+              <p className="text-gray-400 text-xs">Update driver information and route assignments</p>
+            </div>
+            <Link
+              href="/admin/drivers"
+              className="inline-flex items-center px-3 py-1.5 bg-secondary/80 hover:bg-secondary text-secondary-foreground border border-border/50 text-sm rounded-lg transition-colors shadow-sm"
+            >
+              Back
+            </Link>
+          </div>
+        </div>
+        <div className="max-w-5xl mx-auto overflow-hidden">
+          <div className="bg-gradient-to-br from-[#0E0F12] to-[#1A1B23] rounded-2xl shadow-xl border border-white/10 p-4 sm:p-10 space-y-6 animate-pulse">
+            <div className="flex justify-center mb-6">
+              <div className="h-24 w-24 rounded-full bg-white/5" />
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="h-10 bg-white/5 rounded-lg" />
+              <div className="h-10 bg-white/5 rounded-lg" />
+              <div className="h-10 bg-white/5 rounded-lg" />
+              <div className="h-10 bg-white/5 rounded-lg" />
+            </div>
+            <div className="h-32 bg-white/5 rounded-lg" />
+          </div>
+        </div>
+      </div>
+    );
   }
 
   if (!driver) {
     return (
-      <div className="mt-10 min-h-screen flex items-center justify-center bg-[#010717]">
+      <div className="itms-admin-container py-12 flex items-center justify-center">
         <div className="text-center">
           <h1 className="text-2xl font-bold text-white">Driver not found</h1>
           <Link href="/admin/drivers" className="text-blue-500 hover:text-blue-700 mt-4 inline-block">
@@ -577,17 +607,17 @@ export default function EditDriverPage({ params }: { params: Promise<{ id: strin
   }
 
   return (
-    <div className="mt-10 py-4 bg-[#010717] min-h-screen">
+    <div className="itms-admin-container">
       {/* Header */}
-      <div className="max-w-5xl mx-auto px-3 sm:px-6 lg:px-8">
+      <div className="itms-page-header-container max-w-5xl mx-auto">
         <div className="flex justify-between items-center mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-white mb-1">Edit Driver</h1>
+            <h1 className="text-2xl font-bold tracking-tight text-white mb-1 leading-tight pb-1">Edit Driver</h1>
             <p className="text-gray-400 text-xs">Update driver information and route assignments</p>
           </div>
           <Link
             href="/admin/drivers"
-            className="inline-flex items-center px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white text-sm border border-white/20 hover:border-white/30 rounded-lg transition-colors"
+            className="inline-flex items-center px-3 py-1.5 bg-secondary/80 hover:bg-secondary text-secondary-foreground border border-border/50 text-sm rounded-lg transition-colors shadow-sm"
           >
             Back
           </Link>

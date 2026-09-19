@@ -16,6 +16,7 @@ import { createContext,useContext,useEffect,useState } from 'react';
 import { FCMTokenManager } from '@/components/FCMTokenManager';
 import FloatingPermissionBanner from '@/components/FloatingPermissionBanner';
 import MapRuntimeBootstrap from '@/components/maps/MapRuntimeBootstrap';
+import ResponsiveLayoutRoot from '@/components/layout/ResponsiveLayoutRoot';
 
 interface SidebarContextType {
   collapsed: boolean;
@@ -120,7 +121,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           mobileOpen,
           setMobileOpen
         }}>
-          <div className="app-shell tabular-nums" suppressHydrationWarning>
+          <ResponsiveLayoutRoot>
+            <div className="app-shell tabular-nums" suppressHydrationWarning>
             {showGlobalNavbar && (
               <div id="app-navbar" suppressHydrationWarning>
                 <Navbar
@@ -143,7 +145,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                       : 'var(--sidebar-width-expanded) minmax(0, 1fr)',
                     gridTemplateRows: '1fr auto',
                     minHeight: 'calc(100dvh - 48px)', // Subtract navbar height
-                    transition: isFleetMapPage ? 'none' : 'grid-template-columns 300ms cubic-bezier(0.2, 0.8, 0.2, 1)'
                   }}
                 >
                   {/* Sidebar Column - Hidden on mobile (shown via drawer) */}
@@ -169,24 +170,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                     style={{
                       gridColumn: 2,
                       gridRow: 1,
-                      paddingTop: isFleetMapPage
-                        ? '48px'
-                        : (pathname === '/admin' || pathname === '/moderator')
-                        ? '0'
-                        : 'clamp(1rem, 3vw, 2rem)',
-                      paddingRight: (pathname === '/admin' || pathname === '/moderator' || isFleetMapPage)
-                        ? '0'
-                        : 'clamp(1rem, 3vw, 2rem)',
-                      paddingLeft: (pathname === '/admin' || pathname === '/moderator' || isFleetMapPage)
-                        ? '0'
-                        : 'clamp(1rem, 3vw, 2rem)',
-                      paddingBottom: (pathname === '/admin' || pathname === '/moderator' || isFleetMapPage)
-                        ? '0'
-                        : '2rem',
-                      overflow: isFleetMapPage ? 'hidden' : undefined,
-                      height: isFleetMapPage ? '100dvh' : undefined,
-                      maxHeight: isFleetMapPage ? '100dvh' : undefined,
-                      boxSizing: 'border-box'
+                      paddingTop: isFleetMapPage ? '48px' : '0',
+                      paddingRight: '0',
+                      paddingLeft: '0',
+                      paddingBottom: '0',
+                      boxSizing: 'border-box',
+                      minHeight: '100%'
                     }}
                   >
                     {children}
@@ -214,18 +203,21 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               </>
             )}
 
-            {/* Floating Permission Banner (straddles bottom nav on mobile) */}
-            <FloatingPermissionBanner />
+            {/* Floating Permission Banner (straddles bottom nav on mobile) - students/drivers only */}
+            {!authLoading && (userData?.role === 'student' || userData?.role === 'driver') && (
+              <FloatingPermissionBanner />
+            )}
 
             {/* PWA Install Prompt - Only shows on landing page */}
-            <PWAInstallPrompt />
+            {isLandingPage && <PWAInstallPrompt />}
 
-            <FCMTokenManager />
+            {/* FCM Token Manager - Students only */}
+            {userData?.role === 'student' && <FCMTokenManager />}
           </div>
+          </ResponsiveLayoutRoot>
         </SidebarContext.Provider>
       </TooltipProvider>
     </>
   );
 }
-
 

@@ -1,7 +1,6 @@
 "use client";
 
-import { PremiumPageLoader, CardLoader, MetricCardSkeleton } from "@/components/LoadingSpinner";
-import { usePageShellLoader } from "@/hooks/usePageShellLoader";
+import { CardLoader, MetricCardSkeleton } from "@/components/LoadingSpinner";
 import { Badge } from "@/components/ui/badge";
 import { Card,CardContent,CardDescription,CardHeader,CardTitle } from "@/components/ui/card";
 import { useAuth } from "@/contexts/auth-context";
@@ -41,7 +40,6 @@ export default function ModeratorDashboard() {
   const [driverStatuses, setDriverStatuses] = useState<DriverStatus[]>([]);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
-  const { showLoader } = usePageShellLoader(loading, 3500);
   const [error, setError] = useState<string | null>(null);
 
   // Redirect if user is not a moderator
@@ -60,7 +58,7 @@ export default function ModeratorDashboard() {
       try {
         const { data: activeTripsData, error: statusError } = await supabase
           .from('active_trips')
-          .select('*')
+          .select('driver_id, bus_id, last_heartbeat, start_time')
           .eq('status', 'active');
 
         if (statusError) {
@@ -88,15 +86,11 @@ export default function ModeratorDashboard() {
     fetchData();
   }, []);
 
-  if (showLoader) {
-    return <PremiumPageLoader message="Loading Moderator Dashboard..." subMessage="Preparing system controls..." maxDurationMs={3500} />;
-  }
-
   return (
-    <div className="mt-12 space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold dark:text-white">Moderator Dashboard</h1>
-        <p className="text-gray-500 dark:text-gray-400">
+    <div className="itms-admin-container space-y-6">
+      <div className="itms-page-header-container mb-6">
+        <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-foreground leading-tight pb-1">Moderator Dashboard</h1>
+        <p className="text-gray-500 dark:text-gray-400 text-xs sm:text-sm mt-1">
           Monitor all driver activities and system notifications
         </p>
       </div>

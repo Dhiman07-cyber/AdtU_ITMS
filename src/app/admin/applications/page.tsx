@@ -10,7 +10,7 @@ import { useRouter } from "next/navigation";
 import { useEffect,useMemo,useState } from "react";
 // Migrated: Server-side API → PostgreSQL (no Firestore client reads)
 import { StatusBadge } from "@/components/application/status-badge";
-import { PremiumPageLoader } from '@/components/LoadingSpinner';
+import { CardLoader } from '@/components/LoadingSpinner';
 import type { AlternativeBusData } from '@/components/smart-allocation/AlternativeBusPicker';
 import AlternativeBusPicker from '@/components/smart-allocation/AlternativeBusPicker';
 import { Dialog,DialogContent,DialogDescription,DialogFooter,DialogHeader,DialogTitle } from "@/components/ui/dialog";
@@ -859,43 +859,68 @@ export default function AdminApplicationsPage() {
     );
   }
   return (
-    <div className="mt-12 space-y-6">
+    <div className="itms-admin-container space-y-6">
       {/* Page Header */}
-      <div className="space-y-2 mb-8">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <h1 className="text-3xl font-bold tracking-tight text-white leading-none">Student Applications</h1>
-            <div className="hidden md:block">
+      <div className="itms-page-header-container space-y-2 mb-8">
+        <div className="flex items-center justify-between gap-2 w-full">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <h1 className="text-xl sm:text-2xl md:text-3xl font-bold tracking-tight text-white leading-tight pb-1 truncate">Student Applications</h1>
+            <div className="hidden md:block shrink-0">
               <Badge className="text-[10px] font-bold px-2 py-0.5 bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 uppercase tracking-tight rounded-md">
                 {activeSection === 'applications' ? 'Freshers' : activeSection === 'upcoming' ? 'Upcoming' : 'Renewals'}: {filteredData.length}
               </Badge>
             </div>
           </div>
-          <div className="flex items-center gap-2 shrink-0">
+          {/* Desktop action toolbar */}
+          <div className="hidden md:flex items-center gap-2 shrink-0">
             {activeSection === 'upcoming' && (
               <Button
                 size="sm"
-                className="group h-8 px-4 bg-indigo-600 hover:bg-indigo-500 text-white border border-indigo-700 shadow-sm font-bold text-[10px] uppercase tracking-widest rounded-lg transition-all duration-300 active:scale-95 cursor-pointer"
+                className="group h-8 px-3 bg-indigo-600 hover:bg-indigo-500 text-white border border-indigo-700 shadow-sm font-semibold text-xs rounded-lg transition-all duration-200 active:scale-95 cursor-pointer"
                 onClick={handleRunSessionActivation}
                 disabled={activating}
                 title="Activate all verified upcoming-session applications for the current session"
               >
                 {activating ? (
-                  <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
                 ) : (
-                  <Calendar className="mr-2 h-3.5 w-3.5" />
+                  <Calendar className="mr-1.5 h-3.5 w-3.5" />
                 )}
                 Run Session Activation
               </Button>
             )}
             <Button
               size="sm"
-              className="group h-8 px-3.5 bg-zinc-100 hover:bg-zinc-200/80 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-200 hover:text-blue-600 dark:hover:text-blue-400 border border-zinc-300/80 dark:border-zinc-700 shadow-sm hover:shadow-md hover:border-blue-300 dark:hover:border-blue-500/50 font-bold text-[10px] uppercase tracking-widest rounded-lg transition-all duration-300 active:scale-95 cursor-pointer"
+              className="group h-8 px-3.5 bg-white/80 dark:bg-zinc-800/80 hover:bg-zinc-50 dark:hover:bg-zinc-700/80 text-zinc-700 dark:text-zinc-200 hover:text-blue-600 dark:hover:text-blue-400 border border-zinc-200 dark:border-zinc-700/60 shadow-xs text-xs font-semibold rounded-lg transition-all duration-200 active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer"
               onClick={handleRefresh}
               disabled={isRefreshing}
             >
-              <RefreshCw className={cn(`mr-2 h-3.5 w-3.5 transition-transform duration-500`, isRefreshing ? "animate-spin" : "group-hover:rotate-180")} />
-              Refresh
+              <RefreshCw className={cn(`h-3.5 w-3.5 transition-transform duration-500`, isRefreshing ? "animate-spin" : "group-hover:rotate-180")} />
+              <span>Refresh</span>
+            </Button>
+          </div>
+
+          {/* Mobile Refresh Button - exact same line as Student Applications at rightmost end */}
+          <div className="flex md:hidden items-center gap-2 shrink-0">
+            {activeSection === 'upcoming' && (
+              <Button
+                size="sm"
+                className="h-8 px-2.5 bg-indigo-600 hover:bg-indigo-500 text-white border border-indigo-700 shadow-sm font-bold text-[10px] uppercase tracking-wider rounded-lg transition-all duration-300 active:scale-95 cursor-pointer flex items-center gap-1"
+                onClick={handleRunSessionActivation}
+                disabled={activating}
+              >
+                {activating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Calendar className="h-3.5 w-3.5" />}
+                <span>Activate</span>
+              </Button>
+            )}
+            <Button
+              size="sm"
+              onClick={handleRefresh}
+              disabled={isRefreshing}
+              className="h-8 px-3 bg-white dark:bg-zinc-800 hover:bg-gray-50 dark:hover:bg-zinc-700 text-gray-700 dark:text-zinc-200 hover:text-blue-600 dark:hover:text-blue-400 border border-gray-200 dark:border-zinc-700 shadow-sm rounded-lg text-xs font-semibold flex items-center gap-1.5 cursor-pointer active:scale-95 transition-all shrink-0"
+            >
+              <RefreshCw className={cn("h-3.5 w-3.5 transition-transform duration-500", isRefreshing ? "animate-spin text-blue-600" : "group-hover:rotate-180")} />
+              <span>Refresh</span>
             </Button>
           </div>
         </div>
@@ -1054,8 +1079,10 @@ export default function AdminApplicationsPage() {
 
       {/* Content Area */}
       {(loading || loadingRenewals || routesLoading || busesLoading) && pendingApplications.length === 0 ? (
-        <div className="flex justify-center items-center h-96">
-          <PremiumPageLoader message="Fetching data..." maxDurationMs={3500} />
+        <div className="space-y-4">
+          <CardLoader />
+          <CardLoader />
+          <CardLoader />
         </div>
       ) : (
         <>
@@ -1103,6 +1130,7 @@ export default function AdminApplicationsPage() {
                 return (
                   <Card
                     key={key}
+                    style={{ contentVisibility: 'auto', containIntrinsicSize: '0 220px' }}
                     className="group transition-all duration-300 border-white/[0.05] bg-[#12131A]/40 hover:bg-indigo-500/[0.03] hover:border-indigo-500/20 overflow-hidden relative"
                   >
                     <div className="absolute left-0 top-0 bottom-0 w-1 bg-indigo-500 transform scale-y-0 group-hover:scale-y-100 transition-transform duration-300 origin-top" />

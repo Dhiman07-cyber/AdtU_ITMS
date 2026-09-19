@@ -1,6 +1,5 @@
 "use client";
 
-import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import NotificationCardV2 from "@/components/NotificationCardV2";
 import { Button } from "@/components/ui/button";
 import { Card,CardContent } from "@/components/ui/card";
@@ -87,8 +86,13 @@ export default function StudentNotificationsPage() {
   };
 
 
-  if (!currentUser || loading) {
-    return <PremiumPageLoader message="Loading Notifications" subMessage="Preparing your notification center..." />;
+  if (!currentUser) {
+    return (
+      <div className="min-h-screen p-6 max-w-6xl mx-auto space-y-6 animate-pulse pt-20">
+        <div className="h-10 w-48 bg-slate-200 dark:bg-zinc-800 rounded-md" />
+        <div className="h-64 bg-slate-100 dark:bg-zinc-900 rounded-xl border border-slate-200 dark:border-zinc-800" />
+      </div>
+    );
   }
 
   return (
@@ -97,34 +101,34 @@ export default function StudentNotificationsPage() {
         {/* Compact Header with Gradient */}
         <div className="relative overflow-hidden rounded-xl md:rounded-2xl mb-4 md:mb-6 shadow-lg">
           <div className="absolute inset-0 bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 opacity-90"></div>
-          <div className="relative p-4 md:p-6">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <div className="p-2 md:p-2.5 rounded-xl bg-white/20 backdrop-blur-sm">
-                  <Bell className="h-5 w-5 md:h-6 md:w-6 text-white" />
+            <div className="itms-page-header-container">
+              <div className="itms-page-header">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="p-2 md:p-2.5 rounded-xl bg-white/20 backdrop-blur-sm flex-shrink-0">
+                    <Bell className="h-5 w-5 md:h-6 md:w-6 text-white" />
+                  </div>
+                  <div className="min-w-0">
+                    <h1 className="text-xl md:text-2xl font-bold text-white truncate">
+                      Notifications
+                    </h1>
+                    <p className="text-[11px] md:text-sm text-blue-100 mt-0.5 font-medium truncate">
+                      Stay updated with announcements and alerts
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <h1 className="text-xl md:text-2xl font-bold text-white">
-                    Notifications
-                  </h1>
-                  <p className="text-[11px] md:text-sm text-blue-100 mt-0.5 font-medium">
-                    Stay updated with announcements and alerts
-                  </p>
+                <div className="itms-page-header-actions">
+                  <Button
+                    size="sm"
+                    onClick={handleRefresh}
+                    disabled={isRefreshing}
+                    className="group h-8 px-3 md:px-4 bg-zinc-100 hover:bg-zinc-200/80 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-200 hover:text-blue-600 dark:hover:text-blue-400 border border-zinc-300/80 dark:border-zinc-700 shadow-sm hover:shadow-md hover:border-blue-300 dark:hover:border-blue-500/50 font-bold text-[9px] md:text-[10px] uppercase tracking-wider md:tracking-widest rounded-lg transition-all duration-300 active:scale-95 whitespace-nowrap cursor-pointer"
+                  >
+                    <RefreshCw className={`mr-1.5 md:mr-2 h-3 w-3 md:h-3.5 md:w-3.5 transition-transform duration-500 ${isRefreshing ? 'animate-spin' : 'group-hover:rotate-180'}`} />
+                    Refresh
+                  </Button>
                 </div>
-              </div>
-              <div className="flex items-start md:items-center gap-4">
-                <Button
-                  size="sm"
-                  onClick={handleRefresh}
-                  disabled={isRefreshing}
-                  className="group h-8 px-3 md:px-4 bg-zinc-100 hover:bg-zinc-200/80 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-200 hover:text-blue-600 dark:hover:text-blue-400 border border-zinc-300/80 dark:border-zinc-700 shadow-sm hover:shadow-md hover:border-blue-300 dark:hover:border-blue-500/50 font-bold text-[9px] md:text-[10px] uppercase tracking-wider md:tracking-widest rounded-lg transition-all duration-300 active:scale-95 whitespace-nowrap cursor-pointer"
-                >
-                  <RefreshCw className={`mr-1.5 md:mr-2 h-3 w-3 md:h-3.5 md:w-3.5 transition-transform duration-500 ${isRefreshing ? 'animate-spin' : 'group-hover:rotate-180'}`} />
-                  Refresh
-                </Button>
               </div>
             </div>
-          </div>
         </div>
 
         <Tabs defaultValue="all" value={activeTab} onValueChange={(value) => setActiveTab(value as TabType)} className="space-y-3 md:space-y-4">
@@ -208,7 +212,21 @@ export default function StudentNotificationsPage() {
           </TabsList>
 
           <TabsContent value={activeTab} className="space-y-2 md:space-y-3">
-            {filteredNotifications.length === 0 ? (
+            {loading ? (
+              <div className="space-y-3 md:space-y-4">
+                {[1, 2, 3].map((i) => (
+                  <Card key={i} className="animate-pulse border-gray-100 dark:border-gray-800 bg-white/80 dark:bg-gray-900/80 p-4">
+                    <div className="flex items-start gap-3">
+                      <div className="w-10 h-10 rounded-full bg-gray-200 dark:bg-gray-800 shrink-0" />
+                      <div className="space-y-2 flex-1">
+                        <div className="h-4 w-48 bg-gray-200 dark:bg-gray-800 rounded" />
+                        <div className="h-3 w-full bg-gray-100 dark:bg-gray-900 rounded" />
+                      </div>
+                    </div>
+                  </Card>
+                ))}
+              </div>
+            ) : filteredNotifications.length === 0 ? (
               <Card className="border-gray-100 dark:border-gray-800 shadow-sm bg-white/80 dark:bg-gray-900/80 backdrop-blur-xl">
                 <CardContent className="py-12 md:py-16 text-center">
                   <div className="inline-flex p-3 md:p-4 bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-800 dark:to-gray-700 rounded-2xl mb-3 md:mb-4">
@@ -227,12 +245,13 @@ export default function StudentNotificationsPage() {
             ) : (
               <div className="space-y-4 md:space-y-6">
                 {filteredNotifications.map((notification) => (
-                  <NotificationCardV2
-                    key={notification.id}
-                    notification={notification}
-                    onMarkAsRead={markAsRead}
-                    onRefresh={refresh}
-                  />
+                  <div key={notification.id} style={{ contentVisibility: 'auto', containIntrinsicSize: '0 80px' }}>
+                    <NotificationCardV2
+                      notification={notification}
+                      onMarkAsRead={markAsRead}
+                      onRefresh={refresh}
+                    />
+                  </div>
                 ))}
               </div>
             )}

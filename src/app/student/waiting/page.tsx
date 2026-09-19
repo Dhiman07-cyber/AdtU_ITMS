@@ -1,6 +1,5 @@
 "use client";
 
-import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card,CardContent,CardDescription,CardHeader,CardTitle } from "@/components/ui/card";
@@ -184,7 +183,24 @@ export default function StudentWaitingPage() {
   };
 
   if (loading) {
-    return <PremiumPageLoader message="Loading Waiting Status..." subMessage="Fetching flag information..." />;
+    return (
+      <div className="space-y-6">
+        <div>
+          <div className="h-8 w-44 bg-gray-200 dark:bg-gray-800 rounded-lg animate-pulse" />
+          <div className="h-4 w-72 bg-gray-100 dark:bg-gray-900 rounded mt-2 animate-pulse" />
+        </div>
+        <Card className="animate-pulse">
+          <CardHeader>
+            <div className="h-6 w-36 bg-gray-200 dark:bg-gray-800 rounded" />
+            <div className="h-4 w-48 bg-gray-100 dark:bg-gray-900 rounded mt-1" />
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="h-10 bg-gray-100 dark:bg-gray-800 rounded-lg" />
+            <div className="h-10 bg-gray-100 dark:bg-gray-800 rounded-lg" />
+          </CardContent>
+        </Card>
+      </div>
+    );
   }
 
   if (error) {

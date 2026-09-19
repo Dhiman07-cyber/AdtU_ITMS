@@ -1,7 +1,6 @@
 // @ts-nocheck
 "use client";
 
-import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card,CardContent,CardDescription,CardHeader,CardTitle } from "@/components/ui/card";
@@ -75,8 +74,13 @@ export default function ViewNotificationPage({ params }: { params: Promise<{ id:
     return format(dateObj, 'PPpp');
   };
 
-  if (loading) {
-    return <PremiumPageLoader message="Loading notification..." subMessage="Fetching content..." />;
+  if (loading && !currentUser) {
+    return (
+      <div className="itms-admin-container space-y-6 animate-pulse mt-15">
+        <div className="h-10 w-48 bg-slate-200 dark:bg-zinc-800 rounded-md" />
+        <div className="h-64 bg-slate-100 dark:bg-zinc-900 rounded-xl border border-slate-200 dark:border-zinc-800" />
+      </div>
+    );
   }
 
   if (!notification) {
@@ -93,23 +97,26 @@ export default function ViewNotificationPage({ params }: { params: Promise<{ id:
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+    <div className="itms-admin-container space-y-6">
+      <div className="itms-page-header-container flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold">View Notification</h1>
-          <p className="text-gray-500 dark:text-gray-400">
+          <h1 className="text-3xl font-bold tracking-tight leading-tight pb-1">View Notification</h1>
+          <p className="text-muted-foreground">
             Detailed view of notification
           </p>
         </div>
         <div className="flex space-x-2">
           <Button 
             variant="outline" 
+            className="bg-secondary/80 hover:bg-secondary text-secondary-foreground border border-border/50 shadow-sm transition-colors"
             onClick={() => router.push(`/admin/notifications/edit/${notification.id}`)}
           >
             Edit
           </Button>
           <Link href="/admin/notifications">
-            <Button>Back to Notifications</Button>
+            <Button className="bg-secondary/80 hover:bg-secondary text-secondary-foreground border border-border/50 shadow-sm transition-colors">
+              Back to Notifications
+            </Button>
           </Link>
         </div>
       </div>

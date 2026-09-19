@@ -29,7 +29,7 @@ import {
 	User
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect,useState } from "react";
+import { startTransition, useEffect, useState } from "react";
 
 export default function DriverProfilePage() {
   const { currentUser, userData } = useAuth();
@@ -57,11 +57,13 @@ export default function DriverProfilePage() {
         setLoading(true);
         const data = await getUserProfile(currentUser.uid, 'driver');
 
-        if (!data) {
-          setNotFound(true);
-        } else {
-          setProfile(data as DriverProfile);
-        }
+        startTransition(() => {
+          if (!data) {
+            setNotFound(true);
+          } else {
+            setProfile(data as DriverProfile);
+          }
+        });
       } catch (err) {
         console.error('Error fetching profile:', err);
         setError('Failed to load profile. Please try again.');

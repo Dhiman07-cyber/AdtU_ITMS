@@ -325,7 +325,7 @@ export async function GET(request: NextRequest) {
             // Read future/submitted applications from PG
             const { data: upcomingApps, error: pgErr } = await db
                 .from('applications')
-                .select('*')
+                .select('application_id, eligible_approval, eligible_reminder_sent_at, applicant_uid, target_session')
                 .eq('application_type', 'future')
                 .eq('state', 'submitted');
 

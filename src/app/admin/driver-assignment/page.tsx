@@ -1,53 +1,50 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback,useEffect,useMemo,useRef,useState } from "react";
-
-
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { trackEvent } from "@/components/Analytics";
 import Avatar from "@/components/Avatar";
-import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
-	TooltipProvider,
+    TooltipProvider,
 } from "@/components/ui/tooltip";
 import { useAuth } from "@/contexts/auth-context";
 import { cn } from "@/lib/utils";
 import { normalizeShift } from "@/lib/utils/shift-utils";
 import { motion } from "motion/react";
 import {
-	ArrowRightLeft,
-	Bus,
-	Clock,
-	History,
-	MapPin,
-	Search,
-	User,
-	UserCog,
-	Users
+    ArrowRightLeft,
+    Bus,
+    Clock,
+    History,
+    MapPin,
+    Search,
+    User,
+    UserCog,
+    Users
 } from "lucide-react";
 import { toast } from "react-hot-toast";
 
 // Assignment components and services
 import { AssignmentFinalizeCard } from "@/components/assignment/AssignmentFinalizeCard";
 import { DriverConfirmationModal } from "@/components/assignment/DriverConfirmationModal";
-import { DriverStagingAreaV2,type StagedDriverChange } from "@/components/assignment/DriverStagingAreaV2";
+import { DriverStagingAreaV2, type StagedDriverChange } from "@/components/assignment/DriverStagingAreaV2";
 import { ReassignmentHistoryModal } from "@/components/assignment/ReassignmentHistoryModal";
-import { ShiftSlotPrompt,type DriverSlotInfo,type ShiftSlotPayload } from "@/components/assignment/ShiftSlotPrompt";
+import { ShiftSlotPrompt, type DriverSlotInfo, type ShiftSlotPayload } from "@/components/assignment/ShiftSlotPrompt";
 import {
-	formatDriverCode,
-	getDriverStatus,
-	type StagedDriverAssignment,
+    formatDriverCode,
+    getDriverStatus,
+    type StagedDriverAssignment,
 } from "@/lib/services/assignment-service";
 import {
-	computeNetAssignments,
-	validateStagingPreCheck,
-	type ComputeNetAssignmentsResult,
-	type DbSnapshot,
-	type StagedOperation,
+    computeNetAssignments,
+    validateStagingPreCheck,
+    type ComputeNetAssignmentsResult,
+    type DbSnapshot,
+    type StagedOperation,
 } from "@/lib/services/net-assignment-service";
 
 // ============================================
@@ -570,7 +567,7 @@ export default function SmartDriverAssignmentPage() {
                 previousOperatorCode: change.oldDrivers[0]?.code || null,
                 affectOnPreviousOperator: change.action === "swap" ? "swapped"
                     : change.action === "split" ? "reserved"
-                    : change.oldDrivers.length > 0 ? "reserved" : "none",
+                        : change.oldDrivers.length > 0 ? "reserved" : "none",
                 swappedToBusId: change.action === "swap" ? (currentBus?.id || null) : null,
                 swappedToBusNumber: change.action === "swap" ? (currentBus?.busNumber || null) : null,
                 driverPreviousState: currentBus ? "assigned" : "reserved",
@@ -708,8 +705,13 @@ export default function SmartDriverAssignmentPage() {
     // RENDER: LOADING STATE
     // ============================================
 
-    if (loading || authLoading) {
-        return <PremiumPageLoader message="Loading driver assignment system..." subMessage="Configuring shift slots..." />;
+    if (authLoading && !currentUser) {
+        return (
+            <div className="itms-admin-container space-y-6 animate-pulse">
+                <div className="h-10 w-64 bg-slate-200 dark:bg-zinc-800 rounded-md" />
+                <div className="h-64 bg-slate-100 dark:bg-zinc-900 rounded-xl border border-slate-200 dark:border-zinc-800" />
+            </div>
+        );
     }
 
     // ============================================
@@ -734,25 +736,25 @@ export default function SmartDriverAssignmentPage() {
 
     return (
         <TooltipProvider>
-            <div className="mt-20 sm:mt-8 space-y-6 px-2 sm:px-4 ml-0">
+            <div className="itms-admin-container space-y-6">
                 {/* Header */}
-                <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4 flex-shrink-0">
+                <div className="itms-page-header-container flex flex-col md:flex-row md:justify-between md:items-center gap-4 flex-shrink-0">
                     <div>
-                        <h1 className="text-3xl font-bold text-foreground">
+                        <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-foreground leading-tight pb-1">
                             Smart Driver Assignment
                         </h1>
-                        <p className="text-muted-foreground mt-1">
+                        <p className="text-muted-foreground mt-1 text-xs sm:text-sm">
                             Shift-aware driver reassignment with staging workflow
                         </p>
                     </div>
                     <Button
                         variant="outline"
-                        size="default"
-                        className="h-9 text-sm bg-white dark:bg-zinc-800 border-zinc-300 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-700 shadow-sm"
+                        size="sm"
+                        className="group h-8 px-3.5 bg-white/80 dark:bg-zinc-800/80 hover:bg-zinc-50 dark:hover:bg-zinc-700/80 text-zinc-700 dark:text-zinc-200 hover:text-blue-600 dark:hover:text-blue-400 border border-zinc-200 dark:border-zinc-700/60 shadow-xs text-xs font-semibold rounded-lg transition-all duration-200 active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer"
                         onClick={() => setShowHistoryModal(true)}
                     >
-                        <History className="w-4 h-4 mr-2" />
-                        View History
+                        <History className="w-3.5 h-3.5 mr-1" />
+                        <span>View History</span>
                     </Button>
                 </div>
 
@@ -799,63 +801,68 @@ export default function SmartDriverAssignmentPage() {
 
                         <ScrollArea className="flex-1">
                             <div className="px-3 pb-3 space-y-2">
-                                {filteredDrivers.map(driver => {
-                                    const mergedBusInfo = getMergedBusForDriver(driver);
-                                    const isSelected = selectedDriverId === driver.id;
-                                    const driverCode = formatDriverCode(driver.driverId || driver.employeeId || driver.id);
+                                {loading && drivers.length === 0 ? (
+                                    Array.from({ length: 4 }).map((_, i) => (
+                                        <div key={i} className="h-20 rounded-xl bg-white/[0.03] animate-pulse border border-white/[0.05]" />
+                                    ))
+                                ) : (
+                                    filteredDrivers.map(driver => {
+                                        const mergedBusInfo = getMergedBusForDriver(driver);
+                                        const isSelected = selectedDriverId === driver.id;
+                                        const driverCode = formatDriverCode(driver.driverId || driver.employeeId || driver.id);
 
-                                    return (
-                                        <motion.div
-                                            key={driver.id}
-                                            onClick={() => handleDriverSelect(driver.id)}
-                                            className={cn(
-                                                "h-20 p-3 rounded-xl cursor-pointer transition-all duration-200 border",
-                                                isSelected ? "border-opacity-100 shadow-md" : "border-transparent hover:border-opacity-30"
-                                            )}
-                                            style={{
-                                                backgroundColor: isSelected ? `${tokens.primaryPurple}15` : '#131C2E',
-                                                borderColor: isSelected ? tokens.primaryPurple : tokens.borderDark,
-                                            }}
-                                            whileHover={{ scale: 1.01 }}
-                                            whileTap={{ scale: 0.99 }}
-                                        >
-                                            <div className="flex items-center justify-between h-full">
-                                                <div className="flex items-center gap-3">
-                                                    <Avatar src={driver.profilePhotoUrl} name={driver.fullName || driver.name} size="sm" />
-                                                    <div>
-                                                        <p className="font-medium text-sm" style={{ color: tokens.textPrimary }}>
-                                                            {driver.fullName || driver.name || "Unknown"}
-                                                        </p>
-                                                        <p className="text-xs" style={{ color: tokens.textMuted }}>{driverCode}</p>
+                                        return (
+                                            <motion.div
+                                                key={driver.id}
+                                                onClick={() => handleDriverSelect(driver.id)}
+                                                className={cn(
+                                                    "h-20 p-3 rounded-xl cursor-pointer transition-all duration-200 border",
+                                                    isSelected ? "border-opacity-100 shadow-md" : "border-transparent hover:border-opacity-30"
+                                                )}
+                                                style={{
+                                                    backgroundColor: isSelected ? `${tokens.primaryPurple}15` : '#131C2E',
+                                                    borderColor: isSelected ? tokens.primaryPurple : tokens.borderDark,
+                                                }}
+                                                whileHover={{ scale: 1.01 }}
+                                                whileTap={{ scale: 0.99 }}
+                                            >
+                                                <div className="flex items-center justify-between h-full">
+                                                    <div className="flex items-center gap-3">
+                                                        <Avatar src={driver.profilePhotoUrl} name={driver.fullName || driver.name} size="sm" />
+                                                        <div>
+                                                            <p className="font-medium text-sm" style={{ color: tokens.textPrimary }}>
+                                                                {driver.fullName || driver.name || "Unknown"}
+                                                            </p>
+                                                            <p className="text-xs" style={{ color: tokens.textMuted }}>{driverCode}</p>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex flex-col items-end gap-1">
+                                                        {mergedBusInfo.bus ? (
+                                                            <Badge className="text-[9px] px-1.5 py-0" style={{
+                                                                backgroundColor: mergedBusInfo.isStaged ? `${tokens.primaryOrange}20` : `${tokens.success}20`,
+                                                                color: mergedBusInfo.isStaged ? tokens.primaryOrange : tokens.success,
+                                                                border: `1px solid ${mergedBusInfo.isStaged ? tokens.primaryOrange : tokens.success}40`
+                                                            }}>
+                                                                <Bus className="w-2.5 h-2.5 mr-1" />
+                                                                {mergedBusInfo.stagedBusNumber || mergedBusInfo.bus.busNumber}
+                                                            </Badge>
+                                                        ) : (
+                                                            <Badge className="text-[9px] px-1.5 py-0" style={{
+                                                                backgroundColor: mergedBusInfo.isStaged ? `${tokens.primaryOrange}20` : `${tokens.reserved}20`,
+                                                                color: mergedBusInfo.isStaged ? tokens.primaryOrange : tokens.reserved,
+                                                                border: `1px solid ${mergedBusInfo.isStaged ? tokens.primaryOrange : tokens.reserved}40`
+                                                            }}>
+                                                                Reserved
+                                                            </Badge>
+                                                        )}
+                                                        {driver.shift && (
+                                                            <span className="text-[9px]" style={{ color: tokens.textMuted }}>{driver.shift}</span>
+                                                        )}
                                                     </div>
                                                 </div>
-                                                <div className="flex flex-col items-end gap-1">
-                                                    {mergedBusInfo.bus ? (
-                                                        <Badge className="text-[9px] px-1.5 py-0" style={{
-                                                            backgroundColor: mergedBusInfo.isStaged ? `${tokens.primaryOrange}20` : `${tokens.success}20`,
-                                                            color: mergedBusInfo.isStaged ? tokens.primaryOrange : tokens.success,
-                                                            border: `1px solid ${mergedBusInfo.isStaged ? tokens.primaryOrange : tokens.success}40`
-                                                        }}>
-                                                            <Bus className="w-2.5 h-2.5 mr-1" />
-                                                            {mergedBusInfo.stagedBusNumber || mergedBusInfo.bus.busNumber}
-                                                        </Badge>
-                                                    ) : (
-                                                        <Badge className="text-[9px] px-1.5 py-0" style={{
-                                                            backgroundColor: mergedBusInfo.isStaged ? `${tokens.primaryOrange}20` : `${tokens.reserved}20`,
-                                                            color: mergedBusInfo.isStaged ? tokens.primaryOrange : tokens.reserved,
-                                                            border: `1px solid ${mergedBusInfo.isStaged ? tokens.primaryOrange : tokens.reserved}40`
-                                                        }}>
-                                                            Reserved
-                                                        </Badge>
-                                                    )}
-                                                    {driver.shift && (
-                                                        <span className="text-[9px]" style={{ color: tokens.textMuted }}>{driver.shift}</span>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        </motion.div>
-                                    );
-                                })}
+                                            </motion.div>
+                                        );
+                                    }))}
                                 {filteredDrivers.length === 0 && (
                                     <div className="flex flex-col items-center justify-center py-12 text-center">
                                         <Users className="h-12 w-12 mb-3" style={{ color: tokens.textMuted }} />
@@ -927,126 +934,131 @@ export default function SmartDriverAssignmentPage() {
                                     <div>
                                         <p className="text-xs font-medium mb-2 px-1" style={{ color: tokens.textMuted }}>Available Buses</p>
                                         <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                                            {sortedBuses
-                                                .filter(bus => bus.id !== selectedDriverBus?.id)
-                                                .map(bus => {
-                                                    const hasActiveTrip = !!bus.activeTripId;
-                                                    const mergedDriverInfo = getMergedDriverForBus(bus);
-                                                    const route = getRouteForBus(bus);
-                                                    const displayedDriver = mergedDriverInfo.driver;
-                                                    const displayedDriverName = mergedDriverInfo.stagedDriverName || displayedDriver?.fullName || displayedDriver?.name;
-                                                    const busShift = normalizeShift(bus.shift);
+                                            {loading && buses.length === 0 ? (
+                                                Array.from({ length: 4 }).map((_, i) => (
+                                                    <div key={i} className="min-h-[120px] rounded-xl bg-white/[0.03] animate-pulse border border-white/[0.05]" />
+                                                ))
+                                            ) : (
+                                                sortedBuses
+                                                    .filter(bus => bus.id !== selectedDriverBus?.id)
+                                                    .map(bus => {
+                                                        const hasActiveTrip = !!bus.activeTripId;
+                                                        const mergedDriverInfo = getMergedDriverForBus(bus);
+                                                        const route = getRouteForBus(bus);
+                                                        const displayedDriver = mergedDriverInfo.driver;
+                                                        const displayedDriverName = mergedDriverInfo.stagedDriverName || displayedDriver?.fullName || displayedDriver?.name;
+                                                        const busShift = normalizeShift(bus.shift);
 
-                                                    return (
-                                                        <motion.div
-                                                            key={bus.id}
-                                                            whileHover={!hasActiveTrip ? { scale: 1.02, backgroundColor: '#1E293B' } : {}}
-                                                            whileTap={!hasActiveTrip ? { scale: 0.98 } : {}}
-                                                            onClick={() => !hasActiveTrip && handleBusSelect(bus)}
-                                                            className={cn(
-                                                                "min-h-[120px] p-4 rounded-xl border cursor-pointer transition-all duration-300 relative overflow-hidden group",
-                                                                hasActiveTrip && "opacity-50 cursor-not-allowed",
-                                                                mergedDriverInfo.isStaged && "ring-2 ring-orange-500/30"
-                                                            )}
-                                                            style={{
-                                                                backgroundColor: '#131C2E',
-                                                                borderColor: hasActiveTrip ? '#EF4444' : mergedDriverInfo.isStaged ? tokens.primaryOrange : tokens.borderDark,
-                                                            }}
-                                                        >
-                                                            {!hasActiveTrip && (
-                                                                <div className="absolute -inset-1 opacity-0 group-hover:opacity-10 transition-opacity duration-500 bg-gradient-to-r from-blue-500 via-indigo-500 to-cyan-500 blur-xl" />
-                                                            )}
+                                                        return (
+                                                            <motion.div
+                                                                key={bus.id}
+                                                                whileHover={!hasActiveTrip ? { scale: 1.02, backgroundColor: '#1E293B' } : {}}
+                                                                whileTap={!hasActiveTrip ? { scale: 0.98 } : {}}
+                                                                onClick={() => !hasActiveTrip && handleBusSelect(bus)}
+                                                                className={cn(
+                                                                    "min-h-[120px] p-4 rounded-xl border cursor-pointer transition-all duration-300 relative overflow-hidden group",
+                                                                    hasActiveTrip && "opacity-50 cursor-not-allowed",
+                                                                    mergedDriverInfo.isStaged && "ring-2 ring-orange-500/30"
+                                                                )}
+                                                                style={{
+                                                                    backgroundColor: '#131C2E',
+                                                                    borderColor: hasActiveTrip ? '#EF4444' : mergedDriverInfo.isStaged ? tokens.primaryOrange : tokens.borderDark,
+                                                                }}
+                                                            >
+                                                                {!hasActiveTrip && (
+                                                                    <div className="absolute -inset-1 opacity-0 group-hover:opacity-10 transition-opacity duration-500 bg-gradient-to-r from-blue-500 via-indigo-500 to-cyan-500 blur-xl" />
+                                                                )}
 
-                                                            <div className="flex items-start justify-between relative z-10">
-                                                                <div className="flex items-center gap-3">
-                                                                    <div className="w-10 h-10 rounded-xl flex items-center justify-center shadow-lg transition-transform duration-300 group-hover:scale-110"
-                                                                        style={{
-                                                                            background: hasActiveTrip ? 'linear-gradient(135deg, #EF4444, #991B1B)'
-                                                                                : displayedDriver
-                                                                                    ? mergedDriverInfo.isStaged
-                                                                                        ? 'linear-gradient(135deg, #F97316, #C2410C)'
-                                                                                        : 'linear-gradient(135deg, #F59E0B, #B45309)'
-                                                                                    : 'linear-gradient(135deg, #F97316, #EA580C)'
-                                                                        }}>
-                                                                        <Bus className="w-5 h-5 text-white" />
-                                                                    </div>
-                                                                    <div>
-                                                                        <p className="font-bold text-sm tracking-tight" style={{ color: tokens.textPrimary }}>{bus.busNumber}</p>
-                                                                        <div className="flex items-center gap-1">
-                                                                            <MapPin className="w-2.5 h-2.5" style={{ color: tokens.primaryOrange }} />
-                                                                            <p className="text-[10px] font-medium" style={{ color: tokens.textMuted }}>
-                                                                                {route?.routeName || bus.routeName || "No Route"}
-                                                                            </p>
+                                                                <div className="flex items-start justify-between relative z-10">
+                                                                    <div className="flex items-center gap-3">
+                                                                        <div className="w-10 h-10 rounded-xl flex items-center justify-center shadow-lg transition-transform duration-300 group-hover:scale-110"
+                                                                            style={{
+                                                                                background: hasActiveTrip ? 'linear-gradient(135deg, #EF4444, #991B1B)'
+                                                                                    : displayedDriver
+                                                                                        ? mergedDriverInfo.isStaged
+                                                                                            ? 'linear-gradient(135deg, #F97316, #C2410C)'
+                                                                                            : 'linear-gradient(135deg, #F59E0B, #B45309)'
+                                                                                        : 'linear-gradient(135deg, #F97316, #EA580C)'
+                                                                            }}>
+                                                                            <Bus className="w-5 h-5 text-white" />
+                                                                        </div>
+                                                                        <div>
+                                                                            <p className="font-bold text-sm tracking-tight" style={{ color: tokens.textPrimary }}>{bus.busNumber}</p>
+                                                                            <div className="flex items-center gap-1">
+                                                                                <MapPin className="w-2.5 h-2.5" style={{ color: tokens.primaryOrange }} />
+                                                                                <p className="text-[10px] font-medium" style={{ color: tokens.textMuted }}>
+                                                                                    {route?.routeName || bus.routeName || "No Route"}
+                                                                                </p>
+                                                                            </div>
                                                                         </div>
                                                                     </div>
-                                                                </div>
 
-                                                                <div className="flex flex-col items-end gap-1.5">
-                                                                    {hasActiveTrip ? (
-                                                                        <Badge className="bg-red-500 text-white text-[9px] h-5">IN TRIP</Badge>
-                                                                    ) : displayedDriver ? (
-                                                                        <Badge className="text-[9px] h-5 border-none" style={{
-                                                                            backgroundColor: mergedDriverInfo.isStaged ? `${tokens.primaryOrange}25` : `${tokens.occupied}25`,
-                                                                            color: mergedDriverInfo.isStaged ? tokens.primaryOrange : tokens.occupied,
-                                                                        }}>
-                                                                            {mergedDriverInfo.isStaged ? "STAGED" : "OCCUPIED"}
-                                                                        </Badge>
-                                                                    ) : (
-                                                                        <Badge className="text-[9px] h-5 border-none" style={{
-                                                                            backgroundColor: `${tokens.success}25`,
-                                                                            color: tokens.success,
-                                                                        }}>AVAILABLE</Badge>
-                                                                    )}
-                                                                    {/* Shift badge */}
-                                                                    <Badge className="text-[7px] px-1 py-0 border-none" style={{
-                                                                        backgroundColor: `${tokens.primaryPurple}15`,
-                                                                        color: tokens.primaryPurple,
-                                                                    }}>
-                                                                        <Clock className="w-2 h-2 mr-0.5" />
-                                                                        {busShift}
-                                                                    </Badge>
-                                                                </div>
-                                                            </div>
-
-                                                            {/* Route stops preview */}
-                                                            {route?.stops && route.stops.length > 0 && (
-                                                                <div className="mt-3 py-1.5 px-3 rounded-lg bg-black/20 flex gap-2 items-center group-hover:bg-black/30 transition-colors duration-300">
-                                                                    <span className="text-[10px] text-slate-400 font-bold truncate">
-                                                                        {route.stops[0].name} — {route.stops[route.stops.length - 1].name}
-                                                                    </span>
-                                                                    <span className="text-[9px] text-slate-500 font-medium whitespace-nowrap ml-auto">
-                                                                        ... Net {route.stops.length} stops
-                                                                    </span>
-                                                                </div>
-                                                            )}
-
-                                                            {/* Operator Info */}
-                                                            <div className="mt-3 flex items-center justify-between relative z-10 border-t border-white/5 pt-2">
-                                                                {displayedDriver ? (
-                                                                    <div className="flex items-center gap-1.5 text-[11px] font-medium" style={{
-                                                                        color: mergedDriverInfo.isStaged ? tokens.primaryOrange : tokens.textMuted
-                                                                    }}>
-                                                                        <User className="w-3 h-3" />
-                                                                        <span className="truncate max-w-[120px]">{displayedDriverName}</span>
-                                                                        {mergedDriverInfo.isStaged && (
-                                                                            <Badge className="text-[7px] p-0 px-1 bg-orange-500/20 text-orange-500 border-none scale-90">STG</Badge>
+                                                                    <div className="flex flex-col items-end gap-1.5">
+                                                                        {hasActiveTrip ? (
+                                                                            <Badge className="bg-red-500 text-white text-[9px] h-5">IN TRIP</Badge>
+                                                                        ) : displayedDriver ? (
+                                                                            <Badge className="text-[9px] h-5 border-none" style={{
+                                                                                backgroundColor: mergedDriverInfo.isStaged ? `${tokens.primaryOrange}25` : `${tokens.occupied}25`,
+                                                                                color: mergedDriverInfo.isStaged ? tokens.primaryOrange : tokens.occupied,
+                                                                            }}>
+                                                                                {mergedDriverInfo.isStaged ? "STAGED" : "OCCUPIED"}
+                                                                            </Badge>
+                                                                        ) : (
+                                                                            <Badge className="text-[9px] h-5 border-none" style={{
+                                                                                backgroundColor: `${tokens.success}25`,
+                                                                                color: tokens.success,
+                                                                            }}>AVAILABLE</Badge>
                                                                         )}
+                                                                        {/* Shift badge */}
+                                                                        <Badge className="text-[7px] px-1 py-0 border-none" style={{
+                                                                            backgroundColor: `${tokens.primaryPurple}15`,
+                                                                            color: tokens.primaryPurple,
+                                                                        }}>
+                                                                            <Clock className="w-2 h-2 mr-0.5" />
+                                                                            {busShift}
+                                                                        </Badge>
                                                                     </div>
-                                                                ) : (
-                                                                    <span className="text-[10px] text-slate-500 font-medium">No operator assigned</span>
-                                                                )}
-                                                                <div className="flex items-center gap-2 opacity-80 group-hover:opacity-100 transition-opacity">
-                                                                    <div className="w-1.5 h-1.5 rounded-full" style={{
-                                                                        backgroundColor: displayedDriver ? (mergedDriverInfo.isStaged ? tokens.primaryOrange : tokens.occupied) : tokens.success
-                                                                    }} />
-                                                                    <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">
-                                                                        Capacity: {bus.currentMembers || 0}/{bus.capacity || 0}
-                                                                    </span>
                                                                 </div>
-                                                            </div>
-                                                        </motion.div>
-                                                    );
-                                                })}
+
+                                                                {/* Route stops preview */}
+                                                                {route?.stops && route.stops.length > 0 && (
+                                                                    <div className="mt-3 py-1.5 px-3 rounded-lg bg-black/20 flex gap-2 items-center group-hover:bg-black/30 transition-colors duration-300">
+                                                                        <span className="text-[10px] text-slate-400 font-bold truncate">
+                                                                            {route.stops[0].name} — {route.stops[route.stops.length - 1].name}
+                                                                        </span>
+                                                                        <span className="text-[9px] text-slate-500 font-medium whitespace-nowrap ml-auto">
+                                                                            ... Net {route.stops.length} stops
+                                                                        </span>
+                                                                    </div>
+                                                                )}
+
+                                                                {/* Operator Info */}
+                                                                <div className="mt-3 flex items-center justify-between relative z-10 border-t border-white/5 pt-2">
+                                                                    {displayedDriver ? (
+                                                                        <div className="flex items-center gap-1.5 text-[11px] font-medium" style={{
+                                                                            color: mergedDriverInfo.isStaged ? tokens.primaryOrange : tokens.textMuted
+                                                                        }}>
+                                                                            <User className="w-3 h-3" />
+                                                                            <span className="truncate max-w-[120px]">{displayedDriverName}</span>
+                                                                            {mergedDriverInfo.isStaged && (
+                                                                                <Badge className="text-[7px] p-0 px-1 bg-orange-500/20 text-orange-500 border-none scale-90">STG</Badge>
+                                                                            )}
+                                                                        </div>
+                                                                    ) : (
+                                                                        <span className="text-[10px] text-slate-500 font-medium">No operator assigned</span>
+                                                                    )}
+                                                                    <div className="flex items-center gap-2 opacity-80 group-hover:opacity-100 transition-opacity">
+                                                                        <div className="w-1.5 h-1.5 rounded-full" style={{
+                                                                            backgroundColor: displayedDriver ? (mergedDriverInfo.isStaged ? tokens.primaryOrange : tokens.occupied) : tokens.success
+                                                                        }} />
+                                                                        <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">
+                                                                            Capacity: {bus.currentMembers || 0}/{bus.capacity || 0}
+                                                                        </span>
+                                                                    </div>
+                                                                </div>
+                                                            </motion.div>
+                                                        );
+                                                    }))}
                                         </div>
                                     </div>
                                 </div>

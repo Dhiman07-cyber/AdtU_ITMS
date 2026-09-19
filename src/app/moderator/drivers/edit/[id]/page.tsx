@@ -1,6 +1,5 @@
 "use client";
 
-import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import ProfileImageAddModal from "@/components/ProfileImageAddModal";
 import EnhancedDatePicker from "@/components/enhanced-date-picker";
 import { Button } from "@/components/ui/button";
@@ -16,7 +15,7 @@ import { Route } from '@/lib/types';
 import { Camera,Info } from "lucide-react";
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { use,useEffect,useState } from 'react';
+import { startTransition, use, useEffect, useState } from 'react';
 
 type DriverFormData = {
   name: string;
@@ -95,54 +94,58 @@ export default function EditDriverPage({ params }: { params: Promise<{ id: strin
         getDriverById(driverId)
       ]);
 
-      setRoutes(routesData);
-      setBuses(busesData);
+      startTransition(() => {
+        setRoutes(routesData);
+        setBuses(busesData);
 
-      if (foundDriver) {
-        setDriver(foundDriver);
+        if (foundDriver) {
+          setDriver(foundDriver);
 
-        const initialFormData: DriverFormData = {
-          name: foundDriver.fullName || foundDriver.name || '',
-          email: foundDriver.email || '',
-          phone: foundDriver.phoneNumber || foundDriver.phone || '',
-          alternatePhone: foundDriver.alternatePhone || foundDriver.altPhone || '',
-          dob: foundDriver.dob || '',
-          licenseNumber: foundDriver.licenseNumber || '',
-          joiningDate: foundDriver.joiningDate || foundDriver.joinDate || '',
-          aadharNumber: foundDriver.aadharNumber || '',
-          profilePhoto: null,
-          profilePhotoUrl: foundDriver.profilePhotoUrl || '',
-          routeId: foundDriver.routeId || foundDriver.routeId || (foundDriver.isReserved ? 'Reserved' : ''),
-          busAssigned: foundDriver.busAssigned || foundDriver.busId || '',
-          employeeId: foundDriver.employeeId || foundDriver.driverId || '',
-          address: foundDriver.address || foundDriver.location || '',
-          status: foundDriver.status || 'active',
-          approvedBy: foundDriver.approvedBy || '',
-          shift: foundDriver.shift || 'Both'
-        };
+          const initialFormData: DriverFormData = {
+            name: foundDriver.fullName || foundDriver.name || '',
+            email: foundDriver.email || '',
+            phone: foundDriver.phoneNumber || foundDriver.phone || '',
+            alternatePhone: foundDriver.alternatePhone || foundDriver.altPhone || '',
+            dob: foundDriver.dob || '',
+            licenseNumber: foundDriver.licenseNumber || '',
+            joiningDate: foundDriver.joiningDate || foundDriver.joinDate || '',
+            aadharNumber: foundDriver.aadharNumber || '',
+            profilePhoto: null,
+            profilePhotoUrl: foundDriver.profilePhotoUrl || '',
+            routeId: foundDriver.routeId || foundDriver.routeId || (foundDriver.isReserved ? 'Reserved' : ''),
+            busAssigned: foundDriver.busAssigned || foundDriver.busId || '',
+            employeeId: foundDriver.employeeId || foundDriver.driverId || '',
+            address: foundDriver.address || foundDriver.location || '',
+            status: foundDriver.status || 'active',
+            approvedBy: foundDriver.approvedBy || '',
+            shift: foundDriver.shift || 'Both'
+          };
 
-        // If busAssigned is derived from ID, format it correctly
-        if (initialFormData.busAssigned && !initialFormData.busAssigned.includes('Bus-')) {
-          const bus = busesData.find(b => b.id === initialFormData.busAssigned || b.busId === initialFormData.busAssigned);
-          if (bus) {
-            const busIdStr = bus.busId || bus.id || '';
-            const busNum = busIdStr.includes('_') ? busIdStr.split('_')[1] : busIdStr;
-            initialFormData.busAssigned = `Bus-${busNum} (${bus.busNumber})`;
+          // If busAssigned is derived from ID, format it correctly
+          if (initialFormData.busAssigned && !initialFormData.busAssigned.includes('Bus-')) {
+            const bus = busesData.find(b => b.id === initialFormData.busAssigned || b.busId === initialFormData.busAssigned);
+            if (bus) {
+              const busIdStr = bus.busId || bus.id || '';
+              const busNum = busIdStr.includes('_') ? busIdStr.split('_')[1] : busIdStr;
+              initialFormData.busAssigned = `Bus-${busNum} (${bus.busNumber})`;
+            }
+          }
+
+          setFormData(initialFormData);
+          if (foundDriver.profilePhotoUrl) {
+            setPreviewUrl(foundDriver.profilePhotoUrl);
+            setFinalImageUrl(foundDriver.profilePhotoUrl);
           }
         }
+      });
 
-        setFormData(initialFormData);
-        if (foundDriver.profilePhotoUrl) {
-          setPreviewUrl(foundDriver.profilePhotoUrl);
-          setFinalImageUrl(foundDriver.profilePhotoUrl);
-        }
-      } else {
+      if (!foundDriver) {
         addToast('Driver not found', 'error');
         router.push('/moderator/drivers');
       }
     } catch (error) {
-      console.error("Error fetching driver:", error);
-      addToast('Error fetching driver data', 'error');
+      console.error('Error fetching driver:', error);
+      addToast('Failed to load driver data', 'error');
     } finally {
       setLoading(false);
     }
@@ -318,8 +321,27 @@ export default function EditDriverPage({ params }: { params: Promise<{ id: strin
     addToast('Form reset successfully', 'info');
   };
 
-  if (loading || authLoading) {
-    return <PremiumPageLoader message="Loading driver profile..." subMessage="Preparing editing tools..." />;
+  if ((authLoading || permsLoading) && !currentUser) {
+    return (
+      <div className="itms-admin-container py-4 animate-pulse">
+        <div className="max-w-5xl mx-auto">
+          <div className="flex justify-between items-center mb-6">
+            <div>
+              <div className="h-8 w-40 bg-muted/60 rounded-xl mb-1" />
+              <div className="h-3 w-64 bg-muted/40 rounded-lg" />
+            </div>
+            <div className="h-8 w-16 bg-muted/40 rounded-lg" />
+          </div>
+          <div className="bg-gradient-to-br from-[#0E0F12] to-[#1A1B23] rounded-2xl border border-white/10 p-6 space-y-6">
+            <div className="h-24 w-24 rounded-full bg-white/5 mx-auto" />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="h-12 bg-white/5 rounded-lg" />
+              <div className="h-12 bg-white/5 rounded-lg" />
+            </div>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   if (!currentUser || !userData || !['admin', 'moderator'].includes(userData.role)) return null;
@@ -329,11 +351,11 @@ export default function EditDriverPage({ params }: { params: Promise<{ id: strin
   }
 
   return (
-    <div className="mt-10 py-4 bg-[#010717] min-h-screen">
-      <div className="max-w-5xl mx-auto px-3 sm:px-6 lg:px-8">
+    <div className="itms-admin-container py-4">
+      <div className="max-w-5xl mx-auto">
         <div className="flex justify-between items-center mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-white mb-1">Edit Driver</h1>
+            <h1 className="text-2xl font-bold text-white mb-1 leading-tight pb-1">Edit Driver</h1>
             <p className="text-gray-400 text-xs">Update driver details, license information and assigned route</p>
           </div>
           <Link
@@ -346,6 +368,18 @@ export default function EditDriverPage({ params }: { params: Promise<{ id: strin
       </div>
 
       <div className="max-w-5xl mx-auto px-3 sm:px-6 lg:px-8 overflow-hidden">
+        {loading ? (
+          <div className="bg-gradient-to-br from-[#0E0F12] to-[#1A1B23] rounded-2xl shadow-2xl border border-white/10 p-6 space-y-6 animate-pulse">
+            <div className="h-24 w-24 rounded-full bg-white/5 mx-auto" />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="h-12 bg-white/5 rounded-lg" />
+              <div className="h-12 bg-white/5 rounded-lg" />
+              <div className="h-12 bg-white/5 rounded-lg" />
+              <div className="h-12 bg-white/5 rounded-lg" />
+            </div>
+            <div className="h-32 bg-white/5 rounded-lg" />
+          </div>
+        ) : (
         <div className="bg-gradient-to-br from-[#0E0F12] to-[#1A1B23] backdrop-blur-sm rounded-2xl shadow-2xl border border-white/10 p-4 sm:p-10 hover:border-white/20 transition-all duration-300">
           <form onSubmit={handleSubmit} className="space-y-6">
             <div className="flex flex-col items-center mb-8">
@@ -539,6 +573,7 @@ export default function EditDriverPage({ params }: { params: Promise<{ id: strin
             </div>
           </form>
         </div>
+        )}
       </div>
       <ProfileImageAddModal
         isOpen={isImageModalOpen}

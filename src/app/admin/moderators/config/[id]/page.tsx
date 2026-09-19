@@ -1,6 +1,5 @@
 "use client";
 
-import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import { useAuth } from "@/contexts/auth-context";
 import { useToast } from "@/contexts/toast-context";
 import { auth } from "@/lib/firebase";
@@ -298,16 +297,34 @@ export default function ModConfigPage() {
     // LOADING STATE
     // ═══════════════════════════════════════════════
     if (loading) {
-        return <PremiumPageLoader message="Loading permissions..." subMessage="Configuring Moderator access..." />;
+        return (
+            <div className="itms-admin-container">
+                <div className="itms-page-header-container max-w-6xl mx-auto">
+                    <div className="flex items-center gap-3 mb-6">
+                        <button
+                            onClick={() => router.push("/admin/moderators")}
+                            className="p-2 rounded-lg hover:bg-white/5 text-slate-400 hover:text-white"
+                        >
+                            <ArrowLeft className="w-5 h-5" />
+                        </button>
+                        <h1 className="text-xl font-bold tracking-tight text-white leading-tight pb-1">Moderator Configuration</h1>
+                    </div>
+                    <div className="space-y-4 animate-pulse">
+                        <div className="h-24 bg-white/5 rounded-2xl" />
+                        <div className="h-64 bg-white/5 rounded-2xl" />
+                    </div>
+                </div>
+            </div>
+        );
     }
 
     // ═══════════════════════════════════════════════
     // MAIN RENDER
     // ═══════════════════════════════════════════════
     return (
-        <div className="mt-10 py-4">
+        <div className="itms-admin-container">
             {/* ── HEADER ── */}
-            <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div className="itms-page-header-container max-w-6xl mx-auto">
                 <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
                     <div className="flex items-center gap-3">
                         <button
@@ -319,7 +336,7 @@ export default function ModConfigPage() {
                         <div>
                             <div className="flex items-center gap-2">
                                 <Shield className="w-5 h-5 text-blue-400" />
-                                <h1 className="text-xl font-bold tracking-tight text-white mb-0.5">Moderator Configuration</h1>
+                                <h1 className="text-xl font-bold tracking-tight text-white mb-0.5 leading-tight pb-1">Moderator Configuration</h1>
                             </div>
                             {moderator && (
                                 <p className="text-sm text-slate-400 font-medium">

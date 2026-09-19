@@ -119,6 +119,8 @@ const TIMESTAMP_FIELDS = new Set([
   'expired_at', 'eligible_reminder_sent_at',
 ]);
 
+const APPLICATION_COLUMNS = 'application_id, applicant_uid, applicant_email, email, state, pending_verifier, verification_attempts, verified_at, verified_by, verified_by_id, submitted_at, submitted_by, approved_at, approved_by, approved_by_id, created_at, updated_at, created_by, application_version, needs_capacity_review, reassignment_reason, has_alternative_buses, payment_id, application_type, eligible_approval, linked_student_uid, verified_upcoming_at, verified_upcoming_by, verified_upcoming_by_id, pending_seat_allocation_at, assigned_driver_id, assigned_driver_name, expired_at, expiry_reason, eligible_reminder_sent_at, bus_id, route_id, stop_name, shift, session_start_year, session_end_year, form_data, state_history, target_session';
+
 // ─── Mappers ─────────────────────────────────────────────────────────────────
 
 /** Convert domain application data to PostgreSQL row */
@@ -197,7 +199,7 @@ export async function pgFindByApplicationId(applicationId: string): Promise<Appl
 
   const { data, error } = await db
     .from('applications')
-    .select('*')
+    .select(APPLICATION_COLUMNS)
     .eq('application_id', applicationId)
     .maybeSingle();
 
@@ -217,7 +219,7 @@ export async function pgFindByApplicantUid(applicantUid: string): Promise<Applic
 
   const { data, error } = await db
     .from('applications')
-    .select('*')
+    .select(APPLICATION_COLUMNS)
     .eq('applicant_uid', applicantUid)
     .order('submitted_at', { ascending: false })
     .limit(1)
@@ -239,7 +241,7 @@ export async function pgFindAll(): Promise<Application[]> {
 
   const { data, error } = await db
     .from('applications')
-    .select('*');
+    .select(APPLICATION_COLUMNS);
 
   if (error) {
     throw new Error(`ApplicationRepository (PG) findAll failed: ${error.message}`);
@@ -256,7 +258,7 @@ export async function pgFindAllPaginated(limit: number, offset: number): Promise
 
   const { data, error } = await db
     .from('applications')
-    .select('*')
+    .select(APPLICATION_COLUMNS)
     .order('created_at', { ascending: false })
     .range(offset, offset + limit - 1);
 
@@ -275,7 +277,7 @@ export async function pgFindAllByState(state: ApplicationState): Promise<Applica
 
   const { data, error } = await db
     .from('applications')
-    .select('*')
+    .select(APPLICATION_COLUMNS)
     .eq('state', state);
 
   if (error) {
@@ -296,7 +298,7 @@ export async function pgFindAllByStateAndType(
 
   const { data, error } = await db
     .from('applications')
-    .select('*')
+    .select(APPLICATION_COLUMNS)
     .eq('state', state)
     .eq('application_type', applicationType);
 

@@ -1,6 +1,5 @@
 "use client";
 
-import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import NotificationCardV2 from "@/components/NotificationCardV2";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -18,10 +17,12 @@ import {
 	Bell,
 	Inbox,
 	Plus,
+	RefreshCw,
 	Send,
 	ShieldCheck,
 	Truck
 } from "lucide-react";
+import { cn } from "@/lib/utils";
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import { useEffect,useRef,useState } from "react";
@@ -150,9 +151,7 @@ export default function ModeratorNotificationsPage() {
   };
 
 
-  if (loading) {
-    return <PremiumPageLoader message="Loading Notifications..." subMessage="Fetching recent updates..." />;
-  }
+
 
   if (error) {
     return (
@@ -168,73 +167,118 @@ export default function ModeratorNotificationsPage() {
   }
 
   return (
-    <div className="flex-1 py-20 px-3 sm:px-4 lg:px-6 pt-15">
-      <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="flex justify-between items-center mb-6">
-          <div>
-            <h1 className="text-3xl font-bold text-foreground">
-              Notifications
-            </h1>
-            <p className="text-muted-foreground mt-1">
-              Manage and send notifications to all users
-            </p>
-          </div>
-          <Button
-            onClick={() => setCreateDialogOpen(true)}
-            onMouseEnter={() => { import("@/components/NotificationFormV2"); }}
-            onFocus={() => { import("@/components/NotificationFormV2"); }}
-            className="bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-1.5 h-9 text-sm"
-          >
-            <Plus className="h-4 w-4 mr-1" />
-            Create Notification
-          </Button>
-        </div>
+    <div className="itms-admin-container space-y-6">
+      {/* Header */}
+      <div className="itms-page-header-container mb-6">
+        <div className="flex items-center justify-between w-full gap-2">
+          <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-foreground truncate leading-tight pb-1">
+            Notifications
+          </h1>
 
-        {/* Tabs */}
-        <Tabs defaultValue="all" value={activeTab} onValueChange={(v) => setActiveTab(v as TabType)} className="w-full mb-10">
-          <TabsList className="grid w-full grid-cols-4 h-9">
-            <TabsTrigger value="all" className="flex items-center gap-1.5 text-xs">
-              <Inbox className="h-3.5 w-3.5" />
-              All
-              {receivedNotifications.length > 0 && (
-                <Badge variant="secondary" className="ml-1 text-[10px] py-0">
-                  {receivedNotifications.length}
-                </Badge>
-              )}
-            </TabsTrigger>
-            <TabsTrigger value="admin" className="flex items-center gap-1.5 text-xs">
-              <ShieldCheck className="h-3.5 w-3.5" />
-              From Admins
-              {adminNotificationsCount.length > 0 && (
-                <Badge variant="secondary" className="ml-1 text-[10px] py-0">
-                  {adminNotificationsCount.length}
-                </Badge>
-              )}
-            </TabsTrigger>
-            <TabsTrigger value="driver" className="flex items-center gap-1.5 text-xs">
-              <Truck className="h-3.5 w-3.5" />
-              From Drivers
-              {driverNotificationsCount.length > 0 && (
-                <Badge variant="secondary" className="ml-1 text-[10px] py-0">
-                  {driverNotificationsCount.length}
-                </Badge>
-              )}
-            </TabsTrigger>
-            <TabsTrigger value="sent" className="flex items-center gap-1.5 text-xs">
-              <Send className="h-3.5 w-3.5" />
-              Sent
-              {sentNotifications.length > 0 && (
-                <Badge variant="secondary" className="ml-1 text-[10px] py-0">
-                  {sentNotifications.length}
-                </Badge>
-              )}
-            </TabsTrigger>
-          </TabsList>
+          {/* Desktop action toolbar */}
+          <div className="hidden md:flex items-center gap-2 shrink-0">
+            <Button
+              onClick={() => setCreateDialogOpen(true)}
+              onMouseEnter={() => { import("@/components/NotificationFormV2"); }}
+              onFocus={() => { import("@/components/NotificationFormV2"); }}
+              className="bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-1.5 h-8 px-3 text-xs font-semibold rounded-md cursor-pointer"
+            >
+              <Plus className="h-3.5 w-3.5 mr-1" />
+              Create Notification
+            </Button>
+          </div>
+
+          {/* Mobile Actions */}
+          <div className="flex md:hidden items-center gap-2 shrink-0">
+            <Button
+              size="sm"
+              onClick={refresh}
+              disabled={loading}
+              className="h-8 px-3 bg-secondary/80 hover:bg-secondary text-secondary-foreground border border-border/50 text-xs font-semibold flex items-center gap-1.5 cursor-pointer active:scale-95 transition-all shrink-0"
+            >
+              <RefreshCw className={cn("h-3.5 w-3.5 transition-transform duration-500", loading ? "animate-spin text-blue-600" : "")} />
+              <span>Refresh</span>
+            </Button>
+            <Button
+              onClick={() => setCreateDialogOpen(true)}
+              onMouseEnter={() => { import("@/components/NotificationFormV2"); }}
+              onFocus={() => { import("@/components/NotificationFormV2"); }}
+              className="bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-1 h-8 px-2.5 text-xs font-semibold rounded-lg shrink-0 cursor-pointer active:scale-95 transition-all"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              <span>Create</span>
+            </Button>
+          </div>
+        </div>
+        <p className="text-muted-foreground mt-1 text-xs sm:text-sm truncate">
+          Manage and send notifications to all users
+        </p>
+      </div>
+
+      {/* Tabs */}
+      <Tabs defaultValue="all" value={activeTab} onValueChange={(v) => setActiveTab(v as TabType)} className="w-full">
+        <TabsList className="grid w-full grid-cols-4 h-auto min-h-10 sm:h-10 p-1 bg-muted/60 dark:bg-zinc-900/60 border border-white/5 rounded-xl gap-0.5 sm:gap-1">
+          <TabsTrigger
+            value="all"
+            className="flex items-center justify-center gap-1 sm:gap-1.5 px-1 sm:px-2.5 py-1.5 sm:py-1 text-[11px] sm:text-xs font-medium rounded-lg transition-all"
+          >
+            <Inbox className="h-3.5 w-3.5 shrink-0" />
+            <span>All</span>
+            {receivedNotifications.length > 0 && (
+              <Badge variant="secondary" className="ml-0.5 sm:ml-1 text-[9px] sm:text-[10px] px-1 sm:px-1.5 py-0 h-4 min-w-4 flex items-center justify-center shrink-0 rounded-full font-bold">
+                {receivedNotifications.length}
+              </Badge>
+            )}
+          </TabsTrigger>
+          <TabsTrigger
+            value="admin"
+            className="flex items-center justify-center gap-1 sm:gap-1.5 px-1 sm:px-2.5 py-1.5 sm:py-1 text-[11px] sm:text-xs font-medium rounded-lg transition-all"
+          >
+            <ShieldCheck className="h-3.5 w-3.5 shrink-0" />
+            <span className="sm:hidden">Admins</span>
+            <span className="hidden sm:inline">From Admins</span>
+            {adminNotificationsCount.length > 0 && (
+              <Badge variant="secondary" className="ml-0.5 sm:ml-1 text-[9px] sm:text-[10px] px-1 sm:px-1.5 py-0 h-4 min-w-4 flex items-center justify-center shrink-0 rounded-full font-bold">
+                {adminNotificationsCount.length}
+              </Badge>
+            )}
+          </TabsTrigger>
+          <TabsTrigger
+            value="driver"
+            className="flex items-center justify-center gap-1 sm:gap-1.5 px-1 sm:px-2.5 py-1.5 sm:py-1 text-[11px] sm:text-xs font-medium rounded-lg transition-all"
+          >
+            <Truck className="h-3.5 w-3.5 shrink-0" />
+            <span className="sm:hidden">Drivers</span>
+            <span className="hidden sm:inline">From Drivers</span>
+            {driverNotificationsCount.length > 0 && (
+              <Badge variant="secondary" className="ml-0.5 sm:ml-1 text-[9px] sm:text-[10px] px-1 sm:px-1.5 py-0 h-4 min-w-4 flex items-center justify-center shrink-0 rounded-full font-bold">
+                {driverNotificationsCount.length}
+              </Badge>
+            )}
+          </TabsTrigger>
+          <TabsTrigger
+            value="sent"
+            className="flex items-center justify-center gap-1 sm:gap-1.5 px-1 sm:px-2.5 py-1.5 sm:py-1 text-[11px] sm:text-xs font-medium rounded-lg transition-all"
+          >
+            <Send className="h-3.5 w-3.5 shrink-0" />
+            <span>Sent</span>
+            {sentNotifications.length > 0 && (
+              <Badge variant="secondary" className="ml-0.5 sm:ml-1 text-[9px] sm:text-[10px] px-1 sm:px-1.5 py-0 h-4 min-w-4 flex items-center justify-center shrink-0 rounded-full font-bold">
+                {sentNotifications.length}
+              </Badge>
+            )}
+          </TabsTrigger>
+        </TabsList>
 
           {/* Tab Content */}
           <TabsContent value={activeTab} className="mt-3 pt-4">
-            {filteredNotifications.length === 0 ? (
+            {loading && notifications.length === 0 ? (
+              <div className="space-y-4">
+                {[1, 2, 3].map((i) => (
+                  <div key={i} className="h-28 rounded-xl bg-card/40 border border-border/40 animate-pulse" />
+                ))}
+              </div>
+            ) : filteredNotifications.length === 0 ? (
               <Card>
                 <CardContent className="py-30">
                   <div className="text-center">
@@ -269,14 +313,15 @@ export default function ModeratorNotificationsPage() {
             ) : (
               <div className="space-y-3">
                 {filteredNotifications.map((notification) => (
-                  <NotificationCardV2
-                    key={notification.id}
-                    notification={notification}
-                    onMarkAsRead={handleMarkAsRead}
-                    onEdit={handleEdit}
-                    onDeleteGlobally={handleDeleteGlobally}
-                    onRefresh={refresh}
-                  />
+                  <div key={notification.id} style={{ contentVisibility: 'auto', containIntrinsicSize: '0 100px' }}>
+                    <NotificationCardV2
+                      notification={notification}
+                      onMarkAsRead={handleMarkAsRead}
+                      onEdit={handleEdit}
+                      onDeleteGlobally={handleDeleteGlobally}
+                      onRefresh={refresh}
+                    />
+                  </div>
                 ))}
               </div>
             )}
@@ -295,6 +340,5 @@ export default function ModeratorNotificationsPage() {
           />
         )}
       </div>
-    </div>
   );
 }

@@ -49,6 +49,11 @@ export function useEventDrivenRefresh({ collectionName, onRefresh }: UseEventDri
     const router = useRouter();
     const pathname = usePathname();
     const hasRefreshedRef = useRef(false);
+    const onRefreshRef = useRef(onRefresh);
+
+    useEffect(() => {
+        onRefreshRef.current = onRefresh;
+    }, [onRefresh]);
 
     // Check for refresh signals and trigger refresh
     useEffect(() => {
@@ -78,12 +83,12 @@ export function useEventDrivenRefresh({ collectionName, onRefresh }: UseEventDri
 
                 // Then trigger refresh
                 console.log(`[EventDrivenRefresh] Refreshing ${collectionName} due to mutation signal`);
-                await onRefresh();
+                await onRefreshRef.current();
             }
         };
 
         checkAndRefresh();
-    }, [collectionName, onRefresh, searchParams, pathname]);
+    }, [collectionName, searchParams, pathname]);
 
     // Reset the ref when pathname changes (navigating away and back)
     useEffect(() => {

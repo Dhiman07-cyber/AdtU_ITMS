@@ -82,6 +82,8 @@ export interface CreatePaymentInput {
     approvedAt?: Date;
 }
 
+const PAYMENT_COLUMNS = 'id, payment_id, student_uid, student_id, student_name, offline_transaction_id, stop_name, amount, currency, method, status, session_start_year, session_end_year, duration_years, valid_until, transaction_date, razorpay_payment_id, razorpay_order_id, approved_by, approved_at, purpose, metadata, created_at, document_signature';
+
 // ============================================
 // SERVICE CLASS (IMMUTABLE PAYMENT LEDGER)
 // ============================================
@@ -453,7 +455,7 @@ class PaymentsSupabaseService {
 
                 const { data: pendingPayment, error: pendingError } = await this.supabase
                     .from('payments')
-                    .select('*')
+                    .select(PAYMENT_COLUMNS)
                     .eq('payment_id', paymentId)
                     .eq('status', 'Pending')
                     .single();
@@ -706,7 +708,7 @@ class PaymentsSupabaseService {
         try {
             const { data, error } = await this.supabase
                 .from('payments')
-                .select('*')
+                .select(PAYMENT_COLUMNS)
                 .eq('payment_id', paymentId)
                 .single();
 
@@ -731,7 +733,7 @@ class PaymentsSupabaseService {
         try {
             const { data, error } = await this.supabase
                 .from('payments')
-                .select('*')
+                .select(PAYMENT_COLUMNS)
                 .eq('razorpay_payment_id', razorpayPaymentId) // This query assumes plaintext
                 .single();
 
@@ -757,7 +759,7 @@ class PaymentsSupabaseService {
         try {
             const { data, error } = await this.supabase
                 .from('payments')
-                .select('*')
+                .select(PAYMENT_COLUMNS)
                 .eq('student_uid', studentUid)
                 .order('created_at', { ascending: false })
                 .range(offset, offset + limit - 1);
@@ -784,7 +786,7 @@ class PaymentsSupabaseService {
         try {
             const { data, error } = await this.supabase
                 .from('payments')
-                .select('*')
+                .select(PAYMENT_COLUMNS)
                 .gte('transaction_date', startDate.toISOString())
                 .lte('transaction_date', endDate.toISOString())
                 .order('transaction_date', { ascending: true });
@@ -805,7 +807,7 @@ class PaymentsSupabaseService {
         try {
             const { data, error } = await this.supabase
                 .from('payments')
-                .select('*')
+                .select(PAYMENT_COLUMNS)
                 .order('created_at', { ascending: false })
                 .limit(limit);
 
@@ -825,7 +827,7 @@ class PaymentsSupabaseService {
         try {
             const { data, error } = await this.supabase
                 .from('payments')
-                .select('*')
+                .select(PAYMENT_COLUMNS)
                 .eq('status', 'Pending')
                 .eq('method', 'Offline')
                 .order('created_at', { ascending: true });
@@ -850,7 +852,7 @@ class PaymentsSupabaseService {
         try {
             let query = this.supabase
                 .from('payments')
-                .select('*', { count: 'exact' });
+                .select(PAYMENT_COLUMNS, { count: 'exact' });
 
             if (filters.method) {
                 query = query.eq('method', filters.method);
@@ -897,7 +899,7 @@ class PaymentsSupabaseService {
         try {
             const { data, error } = await this.supabase
                 .from('payments')
-                .select('*')
+                .select(PAYMENT_COLUMNS)
                 .gte('transaction_date', startDate.toISOString())
                 .lte('transaction_date', endDate.toISOString())
                 .eq('status', 'Completed')

@@ -1,7 +1,5 @@
 "use client";
 
-import { PremiumPageLoader } from '@/components/LoadingSpinner';
-import { usePageShellLoader } from '@/hooks/usePageShellLoader';
 import { useAuth } from '@/contexts/auth-context';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
@@ -254,11 +252,19 @@ export default function EnhancedModeratorDashboard() {
     feedbacksCount: realCounts.feedbacksCount
   };
 
-  const isInitialLoading = authLoading || (realCounts.totalStudents === 0 && !cachedData);
-  const { showLoader } = usePageShellLoader(isInitialLoading, 3500);
-
-  if (showLoader) {
-    return <PremiumPageLoader fullScreen message="Curating Moderator Experience..." subMessage="Fetching system status and analytics..." />;
+  if (authLoading && !currentUser) {
+    return (
+      <div className="flex-1 bg-[#05060e] min-h-screen px-6 md:px-12 pt-17 pb-20 max-w-screen-2xl mx-auto space-y-6 animate-pulse">
+        <div className="h-12 w-72 bg-white/10 rounded-xl" />
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="h-28 bg-white/5 rounded-2xl" />
+          <div className="h-28 bg-white/5 rounded-2xl" />
+          <div className="h-28 bg-white/5 rounded-2xl" />
+          <div className="h-28 bg-white/5 rounded-2xl" />
+        </div>
+        <div className="h-64 bg-white/5 rounded-2xl" />
+      </div>
+    );
   }
 
   const getFirstName = () => {
@@ -303,12 +309,12 @@ export default function EnhancedModeratorDashboard() {
 
 
 
-        <div className="grid grid-cols-1 gap-12">
+        <div className="grid grid-cols-1 gap-12" style={{ contentVisibility: 'auto', containIntrinsicSize: '0 400px' }}>
           <BusUtilization busUtilization={busUtilization} />
           <RouteOccupancy routeOccupancy={routeOccupancy} busUtilization={busUtilization} />
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8" style={{ contentVisibility: 'auto', containIntrinsicSize: '0 400px' }}>
           <StudentDistribution
             distribution={studentDistribution}
             totalStudents={stats.activeStudents}

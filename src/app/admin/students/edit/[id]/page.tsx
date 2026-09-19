@@ -2,7 +2,6 @@
 
 import EnhancedDatePicker from "@/components/enhanced-date-picker";
 import FacultyDepartmentSelector from '@/components/faculty-department-selector';
-import { PremiumPageLoader } from '@/components/LoadingSpinner';
 import ProfileImageAddModal from "@/components/ProfileImageAddModal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,7 +16,7 @@ import { normalizeShift } from "@/lib/utils/shift-utils";
 import { AlertTriangle,Camera,Info } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import React,{ use,useEffect,useState } from "react";
+import React,{ startTransition, use, useEffect, useState } from "react";
 
 // Define the form data type - matching ADD form exactly
 type StudentFormData = {
@@ -121,8 +120,10 @@ export default function EditStudentPage({ params }: { params: Promise<{ id: stri
           getAllRoutes(),
           getAllBuses()
         ]);
-        setRoutes(routesData);
-        setBuses(busesData);
+        startTransition(() => {
+          setRoutes(routesData);
+          setBuses(busesData);
+        });
       } catch (error) {
         console.error('Error fetching data:', error);
         addToast('Failed to load routes and buses', 'error');
@@ -200,9 +201,11 @@ export default function EditStudentPage({ params }: { params: Promise<{ id: stri
           pickupPoint: studentData.stop_name || studentData.pickupPoint || studentData.stop_name || '',
         };
 
-        setFormData(initialFormData);
-        setPreviewUrl(studentData.profilePhotoUrl || null);
-        setFacultySelected(!!studentData.faculty);
+        startTransition(() => {
+          setFormData(initialFormData);
+          setPreviewUrl(studentData.profilePhotoUrl || null);
+          setFacultySelected(!!studentData.faculty);
+        });
       } else {
         addToast('Student not found', 'error');
         router.push("/admin/students");
@@ -472,22 +475,20 @@ export default function EditStudentPage({ params }: { params: Promise<{ id: stri
   const selectedShift = formData.shift?.toLowerCase() || '';
   const hasShiftConflict = selectedBus && busShift !== 'both' && busShift !== selectedShift;
 
-  if (loading || loadingRoutes || loadingBuses) {
-    return <PremiumPageLoader message="Loading student profile..." subMessage="Preparing editing tools..." />;
-  }
+  const isDataLoading = loading || loadingRoutes || loadingBuses;
 
   return (
-    <div className="mt-10 py-4 bg-[#010717] min-h-screen w-full overflow-x-hidden">
+    <div className="itms-admin-container">
       {/* Header */}
-      <div className="max-w-5xl mx-auto px-3 sm:px-6 lg:px-8">
+      <div className="itms-page-header-container max-w-5xl mx-auto">
         <div className="flex justify-between items-center mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-white mb-1">Edit Student</h1>
+            <h1 className="text-2xl font-bold tracking-tight text-white mb-1 leading-tight pb-1">Edit Student</h1>
             <p className="text-gray-400 text-xs">Update student details including faculty and department information</p>
           </div>
           <Link
             href="/admin/students"
-            className="inline-flex items-center px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white text-sm border border-white/20 hover:border-white/30 rounded-lg transition-all duration-200 hover:shadow-lg"
+            className="inline-flex items-center px-3 py-1.5 bg-secondary/80 hover:bg-secondary text-secondary-foreground border border-border/50 text-sm rounded-lg transition-colors shadow-sm"
           >
             Back
           </Link>
@@ -496,8 +497,22 @@ export default function EditStudentPage({ params }: { params: Promise<{ id: stri
 
       {/* Main Content */}
       <div className="max-w-5xl mx-auto px-3 sm:px-6 lg:px-8 pb-10 overflow-hidden">
-        <div className="bg-gradient-to-br from-[#0E0F12] to-[#1A1B23] rounded-2xl shadow-2xl border border-white/10 p-4 sm:p-10 hover:border-white/20 transition-all duration-300">
-          <form onSubmit={handleSubmit} className="space-y-3">
+        {isDataLoading ? (
+          <div className="bg-gradient-to-br from-[#0E0F12] to-[#1A1B23] rounded-2xl shadow-2xl border border-white/10 p-4 sm:p-10 space-y-6 animate-pulse">
+            <div className="flex justify-center mb-6">
+              <div className="h-24 w-24 rounded-full bg-white/5" />
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="h-10 bg-white/5 rounded-lg" />
+              <div className="h-10 bg-white/5 rounded-lg" />
+              <div className="h-10 bg-white/5 rounded-lg" />
+              <div className="h-10 bg-white/5 rounded-lg" />
+            </div>
+            <div className="h-32 bg-white/5 rounded-lg" />
+          </div>
+        ) : (
+          <div className="bg-gradient-to-br from-[#0E0F12] to-[#1A1B23] rounded-2xl shadow-2xl border border-white/10 p-4 sm:p-10 hover:border-white/20 transition-all duration-300">
+            <form onSubmit={handleSubmit} className="space-y-3">
             {/* Profile Photo Section */}
             <div className="flex flex-col items-center mb-8">
               <div className="relative group cursor-pointer" onClick={() => setIsImageModalOpen(true)}>
@@ -932,6 +947,7 @@ export default function EditStudentPage({ params }: { params: Promise<{ id: stri
             </div>
           </form>
         </div>
+        )}
       </div >
 
       <ProfileImageAddModal

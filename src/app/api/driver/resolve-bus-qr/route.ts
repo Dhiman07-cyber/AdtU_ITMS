@@ -41,15 +41,28 @@ export const POST = withSecurity(
       return NextResponse.json({ found: false, error: 'No bus found for this QR code' }, { status: 404 });
     }
 
-    const busResult = await supabase
-      .from('buses')
-      .select('id, bus_number, status, route_id, route_name')
-      .eq('id', busId)
-      .maybeSingle();
+    const now = new Date().toISOString();
+    const [busResult, activeTripResult] = await Promise.all([
+      supabase
+        .from('buses')
+        .select('id, bus_number, status, route_id, route_name')
+        .eq('id', busId)
+        .maybeSingle(),
+      supabase
+        .from('active_trips')
+        .select('trip_id, driver_id')
+        .eq('bus_id', busId)
+        .eq('status', 'active')
+        .gt('expires_at', now)
+        .maybeSingle(),
+    ]);
 
     if (!busResult.data) {
       return NextResponse.json({ found: false, error: 'Bus not found' }, { status: 404 });
     }
+
+    const activeTrip = activeTripResult.data;
+    const isOperatedByOther = !!(activeTrip && activeTrip.driver_id !== auth.uid);
 
     return NextResponse.json({
       found: true,
@@ -58,6 +71,10 @@ export const POST = withSecurity(
       status: busResult.data.status,
       routeId: busResult.data.route_id,
       routeName: busResult.data.route_name,
+      isInTrip: !!activeTrip,
+      is_operated_by_other: isOperatedByOther,
+      isOperatedByOther,
+      activeDriverId: activeTrip?.driver_id || null,
     });
   },
   {

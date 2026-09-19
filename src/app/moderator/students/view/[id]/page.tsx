@@ -1,6 +1,5 @@
 "use client";
 
-import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import { Avatar,AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -388,7 +387,26 @@ export default function ViewStudentPage({ params }: { params: Promise<{ id: stri
   };
 
   if (loading) {
-    return <PremiumPageLoader message="Loading student profile..." subMessage="Fetching details..." />;
+    return (
+      <div className="min-h-screen pb-12 mt-8 bg-gradient-to-br from-background via-background to-muted/20">
+        <div className="bg-gradient-to-r from-card via-card to-card/95 border-b border-border shadow-sm">
+          <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
+            <h1 className="text-lg md:text-3xl font-black text-foreground tracking-tight">Student Profile</h1>
+            <Link href="/moderator/students">
+              <Button variant="outline" className="h-7 px-2.5 py-1.5 rounded-lg text-xs shadow-sm">
+                &lt;- Back
+              </Button>
+            </Link>
+          </div>
+        </div>
+        <div className="max-w-7xl mx-auto px-4 py-8">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-pulse">
+            <div className="h-96 rounded-2xl bg-white/5" />
+            <div className="lg:col-span-2 h-96 rounded-2xl bg-white/5" />
+          </div>
+        </div>
+      </div>
+    );
   }
 
   if (!student) {

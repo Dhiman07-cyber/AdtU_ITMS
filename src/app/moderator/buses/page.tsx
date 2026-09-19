@@ -1,7 +1,7 @@
 "use client";
 
 import { ExportButton } from '@/components/ExportButton';
-import { PremiumPageLoader } from '@/components/LoadingSpinner';
+import { TableRowLoader } from '@/components/LoadingSpinner';
 import { Button } from "@/components/ui/button";
 import {
 	Card,
@@ -46,6 +46,8 @@ import { supabase } from '@/lib/supabase-client';
 import { cn } from "@/lib/utils";
 import {
 	Bus,
+	Compass,
+	Download,
 	Edit,
 	Eye,
 	Filter,
@@ -65,6 +67,7 @@ import { invalidateCollectionCache,useApiCollection } from '@/hooks/useApiCollec
 import { useEventDrivenRefresh } from '@/hooks/useEventDrivenRefresh';
 import { useModeratorPermissions } from '@/hooks/useModeratorPermissions';
 import { RefreshCw } from "lucide-react";
+import { MobileActionFAB } from '@/components/layout/MobileActionFAB';
 
 // Use local interfaces to avoid type conflicts
 interface BusItem {
@@ -135,9 +138,6 @@ export default function BusesPage() {
   const { data: routes, loading: loadingRoutes } = useApiCollection('routes', {
     pageSize: 50, orderByField: 'routeName', orderDirection: 'asc', autoRefresh: false,
   });
-  const { data: students, loading: loadingStudents } = useApiCollection('students', {
-    pageSize: 50, orderByField: 'updatedAt', orderDirection: 'desc', autoRefresh: false,
-  });
 
   // Event-driven refresh: auto-refresh when mutations occur in other pages
   useEventDrivenRefresh({
@@ -154,7 +154,7 @@ export default function BusesPage() {
   const [deleteItem, setDeleteItem] = useState<{ id: string; name: string } | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  const isLoading = loadingBuses || loadingDrivers || loadingRoutes || loadingStudents;
+  const isLoading = loadingBuses || loadingDrivers || loadingRoutes;
 
   // Manual refresh handler
   const handleRefresh = async () => {
@@ -197,7 +197,7 @@ export default function BusesPage() {
       // Fetch all buses directly from Supabase PostgreSQL table 'buses'
       const { data: rawBuses, error: busesError } = await supabase
         .from('buses')
-        .select('*')
+        .select('id, bus_number, model, year, capacity, route_id, route_name, status, current_members, morning_load, evening_load')
         .order('bus_number', { ascending: true });
 
       if (busesError) throw busesError;
@@ -260,7 +260,7 @@ export default function BusesPage() {
     }
   };
 
-  const commonBtnClass = "group h-8 px-4 bg-white hover:bg-gray-50 text-gray-600 hover:text-blue-600 border border-gray-200 hover:border-blue-200 shadow-sm hover:shadow-lg hover:shadow-blue-500/10 font-bold text-[10px] uppercase tracking-widest rounded-lg transition-all duration-300 active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer";
+  const commonBtnClass = "group h-8 px-3.5 bg-secondary/80 hover:bg-secondary text-secondary-foreground border border-border/50 shadow-sm font-medium text-xs rounded-lg transition-colors active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer";
 
   // Function to get driver name for a specific bus
   const getDriverNameForBus = (bus: any) => {
@@ -350,8 +350,13 @@ export default function BusesPage() {
     }
   };
 
-  if (isLoading) {
-    return <PremiumPageLoader message="Loading Bus Fleet..." subMessage="Fetching fleet status and routes..." />;
+  if (authLoading && !currentUser) {
+    return (
+      <div className="itms-admin-container space-y-6 animate-pulse">
+        <div className="h-10 w-64 bg-slate-200 dark:bg-zinc-800 rounded-md" />
+        <div className="h-64 bg-slate-100 dark:bg-zinc-900 rounded-xl border border-slate-200 dark:border-zinc-800" />
+      </div>
+    );
   }
 
   if (!permsLoading && !canBusView) {
@@ -359,49 +364,65 @@ export default function BusesPage() {
   }
 
   return (
-    <div className="mt-12 space-y-6">
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold text-foreground">Bus Management</h1>
-          <p className="text-muted-foreground mt-1">
-            Manage all buses in the service fleet
-          </p>
-        </div>
-        <div className="flex gap-2">
-          {canBusAdd && (
+    <div className="itms-admin-container space-y-6">
+      {/* Page Header */}
+      <div className="itms-page-header-container">
+        <div className="flex items-center justify-between w-full gap-2">
+          <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-foreground truncate leading-tight pb-1">Bus Management</h1>
+
+          {/* Desktop action toolbar */}
+          <div className="hidden md:flex items-center gap-2 shrink-0">
+            {canBusAdd && (
+              <Button
+                className="w-full md:w-auto cursor-pointer bg-blue-600 hover:bg-blue-700 text-white border border-blue-700 transition-all duration-200 hover:scale-105 hover:shadow-lg rounded-md px-2.5 py-1.5 text-xs h-8"
+                onClick={() => router.push('/moderator/buses/add')}
+              >
+                <Plus className="mr-1.5 h-3.5 w-3.5" />
+                Add New Bus
+              </Button>
+            )}
+            {canBusReassign && (
+              <Button
+                className="w-full md:w-auto cursor-pointer bg-amber-600/90 hover:bg-amber-600 text-white border border-amber-500/30 shadow-sm transition-all duration-200 hover:scale-[1.02] hover:shadow-md rounded-lg px-2.5 py-1.5 text-xs h-8"
+                onClick={() => router.push('/moderator/route-allocation')}
+                title="Manage route reassignments for buses"
+              >
+                <RouteIcon className="mr-1.5 h-3.5 w-3.5" />
+                Bus Reassignment
+              </Button>
+            )}
+            <ExportButton
+              onClick={() => handleExportBuses()}
+              label="Export"
+              className={commonBtnClass}
+            />
             <Button
-              className="w-full md:w-auto cursor-pointer bg-blue-600 hover:bg-blue-700 text-white border border-blue-700 transition-all duration-200 hover:scale-105 hover:shadow-lg rounded-md px-2.5 py-1.5 text-xs h-8"
-              onClick={() => router.push('/moderator/buses/add')}
+              size="sm"
+              onClick={handleRefresh}
+              disabled={isRefreshing}
+              className={commonBtnClass}
             >
-              <Plus className="mr-1.5 h-3.5 w-3.5" />
-              Add New Bus
+              <RefreshCw className={cn("h-3.5 w-3.5 transition-transform duration-500", isRefreshing ? "animate-spin" : "group-hover:rotate-180")} />
+              <span>Refresh</span>
             </Button>
-          )}
-          {canBusReassign && (
+          </div>
+
+          {/* Mobile Refresh Button - exact same line as Bus Management at rightmost end */}
+          <div className="flex md:hidden items-center shrink-0">
             <Button
-              className="w-full md:w-auto cursor-pointer bg-slate-800 hover:bg-slate-900 text-white dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-100 border border-slate-700 dark:border-slate-600 shadow-sm transition-all duration-200 hover:scale-105 hover:shadow-lg rounded-md px-2.5 py-1.5 text-xs h-8"
-              onClick={() => router.push('/moderator/route-allocation')}
-              title="Manage route reassignments for buses"
+              size="sm"
+              onClick={handleRefresh}
+              disabled={isRefreshing}
+              className="h-8 px-3 bg-white dark:bg-zinc-800 hover:bg-gray-50 dark:hover:bg-zinc-700 text-gray-700 dark:text-zinc-200 hover:text-blue-600 dark:hover:text-blue-400 border border-gray-200 dark:border-zinc-700 shadow-sm rounded-lg text-xs font-semibold flex items-center gap-1.5 cursor-pointer active:scale-95 transition-all shrink-0"
             >
-              <RouteIcon className="mr-1.5 h-3.5 w-3.5" />
-              Bus Reassignment
+              <RefreshCw className={cn("h-3.5 w-3.5 transition-transform duration-500", isRefreshing ? "animate-spin text-blue-600" : "group-hover:rotate-180")} />
+              <span>Refresh</span>
             </Button>
-          )}
-          <ExportButton
-            onClick={() => handleExportBuses()}
-            label="EXPORT"
-            className={commonBtnClass}
-          />
-          <Button
-            size="sm"
-            onClick={handleRefresh}
-            disabled={isRefreshing}
-            className={commonBtnClass}
-          >
-            <RefreshCw className={cn("h-3.5 w-3.5 transition-transform duration-500", isRefreshing ? "animate-spin" : "group-hover:rotate-180")} />
-            REFRESH
-          </Button>
+          </div>
         </div>
+        <p className="text-muted-foreground mt-1 text-xs sm:text-sm truncate">
+          Manage all buses in the service fleet
+        </p>
       </div>
 
       <Card className="bg-gray-50 dark:bg-gray-900 border-border min-h-[480px] flex flex-col">
@@ -420,12 +441,10 @@ export default function BusesPage() {
                 />
               </div>
 
-              {/* Filters - Side by side on Mobile */}
-              <div className="flex gap-2 items-center w-full md:w-auto overflow-x-auto pb-1 md:pb-0 no-scrollbar">
-                <Filter className="h-3.5 w-3.5 text-gray-500 flex-shrink-0" />
-
+              {/* Filters - Side by side on Mobile in the same line */}
+              <div className="grid grid-cols-2 gap-2 items-center w-full md:w-auto md:flex md:flex-row">
                 <Select value={colorFilter} onValueChange={setColorFilter}>
-                  <SelectTrigger className="h-8 text-xs min-w-[120px] flex-1 md:w-[180px] bg-white dark:bg-gray-800 md:bg-transparent border-gray-200 dark:border-gray-700">
+                  <SelectTrigger className="h-9 md:h-8 text-xs w-full md:w-[140px] bg-white dark:bg-gray-800 md:bg-transparent border-gray-200 dark:border-gray-700">
                     <SelectValue placeholder="Color" />
                   </SelectTrigger>
                   <SelectContent>
@@ -436,7 +455,7 @@ export default function BusesPage() {
                 </Select>
 
                 <Select value={statusFilter} onValueChange={setStatusFilter}>
-                  <SelectTrigger className="h-8 text-xs min-w-[120px] flex-1 md:w-[180px] bg-white dark:bg-gray-800 md:bg-transparent border-gray-200 dark:border-gray-700">
+                  <SelectTrigger className="h-9 md:h-8 text-xs w-full md:w-[140px] bg-white dark:bg-gray-800 md:bg-transparent border-gray-200 dark:border-gray-700">
                     <SelectValue placeholder="Status" />
                   </SelectTrigger>
                   <SelectContent>
@@ -455,7 +474,7 @@ export default function BusesPage() {
                       setColorFilter("all");
                       setStatusFilter("all");
                     }}
-                    className="h-8 px-3 text-xs bg-red-500 hover:bg-red-600 text-white flex-shrink-0"
+                    className="h-8 px-3 text-xs bg-red-500 hover:bg-red-600 text-white col-span-2 md:col-span-1"
                   >
                     Clear
                   </Button>
@@ -477,10 +496,16 @@ export default function BusesPage() {
                     <TableHead className="text-xs font-semibold text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
-                {filteredBuses.length > 0 && (
-                  <TableBody>
-                    {filteredBuses.map((bus) => (
-                      <TableRow key={bus.id}>
+                <TableBody>
+                  {isLoading && filteredBuses.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={7} className="p-6">
+                        <TableRowLoader rows={5} />
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    filteredBuses.map((bus) => (
+                      <TableRow key={bus.id} style={{ contentVisibility: 'auto', containIntrinsicSize: '0 52px' }}>
                         <TableCell>
                           <div className="flex items-center">
                             <Bus className="mr-2 h-4 w-4 text-muted-foreground" />
@@ -525,7 +550,7 @@ export default function BusesPage() {
                               <DropdownMenuLabel className="text-white font-semibold px-2 py-1.5 text-sm">Actions</DropdownMenuLabel>
                               <DropdownMenuSeparator className="bg-gray-600" />
                               <DropdownMenuItem
-                                className="text-white hover:bg-gray-700 dark:hover:bg-gray-800 focus:bg-gray-700 dark:focus:bg-gray-800 px-2 py-1.5 text-sm cursor-pointer"
+                                className="text-white hover:bg-gray-700 dark:hover:bg-gray-800 focus:bg-gray-700 dark:focus:bg-gray-800 px-2 py-1.5 text-sm !text-white cursor-pointer"
                                 onClick={() => router.push(`/moderator/buses/view/${bus.id}`)}
                               >
                                 <Eye className="mr-2 h-3.5 w-3.5 text-blue-400" />
@@ -533,7 +558,7 @@ export default function BusesPage() {
                               </DropdownMenuItem>
                               {canBusEdit && (
                                 <DropdownMenuItem
-                                  className="text-white hover:bg-gray-700 dark:hover:bg-gray-800 focus:bg-gray-700 dark:focus:bg-gray-800 px-2 py-1.5 text-sm cursor-pointer"
+                                  className="text-white hover:bg-gray-700 dark:hover:bg-gray-800 focus:bg-gray-700 dark:focus:bg-gray-800 px-2 py-1.5 text-sm !text-white cursor-pointer"
                                   onClick={() => router.push(`/moderator/buses/edit/${bus.id}`)}
                                 >
                                   <Edit className="mr-2 h-3.5 w-3.5 text-yellow-400" />
@@ -544,7 +569,7 @@ export default function BusesPage() {
                                 <>
                                   <DropdownMenuSeparator className="bg-gray-600" />
                                   <DropdownMenuItem
-                                    className="text-white hover:!bg-red-600 focus:!bg-red-600 px-2 py-1.5 text-sm cursor-pointer transition-colors"
+                                    className="text-white hover:!bg-red-600 focus:!bg-red-600 px-2 py-1.5 text-sm !text-white cursor-pointer transition-colors"
                                     onClick={() => handleDelete(bus.id, bus.busNumber)}
                                   >
                                     <Trash2 className="mr-2 h-3.5 w-3.5" />
@@ -556,11 +581,11 @@ export default function BusesPage() {
                           </DropdownMenu>
                         </TableCell>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                )}
+                    ))
+                  )}
+                </TableBody>
               </Table>
-              {filteredBuses.length === 0 && (
+              {!isLoading && filteredBuses.length === 0 && (
                 <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-xs text-muted-foreground min-h-[220px]">
                   No buses found
                 </div>
@@ -595,6 +620,32 @@ export default function BusesPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Mobile Floating Action Button */}
+      <MobileActionFAB
+        actions={[
+          ...(canBusAdd ? [{
+            label: "Add New Bus",
+            icon: Plus,
+            onClick: () => router.push('/moderator/buses/add'),
+          }] : []),
+          ...(canBusReassign ? [{
+            label: "Bus Reassignment",
+            icon: RouteIcon,
+            onClick: () => router.push('/moderator/route-allocation'),
+          }] : []),
+          {
+            label: "Fleet Map",
+            icon: Compass,
+            onClick: () => router.push('/moderator/fleet-map'),
+          },
+          {
+            label: "Export Buses",
+            icon: Download,
+            onClick: () => handleExportBuses(),
+          },
+        ]}
+      />
     </div>
   );
 }

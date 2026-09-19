@@ -26,7 +26,7 @@ export const POST = withSecurity(
       // 2. Get the waiting flag from Supabase
       const { data: waitingFlag, error: selectError } = await supabase
         .from('waiting_flags')
-        .select('*')
+        .select('id, bus_id, status, student_uid')
         .eq('id', waitingFlagId)
         .single();
 
@@ -56,7 +56,7 @@ export const POST = withSecurity(
         })
         .eq('id', waitingFlagId)
         .in('status', ['raised', 'waiting'])
-        .select();
+        .select('id');
 
       if (updateError) {
         console.error(`[${requestId}] Failed to update flag status:`, updateError);

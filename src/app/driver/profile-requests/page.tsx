@@ -1,6 +1,5 @@
 "use client";
 
-import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import { Avatar,AvatarFallback,AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Card,CardContent,CardDescription,CardHeader,CardTitle } from "@/components/ui/card";
@@ -16,7 +15,7 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { useEffect,useState } from "react";
+import { startTransition, useEffect, useState } from "react";
 
 interface ProfileUpdateRequest {
   requestId: string;
@@ -59,7 +58,9 @@ export default function DriverProfileRequestsPage() {
           return;
         }
 
-        setDriver(driverData);
+        startTransition(() => {
+          setDriver(driverData);
+        });
         await fetchPendingRequests();
       } catch (err) {
         console.error("Error fetching data:", err);
@@ -87,7 +88,9 @@ export default function DriverProfileRequestsPage() {
       const result = await response.json();
       
       if (response.ok) {
-        setRequests(result.requests || []);
+        startTransition(() => {
+          setRequests(result.requests || []);
+        });
       } else {
         setError(result.error || "Failed to fetch profile requests");
       }
@@ -130,10 +133,6 @@ export default function DriverProfileRequestsPage() {
     }
   };
 
-  if (loading) {
-    return <PremiumPageLoader message="Loading profile requests..." subMessage="Fetching requests..." />;
-  }
-
   if (error) {
     return (
       <div className="container mx-auto p-6">
@@ -162,7 +161,24 @@ export default function DriverProfileRequestsPage() {
         </div>
       </div>
 
-      {requests.length === 0 ? (
+      {loading && requests.length === 0 ? (
+        <div className="grid gap-6">
+          {[1, 2].map((i) => (
+            <Card key={i} className="animate-pulse">
+              <div className="p-6 space-y-4">
+                <div className="flex items-center space-x-4">
+                  <div className="h-12 w-12 rounded-full bg-muted/60" />
+                  <div className="space-y-2 flex-1">
+                    <div className="h-4 w-48 bg-muted/60 rounded" />
+                    <div className="h-3 w-32 bg-muted/40 rounded" />
+                  </div>
+                </div>
+                <div className="h-32 bg-muted/30 rounded-xl" />
+              </div>
+            </Card>
+          ))}
+        </div>
+      ) : requests.length === 0 ? (
         <Card>
           <CardContent className="py-12 text-center">
             <Clock className="h-12 w-12 text-gray-400 mx-auto mb-4" />
@@ -175,7 +191,8 @@ export default function DriverProfileRequestsPage() {
       ) : (
         <div className="grid gap-6">
           {requests.map((request) => (
-            <Card key={request.requestId}>
+            <div key={request.requestId} style={{ contentVisibility: 'auto', containIntrinsicSize: '0 280px' }}>
+            <Card>
               <CardHeader>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center space-x-4">
@@ -285,7 +302,8 @@ export default function DriverProfileRequestsPage() {
                 </div>
               </CardContent>
             </Card>
-          ))}
+          </div>
+        ))}
         </div>
       )}
     </div>

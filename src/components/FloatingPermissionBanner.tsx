@@ -8,11 +8,21 @@ import { useCallback, useEffect, useState } from "react";
 
 export default function FloatingPermissionBanner() {
   const pathname = usePathname();
-  const { userData, currentUser } = useAuth();
+  const { userData, currentUser, loading: authLoading } = useAuth();
 
   const [notificationState, setNotificationState] = useState<NotificationPermission | 'unsupported'>('granted');
   const [geoState, setGeoState] = useState<PermissionState | 'unsupported'>('granted');
-  const [dismissed, setDismissed] = useState(false);
+  const [dismissed, setDismissed] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    try {
+      return (
+        localStorage.getItem('itms_perm_banner_dismissed') === 'true' ||
+        localStorage.getItem('itms_perm_banner_handled') === 'true'
+      );
+    } catch {
+      return false;
+    }
+  });
   const [requesting, setRequesting] = useState(false);
   const [showBlockedGuide, setShowBlockedGuide] = useState(false);
 
@@ -47,31 +57,52 @@ export default function FloatingPermissionBanner() {
 
   useEffect(() => {
     checkStatus();
-    if (typeof window !== 'undefined') {
-      const isDismissed = sessionStorage.getItem('itms_perm_banner_dismissed');
-      if (isDismissed === 'true') {
-        setDismissed(true);
+    if (typeof window !== 'undefined' && currentUser?.uid) {
+      try {
+        const isDismissed =
+          localStorage.getItem('itms_perm_banner_dismissed') === 'true' ||
+          localStorage.getItem('itms_perm_banner_handled') === 'true' ||
+          localStorage.getItem(`itms_perm_banner_dismissed_${currentUser.uid}`) === 'true' ||
+          localStorage.getItem(`itms_perm_banner_handled_${currentUser.uid}`) === 'true';
+        if (isDismissed) {
+          setDismissed(true);
+        }
+      } catch {
+        /* ignore */
       }
     }
-  }, [checkStatus]);
+  }, [checkStatus, currentUser?.uid]);
 
   // Don't render on public landing / login / legal pages
   const isPublicPage = pathname === '/' || pathname === '/login' || pathname?.startsWith('/(marketing)');
-  if (isPublicPage || !currentUser) return null;
+  if (isPublicPage) return null;
 
-  // If already granted for both, or dismissed for this session, hide card
-  const notificationsNeeded = notificationState === 'default';
-  const geoNeeded = geoState === 'prompt';
+  // Strict role check: ONLY show for authenticated students and drivers.
+  // Admins, moderators, unauthenticated users, or pending auth loading must NEVER see this banner.
+  if (authLoading || !currentUser || !userData) return null;
+  if (userData.role !== 'student' && userData.role !== 'driver') return null;
+
+  // Check if both notifications and geolocation are already granted (or unsupported by device)
+  const isNotificationSatisfied =
+    notificationState === 'granted' || notificationState === 'unsupported';
+  const isGeoSatisfied =
+    geoState === 'granted' || geoState === 'unsupported';
+
+  // If all permissions are already granted, never show the banner
+  if (isNotificationSatisfied && isGeoSatisfied) return null;
+
+  // If user has already dismissed or handled this prompt, never show it again (native mobile app behavior)
+  if (dismissed) return null;
+
   const isBlocked = notificationState === 'denied' || geoState === 'denied';
-
-  // If both permissions are granted, or user dismissed non-blocked prompt, don't show
-  if (!notificationsNeeded && !geoNeeded && !isBlocked) return null;
-  if (dismissed && !isBlocked) return null;
 
   const handleDismiss = () => {
     setDismissed(true);
     try {
-      sessionStorage.setItem('itms_perm_banner_dismissed', 'true');
+      localStorage.setItem('itms_perm_banner_dismissed', 'true');
+      if (currentUser?.uid) {
+        localStorage.setItem(`itms_perm_banner_dismissed_${currentUser.uid}`, 'true');
+      }
     } catch {
       /* ignore */
     }
@@ -109,12 +140,23 @@ export default function FloatingPermissionBanner() {
 
       // Re-evaluate permissions after native prompts complete
       await checkStatus();
+
+      // Mark as handled in localStorage like a mobile app (ask once, don't harass)
+      try {
+        localStorage.setItem('itms_perm_banner_handled', 'true');
+        if (currentUser?.uid) {
+          localStorage.setItem(`itms_perm_banner_handled_${currentUser.uid}`, 'true');
+        }
+      } catch {
+        /* ignore */
+      }
+      setDismissed(true);
     } finally {
       setRequesting(false);
     }
   };
 
-  const role = userData?.role || 'student';
+  const role = userData.role;
 
   // Role-specific natural English phrasing
   const roleCopy = {
@@ -126,13 +168,9 @@ export default function FloatingPermissionBanner() {
       title: "Live Pilot & Bus Updates",
       description: "For smooth communication between you and your pilot, it's recommended to allow location and notifications to receive live bus alerts and tracking.",
     },
-    general: {
-      title: "Real-Time Transit Alerts",
-      description: "For smooth communication and accurate transit tracking, it's recommended to enable location and notification permissions.",
-    }
   };
 
-  const currentCopy = role === 'driver' ? roleCopy.driver : role === 'student' ? roleCopy.student : roleCopy.general;
+  const currentCopy = role === 'driver' ? roleCopy.driver : roleCopy.student;
 
   return (
     <div

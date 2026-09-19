@@ -20,19 +20,16 @@ export const POST = withSecurity(
     const supabase = getSupabaseServer();
 
     // 1. Check if driver has an active trip in active_trips (primary check)
+    // IMPORTANT: Do NOT filter by inputBusId here! Any driver can start any bus, so if this
+    // driver has an active trip on ANY bus, we must return that active trip immediately.
     const now = new Date().toISOString();
-    let myTripQuery = supabase
+    const { data: myTrip } = await supabase
       .from('active_trips')
       .select('trip_id, driver_id, bus_id, route_id, shift, start_time')
       .eq('driver_id', driverUid)
       .eq('status', 'active')
-      .gt('expires_at', now);
-
-    if (inputBusId) {
-      myTripQuery = myTripQuery.eq('bus_id', inputBusId);
-    }
-
-    const { data: myTrip } = await myTripQuery.maybeSingle();
+      .gt('expires_at', now)
+      .maybeSingle();
 
     if (myTrip) {
       const startTime = myTrip.start_time ? new Date(myTrip.start_time).getTime() : Date.now();
@@ -50,7 +47,8 @@ export const POST = withSecurity(
       });
     }
 
-    // 2. If busId provided, check for lock held by another driver (non-expired only)
+    // 2. Driver has NO active trip.
+    // If a specific busId was explicitly queried, check whether THAT bus is currently locked by another driver.
     const targetBusId = inputBusId;
     if (targetBusId) {
       const { data: activeTrip } = await supabase
@@ -66,12 +64,13 @@ export const POST = withSecurity(
           hasActiveTrip: false,
           tripData: null,
           busLockedByOther: true,
+          targetBusId,
           lockInfo: {
             lockedByDriver: activeTrip.driver_id,
             tripId: activeTrip.trip_id,
             since: activeTrip.start_time
           },
-          reason: 'This bus is currently being operated by another driver. Please wait or try again later.'
+          reason: 'This specific bus is currently being operated by another driver. Please select another available bus.'
         });
       }
     }
@@ -79,6 +78,7 @@ export const POST = withSecurity(
     return NextResponse.json({
       hasActiveTrip: false,
       tripData: null,
+      busLockedByOther: false,
     });
   },
   {

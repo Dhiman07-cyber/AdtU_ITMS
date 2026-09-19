@@ -1,6 +1,5 @@
-﻿"use client";
+"use client";
 
-import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import RouteJourney from "@/components/RouteJourney";
 import { Button } from "@/components/ui/button";
 import {
@@ -184,7 +183,32 @@ export default function ViewBusPage({ params }: { params: Promise<{ id: string }
   };
 
   if (loading) {
-    return <PremiumPageLoader message="Loading bus details..." subMessage="Fetching diagnostics..." />;
+    return (
+      <div className="itms-admin-container space-y-6">
+        <div className="itms-page-header-container max-w-5xl mx-auto w-full">
+          <div className="flex items-center justify-between mb-8 gap-2">
+            <div>
+              <h1 className="text-xl md:text-2xl font-bold tracking-tight text-white mb-1 leading-tight pb-1">Bus Details</h1>
+              <p className="text-gray-400 text-xs hidden md:block">Fetching bus diagnostics...</p>
+            </div>
+            <Link
+              href="/admin/buses"
+              className="inline-flex items-center px-3 py-1.5 text-sm bg-secondary/80 hover:bg-secondary text-secondary-foreground border border-border/50 font-medium rounded-lg transition-colors shadow-sm"
+            >
+              ← Back
+            </Link>
+          </div>
+          <div className="bg-[#12131A] rounded-2xl border border-white/5 p-8 space-y-6 animate-pulse">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="h-32 bg-white/5 rounded-xl" />
+              <div className="h-32 bg-white/5 rounded-xl" />
+              <div className="h-32 bg-white/5 rounded-xl" />
+            </div>
+            <div className="h-64 bg-white/5 rounded-xl" />
+          </div>
+        </div>
+      </div>
+    );
   }
 
   // Helper to format ID (bus_1 -> Bus-1)
@@ -268,31 +292,31 @@ export default function ViewBusPage({ params }: { params: Promise<{ id: string }
   };
 
   return (
-    <div className="mt-7 min-h-screen bg-transparent py-8 w-full overflow-x-hidden">
+    <div className="itms-admin-container space-y-6">
       {/* Header */}
-      <div className="max-w-5xl mx-auto w-full max-w-[92vw] sm:max-w-5xl">
+      <div className="itms-page-header-container max-w-5xl mx-auto w-full">
         <div className="flex items-center justify-between mb-8 gap-2">
           <div>
-            <h1 className="text-xl md:text-2xl font-bold text-white mb-1">Bus Details</h1>
+            <h1 className="text-xl md:text-2xl font-bold tracking-tight text-white mb-1 leading-tight pb-1">Bus Details</h1>
             <p className="text-gray-400 text-xs hidden md:block">Detailed information about {bus.busNumber}</p>
           </div>
           <div className="flex items-center space-x-2">
             <Link
               href="/admin/buses"
-              className="inline-flex items-center px-3 py-1.5 text-sm bg-white hover:bg-gray-100 text-black font-medium rounded-lg transition-all duration-200 hover:shadow-lg"
+              className="inline-flex items-center px-3 py-1.5 text-sm bg-secondary/80 hover:bg-secondary text-secondary-foreground border border-border/50 font-medium rounded-lg transition-colors shadow-sm"
             >
-              &lt;- Back
+              ← Back
             </Link>
             <Button
               onClick={handleEdit}
-              className="hidden md:inline-flex bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-all duration-200 hover:shadow-lg px-3 py-1.5 h-auto"
+              className="hidden md:inline-flex bg-secondary/80 hover:bg-secondary text-secondary-foreground border border-border/50 text-sm font-medium rounded-lg transition-colors shadow-sm px-3 py-1.5 h-auto"
             >
               <Edit className="mr-1.5 h-3.5 w-3.5" />
               Edit Bus
             </Button>
             <Button
               onClick={handleDelete}
-              className="hidden md:inline-flex bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-lg transition-all duration-200 hover:shadow-lg px-3 py-1.5 h-auto"
+              className="hidden md:inline-flex bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-lg transition-colors shadow-sm px-3 py-1.5 h-auto"
             >
               <Trash2 className="mr-1.5 h-3.5 w-3.5" />
               Delete Bus
@@ -302,7 +326,7 @@ export default function ViewBusPage({ params }: { params: Promise<{ id: string }
       </div>
 
       {/* Main Content */}
-      <main className="max-w-5xl mx-auto w-full max-w-[92vw] sm:max-w-5xl">
+      <main className="max-w-5xl mx-auto w-full">
         <div className="bg-gray-900/50 rounded-2xl shadow-xl border border-gray-700/50 p-6">
           {/* Premium Bus Information Dashboard */}
           <div className="mb-8">

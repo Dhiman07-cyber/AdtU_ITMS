@@ -2,7 +2,6 @@
 
 import { useSidebar } from '@/components/AppShell';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
-import { PremiumPageLoader } from '@/components/LoadingSpinner';
 import MonthDayPicker,{ MonthDayValue,fromConfigFormat,toConfigFormat } from '@/components/month-day-picker';
 import TimePicker,{ TimeValue,fromConfigTime } from '@/components/time-picker';
 import { Button } from '@/components/ui/button';
@@ -632,8 +631,13 @@ export default function SystemRenewalConfigPage() {
     };
 
     // Auth check
-    if (authLoading || loading) {
-        return <PremiumPageLoader message="Loading configuration..." />;
+    if (authLoading && !currentUser) {
+        return (
+            <div className="itms-admin-container space-y-6 animate-pulse p-4">
+                <div className="h-10 w-48 bg-slate-200 dark:bg-zinc-800 rounded-md" />
+                <div className="h-64 bg-slate-100 dark:bg-zinc-900 rounded-xl border border-slate-200 dark:border-zinc-800" />
+            </div>
+        );
     }
 
     if (!currentUser || userData?.role !== 'admin') {
@@ -649,16 +653,16 @@ export default function SystemRenewalConfigPage() {
     }
     return (
         <div className="min-h-screen bg-card">
-            <div className="pt-20 pb-32 px-4 sm:px-6 lg:px-8">
+            <div className="itms-admin-container space-y-6">
                 <div className="max-w-5xl mx-auto">
                     {/* Header */}
-                    <div className="flex items-center gap-4 mb-6">
+                    <div className="itms-page-header-container flex items-center gap-4 mb-6">
                         <div className="p-3 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-2xl">
                             <Settings2 className="h-7 w-7 text-white" />
                         </div>
                         <div>
-                            <h1 className="text-2xl font-bold text-white">System Configuration</h1>
-                            <p className="text-gray-500 text-sm sm:text-base">Manage deadlines, UI content, and landing page</p>
+                            <h1 className="text-2xl font-bold tracking-tight text-white leading-tight pb-1">System Configuration</h1>
+                            <p className="text-gray-400 text-sm sm:text-base">Manage deadlines, UI content, and landing page</p>
                         </div>
                     </div>
 
@@ -699,10 +703,20 @@ export default function SystemRenewalConfigPage() {
 
                     {/* Content Area */}
                     <div className="bg-transparent md:bg-[#12131A] rounded-3xl md:border md:border-white/5 md:shadow-2xl">
-                        <div className="p-0 md:p-8 space-y-16 md:space-y-0">
+                        {loading ? (
+                            <div className="p-6 md:p-8 space-y-6 animate-pulse">
+                                <div className="h-10 bg-white/5 rounded-xl w-1/3" />
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    <div className="h-44 bg-white/5 rounded-2xl" />
+                                    <div className="h-44 bg-white/5 rounded-2xl" />
+                                </div>
+                                <div className="h-64 bg-white/5 rounded-2xl" />
+                            </div>
+                        ) : (
+                            <div className="p-0 md:p-8 space-y-16 md:space-y-0">
 
                             {/* SYSTEM CONFIG SECTION */}
-                            <div id="system-section" className={`${activeTab === 'system' ? 'block' : 'block md:hidden'} animate-in fade-in duration-300`}>
+                            <div id="system-section" style={{ contentVisibility: 'auto', containIntrinsicSize: '0 600px' }} className={`${activeTab === 'system' ? 'block' : 'block md:hidden'} animate-in fade-in duration-300`}>
                                 <div className="md:hidden flex items-center gap-2 mb-4 px-4 py-3 bg-white/5 rounded-xl border border-white/10">
                                     <Settings2 className="h-4 w-4 text-indigo-400" />
                                     <h2 className="text-sm font-bold text-white uppercase tracking-wider">System Config</h2>
@@ -785,7 +799,7 @@ export default function SystemRenewalConfigPage() {
                             </div>
 
                             {/* DEADLINE CONFIG SECTION */}
-                            <div id="deadline-section" className={`${activeTab === 'deadline' ? 'block' : 'block md:hidden'} pt-10 md:pt-0`}>
+                            <div id="deadline-section" style={{ contentVisibility: 'auto', containIntrinsicSize: '0 600px' }} className={`${activeTab === 'deadline' ? 'block' : 'block md:hidden'} pt-10 md:pt-0`}>
                                 <div className="md:hidden flex items-center gap-2 mb-4 px-4 py-3 bg-white/5 rounded-xl border border-white/10">
                                     <Calendar className="h-4 w-4 text-emerald-400" />
                                     <h2 className="text-sm font-bold text-white uppercase tracking-wider">Deadline Config</h2>
@@ -1062,7 +1076,7 @@ export default function SystemRenewalConfigPage() {
                             </div>
 
                             {/* TERMS & CONDITIONS SECTION */}
-                            <div id="terms-section" className={`${activeTab === 'terms' ? 'block' : 'block md:hidden'} pt-10 md:pt-0`}>
+                            <div id="terms-section" style={{ contentVisibility: 'auto', containIntrinsicSize: '0 800px' }} className={`${activeTab === 'terms' ? 'block' : 'block md:hidden'} pt-10 md:pt-0`}>
                                 <div className="md:hidden flex items-center gap-2 mb-4 px-4 py-3 bg-white/5 rounded-xl border border-white/10">
                                     <ScrollText className="h-4 w-4 text-indigo-400" />
                                     <h2 className="text-sm font-bold text-white uppercase tracking-wider">Terms & Conditions</h2>
@@ -1190,7 +1204,7 @@ export default function SystemRenewalConfigPage() {
 
 
                             {/* PRIVACY SECTION */}
-                            <div id="privacy-section" className={`${activeTab === 'privacy' ? 'block' : 'block md:hidden'} pt-10 md:pt-0`}>
+                            <div id="privacy-section" style={{ contentVisibility: 'auto', containIntrinsicSize: '0 800px' }} className={`${activeTab === 'privacy' ? 'block' : 'block md:hidden'} pt-10 md:pt-0`}>
                                 <div className="md:hidden flex items-center gap-2 mb-4 px-4 py-3 bg-white/5 rounded-xl border border-white/10">
                                     <Shield className="h-4 w-4 text-emerald-400" />
                                     <h2 className="text-sm font-bold text-white uppercase tracking-wider">Privacy Policy</h2>
@@ -1316,8 +1330,8 @@ export default function SystemRenewalConfigPage() {
                                     </div>
                                 </div>
                             </div>
-
                         </div>
+                    )}
                     </div>
                 </div>
             </div>

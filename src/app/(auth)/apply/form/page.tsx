@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import FormStepper from './components/FormStepper';
 import Step1Personal from './steps/Step1Personal';
@@ -10,7 +10,6 @@ import Step5Review from './steps/Step5Review';
 import { trackEvent } from '@/components/Analytics';
 import ApplyFormNavbar from '@/components/ApplyFormNavbar';
 import ErrorBoundary from '@/components/ErrorBoundary';
-import { PremiumPageLoader } from '@/components/LoadingSpinner';
 import ProfileImageAddModal from '@/components/ProfileImageAddModal';
 import { Button } from '@/components/ui/button';
 import { Dialog,DialogContent,DialogDescription,DialogFooter,DialogHeader,DialogTitle } from '@/components/ui/dialog';
@@ -1542,7 +1541,15 @@ function ApplicationFormContent() {
   }, [currentUser]);
 
   if (loading || (currentUser && loadingResources)) {
-    return <PremiumPageLoader fullScreen message="Initializing Application Form..." subMessage="Loading resources and verification status..." />;
+    return (
+      <div className="min-h-screen bg-[#05060e] text-white">
+        <ApplyFormNavbar />
+        <div className="max-w-4xl mx-auto px-4 pt-28 pb-16 space-y-6 animate-pulse">
+          <div className="h-10 w-64 bg-white/10 rounded-xl" />
+          <div className="h-96 bg-white/5 border border-white/10 rounded-2xl" />
+        </div>
+      </div>
+    );
   }
 
   if (isSubmitted) {

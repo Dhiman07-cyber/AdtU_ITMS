@@ -1,6 +1,5 @@
 "use client";
 
-import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card,CardContent } from "@/components/ui/card";
@@ -29,6 +28,9 @@ interface BusInfo {
   status: string;
   route_id: string;
   route_name: string;
+  is_in_trip?: boolean;
+  is_operated_by_other?: boolean;
+  is_operated_by_me?: boolean;
 }
 
 export default function StartTripPage() {
@@ -63,6 +65,14 @@ export default function StartTripPage() {
   }, [currentUser]);
 
   const selectBus = (bus: BusInfo) => {
+    if (bus.is_operated_by_other) {
+      setError(`Bus ${formatIdForDisplay(bus.bus_number || bus.id)} is currently operated by another driver. Please choose an available bus.`);
+      return;
+    }
+    if (bus.status === "inactive") {
+      setError(`Bus ${formatIdForDisplay(bus.bus_number || bus.id)} is currently inactive.`);
+      return;
+    }
     setSelectedBus(bus);
     setStep("select-shift");
   };
@@ -80,12 +90,18 @@ export default function StartTripPage() {
 
       if (res.ok) {
         const data = await res.json();
+        if (data.is_operated_by_other || data.isOperatedByOther) {
+          setError(`Bus ${formatIdForDisplay(data.busNumber || data.busId)} is currently being operated by another driver.`);
+          return;
+        }
         setSelectedBus({
           id: data.busId,
           bus_number: data.busNumber,
           status: data.status,
           route_id: data.routeId,
           route_name: data.routeName,
+          is_in_trip: data.isInTrip,
+          is_operated_by_other: data.isOperatedByOther,
         });
         setStep("select-shift");
       } else {
@@ -156,8 +172,21 @@ export default function StartTripPage() {
 
   if (loading) {
     return (
-      <div className="flex-1 min-h-[calc(100dvh-120px)] flex items-center justify-center bg-gray-50 dark:bg-[#020817]">
-        <PremiumPageLoader message="Loading..." subMessage="Checking available buses" />
+      <div className="flex-1 min-h-[calc(100dvh-120px)] bg-gradient-to-br from-gray-50 via-blue-50/30 to-purple-50/30 dark:from-gray-950 dark:via-slate-900 dark:to-gray-950">
+        <div className="max-w-lg mx-auto px-4 py-6 space-y-6">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-gray-200 dark:bg-gray-800 animate-pulse" />
+            <div className="space-y-1">
+              <div className="h-6 w-32 bg-gray-200 dark:bg-gray-800 rounded animate-pulse" />
+              <div className="h-4 w-48 bg-gray-100 dark:bg-gray-850 rounded animate-pulse" />
+            </div>
+          </div>
+          <div className="space-y-3">
+            {[1, 2, 3, 4].map((i) => (
+              <div key={i} className="h-20 rounded-2xl bg-white/80 dark:bg-gray-900/80 border border-gray-100 dark:border-gray-800 animate-pulse" />
+            ))}
+          </div>
+        </div>
       </div>
     );
   }
@@ -218,32 +247,49 @@ export default function StartTripPage() {
             {buses.length === 0 ? (
               <div className="p-8 text-center text-gray-400">
                 <Bus className="h-12 w-12 mx-auto mb-3 opacity-30" />
-                <p>No buses assigned to you</p>
+                <p>No available buses found</p>
               </div>
             ) : (
-              buses.map((bus) => (
-                <button
-                  key={bus.id}
-                  onClick={() => selectBus(bus)}
-                  disabled={bus.status === "inactive"}
-                  className="w-full p-4 rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 hover:border-blue-400 disabled:opacity-50 disabled:cursor-not-allowed transition-all text-left"
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className="p-2.5 rounded-xl bg-gradient-to-br from-blue-500 to-purple-600">
-                        <Bus className="h-5 w-5 text-white" />
+              buses.map((bus) => {
+                const isOccupied = !!bus.is_operated_by_other;
+                const isInactive = bus.status === "inactive";
+                const isDisabled = isOccupied || isInactive;
+                return (
+                  <button
+                    key={bus.id}
+                    onClick={() => !isDisabled && selectBus(bus)}
+                    disabled={isDisabled}
+                    className={`w-full p-4 rounded-2xl border transition-all text-left ${
+                      isDisabled
+                        ? "border-gray-200 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-900/40 opacity-60 cursor-not-allowed"
+                        : "border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 hover:border-blue-400 cursor-pointer shadow-sm"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className={`p-2.5 rounded-xl ${isDisabled ? "bg-gray-400" : "bg-gradient-to-br from-blue-500 to-purple-600"}`}>
+                          <Bus className="h-5 w-5 text-white" />
+                        </div>
+                        <div>
+                          <p className="font-semibold">{formatIdForDisplay(bus.bus_number || bus.id)}</p>
+                          <p className="text-xs text-gray-500">{bus.route_name || bus.route_id || "No route"}</p>
+                        </div>
                       </div>
-                      <div>
-                        <p className="font-semibold">{formatIdForDisplay(bus.bus_number || bus.id)}</p>
-                        <p className="text-xs text-gray-500">{bus.route_name || bus.route_id || "No route"}</p>
+                      <div className="flex items-center gap-2">
+                        {isOccupied ? (
+                          <Badge className="bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 border-amber-300">
+                            In Trip (In Use)
+                          </Badge>
+                        ) : (
+                          <Badge className={bus.status === "active" ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" : "bg-gray-100 text-gray-500"}>
+                            Available
+                          </Badge>
+                        )}
                       </div>
                     </div>
-                    <Badge className={bus.status === "active" ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"}>
-                      {bus.status}
-                    </Badge>
-                  </div>
-                </button>
-              ))
+                  </button>
+                );
+              })
             )}
           </div>
         )}

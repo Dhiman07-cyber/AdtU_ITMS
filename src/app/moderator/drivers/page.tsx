@@ -1,7 +1,7 @@
 "use client";
 
 import Avatar from '@/components/Avatar';
-import { PremiumPageLoader } from '@/components/LoadingSpinner';
+import { TableRowLoader } from '@/components/LoadingSpinner';
 import { Button } from "@/components/ui/button";
 import {
 	Card,
@@ -45,10 +45,11 @@ import { deleteDriver } from '@/lib/dataService';
 import { safeImageSrc } from "@/lib/security/url-sanitizer";
 import { supabase } from "@/lib/supabase-client";
 import { cn } from "@/lib/utils";
-import { ArrowRightLeft,Edit,Eye,Filter,Loader2,MoreHorizontal,Plus,RefreshCw,Search,Trash2 } from "lucide-react";
+import { ArrowRightLeft,Download,Edit,Eye,Filter,Loader2,MoreHorizontal,Plus,RefreshCw,Search,Trash2 } from "lucide-react";
+import { MobileActionFAB } from '@/components/layout/MobileActionFAB';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useEffect,useMemo,useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 // Migrated: Server-side API → PostgreSQL (no Firestore client reads)
 import { ExportButton } from '@/components/ExportButton';
 import { PermissionDeniedCard } from '@/components/PermissionDeniedCard';
@@ -57,6 +58,122 @@ import { useEventDrivenRefresh } from '@/hooks/useEventDrivenRefresh';
 import { useModeratorPermissions } from '@/hooks/useModeratorPermissions';
 import { exportToExcel } from '@/lib/export-helpers';
 import { formatDateDDMMYYYY } from '@/lib/utils/date-utils';
+
+function ModeratorDriverRow({
+  driver,
+  busDisplay,
+  canDriverEdit,
+  canDriverDelete,
+  onDelete,
+}: {
+  driver: any;
+  busDisplay: string | null;
+  canDriverEdit: boolean;
+  canDriverDelete: boolean;
+  onDelete: (item: { id: string; name: string }) => void;
+}) {
+  const joining = driver.joiningDate || driver.joinDate;
+  const years = (() => {
+    if (!joining) return 'N/A';
+    const joinDate = new Date(joining);
+    const y = Math.floor((Date.now() - joinDate.getTime()) / (365.25 * 24 * 60 * 60 * 1000));
+    return y > 0 ? `${y} year${y > 1 ? 's' : ''}` : '< 1 year';
+  })();
+
+  return (
+    <TableRow>
+      <TableCell className="py-2">
+        <div className="flex flex-row items-center gap-2">
+          <Avatar
+            src={safeImageSrc(driver.profilePhotoUrl)}
+            name={driver.name || driver.fullName}
+            size="sm"
+            className="flex-shrink-0"
+          />
+          <div className="flex flex-col min-w-0">
+            <div className="font-medium text-foreground text-sm">{driver.name || driver.fullName}</div>
+            <div className="text-xs text-muted-foreground">{driver.email}</div>
+          </div>
+        </div>
+      </TableCell>
+      <TableCell className="py-2 text-center">
+        <div className="inline-block text-left space-y-0.5">
+          <div className="font-semibold text-foreground text-xs">
+            Ph: {driver.phone || 'N/A'}
+          </div>
+          {driver.alternatePhone && (
+            <div className="text-xs text-muted-foreground">
+              Alt: {driver.alternatePhone}
+            </div>
+          )}
+        </div>
+      </TableCell>
+      <TableCell className="py-2 text-center">
+        <div className="font-mono text-xs text-foreground">
+          {driver.employeeId || driver.empId || driver.driverId || 'N/A'}
+        </div>
+      </TableCell>
+      <TableCell className="py-2 text-center">
+        {busDisplay ? (
+          <span className="text-[10px] whitespace-nowrap">
+            {busDisplay}
+          </span>
+        ) : (
+          <span className="text-[10px] text-muted-foreground italic whitespace-nowrap">Unassigned</span>
+        )}
+      </TableCell>
+      <TableCell className="py-2 text-center">
+        <div className="inline-block text-left space-y-0.5">
+          <div className="font-semibold text-foreground text-xs">
+            {years}
+          </div>
+          <div className="text-[10px] text-muted-foreground">
+            Since {joining ? new Date(joining).getFullYear() || 'N/A' : 'N/A'}
+          </div>
+        </div>
+      </TableCell>
+      <TableCell className="text-right py-2">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" className="h-8 w-8 p-0 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700">
+              <MoreHorizontal className="h-4 w-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="bg-gray-800 dark:bg-gray-900 border-gray-700 dark:border-gray-600 shadow-xl rounded-lg w-44">
+            <DropdownMenuLabel className="text-white font-semibold px-2 py-1.5 text-sm">Actions</DropdownMenuLabel>
+            <DropdownMenuSeparator className="bg-gray-600" />
+            <DropdownMenuItem asChild>
+              <Link href={`/moderator/drivers/view/${driver.id}`} className="text-white hover:bg-gray-700 dark:hover:bg-gray-800 focus:bg-gray-700 dark:focus:bg-gray-800 px-2 py-1.5 text-sm !text-white">
+                <Eye className="mr-2 h-3.5 w-3.5 text-blue-400" />
+                View Details
+              </Link>
+            </DropdownMenuItem>
+            {canDriverEdit && (
+              <DropdownMenuItem asChild>
+                <Link href={`/moderator/drivers/edit/${driver.id}`} className="text-white hover:bg-gray-700 dark:hover:bg-gray-800 focus:bg-gray-700 dark:focus:bg-gray-800 px-2 py-1.5 text-sm !text-white">
+                  <Edit className="mr-2 h-3.5 w-3.5 text-yellow-400" />
+                  Edit
+                </Link>
+              </DropdownMenuItem>
+            )}
+            {canDriverDelete && (
+              <>
+                <DropdownMenuSeparator className="bg-gray-600" />
+                <DropdownMenuItem
+                  className="text-white hover:!bg-red-600 focus:!bg-red-600 px-2 py-1.5 text-sm !text-white cursor-pointer transition-colors"
+                  onClick={() => onDelete({ id: driver.id, name: driver.name || driver.fullName })}
+                >
+                  <Trash2 className="mr-2 h-3.5 w-3.5" />
+                  Delete
+                </DropdownMenuItem>
+              </>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </TableCell>
+    </TableRow>
+  );
+}
 
 export default function AdminDrivers() {
   const { currentUser, userData, loading: authLoading } = useAuth();
@@ -87,7 +204,13 @@ export default function AdminDrivers() {
   const [deleteItem, setDeleteItem] = useState<{ id: string, name: string } | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [experienceFilter, setExperienceFilter] = useState<string>("all");
+  const [statusFilter, setStatusFilter] = useState<string>("all");
   const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const handleDeleteClick = (item: { id: string; name: string }) => {
+    setDeleteItem(item);
+    setIsDialogOpen(true);
+  };
 
   const isLoading = loadingDrivers || loadingBuses;
 
@@ -149,7 +272,7 @@ export default function AdminDrivers() {
       // Fetch all driver profiles from Supabase PostgreSQL table 'driver_profiles'
       const { data: rawDrivers, error } = await supabase
         .from('driver_profiles')
-        .select('*')
+        .select('uid, full_name, email, phone, employee_id, license_number, joining_date, status')
         .order('full_name', { ascending: true });
 
       if (error) throw error;
@@ -194,7 +317,7 @@ export default function AdminDrivers() {
     }
   };
 
-  const commonBtnClass = "group h-8 px-4 bg-white hover:bg-gray-50 text-gray-600 hover:text-blue-600 border border-gray-200 hover:border-blue-200 shadow-sm hover:shadow-lg hover:shadow-blue-500/10 font-bold text-[10px] uppercase tracking-widest rounded-lg transition-all duration-300 active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer";
+  const commonBtnClass = "group h-8 px-3.5 bg-secondary/80 hover:bg-secondary text-secondary-foreground border border-border/50 shadow-sm font-medium text-xs rounded-lg transition-colors active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer";
 
   // Filter and sort drivers — memoized so the full list isn't re-scanned and
   // re-sorted on every unrelated re-render (only when data/filters change).
@@ -219,7 +342,14 @@ export default function AdminDrivers() {
         else if (experienceFilter === "10+") matchesExperience = years > 10;
       }
 
-      return matchesSearch && matchesExperience;
+      // Status filter
+      let matchesStatus = true;
+      if (statusFilter !== "all") {
+        const driverStatus = (driver.status || 'Active').toLowerCase();
+        matchesStatus = driverStatus === statusFilter.toLowerCase();
+      }
+
+      return matchesSearch && matchesExperience && matchesStatus;
     })
     .sort((a, b) => {
       // Sort: Bus-assigned first (by bus number), then reserved
@@ -234,10 +364,15 @@ export default function AdminDrivers() {
       const aBusNum = parseInt(aBusId.replace(/[^0-9]/g, '') || '999');
       const bBusNum = parseInt(bBusId.replace(/[^0-9]/g, '') || '999');
       return aBusNum - bBusNum;
-    }), [drivers, searchTerm, experienceFilter]);
+    }), [drivers, searchTerm, experienceFilter, statusFilter]);
 
-  if (authLoading || isLoading) {
-    return <PremiumPageLoader message="Loading Drivers..." subMessage="Fetching driver records and assignments..." />;
+  if (authLoading && !currentUser) {
+    return (
+      <div className="itms-admin-container space-y-6 animate-pulse">
+        <div className="h-10 w-64 bg-slate-200 dark:bg-zinc-800 rounded-md" />
+        <div className="h-64 bg-slate-100 dark:bg-zinc-900 rounded-xl border border-slate-200 dark:border-zinc-800" />
+      </div>
+    );
   }
 
   if (!currentUser || !userData || (userData.role !== 'admin' && userData.role !== 'moderator')) {
@@ -248,47 +383,60 @@ export default function AdminDrivers() {
     return <PermissionDeniedCard title="Drivers Section Restricted" actionName="Viewing Drivers" showGoBack={false} />;
   }
 
-
-
   return (
-    <div className="mt-12 space-y-6">
+    <div className="itms-admin-container space-y-6">
       {/* Page Header */}
-      <div className="flex justify-between items-center">
-        <div>
-          <h1 className="text-3xl font-bold text-foreground">Driver Management</h1>
-          <p className="text-muted-foreground mt-1">View and manage all drivers</p>
+      <div className="itms-page-header-container">
+        <div className="flex items-center justify-between w-full gap-2">
+          <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-foreground truncate leading-tight pb-1">Driver Management</h1>
+
+          {/* Desktop action toolbar */}
+          <div className="hidden md:flex items-center gap-2 shrink-0">
+            {canDriverAdd && (
+              <Link href="/moderator/drivers/add">
+                <Button className="bg-blue-600 hover:bg-blue-700 text-white border border-blue-700 shadow-sm transition-all duration-200 hover:scale-105 hover:shadow-lg rounded-md px-2.5 py-1.5 text-xs h-8 cursor-pointer">
+                  <Plus className="mr-1.5 h-3.5 w-3.5" />
+                  Add New Driver
+                </Button>
+              </Link>
+            )}
+            {canDriverReassign && (
+              <Link href="/moderator/driver-assignment">
+                <Button className="bg-purple-600/90 hover:bg-purple-600 text-white border border-purple-500/30 shadow-sm transition-all duration-200 hover:scale-[1.02] hover:shadow-md rounded-lg px-2.5 py-1.5 text-xs h-8 cursor-pointer">
+                  <ArrowRightLeft className="mr-1.5 h-3.5 w-3.5" />
+                  Driver Reassignment
+                </Button>
+              </Link>
+            )}
+            <ExportButton
+              onClick={() => handleExportDrivers()}
+              label="Export"
+              className={commonBtnClass}
+            />
+            <Button
+              onClick={handleRefresh}
+              disabled={isRefreshing}
+              className={commonBtnClass}
+            >
+              <RefreshCw className={cn("h-3.5 w-3.5 transition-transform duration-500", isRefreshing ? "animate-spin" : "group-hover:rotate-180")} />
+              <span>Refresh</span>
+            </Button>
+          </div>
+
+          {/* Mobile Refresh Button - exact same line as Driver Management at rightmost end */}
+          <div className="flex md:hidden items-center shrink-0">
+            <Button
+              size="sm"
+              onClick={handleRefresh}
+              disabled={isRefreshing}
+              className="h-8 px-3 bg-white dark:bg-zinc-800 hover:bg-gray-50 dark:hover:bg-zinc-700 text-gray-700 dark:text-zinc-200 hover:text-blue-600 dark:hover:text-blue-400 border border-gray-200 dark:border-zinc-700 shadow-sm rounded-lg text-xs font-semibold flex items-center gap-1.5 cursor-pointer active:scale-95 transition-all shrink-0"
+            >
+              <RefreshCw className={cn("h-3.5 w-3.5 transition-transform duration-500", isRefreshing ? "animate-spin text-blue-600" : "group-hover:rotate-180")} />
+              <span>Refresh</span>
+            </Button>
+          </div>
         </div>
-        <div className="flex gap-2">
-          {canDriverAdd && (
-            <Link href="/moderator/drivers/add">
-              <Button className="bg-blue-600 hover:bg-blue-700 text-white border border-blue-700 shadow-sm transition-all duration-200 hover:scale-105 hover:shadow-lg rounded-md px-2.5 py-1.5 text-xs h-8">
-                <Plus className="mr-1.5 h-3.5 w-3.5" />
-                Add New Driver
-              </Button>
-            </Link>
-          )}
-          {canDriverReassign && (
-            <Link href="/moderator/driver-assignment">
-              <Button className="bg-slate-800 hover:bg-slate-900 text-white dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-100 border border-slate-700 dark:border-slate-600 shadow-sm transition-all duration-200 hover:scale-105 hover:shadow-lg rounded-md px-2.5 py-1.5 text-xs h-8">
-                <ArrowRightLeft className="mr-1.5 h-3.5 w-3.5" />
-                Driver Reassignment
-              </Button>
-            </Link>
-          )}
-          <ExportButton
-            onClick={() => handleExportDrivers()}
-            label="EXPORT"
-            className={commonBtnClass}
-          />
-          <Button
-            onClick={handleRefresh}
-            disabled={isRefreshing}
-            className={commonBtnClass}
-          >
-            <RefreshCw className={cn("h-3.5 w-3.5 transition-transform duration-500", isRefreshing ? "animate-spin" : "group-hover:rotate-180")} />
-            REFRESH
-          </Button>
-        </div>
+        <p className="text-muted-foreground mt-1 text-xs sm:text-sm truncate">View and manage all drivers</p>
       </div>
 
       <Card className="bg-gray-50 dark:bg-gray-900 border-gray-200 dark:border-gray-800 min-h-[480px] flex flex-col">
@@ -307,31 +455,42 @@ export default function AdminDrivers() {
                 />
               </div>
 
-              {/* Filters - Side by side on Mobile */}
-              <div className="flex gap-2 items-center w-full md:w-auto overflow-x-auto pb-1 md:pb-0 no-scrollbar">
-                <Filter className="h-3.5 w-3.5 text-gray-500 flex-shrink-0" />
-
+              {/* Filters - Side by side on Mobile in the same line */}
+              <div className="grid grid-cols-2 gap-2 items-center w-full md:w-auto md:flex md:flex-row">
                 <Select value={experienceFilter} onValueChange={setExperienceFilter}>
-                  <SelectTrigger className="h-8 text-xs min-w-[120px] flex-1 md:w-[180px] bg-white dark:bg-gray-800 md:bg-transparent border-gray-200 dark:border-gray-700">
+                  <SelectTrigger className="h-9 md:h-8 text-xs w-full md:w-[140px] bg-white dark:bg-gray-800 md:bg-transparent border-gray-200 dark:border-gray-700">
                     <SelectValue placeholder="Experience" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all" className="text-xs">All Experience</SelectItem>
-                    <SelectItem value="0-2" className="text-xs">0-2 years</SelectItem>
-                    <SelectItem value="3-5" className="text-xs">3-5 years</SelectItem>
-                    <SelectItem value="6-10" className="text-xs">6-10 years</SelectItem>
-                    <SelectItem value="10+" className="text-xs">10+ years</SelectItem>
+                    <SelectItem value="0-2" className="text-xs">0-2 Years</SelectItem>
+                    <SelectItem value="3-5" className="text-xs">3-5 Years</SelectItem>
+                    <SelectItem value="6-10" className="text-xs">6-10 Years</SelectItem>
+                    <SelectItem value="10+" className="text-xs">10+ Years</SelectItem>
                   </SelectContent>
                 </Select>
 
-                {(experienceFilter !== "all") && (
+                <Select value={statusFilter} onValueChange={setStatusFilter}>
+                  <SelectTrigger className="h-9 md:h-8 text-xs w-full md:w-[130px] bg-white dark:bg-gray-800 md:bg-transparent border-gray-200 dark:border-gray-700">
+                    <SelectValue placeholder="Status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all" className="text-xs">All Status</SelectItem>
+                    <SelectItem value="active" className="text-xs">Active</SelectItem>
+                    <SelectItem value="inactive" className="text-xs">Inactive</SelectItem>
+                    <SelectItem value="on duty" className="text-xs">On Duty</SelectItem>
+                  </SelectContent>
+                </Select>
+
+                {(experienceFilter !== "all" || statusFilter !== "all") && (
                   <Button
                     variant="ghost"
                     size="sm"
                     onClick={() => {
                       setExperienceFilter("all");
+                      setStatusFilter("all");
                     }}
-                    className="h-8 px-3 text-xs bg-red-500 hover:bg-red-600 text-white flex-shrink-0"
+                    className="h-8 px-3 text-xs col-span-2 md:col-span-1 bg-red-500/20 text-red-400 hover:bg-red-500/30 dark:bg-red-500/20 dark:text-red-400 flex-shrink-0"
                   >
                     Clear
                   </Button>
@@ -353,119 +512,28 @@ export default function AdminDrivers() {
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
-                {filteredDrivers.length > 0 && (
-                  <TableBody>
-                    {filteredDrivers.map((driver) => {
-                      // Calculate years of service
-                      const calculateYearsOfService = (joiningDate: string) => {
-                        if (!joiningDate) return 'N/A';
-                        const joinDate = new Date(joiningDate);
-                        const currentDate = new Date();
-                        const years = Math.floor((currentDate.getTime() - joinDate.getTime()) / (365.25 * 24 * 60 * 60 * 1000));
-                        return years > 0 ? `${years} year${years > 1 ? 's' : ''}` : '< 1 year';
-                      };
-
-                      return (
-                        <TableRow key={driver.id}>
-                          <TableCell className="py-2">
-                            <div className="flex flex-row items-center gap-2">
-                              <Avatar
-                                src={safeImageSrc(driver.profilePhotoUrl)}
-                                name={driver.name || driver.fullName}
-                                size="sm"
-                                className="flex-shrink-0"
-                              />
-                              <div className="flex flex-col min-w-0">
-                                <div className="font-medium text-foreground text-sm">{driver.name || driver.fullName}</div>
-                                <div className="text-xs text-muted-foreground">{driver.email}</div>
-                              </div>
-                            </div>
-                          </TableCell>
-                          <TableCell className="py-2 text-center">
-                            <div className="inline-block text-left space-y-0.5">
-                              <div className="font-semibold text-foreground text-xs">
-                                Ph: {driver.phone || 'N/A'}
-                              </div>
-                              {driver.alternatePhone && (
-                                <div className="text-xs text-muted-foreground">
-                                  Alt: {driver.alternatePhone}
-                                </div>
-                              )}
-                            </div>
-                          </TableCell>
-                          <TableCell className="py-2 text-center">
-                            <div className="font-mono text-xs text-foreground">
-                              {driver.employeeId || driver.empId || driver.driverId || 'N/A'}
-                            </div>
-                          </TableCell>
-                          <TableCell className="py-2 text-center">
-                            {getBusDisplay(driver.busId || driver.busId) ? (
-                              <span className="text-[10px] whitespace-nowrap">
-                                {getBusDisplay(driver.busId || driver.busId)}
-                              </span>
-                            ) : (
-                              <span className="text-[10px] text-muted-foreground italic whitespace-nowrap">Unassigned</span>
-                            )}
-                          </TableCell>
-                          <TableCell className="py-2 text-center">
-                            <div className="inline-block text-left space-y-0.5">
-                              <div className="font-semibold text-foreground text-xs">
-                                {calculateYearsOfService(driver.joiningDate || driver.joinDate)}
-                              </div>
-                              <div className="text-[10px] text-muted-foreground">
-                                Since {new Date(driver.joiningDate || driver.joinDate).getFullYear() || 'N/A'}
-                              </div>
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-right py-2">
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" className="h-8 w-8 p-0 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700">
-                                  <MoreHorizontal className="h-4 w-4" />
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end" className="bg-gray-800 dark:bg-gray-900 border-gray-700 dark:border-gray-600 shadow-xl rounded-lg w-44">
-                                <DropdownMenuLabel className="text-white font-semibold px-2 py-1.5 text-sm">Actions</DropdownMenuLabel>
-                                <DropdownMenuSeparator className="bg-gray-600" />
-                                <DropdownMenuItem asChild>
-                                  <Link href={`/moderator/drivers/view/${driver.id}`} className="text-white hover:bg-gray-700 dark:hover:bg-gray-800 focus:bg-gray-700 dark:focus:bg-gray-800 px-2 py-1.5 text-sm !text-white">
-                                    <Eye className="mr-2 h-3.5 w-3.5 text-blue-400" />
-                                    View Details
-                                  </Link>
-                                </DropdownMenuItem>
-                                {canDriverEdit && (
-                                  <DropdownMenuItem asChild>
-                                    <Link href={`/moderator/drivers/edit/${driver.id}`} className="text-white hover:bg-gray-700 dark:hover:bg-gray-800 focus:bg-gray-700 dark:focus:bg-gray-800 px-2 py-1.5 text-sm !text-white">
-                                      <Edit className="mr-2 h-3.5 w-3.5 text-yellow-400" />
-                                      Edit
-                                    </Link>
-                                  </DropdownMenuItem>
-                                )}
-                                {canDriverDelete && (
-                                  <>
-                                    <DropdownMenuSeparator className="bg-gray-600" />
-                                    <DropdownMenuItem
-                                      className="text-white hover:!bg-red-600 focus:!bg-red-600 px-2 py-1.5 text-sm !text-white cursor-pointer transition-colors"
-                                      onClick={() => {
-                                        setDeleteItem({ id: driver.id, name: driver.name || driver.fullName });
-                                        setIsDialogOpen(true);
-                                      }}
-                                    >
-                                      <Trash2 className="mr-2 h-3.5 w-3.5" />
-                                      Delete
-                                    </DropdownMenuItem>
-                                  </>
-                                )}
-                              </DropdownMenuContent>
-                            </DropdownMenu>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                )}
+                <TableBody>
+                  {isLoading && filteredDrivers.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={6} className="p-6">
+                        <TableRowLoader rows={5} />
+                      </TableCell>
+                    </TableRow>
+                  ) : filteredDrivers.length > 0 ? (
+                    filteredDrivers.map((driver) => (
+                      <ModeratorDriverRow
+                        key={driver.id}
+                        driver={driver}
+                        busDisplay={getBusDisplay(driver.busId || driver.busId)}
+                        canDriverEdit={canDriverEdit}
+                        canDriverDelete={canDriverDelete}
+                        onDelete={handleDeleteClick}
+                      />
+                    ))
+                  ) : null}
+                </TableBody>
               </Table>
-              {filteredDrivers.length === 0 && (
+              {!isLoading && filteredDrivers.length === 0 && (
                 <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-xs text-gray-500 min-h-[220px]">
                   No drivers found
                 </div>
@@ -525,6 +593,31 @@ export default function AdminDrivers() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Mobile Floating Action Button (FAB) for Quick Moderator Actions */}
+      <MobileActionFAB
+        ariaLabel="Driver management actions"
+        actions={[
+          ...(canDriverAdd ? [{
+            label: "Add New Driver",
+            icon: Plus,
+            href: "/moderator/drivers/add",
+            color: "bg-blue-600 text-white",
+          }] : []),
+          ...(canDriverReassign ? [{
+            label: "Driver Reassignment",
+            icon: ArrowRightLeft,
+            href: "/moderator/driver-assignment",
+            color: "bg-slate-800 text-white",
+          }] : []),
+          {
+            label: "Export Drivers",
+            icon: Download,
+            onClick: handleExportDrivers,
+            color: "bg-emerald-600 text-white",
+          },
+        ]}
+      />
     </div>
   );
 }

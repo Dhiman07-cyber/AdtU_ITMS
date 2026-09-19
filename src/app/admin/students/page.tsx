@@ -2,8 +2,7 @@
 
 import Avatar from '@/components/Avatar';
 import { ExportButton } from '@/components/ExportButton';
-import { PremiumPageLoader, TableLoader } from '@/components/LoadingSpinner';
-import { usePageShellLoader } from '@/hooks/usePageShellLoader';
+import { TableRowLoader } from '@/components/LoadingSpinner';
 import { Button } from "@/components/ui/button";
 import {
 	Card,
@@ -47,19 +46,18 @@ import { deleteStudent } from '@/lib/dataService';
 import { exportToExcel } from '@/lib/export-helpers';
 import { safeImageSrc } from "@/lib/security/url-sanitizer";
 import { supabase } from '@/lib/supabase-client';
-import { ArrowRightLeft,Edit,Eye,Filter,Loader2,MoreHorizontal,Plus,QrCode,RefreshCw,Search,Trash2 } from "lucide-react";
+import { ArrowRightLeft,Download,Edit,Eye,Filter,Loader2,MoreHorizontal,Plus,QrCode,RefreshCw,Search,Trash2 } from "lucide-react";
+import { MobileActionFAB } from '@/components/layout/MobileActionFAB';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { memo,useCallback,useEffect,useMemo,useState } from 'react';
+import { useEffect,useMemo,useState } from 'react';
 // Migrated: Server-side API → PostgreSQL (no Firestore client reads)
 import { useTheme } from '@/components/theme-provider';
 import { invalidateCollectionCache,useApiCollection } from '@/hooks/useApiCollection';
 import { useEventDrivenRefresh } from '@/hooks/useEventDrivenRefresh';
 import { cn } from '@/lib/utils';
 
-// Memoized table row — skips re-rendering for students whose data and handlers
-// are unchanged, keeping search/filter typing smooth even with a full page of rows.
-const StudentRow = memo(function StudentRow({
+function StudentRow({
   student,
   theme,
   busDisplay,
@@ -71,7 +69,7 @@ const StudentRow = memo(function StudentRow({
   onDelete: (item: { id: string; name: string }) => void;
 }) {
   return (
-    <TableRow className="h-auto">
+    <TableRow className="h-auto" style={{ contentVisibility: 'auto', containIntrinsicSize: '0 52px' }}>
       <TableCell className="py-1.5">
         <div className="flex flex-row items-center gap-2">
           <Avatar
@@ -185,7 +183,7 @@ const StudentRow = memo(function StudentRow({
       </TableCell>
     </TableRow>
   );
-});
+}
 
 export default function AdminStudents() {
   const { currentUser, userData, loading: authLoading } = useAuth();
@@ -232,11 +230,10 @@ export default function AdminStudents() {
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteItem, setDeleteItem] = useState<{ id: string, name: string } | null>(null);
 
-  // Stable handler so memoized rows don't re-render when unrelated state changes.
-  const handleDeleteClick = useCallback((item: { id: string; name: string }) => {
+  const handleDeleteClick = (item: { id: string; name: string }) => {
     setDeleteItem(item);
     setIsDialogOpen(true);
-  }, []);
+  };
   const [searchTerm, setSearchTerm] = useState("");
   const [shiftFilter, setShiftFilter] = useState<string>("all");
   const [busFilter, setBusFilter] = useState<string>("all");
@@ -329,7 +326,7 @@ export default function AdminStudents() {
     return map;
   }, [buses]);
 
-  const getBusDisplay = useCallback((busId: string) => {
+  const getBusDisplay = (busId: string) => {
     if (!busId) return 'Not Assigned';
 
     const bus = busById.get(busId);
@@ -337,7 +334,7 @@ export default function AdminStudents() {
 
     const busNum = busId.replace(/[^0-9]/g, '') || '?';
     return `Bus-${busNum} (${bus.busNumber || 'N/A'})`;
-  }, [busById]);
+  };
 
   // Get unique values for filters with proper numeric sorting
   const uniqueBuses = useMemo(() => Array.from(new Set(students.map(s => s.busId).filter(Boolean)))
@@ -385,7 +382,7 @@ export default function AdminStudents() {
       // Fetch all students directly from Supabase PostgreSQL table 'student_profiles'
       const { data: rawStudents, error: studentsError } = await supabase
         .from('student_profiles')
-        .select('*')
+        .select('uid, full_name, email, phone, faculty, enrollment_id, bus_id, shift, session_start_year, session_end_year, session_duration, status')
         .order('full_name', { ascending: true });
 
       if (studentsError) throw studentsError;
@@ -450,66 +447,79 @@ export default function AdminStudents() {
     return match ? match[0] : '0';
   };
 
-  // Only show full page loader on initial load (when no data exists)
-  // AND we are strictly in a loading state.
-  // This prevents the page from "jumping" during search or refresh.
-  const showFullPageLoader = authLoading || (isLoading && students.length === 0 && !searchResults);
-  const { showLoader } = usePageShellLoader(showFullPageLoader, 3500);
-
-  if (showLoader) {
-    return <PremiumPageLoader message="Curating Student Directory..." subMessage="Fetching student profiles and status..." />;
+  if (authLoading && !currentUser) {
+    return (
+      <div className="itms-admin-container space-y-6 animate-pulse">
+        <div className="h-10 w-64 bg-slate-200 dark:bg-zinc-800 rounded-md" />
+        <div className="h-64 bg-slate-100 dark:bg-zinc-900 rounded-xl border border-slate-200 dark:border-zinc-800" />
+      </div>
+    );
   }
 
   if (!currentUser || !userData || userData.role !== 'admin') {
     return null;
   }
 
-  const commonBtnClass = "group h-8 px-4 bg-white hover:bg-gray-50 text-gray-600 hover:text-blue-600 border border-gray-200 hover:border-blue-200 shadow-sm hover:shadow-lg hover:shadow-blue-500/10 font-bold text-[10px] uppercase tracking-widest rounded-lg transition-all duration-300 active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer";
+  const commonBtnClass = "group h-8 px-3.5 bg-white/80 dark:bg-zinc-800/80 hover:bg-zinc-50 dark:hover:bg-zinc-700/80 text-zinc-700 dark:text-zinc-200 hover:text-blue-600 dark:hover:text-blue-400 border border-zinc-200 dark:border-zinc-700/60 shadow-xs text-xs font-semibold rounded-lg transition-all duration-200 active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer";
 
   return (
-    <div className="mt-12 space-y-6">
+    <div className="itms-admin-container space-y-6">
       {/* Page Header */}
-      <div className="flex justify-between items-center">
-        <div>
-          <h1 className="text-3xl font-bold text-foreground">Student Management</h1>
-          <p className="text-muted-foreground mt-1">View and manage all students</p>
-        </div>
-        <div className="flex gap-2">
-          <Link href="/admin/students/add">
-            <Button className="bg-blue-600 hover:bg-blue-700 text-white border border-blue-700 shadow-sm transition-all duration-200 hover:scale-105 hover:shadow-lg rounded-md px-2.5 py-1.5 text-xs h-8">
-              <Plus className="mr-1.5 h-3.5 w-3.5" />
-              Add New Student
-            </Button>
-          </Link>
+      <div className="itms-page-header-container">
+        <div className="flex items-center justify-between w-full gap-2">
+          <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-foreground truncate leading-tight pb-1">Student Management</h1>
 
-          <Link href="/admin/smart-allocation">
-            <Button className="bg-slate-800 hover:bg-slate-900 text-white dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-100 border border-slate-700 dark:border-slate-600 shadow-sm transition-all duration-200 hover:scale-105 hover:shadow-lg rounded-md px-2.5 py-1.5 text-xs h-8">
-              <ArrowRightLeft className="mr-1.5 h-3.5 w-3.5" />
-              Student Reassignment
-            </Button>
-          </Link>
-          <Link href="/admin/verification">
-            <Button className="bg-cyan-600 hover:bg-cyan-700 text-white border border-cyan-700 shadow-sm transition-all duration-200 hover:scale-105 hover:shadow-lg rounded-md px-2.5 py-1.5 text-xs h-8">
-              <QrCode className="mr-1.5 h-3.5 w-3.5" />
-              Verification
-            </Button>
-          </Link>
-          <ExportButton
-            onClick={handleExportStudents}
-            label="EXPORT"
-            className={commonBtnClass}
-          />
-          <Button
-            size="sm"
-            onClick={handleRefresh}
-            disabled={isRefreshing}
-            className={commonBtnClass}
-          >
-            <RefreshCw className={cn("h-3.5 w-3.5 transition-transform duration-500", isRefreshing ? "animate-spin" : "group-hover:rotate-180")} />
-            REFRESH
-          </Button>
+          {/* Desktop action toolbar */}
+          <div className="hidden md:flex items-center gap-2 shrink-0">
+            <Link href="/admin/students/add">
+              <Button className="bg-blue-600 hover:bg-blue-700 text-white border border-blue-700 shadow-sm transition-all duration-200 hover:scale-105 hover:shadow-lg rounded-md px-2.5 py-1.5 text-xs h-8 cursor-pointer">
+                <Plus className="mr-1.5 h-3.5 w-3.5" />
+                Add New Student
+              </Button>
+            </Link>
 
+            <Link href="/admin/smart-allocation">
+              <Button className="bg-teal-600/90 hover:bg-teal-600 text-white border border-teal-500/40 shadow-sm transition-all duration-200 hover:scale-105 hover:shadow-lg rounded-md px-2.5 py-1.5 text-xs h-8 cursor-pointer">
+                <ArrowRightLeft className="mr-1.5 h-3.5 w-3.5" />
+                Student Reassignment
+              </Button>
+            </Link>
+            <Link href="/admin/verification">
+              <Button className="bg-cyan-600/90 hover:bg-cyan-600 text-white border border-cyan-500/40 shadow-sm transition-all duration-200 hover:scale-105 hover:shadow-lg rounded-md px-2.5 py-1.5 text-xs h-8 cursor-pointer">
+                <QrCode className="mr-1.5 h-3.5 w-3.5" />
+                Verification
+              </Button>
+            </Link>
+            <ExportButton
+              onClick={handleExportStudents}
+              label="Export"
+              className={commonBtnClass}
+            />
+            <Button
+              size="sm"
+              onClick={handleRefresh}
+              disabled={isRefreshing}
+              className={commonBtnClass}
+            >
+              <RefreshCw className={cn("h-3.5 w-3.5 transition-transform duration-500", isRefreshing ? "animate-spin" : "group-hover:rotate-180")} />
+              <span>Refresh</span>
+            </Button>
+          </div>
+
+          {/* Mobile Refresh Button - exact same line as Student Management at rightmost end */}
+          <div className="flex md:hidden items-center shrink-0">
+            <Button
+              size="sm"
+              onClick={handleRefresh}
+              disabled={isRefreshing}
+              className="h-8 px-3 bg-white dark:bg-zinc-800 hover:bg-gray-50 dark:hover:bg-zinc-700 text-gray-700 dark:text-zinc-200 hover:text-blue-600 dark:hover:text-blue-400 border border-gray-200 dark:border-zinc-700 shadow-sm rounded-lg text-xs font-semibold flex items-center gap-1.5 cursor-pointer active:scale-95 transition-all shrink-0"
+            >
+              <RefreshCw className={cn("h-3.5 w-3.5 transition-transform duration-500", isRefreshing ? "animate-spin text-blue-600" : "group-hover:rotate-180")} />
+              <span>Refresh</span>
+            </Button>
+          </div>
         </div>
+        <p className="text-muted-foreground mt-1 text-xs sm:text-sm truncate">View and manage all students</p>
       </div>
 
       <Card className={cn("border-border min-h-[480px] flex flex-col", theme === 'dark' ? "bg-gray-900" : "bg-admin-bg")}>
@@ -528,13 +538,11 @@ export default function AdminStudents() {
                 />
               </div>
 
-              {/* Filters - Side by side on Mobile */}
-              <div className="flex gap-2 items-center w-full md:w-auto overflow-x-auto pb-1 md:pb-0 no-scrollbar">
-                <Filter className={cn("h-3.5 w-3.5 flex-shrink-0", theme === 'dark' ? "text-gray-500" : "text-[#6B7280]")} />
-
+              {/* Filters - Side by side on Mobile in the same line */}
+              <div className="grid grid-cols-2 gap-2 items-center w-full md:w-auto md:flex md:flex-row">
                 <Select value={shiftFilter} onValueChange={setShiftFilter}>
                   <SelectTrigger className={cn(
-                    "h-8 text-xs min-w-[100px] flex-1 md:w-[150px] md:bg-transparent border",
+                    "h-9 md:h-8 text-xs w-full md:w-[140px] md:bg-transparent border",
                     theme === 'dark' ? "bg-gray-800 border-gray-700" : "bg-white border-[#E5E7EB]"
                   )}>
                     <SelectValue placeholder="Shift" />
@@ -548,7 +556,7 @@ export default function AdminStudents() {
 
                 <Select value={busFilter} onValueChange={setBusFilter}>
                   <SelectTrigger className={cn(
-                    "h-8 text-xs min-w-[120px] flex-1 md:w-[250px] md:bg-transparent border",
+                    "h-9 md:h-8 text-xs w-full md:w-[200px] md:bg-transparent border",
                     theme === 'dark' ? "bg-gray-800 border-gray-700" : "bg-white border-[#E5E7EB]"
                   )}>
                     <SelectValue placeholder="Bus" />
@@ -562,7 +570,6 @@ export default function AdminStudents() {
                     ))}
                   </SelectContent>
                 </Select>
-
                 {(shiftFilter !== "all" || busFilter !== "all") && (
                   <Button
                     variant="ghost"
@@ -572,18 +579,18 @@ export default function AdminStudents() {
                       setBusFilter("all");
                     }}
                     className={cn(
-                      "h-8 px-3 text-xs",
-                      theme === 'dark' ? "bg-red-500 hover:bg-red-600" : "bg-[#EF4444] hover:bg-[#DC2626]"
+                      "h-8 px-3 text-xs col-span-2 md:col-span-1",
+                      theme === 'dark' ? "bg-red-500/20 text-red-400 hover:bg-red-500/30" : "bg-red-50 text-red-600 hover:bg-red-100"
                     )}
                   >
-
                     Clear
                   </Button>
                 )}
               </div>
             </div>
+          </div>
 
-            <div className="students-section md:mt-5 flex-1 flex flex-col min-h-0">
+          <div className="students-section md:mt-5 flex-1 flex flex-col min-h-0">
               <div className="students-scroll-wrapper rounded-md border overflow-x-auto flex-1 flex flex-col min-h-0" role="region" aria-label="Student list">
                 <Table>
                   <TableHeader>
@@ -624,7 +631,7 @@ export default function AdminStudents() {
                 {uniqueFilteredStudents.length === 0 && (
                   isLoading ? (
                     <div className="p-6">
-                      <TableLoader rows={6} columns={7} />
+                      <TableRowLoader rows={6} />
                     </div>
                   ) : (
                     <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-[11px] text-gray-500 min-h-[220px]">
@@ -659,7 +666,6 @@ export default function AdminStudents() {
                 </Button>
               </div>
             )}
-          </div>
         </CardContent>
       </Card>
 
@@ -725,6 +731,36 @@ export default function AdminStudents() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      {/* Mobile Floating Action Button (FAB) for Quick Admin Actions */}
+      <MobileActionFAB
+        ariaLabel="Student management actions"
+        actions={[
+          {
+            label: "Add New Student",
+            icon: Plus,
+            href: "/admin/students/add",
+            color: "bg-blue-600 text-white",
+          },
+          {
+            label: "Student Reassignment",
+            icon: ArrowRightLeft,
+            href: "/admin/smart-allocation",
+            color: "bg-slate-800 text-white",
+          },
+          {
+            label: "Verification",
+            icon: QrCode,
+            href: "/admin/verification",
+            color: "bg-cyan-600 text-white",
+          },
+          {
+            label: "Export Students",
+            icon: Download,
+            onClick: handleExportStudents,
+            color: "bg-emerald-600 text-white",
+          },
+        ]}
+      />
     </div>
   );
 }

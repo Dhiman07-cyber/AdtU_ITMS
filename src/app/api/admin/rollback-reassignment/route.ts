@@ -35,7 +35,7 @@ export const POST = withSecurity<RollbackBody>(
       // 1. Fetch the reassignment log from Supabase
       const { data: logEntry, error: logError } = await supabase
         .from('reassignment_logs')
-        .select('*')
+        .select('operation_id, status, changes')
         .eq('operation_id', operationId)
         .eq('status', 'committed')
         .single();

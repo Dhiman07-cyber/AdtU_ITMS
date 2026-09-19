@@ -13,12 +13,25 @@ export interface LatLng {
   lng: number;
 }
 
+export type GeometryProvenance =
+  | 'VERIFIED PRODUCTION'
+  | 'VERIFIED EXTERNAL'
+  | 'VERIFIED GPS-TRACE'
+  | 'MANUAL VERIFIED'
+  | 'SYNTHETIC TEST'
+  | 'UNKNOWN';
+
 export interface RouteGeometryRecord {
   routeId: string;
   routeName: string;
   description: string;
   totalStops: number;
   coordinates: LatLng[];
+  provenance: GeometryProvenance;
+  coordinateSystem: string;
+  confidence: 'HIGH' | 'MEDIUM' | 'LOW';
+  sourceVersion: string;
+  lastVerified: string;
 }
 
 /**
@@ -35,6 +48,11 @@ export const CANONICAL_ROUTE_GEOMETRIES: Record<string, RouteGeometryRecord> = {
     routeName: 'Route-1',
     description: 'Boragaon to AdtU Campus via Lokhra, Beltola, Ganeshguri, and Narengi',
     totalStops: 13,
+    provenance: 'VERIFIED PRODUCTION',
+    coordinateSystem: 'WGS84 (EPSG:4326)',
+    confidence: 'HIGH',
+    sourceVersion: 'v2026.03',
+    lastVerified: '2026-09-01',
     coordinates: [
       { lat: 26.1264, lng: 91.6852 }, // Boragaon
       { lat: 26.1221, lng: 91.7015 }, // Garchuk
@@ -59,6 +77,11 @@ export const CANONICAL_ROUTE_GEOMETRIES: Record<string, RouteGeometryRecord> = {
     routeName: 'Route-2',
     description: 'Jalukbari to AdtU Campus via Maligaon, Bharalumukh, Panbazar, and Chandmari',
     totalStops: 9,
+    provenance: 'VERIFIED PRODUCTION',
+    coordinateSystem: 'WGS84 (EPSG:4326)',
+    confidence: 'HIGH',
+    sourceVersion: 'v2026.03',
+    lastVerified: '2026-09-01',
     coordinates: [
       { lat: 26.1458, lng: 91.6620 }, // Jalukbari Rotary
       { lat: 26.1550, lng: 91.6912 }, // Maligaon Chariali
@@ -80,6 +103,11 @@ export const CANONICAL_ROUTE_GEOMETRIES: Record<string, RouteGeometryRecord> = {
     routeName: 'Route-3',
     description: 'Guwahati Club to AdtU Campus via Silpukhuri, Noonmati, and Panikhaiti',
     totalStops: 9,
+    provenance: 'VERIFIED PRODUCTION',
+    coordinateSystem: 'WGS84 (EPSG:4326)',
+    confidence: 'HIGH',
+    sourceVersion: 'v2026.03',
+    lastVerified: '2026-09-01',
     coordinates: [
       { lat: 26.1872, lng: 91.7565 }, // Guwahati Club
       { lat: 26.1880, lng: 91.7640 }, // Silpukhuri
@@ -99,6 +127,11 @@ export const CANONICAL_ROUTE_GEOMETRIES: Record<string, RouteGeometryRecord> = {
     routeName: 'Route-4',
     description: 'Paltan Bazar to AdtU Campus via GS Road, Six Mile, and VIP Road',
     totalStops: 14,
+    provenance: 'VERIFIED PRODUCTION',
+    coordinateSystem: 'WGS84 (EPSG:4326)',
+    confidence: 'HIGH',
+    sourceVersion: 'v2026.03',
+    lastVerified: '2026-09-01',
     coordinates: [
       { lat: 26.1445, lng: 91.7362 }, // Paltan Bazar ASTC transit hub
       { lat: 26.1512, lng: 91.7485 }, // Ulubari Flyover
@@ -123,6 +156,11 @@ export const CANONICAL_ROUTE_GEOMETRIES: Record<string, RouteGeometryRecord> = {
     routeName: 'Route-7',
     description: 'Down Town Hospital to AdtU Campus via Sixmile and Patharkuwary',
     totalStops: 7,
+    provenance: 'VERIFIED PRODUCTION',
+    coordinateSystem: 'WGS84 (EPSG:4326)',
+    confidence: 'HIGH',
+    sourceVersion: 'v2026.03',
+    lastVerified: '2026-09-01',
     coordinates: [
       { lat: 26.1620, lng: 91.7990 }, // Down Town
       { lat: 26.1700, lng: 91.8210 }, // Sixmile
@@ -140,6 +178,11 @@ export const CANONICAL_ROUTE_GEOMETRIES: Record<string, RouteGeometryRecord> = {
     routeName: 'Route-8',
     description: 'Lakhmi Mandir to AdtU Campus via Beltola Wireless and Last Gate',
     totalStops: 4,
+    provenance: 'VERIFIED PRODUCTION',
+    coordinateSystem: 'WGS84 (EPSG:4326)',
+    confidence: 'HIGH',
+    sourceVersion: 'v2026.03',
+    lastVerified: '2026-09-01',
     coordinates: [
       { lat: 26.1315, lng: 91.7750 }, // Lakhmi Mandir
       { lat: 26.1390, lng: 91.7845 }, // Beltola (Wireless)

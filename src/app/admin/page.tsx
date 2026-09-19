@@ -1,11 +1,9 @@
 "use client";
 
-import { PremiumPageLoader } from '@/components/LoadingSpinner';
 import { useAuth } from '@/contexts/auth-context';
-import { usePageShellLoader } from '@/hooks/usePageShellLoader';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
-import { useEffect,useState } from 'react';
+import { useEffect, useState, useMemo, Suspense } from 'react';
 
 import HighLoadAlert from '@/components/HighLoadAlert';
 
@@ -267,8 +265,8 @@ export default function EnhancedAdminDashboard() {
     return match ? match[0] : '?';
   };
 
-  // Derived stats — plain render-time computation (React Compiler memoizes)
-  const stats = {
+  // Derived stats — memoized to avoid redundant recalculation
+  const stats = useMemo(() => ({
     totalStudents: realCounts.totalStudents,
     activeStudents: realCounts.activeStudents,
     expiringStudents: 0,
@@ -291,14 +289,15 @@ export default function EnhancedAdminDashboard() {
     totalRevenue: realCounts.totalRevenue,
     onlinePayments: realCounts.onlinePayments,
     offlinePayments: realCounts.offlinePayments,
-    academicYearEnd: realCounts.configDates.academicYearEnd,
-    softBlock: realCounts.configDates.softBlock,
-    hardBlock: realCounts.configDates.hardBlock,
-    systemBusFee: realCounts.configDates.busFee,
+    academicYearEnd: realCounts.configDates?.academicYearEnd,
+    softBlock: realCounts.configDates?.softBlock,
+    hardBlock: realCounts.configDates?.hardBlock,
+    systemBusFee: realCounts.configDates?.busFee || 0,
     feedbacksCount: realCounts.feedbacksCount
-  };
+  }), [realCounts, allRoutes.length]);
 
-  const busUtilization = allBuses.map((bus: any) => {
+  const busUtilization = useMemo(() => {
+    return allBuses.map((bus: any) => {
       const currentMembers = bus.currentMembers || 0;
       let capacity = 55;
 
@@ -330,27 +329,32 @@ export default function EnhancedAdminDashboard() {
       const bNum = parseInt(b.name.replace(/\D/g, '')) || 0;
       return aNum - bNum;
     });
+  }, [allBuses]);
 
-  const studentDistribution = [
+  const studentDistribution = useMemo(() => [
     { name: 'Morning', value: realCounts.morningStudents || 0, color: '#f97316' },
     { name: 'Evening', value: realCounts.eveningStudents || 0, color: '#3b82f6' }
-  ];
+  ], [realCounts.morningStudents, realCounts.eveningStudents]);
 
   // Pre-build buses-by-route map in O(B) to eliminate O(R×B) nested filter
-  const busesByRouteId = new Map<string, any[]>();
-  for (const bus of allBuses) {
-    const rId = bus.routeId || bus.route?.routeId;
-    if (rId) {
-      const list = busesByRouteId.get(rId);
-      if (list) {
-        list.push(bus);
-      } else {
-        busesByRouteId.set(rId, [bus]);
+  const busesByRouteId = useMemo(() => {
+    const map = new Map<string, any[]>();
+    for (const bus of allBuses) {
+      const rId = bus.routeId || bus.route?.routeId;
+      if (rId) {
+        const list = map.get(rId);
+        if (list) {
+          list.push(bus);
+        } else {
+          map.set(rId, [bus]);
+        }
       }
     }
-  }
+    return map;
+  }, [allBuses]);
 
-  const routeOccupancy = allRoutes.map((route: any) => {
+  const routeOccupancy = useMemo(() => {
+    return allRoutes.map((route: any) => {
       const routeBuses = busesByRouteId.get(route.routeId) || [];
 
       if (routeBuses.length === 0) {
@@ -393,6 +397,7 @@ export default function EnhancedAdminDashboard() {
       .filter((r: any) => r.capacity > 0)
       .sort((a: any, b: any) => b.occupancy - a.occupancy)
       .slice(0, 8);
+  }, [allRoutes, busesByRouteId]);
 
   // Update timestamp when data changes
 
@@ -404,11 +409,19 @@ export default function EnhancedAdminDashboard() {
   }, [allDataLoading]);
 
 
-  const isInitialBlank = allDataLoading && realCounts.totalStudents === 0 && realCounts.totalBuses === 0;
-  const { showLoader } = usePageShellLoader(isInitialBlank, 3500);
-
-  if (showLoader) {
-    return <PremiumPageLoader fullScreen message="Curating Dashboard Experience..." subMessage="Fetching system status and analytics..." />;
+  if (authLoading && !currentUser) {
+    return (
+      <div className="flex-1 bg-[#05060e] min-h-screen px-6 md:px-12 pt-17 pb-20 max-w-screen-2xl mx-auto space-y-6 animate-pulse">
+        <div className="h-12 w-72 bg-white/10 rounded-xl" />
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="h-28 bg-white/5 rounded-2xl" />
+          <div className="h-28 bg-white/5 rounded-2xl" />
+          <div className="h-28 bg-white/5 rounded-2xl" />
+          <div className="h-28 bg-white/5 rounded-2xl" />
+        </div>
+        <div className="h-64 bg-white/5 rounded-2xl" />
+      </div>
+    );
   }
 
   // Get first name from user data
@@ -425,7 +438,7 @@ export default function EnhancedAdminDashboard() {
 
   return (
     <div className="flex-1 bg-[#05060e] min-h-screen relative overflow-hidden">
-      <div className="px-6 md:px-12 pt-17 md:pt-17 pb-20 relative z-10 max-w-screen-2xl mx-auto space-y-4">
+      <div className="itms-admin-container relative z-10 space-y-4">
         {/* HEADER AREA */}
         <DashboardHeader
           firstName={getFirstName()}
@@ -437,7 +450,9 @@ export default function EnhancedAdminDashboard() {
 
         {/* SECTION 1: SYSTEM HEALTH STRIP */}
         <div className="w-full">
-          <SystemHealthStrip stats={stats as any as DashboardStats} />
+          <Suspense fallback={<DashboardPanelFallback />}>
+            <SystemHealthStrip stats={stats as any as DashboardStats} />
+          </Suspense>
         </div>
 
         {/* SECTION: CRITICAL ALERT (Preserving unchanged) */}
@@ -445,42 +460,58 @@ export default function EnhancedAdminDashboard() {
           <HighLoadAlert role="admin" className="animate-in fade-in duration-300 h-auto" />
         </div>
 
-
-
         {/* SECTION 2.1: PLATFORM ANALYTICS (GA4 INTEGRATION) */}
-        <div className="w-full animate-in fade-in duration-300">
-          <PlatformAnalytics />
+        <div className="w-full animate-in fade-in duration-300" style={{ contentVisibility: 'auto', containIntrinsicSize: '0 300px' }}>
+          <Suspense fallback={<DashboardPanelFallback />}>
+            <PlatformAnalytics />
+          </Suspense>
         </div>
 
         {/* SECTION 3: KEY METRICS BLOCKS */}
-        <KeyMetricsGrid stats={stats as any as DashboardStats} />
+        <Suspense fallback={<DashboardPanelFallback />}>
+          <KeyMetricsGrid stats={stats as any as DashboardStats} />
+        </Suspense>
 
         {/* SECTION 4: TRANSACTIONAL ANALYTICS */}
-        <TransactionalAnalytics paymentTrends={paymentTrends as any} />
+        <div style={{ contentVisibility: 'auto', containIntrinsicSize: '0 350px' }}>
+          <Suspense fallback={<DashboardPanelFallback />}>
+            <TransactionalAnalytics paymentTrends={paymentTrends as any} />
+          </Suspense>
+        </div>
 
         {/* ROW: BUS & ROUTE DYNAMICS */}
-        <div className="grid grid-cols-1 gap-12">
+        <div className="grid grid-cols-1 gap-12" style={{ contentVisibility: 'auto', containIntrinsicSize: '0 400px' }}>
           {/* SECTION 5: BUS UTILIZATION */}
-          <BusUtilization busUtilization={busUtilization} />
+          <Suspense fallback={<DashboardPanelFallback />}>
+            <BusUtilization busUtilization={busUtilization} />
+          </Suspense>
 
           {/* SECTION 6: ROUTE OCCUPANCY */}
-          <RouteOccupancy routeOccupancy={routeOccupancy} busUtilization={busUtilization} />
+          <Suspense fallback={<DashboardPanelFallback />}>
+            <RouteOccupancy routeOccupancy={routeOccupancy} busUtilization={busUtilization} />
+          </Suspense>
         </div>
 
         {/* ROW: DISTRIBUTION & STAFFING */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8" style={{ contentVisibility: 'auto', containIntrinsicSize: '0 400px' }}>
           {/* SECTION 7: STUDENT DISTRIBUTION */}
-          <StudentDistribution
-            distribution={studentDistribution}
-            totalStudents={stats.activeStudents}
-          />
+          <Suspense fallback={<DashboardPanelFallback />}>
+            <StudentDistribution
+              distribution={studentDistribution}
+              totalStudents={stats.activeStudents}
+            />
+          </Suspense>
 
           {/* SECTION 8: SYSTEM LIFECYCLE INTELLIGENCE */}
-          <SystemLifecycleIntelligence stats={stats as any as DashboardStats} />
+          <Suspense fallback={<DashboardPanelFallback />}>
+            <SystemLifecycleIntelligence stats={stats as any as DashboardStats} />
+          </Suspense>
         </div>
 
         {/* SECTION 10: QUICK ACTIONS */}
-        <QuickActions />
+        <Suspense fallback={<DashboardPanelFallback />}>
+          <QuickActions />
+        </Suspense>
       </div>
     </div>
   );

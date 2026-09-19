@@ -33,9 +33,7 @@ export function ExportButton({
   };
 
   // If className is provided, use it completely; otherwise use defaults
-  const buttonClassName = className ? className : `
-    group h-8 px-4 bg-white hover:bg-gray-50 text-gray-600 hover:text-blue-600 border border-gray-200 hover:border-blue-200 shadow-sm hover:shadow-lg hover:shadow-blue-500/10 font-bold text-[10px] uppercase tracking-widest rounded-lg transition-all duration-300 active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer
-  `;
+  const buttonClassName = className ? className : "group h-8 px-3.5 bg-white/80 dark:bg-zinc-800/80 hover:bg-zinc-50 dark:hover:bg-zinc-700/80 text-zinc-700 dark:text-zinc-200 hover:text-blue-600 dark:hover:text-blue-400 border border-zinc-200 dark:border-zinc-700/60 shadow-xs text-xs font-semibold rounded-lg transition-all duration-200 active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer";
 
   return (
     <Button
@@ -48,8 +46,8 @@ export function ExportButton({
         <ButtonLoader text="Exporting..." />
       ) : (
         <>
-          <Download className="h-4 w-4 mr-2" />
-          {label}
+          <Download className="h-3.5 w-3.5 mr-1.5 text-zinc-500 dark:text-zinc-400 group-hover:text-blue-500" />
+          <span>{label}</span>
         </>
       )}
     </Button>

@@ -1,6 +1,5 @@
 "use client";
 
-import { PremiumPageLoader } from '@/components/LoadingSpinner';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -13,7 +12,7 @@ import { getRouteById } from "@/lib/dataService";
 import { GripVertical,MapPin,Plus,X } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { use,useEffect,useRef,useState } from "react";
+import { startTransition, use, useEffect, useRef, useState } from "react";
 
 type Stop = {
   name: string;
@@ -59,20 +58,22 @@ export default function EditRoutePage({ params }: { params: Promise<{ id: string
         let displayId = foundRoute.routeId || id;
         if (displayId.startsWith('route_')) displayId = displayId.replace('route_', '');
 
-        setRouteData({
-          routeId: displayId,
-          routeName: foundRoute.routeName || "",
-          status: foundRoute.status || "active"
-        });
+        startTransition(() => {
+          setRouteData({
+            routeId: displayId,
+            routeName: foundRoute.routeName || "",
+            status: foundRoute.status || "active"
+          });
 
-        if (foundRoute.stops && Array.isArray(foundRoute.stops)) {
-          const convertedStops: Stop[] = foundRoute.stops.map((stop: any, index: number) => ({
-            name: typeof stop === 'string' ? stop : stop.name || stop.toString(),
-            sequence: stop.sequence || index + 1,
-            stop_name: stop.stop_name || (typeof stop === 'string' ? stop.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '') : `stop_${index}`)
-          }));
-          setStops(convertedStops);
-        }
+          if (foundRoute.stops && Array.isArray(foundRoute.stops)) {
+            const convertedStops: Stop[] = foundRoute.stops.map((stop: any, index: number) => ({
+              name: typeof stop === 'string' ? stop : stop.name || stop.toString(),
+              sequence: stop.sequence || index + 1,
+              stop_name: stop.stop_name || (typeof stop === 'string' ? stop.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '') : `stop_${index}`)
+            }));
+            setStops(convertedStops);
+          }
+        });
       } else {
         addToast('Route not found', 'error');
         router.push('/admin/routes');
@@ -231,24 +232,69 @@ export default function EditRoutePage({ params }: { params: Promise<{ id: string
     addToast('Form reset successfully', 'info');
   };
 
-  if (authLoading || fetchingRoute) {
-    return <PremiumPageLoader message="Loading Route Details..." subMessage="Fetching route data..." />;
+  if (authLoading && !currentUser) {
+    return (
+      <div className="itms-admin-form-container space-y-6 animate-pulse">
+        <div className="itms-page-header-container">
+          <div className="flex justify-between items-center mb-6">
+            <div>
+              <div className="h-9 w-48 bg-muted/60 rounded-xl mb-2" />
+              <div className="h-4 w-72 bg-muted/40 rounded-lg" />
+            </div>
+            <div className="h-8 w-20 bg-muted/40 rounded-lg" />
+          </div>
+        </div>
+        <div className="h-96 rounded-2xl bg-muted/20 border border-white/5" />
+      </div>
+    );
+  }
+
+  if (fetchingRoute) {
+    return (
+      <div className="itms-admin-form-container space-y-6">
+        <div className="itms-page-header-container">
+          <div className="flex justify-between items-center mb-6">
+            <div>
+              <h1 className="text-3xl font-bold text-foreground leading-tight pb-1">Edit Route</h1>
+              <p className="text-muted-foreground mt-1 text-xs sm:text-sm">Manage route name, distance and sequence of stops</p>
+            </div>
+            <Link
+              href="/admin/routes"
+              className="inline-flex items-center px-3.5 py-1.5 bg-secondary/80 hover:bg-secondary text-secondary-foreground border border-border/50 text-sm rounded-lg transition-colors shadow-sm"
+            >
+              <span className="mr-1.5 text-sm">←</span>
+              Back
+            </Link>
+          </div>
+        </div>
+        <div className="w-full overflow-hidden">
+          <div className="bg-gradient-to-br from-[#0E0F12] to-[#1A1B23] rounded-2xl shadow-2xl border border-white/10 p-4 sm:p-10 space-y-6 animate-pulse">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="h-10 bg-white/5 rounded-lg" />
+              <div className="h-10 bg-white/5 rounded-lg" />
+              <div className="h-10 bg-white/5 rounded-lg" />
+            </div>
+            <div className="h-40 bg-white/5 rounded-lg" />
+          </div>
+        </div>
+      </div>
+    );
   }
 
   if (!currentUser || !userData || !['admin', 'moderator'].includes(userData.role)) return null;
 
   return (
-    <div className="mt-10 py-4 bg-[#010717] min-h-screen text-white">
+    <div className="itms-admin-form-container space-y-6">
       {/* Header */}
-      <div className="max-w-5xl mx-auto px-3 sm:px-6 lg:px-8">
+      <div className="itms-page-header-container">
         <div className="flex justify-between items-center mb-6">
           <div>
-            <h1 className="text-3xl font-bold text-foreground">Edit Route</h1>
-            <p className="text-muted-foreground mt-1">Manage route name, distance and sequence of stops</p>
+            <h1 className="text-3xl font-bold tracking-tight text-foreground leading-tight pb-1">Edit Route</h1>
+            <p className="text-muted-foreground mt-1 text-xs sm:text-sm">Manage route name, distance and sequence of stops</p>
           </div>
           <Link
             href="/admin/routes"
-            className="inline-flex items-center px-3.5 py-1.5 bg-white/10 hover:bg-white/20 text-white text-sm border border-white/20 hover:border-white/30 rounded-lg transition-all duration-200 hover:shadow-md"
+            className="inline-flex items-center px-3.5 py-1.5 bg-secondary/80 hover:bg-secondary text-secondary-foreground border border-border/50 text-sm rounded-lg transition-colors shadow-sm"
           >
             <span className="mr-1.5 text-sm">←</span>
             Back
@@ -257,7 +303,7 @@ export default function EditRoutePage({ params }: { params: Promise<{ id: string
       </div>
 
       {/* Main Content */}
-      <div className="max-w-5xl mx-auto px-3 sm:px-6 lg:px-8 overflow-hidden">
+      <div className="w-full overflow-hidden">
         <div className="bg-gradient-to-br from-[#0E0F12] to-[#1A1B23] rounded-2xl shadow-2xl border border-white/10 p-4 sm:p-10 hover:border-white/20 transition-all duration-300">
           <form onSubmit={handleSubmit} className="space-y-8">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">

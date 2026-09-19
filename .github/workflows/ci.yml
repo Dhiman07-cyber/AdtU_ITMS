@@ -3,19 +3,29 @@ name: Continuous Integration (CI)
 on:
   pull_request:
     branches: [main, develop]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.vscode/**'
+      - 'Demo_Commit_message.txt'
   push:
     branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.vscode/**'
+      - 'Demo_Commit_message.txt'
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
 
 jobs:
-  typecheck-app:
-    name: 1. Typecheck (App)
+  typecheck:
+    name: 1. TypeScript Verification (App & Server)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -24,26 +34,14 @@ jobs:
           node-version: 22
           cache: npm
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --prefer-offline
       - name: TypeScript Check (App)
         run: npx tsc --noEmit
-
-  typecheck-server:
-    name: 2. Typecheck (WebSocket Server)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-      - name: Install dependencies
-        run: npm ci
       - name: TypeScript Check (Server)
         run: npx tsc --noEmit --project server/tsconfig.json
 
   lint:
-    name: 3. Code Style & Linting
+    name: 2. Code Style & Linting
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -52,12 +50,12 @@ jobs:
           node-version: 22
           cache: npm
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --prefer-offline
       - name: ESLint Check
         run: npm run lint
 
   unit-tests:
-    name: 4. Unit & Integration Tests
+    name: 3. Unit & Integration Tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -66,13 +64,13 @@ jobs:
           node-version: 22
           cache: npm
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --prefer-offline
       - name: Run Vitest Suite
         run: npm run test:run
 
   build-app:
-    name: 5. Next.js Production Build
-    needs: [typecheck-app, typecheck-server, lint]
+    name: 4. Next.js Production Build
+    needs: [typecheck, lint]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -81,7 +79,14 @@ jobs:
           node-version: 22
           cache: npm
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --prefer-offline
+      - name: Cache Next.js Build
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.next/cache
+          key: ${{ runner.os }}-nextjs-${{ hashFiles('**/package-lock.json') }}-${{ hashFiles('**.[jt]s', '**.[jt]sx') }}
+          restore-keys: |
+            ${{ runner.os }}-nextjs-${{ hashFiles('**/package-lock.json') }}-
       - name: Build Next.js Application
         run: npm run build
         env:
@@ -113,14 +118,26 @@ jobs:
         run: npm run manifest
 
   build-docker:
-    name: 6. Docker Container Verification
+    name: 5. Docker Container Verification
     needs: [build-app]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-      - name: Build Application Container
-        run: docker build -t itms-app:ci .
-      - name: Build WebSocket Server Container
-        run: docker build -t itms-ws:ci -f server/Dockerfile .
+      - name: Verify Application Container Build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Verify WebSocket Server Container Build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./server/Dockerfile
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

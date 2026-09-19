@@ -59,7 +59,7 @@ export async function checkAndNotifyExpiringStudents(force: boolean = false): Pr
     const supabase = getSupabaseServer();
     const { data: students, error: pgErr } = await supabase
       .from('student_profiles')
-      .select('*')
+      .select('uid, status, valid_until, session_start_year, session_end_year, expiry_reminder_count')
       .eq('status', 'active')
       .gte('valid_until', deadlineFirst.toISOString())
       .lt('valid_until', deadlineNext.toISOString());

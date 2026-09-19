@@ -14,7 +14,6 @@
  * - Manual Mode: Admin selects specific students with checkboxes
  */
 
-import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card,CardContent,CardDescription,CardHeader,CardTitle } from '@/components/ui/card';
@@ -335,8 +334,13 @@ export default function DeadlineTestingPage() {
     const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
     // Loading state
-    if (loading || !userData) {
-        return <PremiumPageLoader message="Loading Simulation..." subMessage="Preparing test parameters..." />;
+    if ((loading || !userData) && !currentUser) {
+        return (
+            <div className="itms-admin-container space-y-6 animate-pulse">
+                <div className="h-10 w-48 bg-slate-200 dark:bg-zinc-800 rounded-md" />
+                <div className="h-64 bg-slate-100 dark:bg-zinc-900 rounded-xl border border-slate-200 dark:border-zinc-800" />
+            </div>
+        );
     }
 
     if (!currentUser || userData.role !== 'admin') {
@@ -344,13 +348,13 @@ export default function DeadlineTestingPage() {
     }
 
     return (
-        <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 p-4 md:p-6 pb-32">
-            <div className="max-w-7xl mx-auto space-y-6">
+        <div className="itms-admin-container space-y-6">
+            <div className="space-y-6">
                 {/* Header */}
-                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                <div className="itms-page-header-container flex flex-col md:flex-row md:items-center md:justify-between gap-4">
                     <div className="flex items-center gap-3">
                         <Link href="/admin/cron-jobs">
-                            <Button variant="ghost" size="icon" className="h-8 w-8 text-gray-400 hover:text-white">
+                            <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground">
                                 <ArrowLeft className="w-4 h-4" />
                             </Button>
                         </Link>
@@ -358,8 +362,8 @@ export default function DeadlineTestingPage() {
                             <Calendar className="w-5 h-5 text-amber-400" />
                         </div>
                         <div>
-                            <h1 className="text-xl md:text-2xl font-bold text-white">Deadline Simulation</h1>
-                            <p className="text-xs text-gray-400">Simulate any date to test soft block & hard delete</p>
+                            <h1 className="text-xl md:text-2xl font-bold tracking-tight text-foreground leading-tight pb-1">Deadline Simulation</h1>
+                            <p className="text-xs text-muted-foreground">Simulate any date to test soft block & hard delete</p>
                         </div>
                     </div>
 

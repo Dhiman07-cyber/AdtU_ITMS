@@ -29,15 +29,11 @@ export function FCMTokenManager() {
     addToastRef.current = addToast;
   }, [addToast]);
 
+  const isStudent = userData?.role === 'student';
+
   // ── Core Token Sync ──────────────────────────────────────────────────────
   const syncToken = async (force = false): Promise<void> => {
-    if (!currentUser?.uid || !userData) return;
-    
-    // SECURITY: Only allow students to register FCM tokens
-    if (userData.role !== 'student') {
-      console.log(`🚫 FCM token registration skipped for non-student role: ${userData.role}`);
-      return;
-    }
+    if (!currentUser?.uid || !isStudent) return;
     
     if (isSyncing.current) return; // Prevent concurrent syncs
     isSyncing.current = true;
@@ -116,7 +112,7 @@ export function FCMTokenManager() {
 
   // ── Initial Registration + Periodic Refresh ──────────────────────────────
   useEffect(() => {
-    if (!currentUser?.uid || !userData) return;
+    if (!currentUser?.uid || !isStudent) return;
 
     // Initial sync on mount
     syncToken();
@@ -132,13 +128,13 @@ export function FCMTokenManager() {
         refreshTimerRef.current = null;
       }
     };
-  }, [currentUser?.uid, userData]);
+  }, [currentUser?.uid, isStudent]);
 
   // ── Visibility-Based Re-Sync ─────────────────────────────────────────────
   // When user returns to app after being away, re-sync the token
   // This handles cases where the token was rotated while the app was in background
   useEffect(() => {
-    if (!currentUser?.uid || !userData) return;
+    if (!currentUser?.uid || !isStudent) return;
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
@@ -158,13 +154,13 @@ export function FCMTokenManager() {
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [currentUser?.uid, userData]);
+  }, [currentUser?.uid, isStudent]);
 
   // ── Foreground Message Listener ──────────────────────────────────────────
   // When the app is in the foreground, FCM delivers messages here instead of
   // the service worker. We display a toast so the user knows about the event.
   useEffect(() => {
-    if (!currentUser?.uid || !userData) return;
+    if (!currentUser?.uid || !isStudent) return;
 
     let unsubscribe: (() => void) | null = null;
 
@@ -207,17 +203,21 @@ export function FCMTokenManager() {
     return () => {
       if (unsubscribe) unsubscribe();
     };
-  }, [currentUser?.uid, userData, pathname]);
+  }, [currentUser?.uid, isStudent, pathname]);
 
   const [showPromptBanner, setShowPromptBanner] = useState(false);
 
   useEffect(() => {
-    if (typeof window !== 'undefined' && 'Notification' in window && userData?.role === 'student') {
+    if (typeof window !== 'undefined' && 'Notification' in window && isStudent) {
       if (Notification.permission === 'default') {
         setShowPromptBanner(true);
       }
     }
-  }, [userData]);
+  }, [isStudent]);
+
+  if (!isStudent) {
+    return null;
+  }
 
   const handleEnableNotifications = async () => {
     setShowPromptBanner(false);

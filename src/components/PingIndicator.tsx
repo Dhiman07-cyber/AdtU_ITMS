@@ -23,50 +23,83 @@ interface PingQuality {
   activeBars: number;
 }
 
+function getNativeRTT(): number | null {
+  if (typeof navigator !== 'undefined') {
+    const conn = (navigator as any).connection || (navigator as any).mozConnection || (navigator as any).webkitConnection;
+    if (conn && typeof conn.rtt === 'number' && conn.rtt > 0) {
+      return conn.rtt;
+    }
+  }
+  return null;
+}
+
 export function CompactPingIndicator() {
   const [ping, setPing] = useState<number>(0);
   const [isOnline, setIsOnline] = useState(true);
   const [showTooltip, setShowTooltip] = useState(false);
   const isMeasuringRef = useRef(false);
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  const measurePing = async () => {
-    if (isMeasuringRef.current) return;
+  const measurePing = () => {
+    // Skip if document is hidden to avoid background CPU churn
+    if (typeof document !== 'undefined' && document.hidden) return;
+
     if (typeof navigator !== 'undefined' && !navigator.onLine) {
       setIsOnline(false);
       setPing(0);
       return;
     }
 
+    // 1. Prefer zero-overhead native network RTT if available (0ms execution, 0 network requests)
+    const nativeRtt = getNativeRTT();
+    if (nativeRtt !== null) {
+      setPing(Math.min(nativeRtt, 999));
+      setIsOnline(true);
+      return;
+    }
+
+    // 2. Fallback: Run lightweight probe asynchronously outside the interval call stack
+    if (isMeasuringRef.current) return;
     isMeasuringRef.current = true;
 
-    try {
-      const startTime = performance.now();
-      await fetch(`/favicon.ico?t=${Date.now()}`, {
-        method: 'HEAD',
-        cache: 'no-store',
-      });
-      const latency = performance.now() - startTime;
-      setPing(Math.min(Math.round(latency), 999));
-      setIsOnline(true);
-    } catch {
-      if (typeof navigator !== 'undefined' && navigator.onLine) {
+    const executeProbe = async () => {
+      try {
+        const startTime = performance.now();
+        await fetch(`/favicon.ico?t=${Date.now()}`, {
+          method: 'HEAD',
+          cache: 'no-store',
+        });
+        const latency = performance.now() - startTime;
+        setPing(Math.min(Math.round(latency), 999));
         setIsOnline(true);
-        setPing(30);
-      } else {
-        setPing(0);
-        setIsOnline(false);
+      } catch {
+        if (typeof navigator !== 'undefined' && navigator.onLine) {
+          setIsOnline(true);
+          setPing(30);
+        } else {
+          setPing(0);
+          setIsOnline(false);
+        }
+      } finally {
+        isMeasuringRef.current = false;
       }
-    } finally {
-      isMeasuringRef.current = false;
+    };
+
+    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+      (window as any).requestIdleCallback(executeProbe, { timeout: 2000 });
+    } else {
+      setTimeout(executeProbe, 0);
     }
   };
 
   useEffect(() => {
     measurePing();
-    intervalRef.current = setInterval(measurePing, 10000);
+    const interval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      measurePing();
+    }, 15000);
+
     return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
+      clearInterval(interval);
     };
   }, []);
 

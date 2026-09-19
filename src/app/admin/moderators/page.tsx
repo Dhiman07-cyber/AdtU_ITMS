@@ -1,7 +1,7 @@
 "use client";
 
 import { ExportButton } from '@/components/ExportButton';
-import { PremiumPageLoader } from '@/components/LoadingSpinner';
+import { TableRowLoader } from '@/components/LoadingSpinner';
 import { Button } from "@/components/ui/button";
 import {
 	Card,
@@ -45,10 +45,11 @@ import { deleteModerator } from '@/lib/dataService';
 import { exportToExcel } from '@/lib/export-helpers';
 import { supabase } from '@/lib/supabase-client';
 import { cn } from '@/lib/utils';
-import { Edit,Eye,Filter,MoreHorizontal,Plus,RefreshCw,Search,Shield,Trash2 } from "lucide-react";
+import { Download,Edit,Eye,Filter,MoreHorizontal,Plus,RefreshCw,Search,Shield,Trash2 } from "lucide-react";
+import { MobileActionFAB } from '@/components/layout/MobileActionFAB';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { memo,useCallback,useEffect,useMemo,useState } from 'react';
+import { useEffect,useMemo,useState } from 'react';
 // Migrated: Server-side API → PostgreSQL (no Firestore client reads)
 import Avatar from '@/components/Avatar';
 import { invalidateCollectionCache,useApiCollection } from '@/hooks/useApiCollection';
@@ -56,9 +57,7 @@ import { useEventDrivenRefresh } from '@/hooks/useEventDrivenRefresh';
 import { safeImageSrc } from "@/lib/security/url-sanitizer";
 import { formatDateDDMMYYYY } from '@/lib/utils/date-utils';
 
-// Memoized table row — skips re-rendering for moderators whose data/handlers
-// are unchanged, keeping search/filter typing smooth with a full page of rows.
-const ModeratorRow = memo(function ModeratorRow({
+function ModeratorRow({
   moderator,
   onDelete,
 }: {
@@ -81,7 +80,7 @@ const ModeratorRow = memo(function ModeratorRow({
   const isActive = status.toLowerCase() === 'active';
 
   return (
-    <TableRow className="h-auto">
+    <TableRow className="h-auto" style={{ contentVisibility: 'auto', containIntrinsicSize: '0 52px' }}>
       <TableCell className="py-1.5">
         <div className="flex flex-row items-center gap-2">
           <Avatar
@@ -170,7 +169,7 @@ const ModeratorRow = memo(function ModeratorRow({
       </TableCell>
     </TableRow>
   );
-});
+}
 
 export default function AdminModerators() {
   const { currentUser, userData, loading: authLoading } = useAuth();
@@ -226,11 +225,11 @@ export default function AdminModerators() {
 
   // Real-time listeners handle data fetching automatically
 
-  // Stable delete handler so memoized rows don't re-render on unrelated updates.
-  const handleDeleteClick = useCallback((id: string, name: string) => {
+  // Delete handler
+  const handleDeleteClick = (id: string, name: string) => {
     setDeleteItem({ id, name });
     setIsDialogOpen(true);
-  }, []);
+  };
 
   // Memoized so it only recomputes when the data, search term, or filters change.
   const filteredModerators = useMemo(() => {
@@ -279,14 +278,14 @@ export default function AdminModerators() {
       let rawModerators: any[] = [];
       const { data: modProfiles, error: modError } = await supabase
         .from('moderator_profiles')
-        .select('*');
+        .select('uid, full_name, email, phone, employee_id, faculty, approved_by, status, created_at');
 
       if (!modError && modProfiles && modProfiles.length > 0) {
         rawModerators = modProfiles;
       } else {
         const { data: userMods } = await supabase
           .from('users')
-          .select('*')
+          .select('uid, name, email, role, created_at')
           .eq('role', 'moderator');
         rawModerators = userMods || [];
       }
@@ -331,8 +330,13 @@ export default function AdminModerators() {
   // Helper function to format date
   const formatDate = formatDateDDMMYYYY;
 
-  if (isLoading && moderators.length === 0) {
-    return <PremiumPageLoader message="Curating Moderator Directory..." subMessage="Fetching moderator profiles and status..." />;
+  if (authLoading && !currentUser) {
+    return (
+      <div className="itms-admin-container space-y-6 animate-pulse">
+        <div className="h-10 w-64 bg-slate-200 dark:bg-zinc-800 rounded-md" />
+        <div className="h-64 bg-slate-100 dark:bg-zinc-900 rounded-xl border border-slate-200 dark:border-zinc-800" />
+      </div>
+    );
   }
 
   if (!currentUser || !userData || userData.role !== 'admin') {
@@ -372,38 +376,53 @@ export default function AdminModerators() {
     }
   };
 
-  const commonBtnClass = "group h-8 px-4 bg-white hover:bg-gray-50 text-gray-600 hover:text-blue-600 border border-gray-200 hover:border-blue-200 shadow-sm hover:shadow-lg hover:shadow-blue-500/10 font-bold text-[10px] uppercase tracking-widest rounded-lg transition-all duration-300 active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer";
+  const commonBtnClass = "group h-8 px-3.5 bg-white/80 dark:bg-zinc-800/80 hover:bg-zinc-50 dark:hover:bg-zinc-700/80 text-zinc-700 dark:text-zinc-200 hover:text-blue-600 dark:hover:text-blue-400 border border-zinc-200 dark:border-zinc-700/60 shadow-xs text-xs font-semibold rounded-lg transition-all duration-200 active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer";
 
   return (
-    <div className="mt-12 space-y-6">
+    <div className="itms-admin-container space-y-6">
       {/* Page Header */}
-      <div className="flex justify-between items-center">
-        <div>
-          <h1 className="text-3xl font-bold text-foreground">Moderator Management</h1>
-          <p className="text-muted-foreground mt-1">Manage all moderator accounts</p>
-        </div>
-        <div className="flex gap-2">
-          <Link href="/admin/moderators/add">
-            <Button className="bg-blue-600 hover:bg-blue-700 text-white border border-blue-700 transition-all duration-200 hover:scale-105 hover:shadow-lg rounded-md px-2.5 py-1.5 text-xs h-8">
-              <Plus className="mr-1.5 h-3.5 w-3.5" />
-              Add New Moderator
+      <div className="itms-page-header-container">
+        <div className="flex items-center justify-between w-full gap-2">
+          <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-foreground truncate leading-tight pb-1">Moderator Management</h1>
+
+          {/* Desktop action toolbar */}
+          <div className="hidden md:flex items-center gap-2 shrink-0">
+            <Link href="/admin/moderators/add">
+              <Button className="bg-blue-600 hover:bg-blue-700 text-white border border-blue-700 shadow-sm transition-all duration-200 hover:scale-105 hover:shadow-lg rounded-md px-2.5 py-1.5 text-xs h-8 cursor-pointer">
+                <Plus className="mr-1.5 h-3.5 w-3.5" />
+                Add New Moderator
+              </Button>
+            </Link>
+            <ExportButton
+              onClick={() => handleExportModerators()}
+              label="Export"
+              className={commonBtnClass}
+            />
+            <Button
+              size="sm"
+              onClick={handleRefresh}
+              disabled={isRefreshing}
+              className={commonBtnClass}
+            >
+              <RefreshCw className={cn("h-3.5 w-3.5 transition-transform duration-500", isRefreshing ? "animate-spin" : "group-hover:rotate-180")} />
+              <span>Refresh</span>
             </Button>
-          </Link>
-          <ExportButton
-            onClick={() => handleExportModerators()}
-            label="EXPORT"
-            className={commonBtnClass}
-          />
-          <Button
-            size="sm"
-            onClick={handleRefresh}
-            disabled={isRefreshing}
-            className={commonBtnClass}
-          >
-            <RefreshCw className={cn("h-3.5 w-3.5 transition-transform duration-500", isRefreshing ? "animate-spin" : "group-hover:rotate-180")} />
-            REFRESH
-          </Button>
+          </div>
+
+          {/* Mobile Refresh Button - exact same line as Moderator Management at rightmost end */}
+          <div className="flex md:hidden items-center shrink-0">
+            <Button
+              size="sm"
+              onClick={handleRefresh}
+              disabled={isRefreshing}
+              className="h-8 px-3 bg-white dark:bg-zinc-800 hover:bg-gray-50 dark:hover:bg-zinc-700 text-gray-700 dark:text-zinc-200 hover:text-blue-600 dark:hover:text-blue-400 border border-gray-200 dark:border-zinc-700 shadow-sm rounded-lg text-xs font-semibold flex items-center gap-1.5 cursor-pointer active:scale-95 transition-all shrink-0"
+            >
+              <RefreshCw className={cn("h-3.5 w-3.5 transition-transform duration-500", isRefreshing ? "animate-spin text-blue-600" : "group-hover:rotate-180")} />
+              <span>Refresh</span>
+            </Button>
+          </div>
         </div>
+        <p className="text-muted-foreground mt-1 text-xs sm:text-sm truncate">Manage all moderator accounts</p>
       </div>
 
       <Card className="bg-gray-50 dark:bg-gray-900 border-border min-h-[480px] flex flex-col">
@@ -422,25 +441,23 @@ export default function AdminModerators() {
                 />
               </div>
 
-              {/* Filters - Side by side on Mobile */}
-              <div className="flex gap-2 items-center w-full md:w-auto overflow-x-auto pb-1 md:pb-0 no-scrollbar">
-                <Filter className="h-3.5 w-3.5 text-gray-500 flex-shrink-0" />
-
+              {/* Filters - Side by side on Mobile in the same line */}
+              <div className="grid grid-cols-2 gap-2 items-center w-full md:w-auto md:flex md:flex-row">
                 <Select value={experienceFilter} onValueChange={setExperienceFilter}>
-                  <SelectTrigger className="h-8 text-xs min-w-[120px] flex-1 md:w-[180px] bg-white dark:bg-gray-800 md:bg-transparent border-gray-200 dark:border-gray-700">
+                  <SelectTrigger className="h-9 md:h-8 text-xs w-full md:w-[140px] bg-white dark:bg-gray-800 md:bg-transparent border-gray-200 dark:border-gray-700">
                     <SelectValue placeholder="Experience" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all" className="text-xs">All Experience</SelectItem>
-                    <SelectItem value="0-2" className="text-xs">0-2 years</SelectItem>
-                    <SelectItem value="3-5" className="text-xs">3-5 years</SelectItem>
-                    <SelectItem value="6-10" className="text-xs">6-10 years</SelectItem>
-                    <SelectItem value="10+" className="text-xs">10+ years</SelectItem>
+                    <SelectItem value="0-2" className="text-xs">0-2 Years</SelectItem>
+                    <SelectItem value="3-5" className="text-xs">3-5 Years</SelectItem>
+                    <SelectItem value="6-10" className="text-xs">6-10 Years</SelectItem>
+                    <SelectItem value="10+" className="text-xs">10+ Years</SelectItem>
                   </SelectContent>
                 </Select>
 
                 <Select value={statusFilter} onValueChange={setStatusFilter}>
-                  <SelectTrigger className="h-8 text-xs min-w-[120px] flex-1 md:w-[180px] bg-white dark:bg-gray-800 md:bg-transparent border-gray-200 dark:border-gray-700">
+                  <SelectTrigger className="h-9 md:h-8 text-xs w-full md:w-[130px] bg-white dark:bg-gray-800 md:bg-transparent border-gray-200 dark:border-gray-700">
                     <SelectValue placeholder="Status" />
                   </SelectTrigger>
                   <SelectContent>
@@ -458,7 +475,7 @@ export default function AdminModerators() {
                       setExperienceFilter("all");
                       setStatusFilter("all");
                     }}
-                    className="h-8 px-3 text-xs bg-red-500 hover:bg-red-600 text-white flex-shrink-0"
+                    className="h-8 px-3 text-xs col-span-2 md:col-span-1 bg-red-500/20 text-red-400 hover:bg-red-500/30 dark:bg-red-500/20 dark:text-red-400 flex-shrink-0"
                   >
                     Clear
                   </Button>
@@ -480,19 +497,25 @@ export default function AdminModerators() {
                     <TableHead className="text-[11px] py-1.5 text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
-                {filteredModerators.length > 0 && (
-                  <TableBody>
-                    {filteredModerators.map((moderator, index) => (
+                <TableBody>
+                  {isLoading && filteredModerators.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={7} className="p-6">
+                        <TableRowLoader rows={5} />
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    filteredModerators.map((moderator, index) => (
                       <ModeratorRow
                         key={moderator.uid || moderator.id || `moderator-${index}`}
                         moderator={moderator}
                         onDelete={handleDeleteClick}
                       />
-                    ))}
-                  </TableBody>
-                )}
+                    ))
+                  )}
+                </TableBody>
               </Table>
-              {filteredModerators.length === 0 && (
+              {!isLoading && filteredModerators.length === 0 && (
                 <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-[11px] text-gray-500 min-h-[220px]">
                   No moderators found
                 </div>
@@ -535,6 +558,25 @@ export default function AdminModerators() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Mobile Floating Action Button (FAB) for Quick Admin Moderator Actions */}
+      <MobileActionFAB
+        ariaLabel="Moderator management actions"
+        actions={[
+          {
+            label: "Add New Moderator",
+            icon: Plus,
+            href: "/admin/moderators/add",
+            color: "bg-blue-600 text-white",
+          },
+          {
+            label: "Export Moderators",
+            icon: Download,
+            onClick: handleExportModerators,
+            color: "bg-emerald-600 text-white",
+          },
+        ]}
+      />
     </div>
   );
 }

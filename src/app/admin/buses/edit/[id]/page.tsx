@@ -1,6 +1,5 @@
-﻿"use client";
+"use client";
 
-import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import { Alert,AlertDescription,AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -24,7 +23,7 @@ import { Driver,Route } from "@/lib/types";
 import { AlertTriangle,Info } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { use,useEffect,useState } from "react";
+import { startTransition, use, useEffect, useState } from "react";
 
 interface Bus {
   id: string;
@@ -105,33 +104,37 @@ export default function EditBusPage({ params }: { params: Promise<{ id: string }
         getAllBuses()
       ]);
 
-      setRoutes(routesData);
-      setDrivers(driversData);
-      setBuses(busesData);
+      startTransition(() => {
+        setRoutes(routesData);
+        setDrivers(driversData);
+        setBuses(busesData);
 
-      if (busResponse) {
-        const bus = busResponse as unknown as Bus;
-        setBusData(bus);
+        if (busResponse) {
+          const bus = busResponse as unknown as Bus;
+          setBusData(bus);
 
-        const mLoad = bus.load?.morningCount || 0;
-        const eLoad = bus.load?.eveningCount || 0;
+          const mLoad = bus.load?.morningCount || 0;
+          const eLoad = bus.load?.eveningCount || 0;
 
-        let displayId = bus.busId || bus.id;
-        if (displayId.startsWith('bus_')) displayId = displayId.replace('bus_', '');
+          let displayId = bus.busId || bus.id;
+          if (displayId.startsWith('bus_')) displayId = displayId.replace('bus_', '');
 
-        setFormData({
-          busId: displayId,
-          busNumber: bus.busNumber,
-          color: bus.color || "White",
-          capacity: bus.capacity.toString(),
-          driverUID: bus.assignedDriverId || bus.driverUID || bus.activeDriverId || "",
-          routeId: bus.routeId,
-          shift: bus.shift || "",
-          status: bus.status || "active",
-          morningLoad: mLoad.toString(),
-          eveningLoad: eLoad.toString()
-        });
-      } else {
+          setFormData({
+            busId: displayId,
+            busNumber: bus.busNumber,
+            color: bus.color || "White",
+            capacity: bus.capacity.toString(),
+            driverUID: bus.assignedDriverId || bus.driverUID || bus.activeDriverId || "",
+            routeId: bus.routeId,
+            shift: bus.shift || "",
+            status: bus.status || "active",
+            morningLoad: mLoad.toString(),
+            eveningLoad: eLoad.toString()
+          });
+        }
+      });
+
+      if (!busResponse) {
         addToast('Bus not found', 'error');
         router.push('/admin/buses');
       }
@@ -302,23 +305,71 @@ export default function EditBusPage({ params }: { params: Promise<{ id: string }
     addToast('Form reset successfully', 'info');
   };
 
-  if (loading || authLoading) {
-    return <PremiumPageLoader message="Loading bus details..." subMessage="Preparing editing tools..." />;
+  if (authLoading && !currentUser) {
+    return (
+      <div className="itms-admin-container py-4 animate-pulse">
+        <div className="max-w-5xl mx-auto">
+          <div className="flex justify-between items-center mb-6">
+            <div>
+              <div className="h-8 w-40 bg-muted/60 rounded-xl mb-1" />
+              <div className="h-3 w-64 bg-muted/40 rounded-lg" />
+            </div>
+            <div className="h-8 w-16 bg-muted/40 rounded-lg" />
+          </div>
+          <div className="bg-gradient-to-br from-[#0E0F12] to-[#1A1B23] rounded-2xl border border-white/10 p-6 space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="h-10 bg-white/5 rounded-lg" />
+              <div className="h-10 bg-white/5 rounded-lg" />
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (loading) {
+    return (
+      <div className="itms-admin-container">
+        <div className="itms-page-header-container max-w-5xl mx-auto">
+          <div className="flex justify-between items-center mb-6">
+            <div>
+              <h1 className="text-2xl font-bold tracking-tight text-white mb-1 leading-tight pb-1">Edit Bus</h1>
+              <p className="text-gray-400 text-xs">Update bus registration, capacity and route assignment</p>
+            </div>
+            <Link
+              href="/admin/buses"
+              className="inline-flex items-center px-3 py-1.5 bg-secondary/80 hover:bg-secondary text-secondary-foreground border border-border/50 text-sm rounded-lg transition-colors shadow-sm"
+            >
+              Back
+            </Link>
+          </div>
+          <div className="bg-gradient-to-br from-[#0E0F12] to-[#1A1B23] rounded-2xl shadow-2xl border border-white/10 p-4 sm:p-10 space-y-6 animate-pulse">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="h-10 bg-white/5 rounded-lg" />
+              <div className="h-10 bg-white/5 rounded-lg" />
+              <div className="h-10 bg-white/5 rounded-lg" />
+              <div className="h-10 bg-white/5 rounded-lg" />
+            </div>
+            <div className="h-24 bg-white/5 rounded-lg" />
+          </div>
+        </div>
+      </div>
+    );
   }
 
   if (!currentUser || !userData || !['admin', 'moderator'].includes(userData.role)) return null;
 
   return (
-    <div className="mt-10 py-4 bg-[#010717] min-h-screen">
-      <div className="max-w-5xl mx-auto px-3 sm:px-6 lg:px-8">
+    <div className="itms-admin-container">
+      <div className="itms-page-header-container max-w-5xl mx-auto">
         <div className="flex justify-between items-center mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-white mb-1">Edit Bus</h1>
+            <h1 className="text-2xl font-bold tracking-tight text-white mb-1 leading-tight pb-1">Edit Bus</h1>
             <p className="text-gray-400 text-xs">Update bus registration, capacity and route assignment</p>
           </div>
           <Link
             href="/admin/buses"
-            className="inline-flex items-center px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white text-sm border border-white/20 hover:border-white/30 rounded-lg transition-all duration-200 hover:shadow-lg"
+            className="inline-flex items-center px-3 py-1.5 bg-secondary/80 hover:bg-secondary text-secondary-foreground border border-border/50 text-sm rounded-lg transition-colors shadow-sm"
           >
             Back
           </Link>

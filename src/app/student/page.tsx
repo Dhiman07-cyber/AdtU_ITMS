@@ -34,12 +34,8 @@ import {
 } from "lucide-react";
 import Link from 'next/link';
 import { useRouter } from "next/navigation";
-import { useEffect,useState } from 'react';
+import { startTransition, useEffect, useState } from 'react';
 // SPARK PLAN SAFETY: Migrated to usePaginatedCollection
-
-
-import { PremiumPageLoader } from "@/components/LoadingSpinner";
-import { usePageShellLoader } from "@/hooks/usePageShellLoader";
 
 export default function StudentDashboard() {
   const { userData, currentUser } = useAuth();
@@ -64,20 +60,22 @@ export default function StudentDashboard() {
         
         if (response.ok) {
           const result = await response.json();
-          setStudentData(result.student);
-          setBusData(result.bus);
-          setRouteData(result.route);
-          setDriverData(result.driver);
-          setTripActive(result.tripActive);
+          startTransition(() => {
+            setStudentData(result.student);
+            setBusData(result.bus);
+            setRouteData(result.route);
+            setDriverData(result.driver);
+            setTripActive(result.tripActive);
 
-          // Calculate expiry if present
-          if (result.student?.validUntil) {
-            const expiryDate = result.student.validUntil.seconds 
-              ? new Date(result.student.validUntil.seconds * 1000)
-              : new Date(result.student.validUntil);
-            const diffDays = Math.ceil((expiryDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
-            setDaysUntilExpiry(diffDays);
-          }
+            // Calculate expiry if present
+            if (result.student?.validUntil) {
+              const expiryDate = result.student.validUntil.seconds 
+                ? new Date(result.student.validUntil.seconds * 1000)
+                : new Date(result.student.validUntil);
+              const diffDays = Math.ceil((expiryDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+              setDaysUntilExpiry(diffDays);
+            }
+          });
         }
       } catch (error) {
         console.error('Error fetching dashboard data:', error);
@@ -207,11 +205,7 @@ export default function StudentDashboard() {
   // Note: Expiration checking is handled by AuthContext's isExpired state
   // No need for additional blocking logic here as it's already handled in StudentAuthWrapper
 
-  const { showLoader } = usePageShellLoader(loading, 3500);
 
-  if (showLoader) {
-    return <PremiumPageLoader message="Loading Dashboard" subMessage="Preparing your student portal..." />;
-  }
 
   // Extract key information with better fallbacks
   const hasPayment = studentData?.paymentInfo?.amountPaid > 0 || studentData?.amountPaid > 0;
@@ -632,12 +626,24 @@ export default function StudentDashboard() {
                 {/* Active Badge */}
                 <Badge className="bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-900/50 transition-colors text-[10px] sm:text-xs px-2 py-0.5">
                   <Info className="h-2.5 w-2.5 sm:h-3 sm:w-3 mr-0.5 sm:mr-1" />
-                  {busData ? 'Assigned' : 'Pending'}
+                  {loading && !studentData ? 'Loading...' : busData ? 'Assigned' : 'Pending'}
                 </Badge>
               </div>
             </CardHeader>
             <CardContent>
-              {(busData || routeData) ? (
+              {loading && !studentData ? (
+                <div className="space-y-4 animate-pulse">
+                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 sm:gap-6 mb-3 sm:mb-5">
+                    {[1, 2, 3, 4, 5, 6].map((i) => (
+                      <div key={i} className="space-y-1.5">
+                        <div className="h-3 w-14 bg-gray-200 dark:bg-gray-800 rounded" />
+                        <div className="h-4 w-20 bg-gray-300 dark:bg-gray-700 rounded" />
+                      </div>
+                    ))}
+                  </div>
+                  <div className="h-9 w-full bg-gray-200 dark:bg-gray-800 rounded-lg" />
+                </div>
+              ) : (busData || routeData) ? (
                 <div className="space-y-4">
 
                   {/* Enhanced Details Grid - 2 columns on mobile, 3 on tablet, 6 on desktop */}
@@ -742,7 +748,7 @@ export default function StudentDashboard() {
                         <div className="flex gap-1.5 sm:gap-2 overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-gray-300 dark:scrollbar-thumb-gray-600 scrollbar-track-transparent">
                           {(typeof routeData.stops[0] === 'object' ?
                             routeData.stops.map((stop: any, idx: number) => (
-                              <div key={idx} className="flex-shrink-0">
+                              <div key={idx} className="flex-shrink-0" style={{ contentVisibility: 'auto', containIntrinsicSize: '0 40px' }}>
                                 <div className="flex items-center gap-1.5 sm:gap-2 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 border border-blue-200 dark:border-blue-700 rounded-lg px-2 sm:px-3 py-1.5 sm:py-2 min-w-fit group-hover:from-blue-100 dark:group-hover:from-blue-900/30 group-hover:to-indigo-100 dark:group-hover:to-indigo-900/30 transition-all duration-300">
                                   <div className="flex items-center justify-center w-5 h-5 sm:w-6 sm:h-6 bg-blue-500 text-white text-[10px] sm:text-xs font-bold rounded-full">
                                     {idx + 1}
@@ -754,7 +760,7 @@ export default function StudentDashboard() {
                               </div>
                             )) :
                             routeData.stops.map((stop: any, idx: number) => (
-                              <div key={idx} className="group/stop flex-shrink-0">
+                              <div key={idx} className="group/stop flex-shrink-0" style={{ contentVisibility: 'auto', containIntrinsicSize: '0 56px' }}>
                                 <div className="flex items-center gap-3 bg-gradient-to-br from-white to-blue-50/50 dark:from-gray-800 dark:to-blue-900/30 border border-blue-200/50 dark:border-blue-700/50 rounded-xl px-4 py-3 min-w-fit shadow-sm hover:shadow-md transition-all duration-300 group-hover/stop:from-blue-50 group-hover/stop:to-indigo-50 dark:group-hover/stop:from-blue-900/40 dark:group-hover/stop:to-indigo-900/40">
                                   <div className="flex items-center justify-center w-8 h-8 bg-gradient-to-br from-blue-500 to-indigo-600 text-white text-sm font-bold rounded-full shadow-md group-hover/stop:scale-110 transition-all duration-300">
                                     {idx + 1}

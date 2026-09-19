@@ -46,6 +46,8 @@ export interface IdentityUser {
   [key: string]: any;
 }
 
+const USER_COLUMNS = 'uid, email, name, role, created_at, last_login_at';
+
 // ─── Mappers ─────────────────────────────────────────────────────────────────
 
 /**
@@ -166,7 +168,7 @@ export async function pgFindUserById(uid: string): Promise<IdentityUser | null> 
 
   const { data, error } = await db
     .from('users')
-    .select('*')
+    .select(USER_COLUMNS)
     .eq('uid', uid)
     .maybeSingle();
 
@@ -212,7 +214,7 @@ export async function pgFindUsersByRole(role: UserRole): Promise<IdentityUser[]>
 
   const { data, error } = await db
     .from('users')
-    .select('*')
+    .select(USER_COLUMNS)
     .eq('role', role);
 
   if (error) {
@@ -230,7 +232,7 @@ export async function pgFindAllUsers(): Promise<IdentityUser[]> {
 
   const { data, error } = await db
     .from('users')
-    .select('*');
+    .select(USER_COLUMNS);
 
   if (error) {
     throw new Error(`IdentityRepository (PG) all users query failed: ${error.message}`);
@@ -247,7 +249,7 @@ export async function pgFindUserByEmail(email: string): Promise<IdentityUser | n
 
   const { data, error } = await db
     .from('users')
-    .select('*')
+    .select(USER_COLUMNS)
     .eq('email', email)
     .maybeSingle();
 
@@ -450,6 +452,8 @@ const DRIVER_FIELD_MAP: Record<string, string> = {
   updatedAt: 'updated_at',
 };
 
+const DRIVER_COLUMNS = 'uid, email, full_name, phone, alternate_phone, license_number, aadhar_number, employee_id, address, profile_photo_url, joining_date, status, is_reserved, approved_by, dob, created_at, updated_at';
+
 /** Known Firestore fields that map to typed PostgreSQL columns */
 const KNOWN_DRIVER_FIELDS = new Set(Object.keys(DRIVER_FIELD_MAP));
 
@@ -489,7 +493,7 @@ export async function pgFindDriversByStatus(status: string): Promise<Record<stri
 /** Find all drivers (no filter) */
 export async function pgFindAllDrivers(): Promise<Record<string, any>[]> {
   const db = getSupabaseServer();
-  const { data, error } = await db.from('driver_profiles').select('*');
+  const { data, error } = await db.from('driver_profiles').select(DRIVER_COLUMNS);
   if (error) throw new Error(`IdentityRepository (PG) all drivers query failed: ${error.message}`);
   return (data || []).map(rowToFirestoreDriver);
 }
@@ -497,7 +501,7 @@ export async function pgFindAllDrivers(): Promise<Record<string, any>[]> {
 /** Find drivers with database-level pagination */
 export async function pgFindAllDriversPaginated(limit: number, offset: number): Promise<Record<string, any>[]> {
   const db = getSupabaseServer();
-  const { data, error } = await db.from('driver_profiles').select('*').range(offset, offset + limit - 1);
+  const { data, error } = await db.from('driver_profiles').select(DRIVER_COLUMNS).range(offset, offset + limit - 1);
   if (error) throw new Error(`IdentityRepository (PG) paginated drivers query failed: ${error.message}`);
   return (data || []).map(rowToFirestoreDriver);
 }
@@ -557,6 +561,8 @@ const MODERATOR_FIELD_MAP: Record<string, string> = {
   updatedAt: 'updated_at',
 };
 
+const MODERATOR_COLUMNS = 'uid, email, full_name, phone, employee_id, team_name, status, profile_photo_url, role, created_by, faculty, permissions, permissions_updated_at, permissions_updated_by, created_at, updated_at';
+
 const KNOWN_MODERATOR_FIELDS = new Set(Object.keys(MODERATOR_FIELD_MAP));
 
 const firestoreModeratorToRow = (data: Record<string, any>) => firestoreToRow(data, MODERATOR_FIELD_MAP);
@@ -577,7 +583,7 @@ export async function pgFindModeratorsByStatus(status: string): Promise<Record<s
 /** Find all moderators */
 export async function pgFindAllModerators(): Promise<Record<string, any>[]> {
   const db = getSupabaseServer();
-  const { data, error } = await db.from('moderator_profiles').select('*');
+  const { data, error } = await db.from('moderator_profiles').select(MODERATOR_COLUMNS);
   if (error) throw new Error(`IdentityRepository (PG) all moderators query failed: ${error.message}`);
   return (data || []).map(rowToFirestoreModerator);
 }
@@ -745,10 +751,12 @@ export async function pgCountUnauthUsers(): Promise<number> {
   return pgCountTable('unauth_users');
 }
 
+const UNAUTH_COLUMNS = 'uid, email, display_name, photo_url, status, needs_application, created_at, last_login_at';
+
 /** Find all unauth users */
 export async function pgFindAllUnauthUsers(): Promise<Record<string, any>[]> {
   const db = getSupabaseServer();
-  const { data, error } = await db.from('unauth_users').select('*');
+  const { data, error } = await db.from('unauth_users').select(UNAUTH_COLUMNS);
   if (error) throw new Error(`IdentityRepository (PG) all unauth users query failed: ${error.message}`);
   return (data || []).map(rowToFirestoreUnauth);
 }

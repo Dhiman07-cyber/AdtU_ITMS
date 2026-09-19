@@ -103,12 +103,13 @@ export const GET = withSecurity(
         const busId = studentData.busId || studentData.busId;
         const routeId = studentData.routeId || studentData.routeId;
 
-        // 2. Parallelize core metadata reads (bus, route, drivers, active trip)
-        const [busData, dbRoute, drivers, tripStatus] = await Promise.all([
+        // 2. Parallelize core metadata reads (bus, route, drivers, active trip, waiting flags)
+        const [busData, dbRoute, drivers, tripStatus, waitingFlagRes] = await Promise.all([
             busId ? getBusById(busId) : Promise.resolve(null),
             routeId ? routeService.getById(routeId) : Promise.resolve(null),
             busId ? getDriversByBusId(busId) : Promise.resolve([]),
-            busId ? supabase.from('active_trips').select('trip_id, status, start_time, last_heartbeat, shift').eq('bus_id', busId).eq('status', 'active').maybeSingle() : Promise.resolve(null)
+            busId ? supabase.from('active_trips').select('trip_id, status, start_time, last_heartbeat, shift').eq('bus_id', busId).eq('status', 'active').maybeSingle() : Promise.resolve(null),
+            supabase.from('waiting_flags').select('id, student_uid, bus_id, status, trip_id, stop_name, created_at').eq('student_uid', uid).in('status', ['raised', 'acknowledged', 'waiting']).limit(1)
         ]);
 
         // Process Bus & Route
@@ -130,19 +131,9 @@ export const GET = withSecurity(
             }
         }
 
-        // OPTIMIZATION: Only fetch waiting flags if a trip is currently active
-        let activeWaitingFlag = null;
-        if (isTripActive) {
-            const { data: flagData } = await supabase
-                .from('waiting_flags')
-                .select('*')
-                .eq('student_uid', uid)
-                .in('status', ['raised', 'acknowledged', 'waiting'])
-                .limit(1);
-            if (flagData && flagData.length > 0) {
-                activeWaitingFlag = flagData[0];
-            }
-        }
+        const activeWaitingFlag = (isTripActive && waitingFlagRes?.data && waitingFlagRes.data.length > 0)
+            ? waitingFlagRes.data[0]
+            : null;
 
         return NextResponse.json({
             student: studentData,

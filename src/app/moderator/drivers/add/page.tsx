@@ -1,32 +1,31 @@
 "use client";
 
 import EnhancedDatePicker from "@/components/enhanced-date-picker";
-import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import ProfileImageAddModal from '@/components/ProfileImageAddModal';
 import RouteSelect from '@/components/RouteSelect';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-	Select,
-	SelectContent,
-	SelectItem,
-	SelectTrigger,
-	SelectValue,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from '@/contexts/auth-context';
 import { useToast } from '@/contexts/toast-context';
 import { useDebouncedStorage } from '@/hooks/useDebouncedStorage';
 import { signalCollectionRefresh } from "@/hooks/useEventDrivenRefresh";
-import { getAllBuses,getAllDrivers,getAllRoutes,getModeratorById,updateDriver } from '@/lib/dataService';
+import { getAllBuses, getAllDrivers, getAllRoutes, getModeratorById, updateDriver } from '@/lib/dataService';
 import { Route } from '@/lib/types';
 import { uploadImage } from '@/lib/upload';
-import { Camera,RefreshCw,Trash2 } from "lucide-react";
+import { Camera, RefreshCw, Trash2 } from "lucide-react";
 import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useEffect,useRef,useState } from 'react';
+import { startTransition, useEffect, useRef, useState } from 'react';
 
 // Define the form data type
 type DriverFormData = {
@@ -186,16 +185,18 @@ export default function AddDriver() {
           getAllBuses(),
           getAllDrivers()
         ]);
-        setRoutes(routesData);
-        setBuses(busesData);
-        setDriversList(driversData);
+        startTransition(() => {
+          setRoutes(routesData);
+          setBuses(busesData);
+          setDriversList(driversData);
 
-        // Logic for Driver ID: DB-XY
-        const nextCount = driversData.length + 1;
-        const xy = nextCount < 10 ? `0${nextCount}` : `${nextCount}`;
-        const newDriverId = `DB-${xy}`;
-        setAutoFilledId(newDriverId);
-        setFormData(prev => ({ ...prev, driverId: newDriverId }));
+          // Logic for Driver ID: DB-XY
+          const nextCount = driversData.length + 1;
+          const xy = nextCount < 10 ? `0${nextCount}` : `${nextCount}`;
+          const newDriverId = `DB-${xy}`;
+          setAutoFilledId(newDriverId);
+          setFormData(prev => ({ ...prev, driverId: newDriverId }));
+        });
 
         console.log('Fetched routes:', routesData);
         console.log('Fetched buses:', busesData);
@@ -216,20 +217,20 @@ export default function AddDriver() {
       return;
     }
 
-    const existingDriver = driversList.find(d => 
+    const existingDriver = driversList.find(d =>
       (d.busId === formData.busId || d.busId === formData.busId) && !d.isReserved
     );
 
     if (existingDriver) {
-      setAvailableShifts(['Morning', 'Evening']); 
-      
+      setAvailableShifts(['Morning', 'Evening']);
+
       const existingShift = existingDriver.shift?.toLowerCase();
       if (existingShift === 'morning') {
         setFormData(prev => ({ ...prev, shift: 'Evening' }));
       } else if (existingShift === 'evening') {
         setFormData(prev => ({ ...prev, shift: 'Morning' }));
       } else if (existingShift === 'both' && formData.shift === 'Both') {
-        setFormData(prev => ({ ...prev, shift: 'Morning' })); 
+        setFormData(prev => ({ ...prev, shift: 'Morning' }));
       }
     } else {
       setAvailableShifts(['Morning', 'Evening', 'Both']);
@@ -438,15 +439,15 @@ export default function AddDriver() {
     }
 
     if (e) {
-      const existingDriver = driversList.find(d => 
+      const existingDriver = driversList.find(d =>
         (d.busId === formData.busId || d.busId === formData.busId) && !d.isReserved
       );
-      
+
       if (existingDriver) {
         let isConflict = false;
         const eShift = existingDriver.shift?.toLowerCase();
         const fShift = formData.shift.toLowerCase();
-        
+
         if (eShift === 'both' || eShift === fShift) {
           isConflict = true;
         }
@@ -454,7 +455,7 @@ export default function AddDriver() {
         if (isConflict) {
           setConflictDriver(existingDriver);
           setShowConflictModal(true);
-          return; 
+          return;
         }
       }
     }
@@ -576,8 +577,21 @@ export default function AddDriver() {
     addToast('Form reset successfully', 'info');
   };
 
-  if (loading) {
-    return <PremiumPageLoader message="Preparing driver form..." subMessage="Loading resources..." />;
+  if (loading && !currentUser) {
+    return (
+      <div className="itms-admin-form-container space-y-6 animate-pulse">
+        <div className="itms-page-header-container">
+          <div className="flex justify-between items-center mb-6">
+            <div>
+              <div className="h-9 w-48 bg-muted/60 rounded-xl mb-2" />
+              <div className="h-4 w-72 bg-muted/40 rounded-lg" />
+            </div>
+            <div className="h-8 w-20 bg-muted/40 rounded-lg" />
+          </div>
+        </div>
+        <div className="h-96 rounded-2xl bg-muted/20 border border-white/5" />
+      </div>
+    );
   }
 
   if (!currentUser || !userData || (userData.role !== 'admin' && userData.role !== 'moderator')) {
@@ -608,26 +622,27 @@ export default function AddDriver() {
   const selectedRoute = routes.find(route => route.routeId === formData.routeId);
 
   return (
-    <div className="mt-10 py-4">
+    <div className="itms-admin-form-container space-y-6">
       {/* Header */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div className="itms-page-header-container">
         <div className="flex justify-between items-center mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-white mb-1">Add Driver</h1>
-            <p className="text-gray-400 text-xs">Register a new driver in the system</p>
+            <h1 className="text-xl sm:text-2xl md:text-3xl font-bold tracking-tight text-foreground leading-tight pb-1">Add Driver</h1>
+            <p className="text-muted-foreground mt-1 text-xs sm:text-sm">Register a new driver in the system</p>
           </div>
           <Link
             href="/moderator/drivers"
-            className="inline-flex items-center px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white text-sm border border-white/20 hover:border-white/30 rounded-lg transition-all duration-200 hover:shadow-lg backdrop-blur-sm"
+            className="inline-flex items-center px-3.5 py-1.5 bg-secondary/80 hover:bg-secondary text-secondary-foreground border border-border/50 text-xs font-medium rounded-lg transition-colors shadow-sm cursor-pointer"
           >
+            <span className="mr-1.5 text-xs">←</span>
             Back
           </Link>
         </div>
       </div>
 
       {/* Main Content - Card container */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="bg-gradient-to-br from-[#0E0F12] to-[#1A1B23] backdrop-blur-sm rounded-2xl shadow-2xl border border-white/10 p-10 hover:border-white/20 transition-all duration-300">
+      <div className="w-full">
+        <div className="bg-gradient-to-br from-[#0E0F12] to-[#1A1B23] backdrop-blur-sm rounded-2xl shadow-2xl border border-white/10 p-4 sm:p-10 hover:border-white/20 transition-all duration-300">
           <form onSubmit={handleSubmit} className="space-y-6">
             {/* Profile Photo Section - Moved to top center */}
             <div className="flex flex-col items-center mb-6">
@@ -1009,7 +1024,7 @@ export default function AddDriver() {
             </div>
           )}
         </div>
-    </div>
+      </div>
 
       {showConflictModal && conflictDriver && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">

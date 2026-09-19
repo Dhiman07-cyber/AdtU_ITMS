@@ -12,8 +12,7 @@ import { useRouter } from "next/navigation";
 import { useEffect,useMemo,useState } from "react";
 // Migrated: Server-side API → PostgreSQL (no Firestore client reads)
 import { StatusBadge } from "@/components/application/status-badge";
-import { CardLoader, PremiumPageLoader } from '@/components/LoadingSpinner';
-import { usePageShellLoader } from '@/hooks/usePageShellLoader';
+import { CardLoader } from '@/components/LoadingSpinner';
 import type { AlternativeBusData } from '@/components/smart-allocation/AlternativeBusPicker';
 import AlternativeBusPicker from '@/components/smart-allocation/AlternativeBusPicker';
 import type { BusData as RPBusData,StudentData as RPStudentData } from '@/components/smart-allocation/ReassignmentPanel';
@@ -122,7 +121,6 @@ export default function ModeratorApplicationsPage() {
   });
 
   const isDataLoading = loading || loadingRenewals || routesLoading || busesLoading;
-  const { showLoader } = usePageShellLoader(isDataLoading && pendingApplications.length === 0, 3500);
 
   const [error, setError] = useState("");
   const [activeSection, setActiveSection] = useState<'applications' | 'upcoming' | 'renewals'>('applications');
@@ -911,27 +909,43 @@ export default function ModeratorApplicationsPage() {
   }
 
   return (
-    <div className="mt-12 space-y-6">
+    <div className="itms-admin-container space-y-6">
       {/* Page Header - Responsive Custom Implementation */}
-      <div className="space-y-2 mb-8">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <h1 className="text-3xl font-bold tracking-tight text-white leading-none">Student Applications</h1>
-            <div className="hidden md:block">
+      <div className="itms-page-header-container space-y-2 mb-8">
+        <div className="flex items-center justify-between gap-2 w-full">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <h1 className="text-xl sm:text-2xl md:text-3xl font-bold tracking-tight text-white leading-tight pb-1 truncate">Student Applications</h1>
+            <div className="hidden md:block shrink-0">
               <Badge className="text-[10px] font-bold px-2 py-0.5 bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 uppercase tracking-tight rounded-md">
                 {activeSection === 'applications' ? 'Applications' : activeSection === 'upcoming' ? 'Upcoming' : 'Renewals'}: {filteredData.length}
               </Badge>
             </div>
           </div>
-          <Button
-            size="sm"
-            className="group h-8 px-3.5 bg-zinc-100 hover:bg-zinc-200/80 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-200 hover:text-blue-600 dark:hover:text-blue-400 border border-zinc-300/80 dark:border-zinc-700 shadow-sm hover:shadow-md hover:border-blue-300 dark:hover:border-blue-500/50 font-bold text-[10px] uppercase tracking-widest rounded-lg transition-all duration-300 active:scale-95 cursor-pointer"
-            onClick={handleRefresh}
-            disabled={isRefreshing}
-          >
-            <RefreshCw className={cn(`mr-2 h-3.5 w-3.5 transition-transform duration-500`, isRefreshing ? "animate-spin" : "group-hover:rotate-180")} />
-            Refresh
-          </Button>
+          {/* Desktop action toolbar */}
+          <div className="hidden md:flex items-center gap-2 shrink-0">
+            <Button
+              size="sm"
+              className="group h-8 px-3.5 bg-secondary/80 hover:bg-secondary text-secondary-foreground border border-border/50 shadow-sm font-medium text-xs rounded-lg transition-colors active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer shrink-0"
+              onClick={handleRefresh}
+              disabled={isRefreshing}
+            >
+              <RefreshCw className={cn(`mr-1.5 h-3 w-3 transition-transform duration-500`, isRefreshing ? "animate-spin" : "group-hover:rotate-180")} />
+              <span>Refresh</span>
+            </Button>
+          </div>
+
+          {/* Mobile Refresh Button - exact same line as Student Applications at rightmost end */}
+          <div className="flex md:hidden items-center shrink-0">
+            <Button
+              size="sm"
+              onClick={handleRefresh}
+              disabled={isRefreshing}
+              className="h-8 px-3 bg-white dark:bg-zinc-800 hover:bg-gray-50 dark:hover:bg-zinc-700 text-gray-700 dark:text-zinc-200 hover:text-blue-600 dark:hover:text-blue-400 border border-gray-200 dark:border-zinc-700 shadow-sm rounded-lg text-xs font-semibold flex items-center gap-1.5 cursor-pointer active:scale-95 transition-all shrink-0"
+            >
+              <RefreshCw className={cn("h-3.5 w-3.5 transition-transform duration-500", isRefreshing ? "animate-spin text-blue-600" : "group-hover:rotate-180")} />
+              <span>Refresh</span>
+            </Button>
+          </div>
         </div>
         <p className="text-zinc-400 text-sm max-w-2xl">
           Review and manage all student bus application requests
@@ -1039,11 +1053,7 @@ export default function ModeratorApplicationsPage() {
         </div>
       )}
 
-      {showLoader ? (
-        <div className="flex-1 min-h-[calc(100dvh-48px)] flex justify-center items-center">
-          <PremiumPageLoader message="Fetching data..." maxDurationMs={3500} />
-        </div>
-      ) : isDataLoading && filteredData.length === 0 ? (
+      {isDataLoading && filteredData.length === 0 ? (
         <div className="space-y-4">
           <CardLoader />
           <CardLoader />
@@ -1075,7 +1085,7 @@ export default function ModeratorApplicationsPage() {
             const key = isApplication ? item.applicationId : item.codeId;
 
             return (
-              <Card key={key} className="group hover:border-indigo-500/20 transition-all duration-300 border-white/[0.05] bg-[#12131A]/40 hover:bg-indigo-500/[0.03] overflow-hidden relative">
+              <Card key={key} style={{ contentVisibility: 'auto', containIntrinsicSize: '0 220px' }} className="group hover:border-indigo-500/20 transition-all duration-300 border-white/[0.05] bg-[#12131A]/40 hover:bg-indigo-500/[0.03] overflow-hidden relative">
                 <div className="absolute left-0 top-0 bottom-0 w-1 bg-indigo-500 transform scale-y-0 group-hover:scale-y-100 transition-transform duration-300" />
 
                 {isApplication ? (() => {

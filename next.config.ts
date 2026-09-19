@@ -178,8 +178,8 @@ const nextConfig: NextConfig = {
       },
     ],
     // Image optimization settings - prioritize quality
-    formats: ['image/webp', 'image/avif'],
-    minimumCacheTTL: 14400,
+    formats: ['image/avif', 'image/webp'],
+    minimumCacheTTL: 86400,
     dangerouslyAllowSVG: false,
     contentSecurityPolicy: "default-src 'self'; script-src 'none'; sandbox;",
     // Disable automatic optimization for Cloudinary URLs to preserve quality

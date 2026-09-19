@@ -17,7 +17,7 @@ import {
 } from '@/config/runtime';
 import { useAuth } from '@/contexts/auth-context';
 import { useVisibilityAwareListener } from '@/utils/useVisibilityAwareListener';
-import { useEffect,useRef,useState } from 'react';
+import { useEffect, useRef, useState, startTransition } from 'react';
 import {
 	dataCache,
 	type CacheEntry
@@ -198,8 +198,10 @@ export function useApiCollection<T = Record<string, any>>(
         if (!bypassCache && ttl > 0) {
             const cached = getCachedData<T>(cacheKey, ttl);
             if (cached) {
-                setData(cached);
-                setLoading(false);
+                startTransition(() => {
+                    setData(cached);
+                    setLoading(false);
+                });
                 return;
             }
         }
@@ -239,7 +241,10 @@ export function useApiCollection<T = Record<string, any>>(
                 return aVal < bVal ? 1 : aVal > bVal ? -1 : 0;
             });
 
-            setData(sorted);
+            startTransition(() => {
+                setData(sorted);
+                setLoading(false);
+            });
             if (ttl > 0) setCachedData(cacheKey, sorted);
 
             retryCountRef.current = 0;
@@ -259,7 +264,11 @@ export function useApiCollection<T = Record<string, any>>(
                 }, backoffMs);
             }
         } finally {
-            if (isMountedRef.current) setLoading(false);
+            if (isMountedRef.current) {
+                startTransition(() => {
+                    setLoading(false);
+                });
+            }
         }
     };
 
@@ -298,13 +307,15 @@ export function useApiCollection<T = Record<string, any>>(
             offsetRef.current = nextOffset;
 
             // Merge and dedup by id/uid if available
-            setData(prev => {
-                const existingIds = new Set(prev.map((item: any) => item.id || item.uid || item._id));
-                const uniqueNew = nextBatch.filter((item: any) => {
-                    const id = item.id || item.uid || item._id;
-                    return id ? !existingIds.has(id) : true;
+            startTransition(() => {
+                setData(prev => {
+                    const existingIds = new Set(prev.map((item: any) => item.id || item.uid || item._id));
+                    const uniqueNew = nextBatch.filter((item: any) => {
+                        const id = item.id || item.uid || item._id;
+                        return id ? !existingIds.has(id) : true;
+                    });
+                    return [...prev, ...uniqueNew];
                 });
-                return [...prev, ...uniqueNew];
             });
         } catch (err) {
             console.error('[useApiCollection] Failed to fetch next page:', err);

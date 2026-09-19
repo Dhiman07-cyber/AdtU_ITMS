@@ -95,7 +95,7 @@ export const POST = withSecurity(
         const { data: insertData, error: insertError } = await supabase
             .from('waiting_flags')
             .insert(flagData)
-            .select()
+            .select('id, student_uid, student_name, bus_id, route_id, stop_name, stop_lat, stop_lng, status, trip_id, created_at, message')
             .single();
 
         if (insertError) {
@@ -143,7 +143,7 @@ export const DELETE = withSecurity(
             .eq('id', flagId)
             .eq('student_uid', studentUid)
             .in('status', ['raised', 'acknowledged', 'waiting'])
-            .select();
+            .select('id');
 
         if (supabaseError) {
             console.error('Supabase error:', supabaseError);
@@ -188,7 +188,7 @@ export const GET = withSecurity(
 
         const { data, error } = await supabase
             .from('waiting_flags')
-            .select('*')
+            .select('id, student_uid, bus_id, status, trip_id, created_at, stop_name, stop_lat, stop_lng, message')
             .eq('student_uid', studentUid)
             .in('status', ['waiting', 'raised', 'acknowledged'])
             .maybeSingle();

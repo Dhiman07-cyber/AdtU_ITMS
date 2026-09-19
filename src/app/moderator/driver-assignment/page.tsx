@@ -5,7 +5,6 @@ import { useCallback,useEffect,useMemo,useRef,useState } from "react";
 
 
 import Avatar from "@/components/Avatar";
-import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import { PermissionDeniedCard } from "@/components/PermissionDeniedCard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -801,8 +800,13 @@ export default function SmartDriverAssignmentPage() {
     // RENDER: LOADING STATE
     // ============================================
 
-    if (loading || authLoading) {
-        return <PremiumPageLoader message="Loading driver assignment system..." subMessage="Configuring shift slots..." />;
+    if (authLoading && !currentUser) {
+        return (
+            <div className="itms-admin-container space-y-6 animate-pulse">
+                <div className="h-10 w-64 bg-slate-200 dark:bg-zinc-800 rounded-md" />
+                <div className="h-64 bg-slate-100 dark:bg-zinc-900 rounded-xl border border-slate-200 dark:border-zinc-800" />
+            </div>
+        );
     }
 
     if (!permsLoading && !canDriverReassign) {
@@ -811,7 +815,7 @@ export default function SmartDriverAssignmentPage() {
 
     return (
         <TooltipProvider>
-            <div className="mt-20 sm:mt-8 space-y-6 px-2 sm:px-4 ml-0">
+            <div className="itms-admin-container space-y-6">
                 {/* Header */}
                 <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4 flex-shrink-0">
                     <div>
@@ -887,28 +891,37 @@ export default function SmartDriverAssignmentPage() {
                         </div>
                         <ScrollArea className="flex-1">
                             <div className="px-3 pb-3 space-y-2">
-                                {filteredDrivers.map((driver) => {
-                                    const mergedBusInfo = getMergedBusForDriver(driver);
-                                    const isSelected = selectedDriverIds.has(driver.id);
-                                    const driverCode = formatDriverCode(driver.driverId || driver.employeeId || driver.id);
+                                {loading && filteredDrivers.length === 0 ? (
+                                    <div className="space-y-2">
+                                        {[1, 2, 3, 4, 5].map((i) => (
+                                            <div key={i} className="h-20 rounded-xl bg-slate-800/40 animate-pulse border border-slate-700/30" />
+                                        ))}
+                                    </div>
+                                ) : (
+                                    filteredDrivers.map((driver) => {
+                                        const mergedBusInfo = getMergedBusForDriver(driver);
+                                        const isSelected = selectedDriverIds.has(driver.id);
+                                        const driverCode = formatDriverCode(driver.driverId || driver.employeeId || driver.id);
 
-                                    return (
-                                        <motion.div
-                                            key={driver.id}
-                                            onClick={(e) => handleDriverSelect(driver.id, e)}
-                                            className={cn(
-                                                "h-20 p-3 rounded-xl cursor-pointer transition-all duration-200 border",
-                                                isSelected
-                                                    ? "border-opacity-100 shadow-md"
-                                                    : "border-transparent hover:border-opacity-30"
-                                            )}
-                                            style={{
-                                                backgroundColor: isSelected ? `${tokens.primaryPurple}15` : '#131C2E',
-                                                borderColor: isSelected ? tokens.primaryPurple : tokens.borderDark,
-                                            }}
-                                            whileHover={{ scale: 1.01 }}
-                                            whileTap={{ scale: 0.99 }}
-                                        >
+                                        return (
+                                            <motion.div
+                                                key={driver.id}
+                                                onClick={(e) => handleDriverSelect(driver.id, e)}
+                                                className={cn(
+                                                    "h-20 p-3 rounded-xl cursor-pointer transition-all duration-200 border",
+                                                    isSelected
+                                                        ? "border-opacity-100 shadow-md"
+                                                        : "border-transparent hover:border-opacity-30"
+                                                )}
+                                                style={{
+                                                    backgroundColor: isSelected ? `${tokens.primaryPurple}15` : '#131C2E',
+                                                    borderColor: isSelected ? tokens.primaryPurple : tokens.borderDark,
+                                                    contentVisibility: 'auto',
+                                                    containIntrinsicSize: '0 80px',
+                                                }}
+                                                whileHover={{ scale: 1.01 }}
+                                                whileTap={{ scale: 0.99 }}
+                                            >
                                             <div className="flex items-center justify-between h-full">
                                                 <div className="flex items-center gap-3">
                                                     {/* Checkbox removed as per single-select requirement */}
@@ -968,9 +981,10 @@ export default function SmartDriverAssignmentPage() {
                                             </div>
                                         </motion.div>
                                     );
-                                })}
+                                    })
+                                )}
 
-                                {filteredDrivers.length === 0 && (
+                                {!loading && filteredDrivers.length === 0 && (
                                     <div className="flex flex-col items-center justify-center py-12 text-center">
                                         <Users className="h-12 w-12 mb-3" style={{ color: tokens.textMuted }} />
                                         <p className="text-sm" style={{ color: tokens.textMuted }}>No drivers found</p>
@@ -1064,7 +1078,7 @@ export default function SmartDriverAssignmentPage() {
                                                     const displayedDriverName = mergedDriverInfo.stagedDriverName || displayedDriver?.fullName || displayedDriver?.name;
 
                                                     return (
-                                                        <div key={bus.id} className="relative">
+                                                        <div key={bus.id} style={{ contentVisibility: 'auto', containIntrinsicSize: '0 120px' }} className="relative">
                                                             <motion.div
                                                                 whileHover={!hasActiveTrip ? { scale: 1.02, backgroundColor: '#1E293B' } : {}}
                                                                 whileTap={!hasActiveTrip ? { scale: 0.98 } : {}}

@@ -39,8 +39,14 @@ export default function PWAInstallPrompt() {
     }, 11000); // Hide after 11 seconds total
 
     const handler = (e: Event) => {
-      // beforeinstallprompt event fired
-      // Prevent the mini-infobar from appearing on mobile
+      // In development / localhost, do not call preventDefault to avoid Chrome warning:
+      // "Banner not shown: beforeinstallpromptevent.preventDefault() called."
+      if (process.env.NODE_ENV === 'development' || window.location.hostname === 'localhost') {
+        setDeferredPrompt(e);
+        return;
+      }
+
+      // Prevent the mini-infobar from appearing on mobile in production
       e.preventDefault();
       // Save the event so it can be triggered later
       setDeferredPrompt(e);

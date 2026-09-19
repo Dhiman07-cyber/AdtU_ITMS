@@ -1,6 +1,5 @@
 "use client";
 
-import { PremiumPageLoader } from '@/components/LoadingSpinner';
 import StudentAccessBlockScreen from '@/components/StudentAccessBlockScreen';
 import { useAuth } from '@/contexts/auth-context';
 import { useTransportEntitlement } from '@/hooks/useTransportEntitlement';
@@ -44,7 +43,15 @@ export default function TransportEntitlementGuard({ children }: TransportEntitle
     };
   }, [loading, entitled]);
 
-  if (loading) return <PremiumPageLoader />;
+  if (loading) {
+    return (
+      <div className="min-h-[60vh] flex flex-col items-center justify-center p-6 animate-pulse">
+        <div className="w-16 h-16 rounded-full bg-slate-200 dark:bg-zinc-800 mb-4" />
+        <div className="h-4 w-48 bg-slate-200 dark:bg-zinc-800 rounded mb-2" />
+        <div className="h-3 w-32 bg-slate-100 dark:bg-zinc-900 rounded" />
+      </div>
+    );
+  }
   if (entitled) return <>{children}</>;
 
   return (

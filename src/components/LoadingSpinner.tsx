@@ -16,5 +16,6 @@ export {
   PageLoader,
   PremiumPageLoader,
   TableLoader,
+  TableRowLoader,
   default as LoadingSpinner,
 } from '@/app/loading';

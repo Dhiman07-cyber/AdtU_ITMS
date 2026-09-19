@@ -7,7 +7,6 @@
  * and payment receipts - matches driver's bus pass scanner UI exactly.
  */
 
-import { PremiumPageLoader } from '@/components/LoadingSpinner';
 import ReceiptVerificationModal from '@/components/ReceiptVerificationModal';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/auth-context';
@@ -398,8 +397,12 @@ export default function AdminVerificationPage() {
         setCameraError(null);
     };
 
-    if (authLoading) {
-        return <PremiumPageLoader message="Loading Verification Scanner..." subMessage="Preparing scanner..." />;
+    if (authLoading && !currentUser) {
+        return (
+            <div className="min-h-screen bg-transparent flex flex-col items-center justify-center p-4">
+                <div className="w-full max-w-[500px] h-96 bg-zinc-900/50 border border-zinc-800 rounded-3xl animate-pulse" />
+            </div>
+        );
     }
 
     return (
@@ -410,18 +413,16 @@ export default function AdminVerificationPage() {
                 {scannedResults.length === 0 && (
                     <div className="w-full flex items-center justify-between mb-6 px-1">
                         <div className="text-left">
-                            <h1 className="text-xl font-black text-white tracking-tight leading-none">Verification Scanner</h1>
-                            <p className="text-[9px] text-white/40 font-bold uppercase tracking-[0.15em] mt-1">Verify students & receipts</p>
+                            <h1 className="text-xl font-black text-white tracking-tight leading-tight pb-1">Verification Scanner</h1>
+                            <p className="text-[10px] text-white/50 font-medium mt-0.5">Verify students & receipts</p>
                         </div>
                         <button
                             onClick={resetScan}
-                            className="p-2 rounded-xl bg-white text-[#020617] hover:bg-white/90 transition-all shadow-lg hover:scale-102 hover:cursor-pointer"
+                            className="h-8 px-3.5 rounded-lg bg-white/80 dark:bg-zinc-800/80 hover:bg-zinc-50 dark:hover:bg-zinc-700/80 text-zinc-700 dark:text-zinc-200 hover:text-blue-600 dark:hover:text-blue-400 border border-zinc-200 dark:border-zinc-700/60 shadow-xs text-xs font-semibold transition-all duration-200 active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer"
                             title="Refresh"
                         >
-                            <div className="flex items-center gap-2">
-                                <RotateCcw className="h-3 w-3" />
-                                <div className="text-[10px] text-gray-800 font-bold tracking-[0.15em]">Refresh</div>
-                            </div>
+                            <RotateCcw className="h-3.5 w-3.5" />
+                            <span>Refresh</span>
                         </button>
                     </div>
                 )}
@@ -576,7 +577,7 @@ export default function AdminVerificationPage() {
                                         {/* Header with Logo */}
                                         <div className="w-full px-3 sm:px-4 py-2 sm:py-3 flex items-center justify-center border-b border-white/5 bg-gradient-to-r from-[#1a1b2e] to-[#0f1019] relative">
                                             <div className="flex items-center gap-2">
-                                                <Image src="/adtu-new-logo.svg" alt="AdtU" width={96} height={24} className="h-5 sm:h-7 w-auto flex-shrink-0" style={{ width: 'auto', height: 'auto' }} />
+                                                <Image src="/adtu-new-logo.svg" alt="AdtU" width={96} height={24} priority loading="eager" className="h-5 sm:h-7 w-auto flex-shrink-0" style={{ width: 'auto', height: 'auto' }} />
                                                 <span className="text-[9px] sm:text-xs font-bold text-white/70 tracking-wider">Assam down town University</span>
                                             </div>
                                         </div>

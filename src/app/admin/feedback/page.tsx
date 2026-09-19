@@ -1,31 +1,30 @@
 "use client";
 
-import { PremiumPageLoader } from '@/components/LoadingSpinner';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card,CardContent } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import {
-	Command,
-	CommandEmpty,
-	CommandGroup,
-	CommandInput,
-	CommandItem,
-	CommandList,
+    Command,
+    CommandEmpty,
+    CommandGroup,
+    CommandInput,
+    CommandItem,
+    CommandList,
 } from "@/components/ui/command";
 import {
-	Dialog,
-	DialogContent,
-	DialogDescription,
-	DialogFooter,
-	DialogHeader,
-	DialogTitle,
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
-	Popover,
-	PopoverContent,
-	PopoverTrigger,
+    Popover,
+    PopoverContent,
+    PopoverTrigger,
 } from "@/components/ui/popover";
 import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/contexts/auth-context';
@@ -33,30 +32,30 @@ import { useToast } from '@/contexts/toast-context';
 import { cn } from "@/lib/utils";
 import { formatDateTimeShort } from '@/lib/utils/date-utils';
 import {
-	AlertCircle,
-	Bell,
-	Calendar,
-	Check,
-	CheckCircle2,
-	ChevronsUpDown,
-	CircleUser,
-	Eye,
-	Forward,
-	GraduationCap,
-	Loader2,
-	Mail,
-	MessageSquare,
-	RefreshCw,
-	Search,
-	ShieldCheck,
-	Truck,
-	User,
-	Users,
-	X
+    AlertCircle,
+    Bell,
+    Calendar,
+    Check,
+    CheckCircle2,
+    ChevronsUpDown,
+    CircleUser,
+    Eye,
+    Forward,
+    GraduationCap,
+    Loader2,
+    Mail,
+    MessageSquare,
+    RefreshCw,
+    Search,
+    ShieldCheck,
+    Truck,
+    User,
+    Users,
+    X
 } from 'lucide-react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
-import { useCallback,useEffect,useMemo,useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 interface FeedbackEntry {
     id: string;
@@ -123,11 +122,13 @@ export default function AdminFeedbackPage() {
     const [sendingForward, setSendingForward] = useState(false);
 
 
-    const fetchFeedback = useCallback(async () => {
+    const fetchFeedback = useCallback(async (isManual: boolean = false) => {
         if (!currentUser) return;
 
         try {
-            setRefreshing(true);
+            if (isManual) {
+                setRefreshing(true);
+            }
             setError(null);
             const token = await currentUser.getIdToken();
 
@@ -159,7 +160,7 @@ export default function AdminFeedbackPage() {
     // Fetch feedback on mount and when user is ready
     useEffect(() => {
         if (currentUser && userData?.role === 'admin') {
-            fetchFeedback();
+            fetchFeedback(false);
         }
     }, [currentUser, userData, fetchFeedback]);
 
@@ -385,40 +386,59 @@ export default function AdminFeedbackPage() {
         }
     };
 
-    if (authLoading) {
-        return <PremiumPageLoader message="Loading Feedback..." subMessage="Fetching feedback records..." />;
+    if (authLoading && !currentUser) {
+        return (
+            <div className="itms-admin-container space-y-6 animate-pulse">
+                <div className="h-10 w-64 bg-slate-200 dark:bg-zinc-800 rounded-md" />
+                <div className="h-64 bg-slate-100 dark:bg-zinc-900 rounded-xl border border-slate-200 dark:border-zinc-800" />
+            </div>
+        );
     }
 
     return (
-        <div className="mt-12 space-y-6">
+        <div className="itms-admin-container space-y-6">
             {/* Page Header */}
-            <div className="mb-6">
-                <div className="flex items-center justify-between gap-3">
-                    <div>
-                        <h1 className="text-3xl font-bold text-foreground">Feedback Management</h1>
-                        <p className="text-muted-foreground mt-1">Manage and action user feedback submissions</p>
+            <div className="itms-page-header-container mb-6">
+                <div className="flex items-center justify-between w-full gap-2">
+                    <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-foreground truncate leading-tight pb-1">Feedback Management</h1>
+
+                    {/* Desktop refresh button */}
+                    <div className="hidden md:flex items-center gap-2 shrink-0">
+                        <Button
+                            onClick={() => fetchFeedback(true)}
+                            disabled={refreshing}
+                            className={cn(
+                                "group h-8 px-3.5 bg-white/80 dark:bg-zinc-800/80 hover:bg-zinc-50 dark:hover:bg-zinc-700/80 text-zinc-700 dark:text-zinc-200 hover:text-blue-600 dark:hover:text-blue-400 border border-zinc-200 dark:border-zinc-700/60 shadow-xs text-xs font-semibold rounded-lg transition-all duration-200 active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer",
+                                refreshing && "opacity-70 cursor-not-allowed"
+                            )}
+                        >
+                            <RefreshCw className={cn(
+                                "h-3.5 w-3.5 transition-transform duration-500",
+                                refreshing ? "animate-spin text-blue-600" : "group-hover:rotate-180"
+                            )} />
+                            <span>Refresh</span>
+                        </Button>
                     </div>
 
-                    <Button
-                        onClick={fetchFeedback}
-                        disabled={refreshing}
-                        className={cn(
-                            "group h-8 px-3.5 bg-zinc-100 hover:bg-zinc-200/80 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-200 hover:text-blue-600 dark:hover:text-blue-400 border border-zinc-300/80 dark:border-zinc-700 shadow-sm hover:shadow-md hover:border-blue-300 dark:hover:border-blue-500/50 font-bold text-[10px] uppercase tracking-widest rounded-lg transition-all duration-300 active:scale-95 cursor-pointer",
-                            refreshing && "opacity-70 cursor-not-allowed"
-                        )}
-                    >
-                        <RefreshCw className={cn(
-                            "mr-2 h-3.5 w-3.5 transition-transform duration-500",
-                            refreshing ? "animate-spin text-blue-600" : "group-hover:rotate-180"
-                        )} />
-                        {refreshing ? 'Refreshing...' : 'Refresh'}
-                    </Button>
+                    {/* Mobile Refresh Button - exact same line as Feedback Management at rightmost end */}
+                    <div className="flex md:hidden items-center shrink-0">
+                        <Button
+                            size="sm"
+                            onClick={() => fetchFeedback(true)}
+                            disabled={refreshing}
+                            className="h-8 px-3 bg-white dark:bg-zinc-800 hover:bg-gray-50 dark:hover:bg-zinc-700 text-gray-700 dark:text-zinc-200 hover:text-blue-600 dark:hover:text-blue-400 border border-gray-200 dark:border-zinc-700 shadow-sm rounded-lg text-xs font-semibold flex items-center gap-1.5 cursor-pointer active:scale-95 transition-all shrink-0"
+                        >
+                            <RefreshCw className={cn("h-3.5 w-3.5 transition-transform duration-500", refreshing ? "animate-spin text-blue-600" : "group-hover:rotate-180")} />
+                            <span>Refresh</span>
+                        </Button>
+                    </div>
                 </div>
+                <p className="text-muted-foreground mt-1 text-xs sm:text-sm truncate">Manage and action user feedback submissions</p>
             </div>
 
             {/* Main Card - Darker background */}
             <Card className="bg-[#0d1117] border-gray-800/50">
-                <CardContent className="pt-6 pb-6 px-4 sm:px-6">
+                <CardContent className="pb-6 px-4 sm:px-6">
 
                     {/* Search and Filters Row */}
                     <div className="flex flex-col md:flex-row gap-3 mb-6">
@@ -434,10 +454,10 @@ export default function AdminFeedbackPage() {
                         </div>
 
                         {/* Role Filters - Right Aligned */}
-                        <div className="flex gap-1.5 bg-[#161b22] p-1 rounded-lg border border-gray-700 md:ml-auto">
+                        <div className="flex w-full md:w-auto gap-1 bg-[#161b22] p-1 rounded-lg border border-gray-700 md:ml-auto">
                             <button
                                 onClick={() => setRoleFilter('all')}
-                                className={`px-4 py-2 rounded-md text-xs font-medium transition-colors ${roleFilter === 'all'
+                                className={`flex-1 md:flex-initial px-3 sm:px-4 py-2 rounded-md text-[10px] sm:text-xs font-medium transition-all ${roleFilter === 'all'
                                     ? 'bg-blue-600 text-white shadow-sm'
                                     : 'text-gray-400 hover:text-white hover:bg-gray-700'
                                     }`}
@@ -446,22 +466,22 @@ export default function AdminFeedbackPage() {
                             </button>
                             <button
                                 onClick={() => setRoleFilter('student')}
-                                className={`px-4 py-2 rounded-md text-xs font-medium transition-colors flex items-center gap-1.5 ${roleFilter === 'student'
+                                className={`flex-1 md:flex-initial px-3 sm:px-4 py-2 rounded-md text-[10px] sm:text-xs font-medium transition-all flex items-center justify-center gap-1.5 ${roleFilter === 'student'
                                     ? 'bg-emerald-600 text-white shadow-sm'
                                     : 'text-gray-400 hover:text-white hover:bg-gray-700'
                                     }`}
                             >
-                                <User className="h-3.5 w-3.5" />
+                                <User className="h-3 sm:h-3.5 w-3 sm:w-3.5" />
                                 Students
                             </button>
                             <button
                                 onClick={() => setRoleFilter('driver')}
-                                className={`px-4 py-2 rounded-md text-xs font-medium transition-colors flex items-center gap-1.5 ${roleFilter === 'driver'
+                                className={`flex-1 md:flex-initial px-3 sm:px-4 py-2 rounded-md text-[10px] sm:text-xs font-medium transition-all flex items-center justify-center gap-1.5 ${roleFilter === 'driver'
                                     ? 'bg-amber-600 text-white shadow-sm'
                                     : 'text-gray-400 hover:text-white hover:bg-gray-700'
                                     }`}
                             >
-                                <Truck className="h-3.5 w-3.5" />
+                                <Truck className="h-3 sm:h-3.5 w-3 sm:w-3.5" />
                                 Drivers
                             </button>
                         </div>
@@ -476,7 +496,7 @@ export default function AdminFeedbackPage() {
                     )}
 
                     {/* Loading State */}
-                    {(loading || refreshing) && feedback.length === 0 && (
+                    {loading && feedback.length === 0 && (
                         <div className="flex flex-col items-center justify-center py-16">
                             <Loader2 className="h-10 w-10 animate-spin text-indigo-500 mb-4" />
                             <p className="text-gray-400 text-sm">Loading feedback...</p>
@@ -504,6 +524,7 @@ export default function AdminFeedbackPage() {
                             {filteredFeedback.map((item) => (
                                 <div
                                     key={item.id}
+                                    style={{ contentVisibility: 'auto', containIntrinsicSize: '0 160px' }}
                                     className="bg-[#1c2128] border border-gray-700/60 rounded-2xl p-5 transition-all duration-200 hover:border-indigo-500/40 hover:shadow-lg hover:shadow-indigo-500/5"
                                 >
                                     {/* Header: Avatar, Name, Read Badge, Date, Role Badge */}

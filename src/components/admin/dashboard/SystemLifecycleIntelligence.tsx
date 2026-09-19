@@ -202,10 +202,10 @@ export default function SystemLifecycleIntelligence({ stats }: SystemLifecycleIn
                      </div>
                   </TooltipProvider>
 
-                  {/* Mobile Vertical Timeline */}
-                  <div className="relative flex md:hidden flex-col gap-6 pl-8 pt-2">
-                     {/* Connecting Line */}
-                     <div className="absolute left-4 top-2 bottom-6 w-[2px] bg-slate-800/50 z-0" />
+                  {/* Mobile Vertical Timeline with proper horizontal spacing between icons and text */}
+                  <div className="relative flex md:hidden flex-col gap-5 pt-2">
+                     {/* Connecting Vertical Line passing cleanly through center of 36px icons */}
+                     <div className="absolute left-[17px] top-4 bottom-6 w-[2px] bg-slate-800/50 z-0" />
 
                      {lifecycleDates.map((milestone, idx) => (
                         <motion.div
@@ -213,16 +213,17 @@ export default function SystemLifecycleIntelligence({ stats }: SystemLifecycleIn
                            initial={{ opacity: 0, x: -10 }}
                            animate={{ opacity: 1, x: 0 }}
                            transition={{ delay: idx * 0.05 }}
-                           className="relative flex flex-col gap-0.5"
+                           className="relative flex items-start gap-3.5 z-10"
                         >
-                           {/* Icon Node positioned absolutely on the left vertical line */}
-                           <div className={`absolute -left-8 top-0.5 w-8 h-8 rounded-full ${milestone.bg} border-2 border-slate-950 flex items-center justify-center z-10`}>
-                              <milestone.icon className={`w-3.5 h-3.5 ${milestone.color}`} />
+                           {/* Icon Node */}
+                           <div className={`w-9 h-9 rounded-full ${milestone.bg} border-2 border-slate-950 flex-shrink-0 flex items-center justify-center shadow-md`}>
+                              <milestone.icon className={`w-4 h-4 ${milestone.color}`} />
                            </div>
-                           <div className="flex flex-col">
-                              <span className="text-[9px] font-bold text-slate-500">{milestone.label}</span>
+                           {/* Text Content with dedicated horizontal spacing */}
+                           <div className="flex flex-col min-w-0 pt-0.5">
+                              <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider">{milestone.label}</span>
                               <span className="text-xs font-bold text-white mt-0.5">{milestone.date}</span>
-                              <p className="text-[10px] text-slate-400 mt-1 leading-normal max-w-sm">{milestone.description}</p>
+                              <p className="text-[10px] text-slate-400 mt-1 leading-normal">{milestone.description}</p>
                            </div>
                         </motion.div>
                      ))}

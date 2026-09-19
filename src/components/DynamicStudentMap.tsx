@@ -241,7 +241,7 @@ function DynamicStudentMap({
         try {
           const { data: flagsData, error: flagsError } = await supabase
             .from('waiting_flags')
-            .select('*')
+            .select('id, student_uid, student_name, bus_id, lat, lng, accuracy, message, status, created_at, timestamp')
             .eq('bus_id', busId)
             .eq('status', 'waiting');
 

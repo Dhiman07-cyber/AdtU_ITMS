@@ -14,8 +14,6 @@
  */
 
 import InlineQRDisplay from "@/components/bus-pass/InlineQRDisplay";
-import { PremiumPageLoader } from "@/components/LoadingSpinner";
-import { usePageShellLoader } from "@/hooks/usePageShellLoader";
 import { Button } from "@/components/ui/button";
 import { Card,CardContent } from "@/components/ui/card";
 import { useAuth } from "@/contexts/auth-context";
@@ -33,7 +31,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect,useState } from "react";
+import { startTransition, useEffect, useState } from "react";
 
 export default function StudentBusPassPage() {
   const { currentUser, userData } = useAuth();
@@ -42,7 +40,6 @@ export default function StudentBusPassPage() {
   const [busData, setBusData] = useState<any>(null);
   const [routeData, setRouteData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const { showLoader } = usePageShellLoader(loading, 3500);
 
   // Single Firestore read on page load - fetches student document including UID
   useEffect(() => {
@@ -52,25 +49,14 @@ export default function StudentBusPassPage() {
       try {
         const data = await getStudentByUid(currentUser.uid);
         if (data) {
-          setStudentData({
-            ...data,
-            uid: currentUser.uid, // Ensure UID is stored
-            fullName: data.fullName || data.name,
-            busId: data.busId || data.busId,
-            routeId: data.routeId || data.routeId,
-            status: data.status || 'pending',
-            shift: data.shift || 'Not Set',
-            stop_name: data.stop_name || data.stop_name || 'Not Set'
-          });
-
-          // Fetch bus and route data for display purposes
           const studentBusId = data.busId || data.busId;
           const studentRouteId = data.routeId || data.routeId;
+          let bus: any = null;
+          let route: any = null;
 
           if (studentBusId) {
             try {
-              const bus = await getBusById(studentBusId);
-              if (bus) setBusData(bus);
+              bus = await getBusById(studentBusId);
             } catch (error) {
               console.warn('Failed to fetch bus data:', error);
             }
@@ -78,12 +64,26 @@ export default function StudentBusPassPage() {
 
           if (studentRouteId) {
             try {
-              const route = await getRouteById(studentRouteId);
-              if (route) setRouteData(route);
+              route = await getRouteById(studentRouteId);
             } catch (error) {
               console.warn('Failed to fetch route data:', error);
             }
           }
+
+          startTransition(() => {
+            setStudentData({
+              ...data,
+              uid: currentUser.uid,
+              fullName: data.fullName || data.name,
+              busId: studentBusId,
+              routeId: studentRouteId,
+              status: data.status || 'pending',
+              shift: data.shift || 'Not Set',
+              stop_name: data.stop_name || data.stop_name || 'Not Set'
+            });
+            if (bus) setBusData(bus);
+            if (route) setRouteData(route);
+          });
         }
       } catch (error) {
         console.error('Error fetching student data:', error);
@@ -119,8 +119,35 @@ export default function StudentBusPassPage() {
   // page, the dashboard, the profile, and the server verify endpoints all agree.
   const isActive = hasTransportEntitlement(studentData);
 
-  if (showLoader) {
-    return <PremiumPageLoader message="Loading Bus Pass" subMessage="Fetching your details..." maxDurationMs={3500} />;
+  if (loading && !studentData) {
+    return (
+      <div className="min-h-screen bg-[#020617] text-white selection:bg-blue-500/30 mt-12">
+        <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 pb-16">
+          <div className="flex items-center justify-between gap-4 mb-10 sm:mb-12">
+            <div className="flex items-center gap-3">
+              <div className="p-2 md:p-2.5 bg-blue-500/10 rounded-xl border border-blue-500/20">
+                <CreditCard className="h-5 w-5 md:h-6 md:w-6 text-blue-400" />
+              </div>
+              <div className="space-y-1">
+                <div className="h-7 w-36 bg-white/10 rounded-lg animate-pulse" />
+                <div className="h-3 w-28 bg-white/5 rounded animate-pulse" />
+              </div>
+            </div>
+          </div>
+          <div className="flex justify-center">
+            <div className="w-full max-w-sm h-[460px] rounded-3xl bg-slate-900/60 border border-slate-800/80 animate-pulse p-6 flex flex-col items-center justify-center space-y-6">
+              <div className="h-12 w-12 rounded-2xl bg-white/10" />
+              <div className="h-4 w-32 rounded bg-white/10" />
+              <div className="h-44 w-44 rounded-2xl bg-white/10" />
+              <div className="space-y-2 w-full flex flex-col items-center">
+                <div className="h-4 w-44 rounded bg-white/10" />
+                <div className="h-3 w-32 rounded bg-white/5" />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   if (!loading && !studentData) {

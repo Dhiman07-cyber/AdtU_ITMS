@@ -243,7 +243,7 @@ class ReassignmentLogsService {
         try {
             const { data, error } = await this.getClient()
                 .from('reassignment_logs')
-                .select('*')
+                .select('id, operation_id, type, actor_id, actor_label, timestamp, status, summary, changes, meta, rollback_of, created_at')
                 .eq('operation_id', operationId)
                 .single();
 
@@ -268,7 +268,7 @@ class ReassignmentLogsService {
         try {
             let query = this.getClient()
                 .from('reassignment_logs')
-                .select('*')
+                .select('id, operation_id, type, actor_id, actor_label, timestamp, status, summary, changes, meta, rollback_of, created_at')
                 .order('created_at', { ascending: false });
 
             if (options.type) {

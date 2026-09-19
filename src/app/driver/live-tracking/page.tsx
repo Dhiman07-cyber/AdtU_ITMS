@@ -1,9 +1,7 @@
 "use client";
 
 import ErrorBoundary from "@/components/ErrorBoundary";
-import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import LocationPermissionGate from "@/components/LocationPermissionGate";
-import { usePageShellLoader } from "@/hooks/usePageShellLoader";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -20,10 +18,10 @@ import {
   releaseDeviceSession
 } from "@/lib/session-device-service";
 import { formatIdForDisplay } from "@/lib/utils";
-import { Activity, AlertCircle, Bus, CheckCircle, Clock, Flag, Loader2, MapPin, Moon, Navigation, PlayCircle, StopCircle, Sun, XCircle } from "lucide-react";
+import { Activity, AlertCircle, Bus, CheckCircle, Clock, Flag, Loader2, MapPin, Moon, Navigation, PlayCircle, StopCircle, Sun, Users, XCircle } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 // Dynamically import components to avoid SSR issues
 const BrowserCompatibilityBanner = dynamic(() => import('@/components/BrowserCompatibilityBanner'), {
@@ -80,7 +78,6 @@ export default function DriverLiveTrackingPage() {
   const [busData, setBusData] = useState<any>(null);
   const [routeData, setRouteData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const { showLoader } = usePageShellLoader(loading, 3500);
 
   // Trip state
   const [tripActive, setTripActive] = useState(false);
@@ -184,8 +181,9 @@ export default function DriverLiveTrackingPage() {
         const list = data.buses || [];
         setAvailableBuses(list);
         if (list.length > 0) {
-          const match = list.find((b: any) => b.id === busData?.busId || b.id === busData?.id);
-          setSelectedBusId(match ? match.id : list[0].id);
+          // Dynamic bus selection: select the first available, unoccupied bus
+          const firstAvailable = list.find((b: any) => !b.is_operated_by_other && b.status !== 'inactive');
+          setSelectedBusId(firstAvailable ? firstAvailable.id : list[0].id);
         }
       }
     } catch (e) {
@@ -193,7 +191,7 @@ export default function DriverLiveTrackingPage() {
     } finally {
       setFetchingBuses(false);
     }
-  }, [currentUser, busData]);
+  }, [currentUser]);
 
   // Open modal if URL contains ?initiate=true
   useEffect(() => {
@@ -524,32 +522,33 @@ export default function DriverLiveTrackingPage() {
         const response = await authApiFetch(currentUser, '/api/driver/dashboard-data');
         if (response.ok) {
           const result = await response.json();
-          if (result.driver) setDriverData(result.driver);
-          if (result.bus) {
-            if (result.bus.status === 'inactive') {
-              addToast("Your assigned bus is currently Inactive. You cannot start a trip.", "error");
-              router.push("/driver");
-              return;
-            }
-            setBusData(result.bus);
-          }
-          if (result.route) setRouteData(result.route);
-          if (result.waitingFlags) setWaitingFlags(result.waitingFlags);
-          // Sync resolved busId ref so the WS subscription effect can pick it up
           const resolvedBusId = result.bus?.busId || result.bus?.id || result.driver?.busId || null;
           if (resolvedBusId) resolvedBusIdRef.current = resolvedBusId;
-          if (result.tripActive) {
-            setTripActive(true);
-            setIsFullScreenMap(true);
-            setTripId(result.tripData?.tripId || result.tripData?.trip_id || null);
-            if (result.tripData?.current_location) {
-              const loc = result.tripData.current_location;
-              if (loc.lat && loc.lng) {
-                setCurrentLocation({ lat: loc.lat, lng: loc.lng, accuracy: loc.accuracy || 10 });
-              }
-            }
-            startLocationTracking();
+
+          if (result.bus?.status === 'inactive') {
+            addToast("Your assigned bus is currently Inactive. You cannot start a trip.", "error");
+            router.push("/driver");
+            return;
           }
+
+          startTransition(() => {
+            if (result.driver) setDriverData(result.driver);
+            if (result.bus) setBusData(result.bus);
+            if (result.route) setRouteData(result.route);
+            if (result.waitingFlags) setWaitingFlags(result.waitingFlags);
+            if (result.tripActive) {
+              setTripActive(true);
+              setIsFullScreenMap(true);
+              setTripId(result.tripData?.tripId || result.tripData?.trip_id || null);
+              if (result.tripData?.current_location) {
+                const loc = result.tripData.current_location;
+                if (loc.lat && loc.lng) {
+                  setCurrentLocation({ lat: loc.lat, lng: loc.lng, accuracy: loc.accuracy || 10 });
+                }
+              }
+              startLocationTracking();
+            }
+          });
         }
       } catch (error) {
         console.error("Error fetching driver live tracking data:", error);
@@ -631,7 +630,8 @@ export default function DriverLiveTrackingPage() {
           },
           body: JSON.stringify({
             idToken,
-            busId: busData?.busId || busData?.id || undefined,
+            // Only query specific busId if the driver is ALREADY actively tracking that bus
+            busId: tripActiveRef.current ? (busData?.busId || busData?.id || undefined) : undefined,
           }),
         });
 
@@ -651,20 +651,17 @@ export default function DriverLiveTrackingPage() {
 
         // =====================================================
         // MULTI-DRIVER LOCK CHECK
-        // If bus is locked by another driver, block this driver
+        // Only block if this driver was actively operating this bus
         // =====================================================
-        if (result.busLockedByOther) {
-          console.log("🔒 Bus is locked by another driver!", result.lockInfo);
+        if (result.busLockedByOther && tripActiveRef.current) {
+          console.log("🔒 Active bus is locked by another driver!", result.lockInfo);
           setBusLockedByOther(true);
           setLockInfo(result.lockInfo || null);
-          // Don't set tripActive for this driver - they shouldn't operate
-          if (tripActiveRef.current) {
-            setTripActive(false);
-            setTripId(null);
-            stopLocationTracking();
-          }
+          setTripActive(false);
+          setTripId(null);
+          stopLocationTracking();
           return; // Don't continue with trip check
-        } else {
+        } else if (!result.busLockedByOther) {
           // Clear lock state if previously locked
           if (busLockedByOtherRef.current) {
             console.log("🔓 Bus lock released, driver can now operate");
@@ -733,7 +730,7 @@ export default function DriverLiveTrackingPage() {
           const res = await fetch('/api/driver/check-active-trip', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
-            body: JSON.stringify({ idToken, busId: busData?.busId || busData?.id || undefined }),
+            body: JSON.stringify({ idToken, busId: tripActiveRef.current ? (busData?.busId || busData?.id || undefined) : undefined }),
           });
           if (!res.ok) return;
           const result = await res.json();
@@ -1229,6 +1226,14 @@ export default function DriverLiveTrackingPage() {
   // Confirm selection in small card -> initiates trip directly on live location page
   const handleConfirmInitiateTrip = async () => {
     if (!currentUser || !selectedBusId || initiatingTrip) return;
+
+    const chosenBus = availableBuses.find((b: any) => b.id === selectedBusId);
+    if (chosenBus?.is_operated_by_other) {
+      addToast(`Bus ${chosenBus.bus_number || chosenBus.id} is currently operated by another driver. Please select another available bus.`, 'error');
+      fetchAvailableBusesForSelection();
+      return;
+    }
+
     setInitiatingTrip(true);
 
     try {
@@ -1290,6 +1295,7 @@ export default function DriverLiveTrackingPage() {
       } else {
         const err = await res.json();
         addToast(err.error || 'Failed to start trip', 'error');
+        fetchAvailableBusesForSelection();
       }
     } catch (e) {
       console.error('Error starting trip:', e);
@@ -1500,14 +1506,13 @@ export default function DriverLiveTrackingPage() {
   }, [waitingFlags, currentLocation?.lat, currentLocation?.lng]);
 
 
-  if (showLoader) {
+  if (loading && !busData) {
     return (
-      <div className="flex-1 min-h-[calc(100dvh-120px)] flex items-center justify-center bg-gray-50 dark:bg-[#020817]">
-        <PremiumPageLoader
-          message="Initiating Real-time Tracking..."
-          subMessage="Connecting to GPS and route services..."
-          maxDurationMs={3500}
-        />
+      <div className="flex-1 bg-[#0A0D16] min-h-screen p-4 text-white">
+        <div className="max-w-7xl mx-auto space-y-4 animate-pulse">
+          <div className="h-16 bg-white/5 rounded-2xl" />
+          <div className="h-[600px] bg-white/5 rounded-3xl" />
+        </div>
       </div>
     );
   }
@@ -1590,12 +1595,23 @@ export default function DriverLiveTrackingPage() {
               </div>
             </div>
 
-            {/* Action Button */}
-            <div className="mt-6">
+            {/* Action Buttons */}
+            <div className="mt-6 flex flex-col sm:flex-row gap-3">
+              <Button
+                onClick={() => {
+                  setBusLockedByOther(false);
+                  setShowStartTripModal(true);
+                  fetchAvailableBusesForSelection();
+                }}
+                className="flex-1 h-12 font-bold rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white shadow-lg shadow-emerald-500/20"
+              >
+                <PlayCircle className="w-4 h-4 mr-2" />
+                Select Another Bus
+              </Button>
               <Button
                 onClick={() => router.push('/driver')}
                 variant="outline"
-                className="w-full h-12 font-bold rounded-xl border-2 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800"
+                className="h-12 font-bold rounded-xl border-2 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800"
               >
                 Go Back to Dashboard
               </Button>
@@ -1950,11 +1966,15 @@ export default function DriverLiveTrackingPage() {
                       onChange={(e) => setSelectedBusId(e.target.value)}
                       className="w-full px-3 py-2.5 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-sm font-medium text-gray-900 dark:text-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
                     >
-                      {availableBuses.map((bus: any) => (
-                        <option key={bus.id} value={bus.id}>
-                          Bus {bus.bus_number || bus.busNumber} — {bus.route_name || bus.routeName || 'Standard Route'}
-                        </option>
-                      ))}
+                      {availableBuses.map((bus: any) => {
+                        const isOccupied = !!bus.is_operated_by_other;
+                        return (
+                          <option key={bus.id} value={bus.id} disabled={isOccupied}>
+                            Bus {bus.bus_number || bus.busNumber} — {bus.route_name || bus.routeName || 'Standard Route'}
+                            {isOccupied ? ' 🔒 (In Trip - Occupied)' : ''}
+                          </option>
+                        );
+                      })}
                     </select>
                   ) : (
                     <div className="p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl text-xs text-amber-700 dark:text-amber-400">

@@ -5,7 +5,6 @@ import { useCallback,useEffect,useMemo,useRef,useState } from "react";
 
 
 
-import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import { PermissionDeniedCard } from "@/components/PermissionDeniedCard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -555,8 +554,13 @@ export default function SmartRouteAllocationPage() {
     // RENDER: LOADING STATE
     // ============================================
 
-    if (loading || authLoading) {
-        return <PremiumPageLoader message="Loading route allocation system..." subMessage="Analyzing routes..." />;
+    if (authLoading && !currentUser) {
+        return (
+            <div className="itms-admin-container space-y-6 animate-pulse">
+                <div className="h-10 w-64 bg-slate-200 dark:bg-zinc-800 rounded-md" />
+                <div className="h-64 bg-slate-100 dark:bg-zinc-900 rounded-xl border border-slate-200 dark:border-zinc-800" />
+            </div>
+        );
     }
 
     if (!permsLoading && !canBusReassign) {
@@ -565,7 +569,7 @@ export default function SmartRouteAllocationPage() {
 
     return (
         <TooltipProvider>
-            <div className="mt-20 sm:mt-8 space-y-6 px-2 sm:px-4">
+            <div className="itms-admin-container space-y-6">
                 {/* Header */}
                 <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4 flex-shrink-0">
                     <div>
@@ -657,110 +661,117 @@ export default function SmartRouteAllocationPage() {
                         {/* Bus List */}
                         <ScrollArea className="flex-1">
                             <div className="p-3 space-y-1">
-                                {filteredBuses.map((bus) => {
-                                    const mergedRouteInfo = getMergedRouteForBus(bus);
-                                    const displayedRoute = mergedRouteInfo.route;
-                                    const displayedRouteName = mergedRouteInfo.stagedRouteName || displayedRoute?.routeName;
-                                    const isSelected = selectedBusIds.has(bus.id);
-                                    const hasActiveTrip = !!bus.activeTripId;
+                                {loading && buses.length === 0 ? (
+                                    Array.from({ length: 4 }).map((_, i) => (
+                                        <div key={i} className="h-20 rounded-xl bg-white/[0.03] animate-pulse border border-white/[0.05]" />
+                                    ))
+                                ) : (
+                                    filteredBuses.map((bus) => {
+                                        const mergedRouteInfo = getMergedRouteForBus(bus);
+                                        const displayedRoute = mergedRouteInfo.route;
+                                        const displayedRouteName = mergedRouteInfo.stagedRouteName || displayedRoute?.routeName;
+                                        const isSelected = selectedBusIds.has(bus.id);
+                                        const hasActiveTrip = !!bus.activeTripId;
 
-                                    return (
-                                        <motion.div
-                                            key={bus.id}
-                                            onClick={(e) => handleBusSelect(bus.id, e)}
-                                            className={cn(
-                                                "h-20 p-3 rounded-xl transition-all duration-200 border",
-                                                hasActiveTrip
-                                                    ? "opacity-50 cursor-not-allowed"
-                                                    : "cursor-pointer",
-                                                isSelected
-                                                    ? "border-opacity-100 shadow-md"
-                                                    : "border-transparent hover:border-opacity-30",
-                                                mergedRouteInfo.isStaged && "ring-2 ring-orange-500/30"
-                                            )}
-                                            style={{
-                                                backgroundColor: isSelected ? `${tokens.primaryPurple}15` : '#131C2E',
-                                                borderColor: hasActiveTrip
-                                                    ? '#EF4444'
-                                                    : mergedRouteInfo.isStaged
-                                                        ? tokens.primaryOrange
-                                                        : isSelected
-                                                            ? tokens.primaryPurple
-                                                            : tokens.borderDark,
-                                            }}
-                                            whileHover={!hasActiveTrip ? { scale: 1.01 } : {}}
-                                            whileTap={!hasActiveTrip ? { scale: 0.99 } : {}}
-                                        >
-                                            <div className="flex items-center justify-between h-full">
-                                                <div className="flex items-center gap-3">
-                                                    {/* Checkbox removed as per single-select requirement */}
-                                                    <div
-                                                        className="w-10 h-10 rounded-lg flex items-center justify-center"
-                                                        style={{
-                                                            backgroundColor: hasActiveTrip
-                                                                ? '#EF4444'
-                                                                : mergedRouteInfo.isStaged
-                                                                    ? tokens.primaryOrange
-                                                                    : isSelected
+                                        return (
+                                            <motion.div
+                                                key={bus.id}
+                                                onClick={(e) => handleBusSelect(bus.id, e)}
+                                                className={cn(
+                                                    "h-20 p-3 rounded-xl transition-all duration-200 border",
+                                                    hasActiveTrip
+                                                        ? "opacity-50 cursor-not-allowed"
+                                                        : "cursor-pointer",
+                                                    isSelected
+                                                        ? "border-opacity-100 shadow-md"
+                                                        : "border-transparent hover:border-opacity-30",
+                                                    mergedRouteInfo.isStaged && "ring-2 ring-orange-500/30"
+                                                )}
+                                                style={{
+                                                    backgroundColor: isSelected ? `${tokens.primaryPurple}15` : '#131C2E',
+                                                    borderColor: hasActiveTrip
+                                                        ? '#EF4444'
+                                                        : mergedRouteInfo.isStaged
+                                                            ? tokens.primaryOrange
+                                                            : isSelected
+                                                                ? tokens.primaryPurple
+                                                                : tokens.borderDark,
+                                                    contentVisibility: 'auto',
+                                                    containIntrinsicSize: '0 64px',
+                                                }}
+                                                whileHover={!hasActiveTrip ? { scale: 1.01 } : {}}
+                                                whileTap={!hasActiveTrip ? { scale: 0.99 } : {}}
+                                            >
+                                                <div className="flex items-center justify-between h-full">
+                                                    <div className="flex items-center gap-3">
+                                                        <div
+                                                            className="w-10 h-10 rounded-lg flex items-center justify-center"
+                                                            style={{
+                                                                backgroundColor: hasActiveTrip
+                                                                    ? '#EF4444'
+                                                                    : mergedRouteInfo.isStaged
                                                                         ? tokens.primaryOrange
-                                                                        : '#374151'
-                                                        }}
-                                                    >
-                                                        <Bus className="w-5 h-5 text-white" />
-                                                    </div>
-                                                    <div>
-                                                        <p className="font-medium text-sm" style={{ color: tokens.textPrimary }}>
-                                                            {bus.busNumber}
-                                                        </p>
-                                                        <p className="text-xs" style={{ color: tokens.textMuted }}>
-                                                            Bus ID: {bus.busId || bus.id}
-                                                        </p>
-                                                    </div>
-                                                </div>
-                                                <div className="flex flex-col items-end gap-1">
-                                                    {hasActiveTrip ? (
-                                                        <Badge className="bg-red-500 text-white text-[10px]">
-                                                            In Trip
-                                                        </Badge>
-                                                    ) : displayedRoute ? (
-                                                        <Badge
-                                                            className="text-[9px] px-1.5 py-0"
-                                                            style={{
-                                                                backgroundColor: mergedRouteInfo.isStaged
-                                                                    ? `${tokens.primaryOrange}20`
-                                                                    : `${tokens.success}20`,
-                                                                color: mergedRouteInfo.isStaged
-                                                                    ? tokens.primaryOrange
-                                                                    : tokens.success,
-                                                                border: `1px solid ${mergedRouteInfo.isStaged ? tokens.primaryOrange : tokens.success}40`
+                                                                        : isSelected
+                                                                            ? tokens.primaryOrange
+                                                                            : '#374151'
                                                             }}
                                                         >
-                                                            <RouteIcon className="w-2.5 h-2.5 mr-1" />
-                                                            {displayedRouteName}
-                                                            {mergedRouteInfo.isStaged && <span className="ml-1 opacity-70">(staged)</span>}
-                                                        </Badge>
-                                                    ) : (
-                                                        <Badge
-                                                            className="text-[9px] px-1.5 py-0"
-                                                            style={{
-                                                                backgroundColor: `${tokens.reserved}20`,
-                                                                color: tokens.reserved,
-                                                                border: `1px solid ${tokens.reserved}40`
-                                                            }}
-                                                        >
-                                                            No Route
-                                                        </Badge>
-                                                    )}
-                                                    <span className="text-[10px]" style={{ color: tokens.textMuted }}>
-                                                        {bus.currentMembers || 0}/{bus.capacity}
-                                                    </span>
+                                                            <Bus className="w-5 h-5 text-white" />
+                                                        </div>
+                                                        <div>
+                                                            <p className="font-medium text-sm" style={{ color: tokens.textPrimary }}>
+                                                                {bus.busNumber}
+                                                            </p>
+                                                            <p className="text-xs" style={{ color: tokens.textMuted }}>
+                                                                Bus ID: {bus.busId || bus.id}
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex flex-col items-end gap-1">
+                                                        {hasActiveTrip ? (
+                                                            <Badge className="bg-red-500 text-white text-[10px]">
+                                                                In Trip
+                                                            </Badge>
+                                                        ) : displayedRoute ? (
+                                                            <Badge
+                                                                className="text-[9px] px-1.5 py-0"
+                                                                style={{
+                                                                    backgroundColor: mergedRouteInfo.isStaged
+                                                                        ? `${tokens.primaryOrange}20`
+                                                                        : `${tokens.success}20`,
+                                                                    color: mergedRouteInfo.isStaged
+                                                                        ? tokens.primaryOrange
+                                                                        : tokens.success,
+                                                                    border: `1px solid ${mergedRouteInfo.isStaged ? tokens.primaryOrange : tokens.success}40`
+                                                                }}
+                                                            >
+                                                                <RouteIcon className="w-2.5 h-2.5 mr-1" />
+                                                                {displayedRouteName}
+                                                                {mergedRouteInfo.isStaged && <span className="ml-1 opacity-70">(staged)</span>}
+                                                            </Badge>
+                                                        ) : (
+                                                            <Badge
+                                                                className="text-[9px] px-1.5 py-0"
+                                                                style={{
+                                                                    backgroundColor: `${tokens.reserved}20`,
+                                                                    color: tokens.reserved,
+                                                                    border: `1px solid ${tokens.reserved}40`
+                                                                }}
+                                                            >
+                                                                No Route
+                                                            </Badge>
+                                                        )}
+                                                        <span className="text-[10px]" style={{ color: tokens.textMuted }}>
+                                                            {bus.currentMembers || 0}/{bus.capacity}
+                                                        </span>
+                                                    </div>
                                                 </div>
-                                            </div>
-                                        </motion.div>
-                                    );
-                                })}
+                                            </motion.div>
+                                        );
+                                    })
+                                )}
 
-                                {filteredBuses.length === 0 && (
+                                {!loading && filteredBuses.length === 0 && (
                                     <div className="flex flex-col items-center justify-center py-12 text-center">
                                         <Bus className="h-12 w-12 mb-3" style={{ color: tokens.textMuted }} />
                                         <p className="text-sm" style={{ color: tokens.textMuted }}>No buses found</p>
@@ -847,6 +858,8 @@ export default function SmartRouteAllocationPage() {
                                                             style={{
                                                                 backgroundColor: '#131C2E',
                                                                 borderColor: isInactive ? '#374151' : tokens.borderDark,
+                                                                contentVisibility: 'auto',
+                                                                containIntrinsicSize: '0 140px',
                                                             }}
                                                         >
                                                             {/* Interactive Glow Effect */}

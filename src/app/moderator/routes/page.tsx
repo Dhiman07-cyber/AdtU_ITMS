@@ -1,7 +1,7 @@
 "use client";
 
 import { ExportButton } from '@/components/ExportButton';
-import { PremiumPageLoader } from '@/components/LoadingSpinner';
+import { TableRowLoader } from '@/components/LoadingSpinner';
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -48,6 +48,7 @@ import { supabase } from '@/lib/supabase-client';
 import { cn } from "@/lib/utils";
 import {
 	Bus as BusIcon,
+	Download,
 	Edit,
 	Eye,
 	Filter,
@@ -58,6 +59,7 @@ import {
 	Search,
 	Trash2
 } from "lucide-react";
+import { MobileActionFAB } from '@/components/layout/MobileActionFAB';
 import { useRouter } from 'next/navigation';
 import { useState } from "react";
 // Migrated: Server-side API → PostgreSQL (no Firestore client reads)
@@ -209,7 +211,7 @@ export default function RoutesPage() {
       // Fetch all routes directly from Supabase PostgreSQL table 'routes'
       const { data: rawRoutes, error: routesError } = await supabase
         .from('routes')
-        .select('*')
+        .select('id, route_name, route_number, stops, start_location, total_stops, status')
         .order('route_name', { ascending: true });
 
       if (routesError) throw routesError;
@@ -271,7 +273,7 @@ export default function RoutesPage() {
     }
   };
 
-  const commonBtnClass = "group h-8 px-4 bg-white hover:bg-gray-50 text-gray-600 hover:text-blue-600 border border-gray-200 hover:border-blue-200 shadow-sm hover:shadow-lg hover:shadow-blue-500/10 font-bold text-[10px] uppercase tracking-widest rounded-lg transition-all duration-300 active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer";
+  const commonBtnClass = "group h-8 px-3.5 bg-secondary/80 hover:bg-secondary text-secondary-foreground border border-border/50 shadow-sm font-medium text-xs rounded-lg transition-colors active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer";
 
   const handleDelete = (id: string, name: string) => {
     setDeleteItem({ id, name });
@@ -302,48 +304,69 @@ export default function RoutesPage() {
     }
   };
 
-  if (isLoading) {
-    return <PremiumPageLoader message="Curating Transit Routes..." subMessage="Fetching route definitions and stops..." />;
+  if (permsLoading) {
+    return (
+      <div className="itms-admin-container space-y-6 animate-pulse">
+        <div className="h-10 w-64 bg-slate-200 dark:bg-zinc-800 rounded-md" />
+        <div className="h-64 bg-slate-100 dark:bg-zinc-900 rounded-xl border border-slate-200 dark:border-zinc-800" />
+      </div>
+    );
   }
 
-  if (!permsLoading && !canRouteView) {
+  if (!canRouteView) {
     return <PermissionDeniedCard title="Routes Section Restricted" actionName="Viewing Routes" showGoBack={false} />;
   }
 
   return (
-    <div className="mt-12 space-y-6">
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold dark:text-white">Route Management</h1>
-          <p className="text-muted-foreground">
-            Manage all bus routes and stops
-          </p>
-        </div>
-        <div className="flex gap-2">
-          {canRouteAdd && (
+    <div className="itms-admin-container space-y-6">
+      {/* Page Header */}
+      <div className="itms-page-header-container">
+        <div className="flex items-center justify-between w-full gap-2">
+          <h1 className="text-xl sm:text-2xl md:text-3xl font-bold dark:text-white truncate leading-tight pb-1">Route Management</h1>
+
+          {/* Desktop action toolbar */}
+          <div className="hidden md:flex items-center gap-2 shrink-0">
+            {canRouteAdd && (
+              <Button
+                className="w-full md:w-auto cursor-pointer bg-blue-600 hover:bg-blue-700 text-white border border-blue-700 transition-all duration-200 hover:scale-105 hover:shadow-lg rounded-md px-2.5 py-1.5 text-xs h-8"
+                onClick={() => router.push('/moderator/routes/add')}
+              >
+                <Plus className="mr-1.5 h-3.5 w-3.5" />
+                Add New Route
+              </Button>
+            )}
+            <ExportButton
+              onClick={() => handleExportRoutes()}
+              label="Export"
+              className={commonBtnClass}
+            />
             <Button
-              className="w-full md:w-auto cursor-pointer bg-blue-600 hover:bg-blue-700 text-white border border-blue-700 transition-all duration-200 hover:scale-105 hover:shadow-lg rounded-md px-2.5 py-1.5 text-xs h-8"
-              onClick={() => router.push('/moderator/routes/add')}
+              size="sm"
+              onClick={handleRefresh}
+              disabled={isRefreshing}
+              className={commonBtnClass}
             >
-              <Plus className="mr-1.5 h-3.5 w-3.5" />
-              Add New Route
+              <RefreshCw className={cn("h-3.5 w-3.5 transition-transform duration-500", isRefreshing ? "animate-spin" : "group-hover:rotate-180")} />
+              <span>Refresh</span>
             </Button>
-          )}
-          <ExportButton
-            onClick={() => handleExportRoutes()}
-            label="EXPORT"
-            className={commonBtnClass}
-          />
-          <Button
-            size="sm"
-            onClick={handleRefresh}
-            disabled={isRefreshing}
-            className={commonBtnClass}
-          >
-            <RefreshCw className={cn("h-3.5 w-3.5 transition-transform duration-500", isRefreshing ? "animate-spin" : "group-hover:rotate-180")} />
-            REFRESH
-          </Button>
+          </div>
+
+          {/* Mobile Refresh Button - exact same line as Route Management at rightmost end */}
+          <div className="flex md:hidden items-center shrink-0">
+            <Button
+              size="sm"
+              onClick={handleRefresh}
+              disabled={isRefreshing}
+              className="h-8 px-3 bg-white dark:bg-zinc-800 hover:bg-gray-50 dark:hover:bg-zinc-700 text-gray-700 dark:text-zinc-200 hover:text-blue-600 dark:hover:text-blue-400 border border-gray-200 dark:border-zinc-700 shadow-sm rounded-lg text-xs font-semibold flex items-center gap-1.5 cursor-pointer active:scale-95 transition-all shrink-0"
+            >
+              <RefreshCw className={cn("h-3.5 w-3.5 transition-transform duration-500", isRefreshing ? "animate-spin text-blue-600" : "group-hover:rotate-180")} />
+              <span>Refresh</span>
+            </Button>
+          </div>
         </div>
+        <p className="text-muted-foreground mt-1 text-xs sm:text-sm truncate">
+          Manage all bus routes and stops
+        </p>
       </div>
 
       <Card className="bg-gray-50 dark:bg-gray-900 border-border min-h-[480px] flex flex-col">
@@ -362,16 +385,14 @@ export default function RoutesPage() {
                 />
               </div>
 
-              {/* Filters - Below Search on Mobile */}
-              <div className="flex gap-2 items-center w-full md:w-auto overflow-x-auto pb-1 md:pb-0 no-scrollbar">
-                <Filter className="h-3.5 w-3.5 text-gray-500 flex-shrink-0" />
-
+              {/* Filters - Side by side on Mobile in the same line */}
+              <div className="flex items-center gap-2 w-full md:w-auto">
                 <Select value={shiftFilter} onValueChange={setShiftFilter}>
-                  <SelectTrigger className="h-8 text-xs min-w-[120px] flex-1 md:w-[180px] bg-white dark:bg-gray-800 md:bg-transparent border-gray-200 dark:border-gray-700">
-                    <SelectValue placeholder="Shift" />
+                  <SelectTrigger className="h-9 md:h-8 text-xs w-full md:w-[180px] bg-white dark:bg-gray-800 md:bg-transparent border-gray-200 dark:border-gray-700">
+                    <SelectValue placeholder="Status" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all" className="text-xs">All Shifts</SelectItem>
+                    <SelectItem value="all" className="text-xs">All Statuses</SelectItem>
                     <SelectItem value="active" className="text-xs">Active</SelectItem>
                     <SelectItem value="inactive" className="text-xs">Inactive</SelectItem>
                     <SelectItem value="maintenance" className="text-xs">Maintenance</SelectItem>
@@ -383,7 +404,7 @@ export default function RoutesPage() {
                     variant="ghost"
                     size="sm"
                     onClick={() => setShiftFilter("all")}
-                    className="h-8 px-3 text-xs bg-red-500 hover:bg-red-600 text-white flex-shrink-0"
+                    className="h-8 px-3 text-xs bg-red-500/20 text-red-400 hover:bg-red-500/30 dark:bg-red-500/20 dark:text-red-400 flex-shrink-0"
                   >
                     Clear
                   </Button>
@@ -404,10 +425,16 @@ export default function RoutesPage() {
                     <TableHead className="text-xs font-semibold text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
-                {filteredRoutes.length > 0 && (
-                  <TableBody>
-                    {filteredRoutes.map((route: any) => (
-                      <TableRow key={route.id}>
+                <TableBody>
+                  {isLoading && filteredRoutes.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={6} className="p-6">
+                        <TableRowLoader rows={6} />
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    filteredRoutes.map((route: any) => (
+                      <TableRow key={route.id} style={{ contentVisibility: 'auto', containIntrinsicSize: '0 52px' }}>
                         <TableCell>
                           <div className="flex items-center">
                             <MapPin className="mr-2 h-4 w-4 text-muted-foreground" />
@@ -492,11 +519,11 @@ export default function RoutesPage() {
                           </DropdownMenu>
                         </TableCell>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                )}
+                    ))
+                  )}
+                </TableBody>
               </Table>
-              {filteredRoutes.length === 0 && (
+              {!isLoading && filteredRoutes.length === 0 && (
                 <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-xs text-muted-foreground min-h-[220px]">
                   No routes found.
                 </div>
@@ -531,6 +558,25 @@ export default function RoutesPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Mobile Floating Action Button (FAB) for Quick Moderator Route Actions */}
+      <MobileActionFAB
+        ariaLabel="Route management actions"
+        actions={[
+          ...(canRouteAdd ? [{
+            label: "Add New Route",
+            icon: Plus,
+            href: "/moderator/routes/add",
+            color: "bg-blue-600 text-white",
+          }] : []),
+          {
+            label: "Export Routes",
+            icon: Download,
+            onClick: handleExportRoutes,
+            color: "bg-emerald-600 text-white",
+          },
+        ]}
+      />
     </div>
   );
 }

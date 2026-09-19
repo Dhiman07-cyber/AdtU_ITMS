@@ -12,7 +12,6 @@ import { useParams,useRouter } from 'next/navigation';
 import { useEffect,useMemo,useState } from 'react';
 
 import { StatusBadge } from '@/components/application/status-badge';
-import { PremiumPageLoader } from '@/components/LoadingSpinner';
 import ReassignmentPanel,{ type BusData as RPBusData,type StudentData as RPStudentData } from '@/components/smart-allocation/ReassignmentPanel';
 import { useToast } from '@/contexts/toast-context';
 import { invalidateCollectionCache } from '@/hooks/usePaginatedCollection';
@@ -835,10 +834,38 @@ export default function AdminApplicationDetailPage() {
     }
   };
 
-  if (loading || loadingApp) {
+  if (loading && !currentUser) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-transparents">
-        <PremiumPageLoader message="Curating Application Details..." />
+      <div className="itms-admin-container space-y-6 animate-pulse">
+        <div className="h-9 w-44 bg-zinc-800 rounded-lg mb-6" />
+        <div className="h-64 bg-zinc-900/50 border border-zinc-800 rounded-xl" />
+      </div>
+    );
+  }
+
+  if (loadingApp) {
+    return (
+      <div className="itms-admin-container space-y-6">
+        <div className="itms-page-header-container max-w-7xl mx-auto">
+          <div className="flex justify-between items-center mb-6">
+            <Link href="/admin/applications">
+              <Button variant="ghost" size="sm" className="gap-2 bg-secondary/80 hover:bg-secondary text-secondary-foreground border border-border/50 rounded-lg transition-colors shadow-sm">
+                <ArrowLeft className="h-4 w-4" />
+                Back to Applications
+              </Button>
+            </Link>
+          </div>
+        </div>
+        <div className="max-w-7xl mx-auto pb-20">
+          <div className="bg-[#12131A] rounded-[20px] shadow-2xl border border-white/5 p-8 space-y-6 animate-pulse">
+            <div className="h-20 bg-white/5 rounded-xl" />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="h-48 bg-white/5 rounded-xl" />
+              <div className="h-48 bg-white/5 rounded-xl" />
+            </div>
+            <div className="h-64 bg-white/5 rounded-xl" />
+          </div>
+        </div>
       </div>
     );
   }
@@ -852,12 +879,12 @@ export default function AdminApplicationDetailPage() {
   }
 
   return (
-    <div className="min-h-screen bg-transparent mt-10 py-4">
+    <div className="itms-admin-container space-y-6">
       {/* Header */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div className="itms-page-header-container max-w-7xl mx-auto">
         <div className="flex justify-between items-center mb-6">
           <Link href="/admin/applications">
-            <Button variant="ghost" size="sm" className="gap-2 bg-white/10 hover:bg-white/20 text-white border border-white/20 hover:border-white/30 rounded-lg transition-all duration-200">
+            <Button variant="ghost" size="sm" className="gap-2 bg-secondary/80 hover:bg-secondary text-secondary-foreground border border-border/50 rounded-lg transition-colors shadow-sm">
               <ArrowLeft className="h-4 w-4" />
               Back to Applications
             </Button>
@@ -865,7 +892,7 @@ export default function AdminApplicationDetailPage() {
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-20">
+      <div className="max-w-7xl mx-auto pb-20">
         {/* ONE Single Large Container */}
         <div className="bg-[#12131A] rounded-[20px] shadow-2xl border border-white/5 overflow-hidden">
 

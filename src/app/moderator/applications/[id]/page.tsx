@@ -12,7 +12,6 @@ import { useParams,useRouter } from 'next/navigation';
 import { useEffect,useMemo,useState } from 'react';
 
 import { StatusBadge } from '@/components/application/status-badge';
-import { PremiumPageLoader } from '@/components/LoadingSpinner';
 import { useToast } from '@/contexts/toast-context';
 import { invalidateCollectionCache } from '@/hooks/usePaginatedCollection';
 import { downloadFile } from '@/lib/download-utils';
@@ -853,10 +852,38 @@ export default function ModeratorApplicationDetailPage() {
     }
   };
 
-  if (loading || loadingApp) {
+  if (loading && !currentUser) {
     return (
-      <div className="flex-1 min-h-[calc(100dvh-48px)] flex items-center justify-center bg-transparent">
-        <PremiumPageLoader message="Curating Application Details..." />
+      <div className="min-h-screen bg-transparent mt-10 py-4 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 animate-pulse">
+        <div className="h-9 w-44 bg-zinc-800 rounded-lg mb-6" />
+        <div className="h-64 bg-zinc-900/50 border border-zinc-800 rounded-xl" />
+      </div>
+    );
+  }
+
+  if (loadingApp) {
+    return (
+      <div className="min-h-screen bg-transparent mt-10 py-4">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between items-center mb-6">
+            <Link href="/moderator/applications">
+              <Button variant="ghost" size="sm" className="gap-2 bg-white/10 hover:bg-white/20 text-white border border-white/20 hover:border-white/30 rounded-lg transition-all duration-200">
+                <ArrowLeft className="h-4 w-4" />
+                Back to Applications
+              </Button>
+            </Link>
+          </div>
+        </div>
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-20">
+          <div className="bg-[#12131A] rounded-[20px] shadow-2xl border border-white/5 p-8 space-y-6 animate-pulse">
+            <div className="h-20 bg-white/5 rounded-xl" />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="h-48 bg-white/5 rounded-xl" />
+              <div className="h-48 bg-white/5 rounded-xl" />
+            </div>
+            <div className="h-64 bg-white/5 rounded-xl" />
+          </div>
+        </div>
       </div>
     );
   }

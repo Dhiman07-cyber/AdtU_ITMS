@@ -1,7 +1,5 @@
 "use client";
 
-import { PremiumPageLoader } from "@/components/LoadingSpinner";
-import { usePageShellLoader } from "@/hooks/usePageShellLoader";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card,CardContent,CardHeader } from "@/components/ui/card";
@@ -38,7 +36,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { startTransition, useEffect, useState } from "react";
 
 export default function DriverDashboard() {
   const { userData, currentUser } = useAuth();
@@ -66,12 +64,14 @@ export default function DriverDashboard() {
         
         if (response.ok) {
           const result = await response.json();
-          setDriverDataFirestore(result.driver);
-          setAssignedBusData(result.bus);
-          setAssignedRouteData(result.route);
-          setStudentCount(result.studentCount);
-          setHasActiveTrip(result.tripActive);
-          setTripData(result.tripData);
+          startTransition(() => {
+            setDriverDataFirestore(result.driver);
+            setAssignedBusData(result.bus);
+            setAssignedRouteData(result.route);
+            setStudentCount(result.studentCount);
+            setHasActiveTrip(result.tripActive);
+            setTripData(result.tripData);
+          });
         }
       } catch (error) {
         console.error('Error fetching driver dashboard:', error);
@@ -95,22 +95,19 @@ export default function DriverDashboard() {
 
   const busData = assignedBusData || null;
 
-  // Sync hasActiveTrip with Supabase and API (Robust Version)
+  // Sync hasActiveTrip strictly with current driver's active trip in Supabase
   useEffect(() => {
     if (!currentUser?.uid) return;
 
-    // Get distinct bus ID for broadcasting/student matching (secondary check)
-    const busId = busData?.busId || busData?.id;
-    
-    console.log('🔄 Setting up robust trip status sync for driver:', currentUser.uid, 'and bus:', busId);
+    console.log('🔄 Setting up robust trip status sync for driver:', currentUser.uid);
 
-    // 1. Initial Status Sync - Direct from Supabase active_trips
+    // 1. Initial Status Sync - Direct from Supabase active_trips for THIS driver
     const fetchCurrentStatus = async () => {
       try {
         console.log('🔍 Fetching current driver trip status from active_trips...');
         const { data, error } = await supabase
           .from('active_trips')
-          .select('trip_id, bus_id')
+          .select('trip_id, bus_id, route_id, shift, start_time')
           .eq('driver_id', currentUser.uid)
           .eq('status', 'active')
           .maybeSingle();
@@ -118,17 +115,19 @@ export default function DriverDashboard() {
         if (error) throw error;
 
         if (data) {
-          console.log('✅ Active trip found:', data);
+          console.log('✅ Active trip found for driver:', data);
           setHasActiveTrip(true);
-        } else if (busId) {
-          const response = await authApiFetch(currentUser, '/api/student/trip-status', {
-            query: { busId },
-            timeoutMs: 8000,
+          setTripData({
+            tripId: data.trip_id,
+            busId: data.bus_id,
+            routeId: data.route_id,
+            shift: data.shift,
+            startTime: data.start_time,
           });
-          if (response.ok) {
-            const result = await response.json();
-            setHasActiveTrip(!!result.tripActive);
-          }
+        } else {
+          console.log('ℹ️ Driver has no active trip');
+          setHasActiveTrip(false);
+          setTripData(null);
         }
       } catch (err) {
         console.error('❌ Error fetching direct trip status:', err);
@@ -141,15 +140,25 @@ export default function DriverDashboard() {
     // Trip events are pushed from server API routes via emitEvent → WS server.
     let tripWsClient: WebSocketClient | null = null;
     const initTripWs = async () => {
-      if (!busId || !currentUser) return;
+      const activeBusId = tripData?.busId || busData?.busId || busData?.id;
+      if (!activeBusId || !currentUser) return;
       const token = await currentUser.getIdToken();
       const url = getClientWsUrl();
       tripWsClient = new WebSocketClient({ url, token });
       tripWsClient.connect();
-      tripWsClient.subscribe(`trip-status-${busId}`, (payload: any) => {
-        console.log('🚦 Trip status broadcast received:', payload.event);
-        if (payload.event === 'trip_started') setHasActiveTrip(true);
-        else if (payload.event === 'trip_ended') setHasActiveTrip(false);
+      tripWsClient.subscribe(`trip-status-${activeBusId}`, (payload: any) => {
+        console.log('🚦 Trip status broadcast received:', payload.event, payload);
+        if (payload.event === 'trip_started') {
+          // Strictly verify this event belongs to the current driver
+          if (payload.driverUid && payload.driverUid === currentUser.uid) {
+            setHasActiveTrip(true);
+          }
+        } else if (payload.event === 'trip_ended') {
+          if (!payload.driverUid || payload.driverUid === currentUser.uid) {
+            setHasActiveTrip(false);
+            setTripData(null);
+          }
+        }
       });
     };
     initTripWs();
@@ -157,7 +166,7 @@ export default function DriverDashboard() {
     return () => {
       if (tripWsClient) tripWsClient.disconnect();
     };
-  }, [currentUser?.uid, busData?.busId, busData?.id]);
+  }, [currentUser?.uid, busData?.busId, busData?.id, tripData?.busId]);
 
   const routeData = (() => {
     // First try to use directly fetched assigned route data
@@ -276,18 +285,7 @@ export default function DriverDashboard() {
     }
   }, [userData, router]);
 
-  const { showLoader } = usePageShellLoader(loading, 3500);
 
-  if (showLoader) {
-    return (
-      <div className="flex-1 min-h-[calc(100dvh-120px)] flex items-center justify-center bg-gray-50 dark:bg-[#020817]">
-        <PremiumPageLoader
-          message="Loading Driver Dashboard..."
-          subMessage="Preparing your driver interface..."
-        />
-      </div>
-    );
-  }
 
   return (
     <div className="flex-1 bg-gradient-to-br from-gray-50 via-blue-50/30 to-purple-50/30 dark:from-gray-950 dark:via-slate-900 dark:to-gray-950 relative overflow-hidden pb-24 md:pb-12">
@@ -759,10 +757,23 @@ export default function DriverDashboard() {
 
                 </div>
               ) : (
-                <div className="text-center py-8">
-                  <Bus className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                  <p className="text-gray-500 dark:text-gray-400">No bus or route assigned</p>
-                  <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">Contact admin for assignment</p>
+                <div className="text-center py-8 space-y-3">
+                  <div className="mx-auto w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center shadow-lg">
+                    <Bus className="h-7 w-7 text-white" />
+                  </div>
+                  <div>
+                    <h4 className="text-base font-bold text-gray-900 dark:text-white">Ready for Departure</h4>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 max-w-sm mx-auto">
+                      Any driver can start any bus. Select an available bus to begin your route.
+                    </p>
+                  </div>
+                  <Button
+                    onClick={() => router.push('/driver/live-tracking?initiate=true')}
+                    className="mt-2 bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-bold rounded-xl px-6 py-2.5 shadow-lg"
+                  >
+                    <PlayCircle className="h-4 w-4 mr-2" />
+                    Select Bus & Start Trip
+                  </Button>
                 </div>
               )}
             </CardContent>

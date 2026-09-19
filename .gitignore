@@ -27,6 +27,7 @@ Demo_Commit_message.txt
 
 # Vercel
 .vercel
+Master Prompts
 
 # Security - Never commit these
 *.key

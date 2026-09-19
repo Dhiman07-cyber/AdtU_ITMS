@@ -1,6 +1,5 @@
 "use client";
 
-import { PremiumPageLoader } from '@/components/LoadingSpinner';
 import PaymentModeSelector from '@/components/PaymentModeSelector';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -371,8 +370,13 @@ export default function StudentRenewalPage() {
     }
   };
 
-  if (loading || loadingStudent || loadingFee) {
-    return <PremiumPageLoader message="Loading Renewal Service..." subMessage="Checking your service eligibility..." />;
+  if (loading && !currentUser) {
+    return (
+      <div className="min-h-screen p-6 max-w-4xl mx-auto space-y-6 animate-pulse mt-12">
+        <div className="h-10 w-48 bg-slate-200 dark:bg-zinc-800 rounded-md" />
+        <div className="h-64 bg-slate-100 dark:bg-zinc-900 rounded-xl border border-slate-200 dark:border-zinc-800" />
+      </div>
+    );
   }
 
   if (!currentUser || userData?.role !== 'student') {
@@ -419,6 +423,20 @@ export default function StudentRenewalPage() {
         </div>
 
         {/* Main Content Grid */}
+        {loadingStudent || loadingFee ? (
+          <div className="grid lg:grid-cols-[340px_1fr] gap-6 lg:gap-8 items-start animate-pulse">
+            <Card className="h-96 bg-[#0d1117] rounded-[2rem] border border-white/5 p-6 flex flex-col items-center justify-center space-y-4">
+              <div className="w-20 h-20 rounded-full bg-white/10" />
+              <div className="w-32 h-6 rounded bg-white/10" />
+              <div className="w-24 h-4 rounded bg-white/5" />
+            </Card>
+            <Card className="h-96 bg-[#0d1117] rounded-[2rem] border border-white/5 p-6 space-y-4">
+              <div className="w-48 h-6 rounded bg-white/10" />
+              <div className="w-full h-20 rounded bg-white/5" />
+              <div className="w-full h-20 rounded bg-white/5" />
+            </Card>
+          </div>
+        ) : (
         <div className="grid lg:grid-cols-[340px_1fr] gap-6 lg:gap-8 items-start">
 
           {/* Left Column - Redesigned Unified Identity Sidebar */}
@@ -954,6 +972,7 @@ export default function StudentRenewalPage() {
             )}
           </div>
         </div>
+        )}
       </div>
     </div>
     </ErrorBoundary>

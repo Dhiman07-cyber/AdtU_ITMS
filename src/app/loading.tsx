@@ -188,17 +188,23 @@ export function ButtonLoader({ text = "Processing..." }: { text?: string }) {
 /**
  * Table Loading Skeleton
  */
-export function TableLoader({ rows = 5, columns = 6 }: { rows?: number; columns?: number }) {
+export function TableLoader({ rows = 5, columns = 6, className = "" }: { rows?: number; columns?: number; className?: string }) {
+  return <TableRowLoader rows={rows} className={className} />;
+}
+
+/**
+ * Unified Table Row Loading Skeleton (Single Animation Per Row)
+ * Replaces separate per-column/per-field boxes with a single cohesive row animation.
+ */
+export function TableRowLoader({ rows = 6, className = "" }: { rows?: number; className?: string }) {
   return (
-    <div className="space-y-3">
+    <div className={`space-y-3 w-full ${className}`}>
       {Array.from({ length: rows }).map((_, rowIndex) => (
-        <div key={rowIndex} className="flex gap-4">
-          {Array.from({ length: columns }).map((_, colIndex) => (
-            <div
-              key={colIndex}
-              className="h-12 bg-gray-200 dark:bg-gray-800 rounded animate-pulse flex-1"
-            />
-          ))}
+        <div
+          key={rowIndex}
+          className="h-12 w-full rounded-xl bg-slate-200/50 dark:bg-slate-900/60 border border-slate-200/60 dark:border-slate-800/60 animate-pulse relative overflow-hidden"
+        >
+          <div className="absolute inset-0 bg-gradient-to-r from-transparent via-slate-300/30 dark:via-white/[0.04] to-transparent" />
         </div>
       ))}
     </div>
@@ -339,7 +345,7 @@ export function ModuleErrorFallback({
 export default function Loading() {
   return (
     <PremiumPageLoader
-      message="Loading ADTU Bus Services..."
+      message="Loading..."
       subMessage="Fetching latest transit telemetry..."
     />
   );

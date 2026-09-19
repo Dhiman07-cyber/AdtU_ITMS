@@ -1,5 +1,6 @@
 "use client";
 
+import { PermissionDeniedCard } from "@/components/PermissionDeniedCard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -8,11 +9,12 @@ import { useAuth } from '@/contexts/auth-context';
 import { useToast } from "@/contexts/toast-context";
 import AllStopsData from "@/data/All_stops.json";
 import { signalCollectionRefresh } from "@/hooks/useEventDrivenRefresh";
+import { useModeratorPermissions } from "@/hooks/useModeratorPermissions";
 import { getAllRoutes } from "@/lib/dataService";
 import { ArrowDown,GripVertical,MapPin,Plus,RotateCcw,X } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect,useRef,useState } from "react";
+import { startTransition, useEffect, useRef, useState } from "react";
 
 // Stop type definition
 type Stop = {
@@ -27,10 +29,6 @@ type RouteFormData = {
   routeName: string;
   status: string;
 };
-
-import { PremiumPageLoader } from '@/components/LoadingSpinner';
-import { PermissionDeniedCard } from "@/components/PermissionDeniedCard";
-import { useModeratorPermissions } from "@/hooks/useModeratorPermissions";
 
 export default function AddRoutePage() {
   const { currentUser, userData, loading: authLoading } = useAuth();
@@ -65,10 +63,11 @@ export default function AddRoutePage() {
       try {
         const routes = await getAllRoutes();
         const nextNum = routes.length + 1;
-        // Display only number
         const displayId = nextNum.toString();
-        setRouteData(prev => ({ ...prev, routeId: displayId, routeName: `Route-${displayId}` }));
-        setDefaultRouteId(displayId);
+        startTransition(() => {
+          setRouteData(prev => ({ ...prev, routeId: displayId, routeName: `Route-${displayId}` }));
+          setDefaultRouteId(displayId);
+        });
       } catch (e) {
         console.error(e);
       }
@@ -252,8 +251,19 @@ export default function AddRoutePage() {
     addToast('Form reset successfully', 'info');
   };
 
-  if (authLoading || permsLoading) {
-    return <PremiumPageLoader message="Loading Route Registration..." subMessage="Setting up form..." />;
+  if ((authLoading || permsLoading) && !currentUser) {
+    return (
+      <div className="itms-admin-form-container space-y-6 animate-pulse">
+        <div className="flex justify-between items-center mb-6">
+          <div>
+            <div className="h-9 w-48 bg-muted/60 rounded-xl mb-2" />
+            <div className="h-4 w-72 bg-muted/40 rounded-lg" />
+          </div>
+          <div className="h-8 w-20 bg-muted/40 rounded-lg" />
+        </div>
+        <div className="h-96 rounded-2xl bg-muted/20 border border-white/5" />
+      </div>
+    );
   }
 
   if (!currentUser || !userData || userData.role !== 'moderator') {
@@ -265,27 +275,27 @@ export default function AddRoutePage() {
   }
 
   return (
-    <div className="mt-10 py-4 bg-[#010717] min-h-screen">
+    <div className="itms-admin-form-container space-y-6">
       {/* Header */}
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div className="itms-page-header-container">
         <div className="flex justify-between items-center mb-6">
           <div>
-            <h1 className="text-3xl font-bold text-foreground">Add Route</h1>
-            <p className="text-muted-foreground mt-1">Create a new bus route with stops</p>
+            <h1 className="text-xl sm:text-2xl md:text-3xl font-bold tracking-tight text-foreground leading-tight pb-1">Add Route</h1>
+            <p className="text-muted-foreground mt-1 text-xs sm:text-sm">Create a new bus route with stops</p>
           </div>
           <Link
             href="/moderator/routes"
-            className="inline-flex items-center px-3.5 py-1.5 bg-white/10 hover:bg-white/20 text-white text-sm border border-white/20 hover:border-white/30 rounded-lg transition-all duration-200 hover:shadow-md backdrop-blur-sm"
+            className="inline-flex items-center px-3.5 py-1.5 bg-secondary/80 hover:bg-secondary text-secondary-foreground border border-border/50 text-xs font-medium rounded-lg transition-colors shadow-sm cursor-pointer"
           >
-            <span className="mr-1.5 text-sm">←</span>
+            <span className="mr-1.5 text-xs">←</span>
             Back
           </Link>
         </div>
       </div>
 
       {/* Main Content */}
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="bg-gradient-to-br from-[#0E0F12] to-[#1A1B23] backdrop-blur-sm rounded-2xl shadow-2xl border border-white/10 p-10 hover:border-white/20 transition-all duration-300">
+      <div className="w-full">
+        <div className="bg-gradient-to-br from-[#0E0F12] to-[#1A1B23] backdrop-blur-sm rounded-2xl shadow-2xl border border-white/10 p-4 sm:p-10 hover:border-white/20 transition-all duration-300">
           <form onSubmit={handleSubmit} className="space-y-8">
             {/* Basic Information */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">

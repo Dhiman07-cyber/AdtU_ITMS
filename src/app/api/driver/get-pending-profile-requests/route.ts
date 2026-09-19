@@ -1,4 +1,4 @@
-﻿import { getAllBuses } from '@/domains/fleet';
+import { getAllBuses } from '@/domains/fleet';
 import { getStudentById } from '@/domains/identity';
 import { db as adminDb } from '@/lib/firebase-admin';
 import { withSecurity } from '@/lib/security/api-security';
@@ -33,17 +33,20 @@ export const POST = withSecurity(
       });
     }
 
-    // Query profile_update_requests directly by busId
+    // Query profile_update_requests directly by busId in parallel
     const requests: any[] = [];
 
-    for (const busId of busIds) {
-      // Query pending requests for this bus
-      const requestsSnapshot = await adminDb.collection('profile_update_requests')
-        .where('busId', '==', busId)
-        .where('status', '==', 'pending')
-        .get();
+    const busSnapshots = await Promise.all(
+      busIds.map(busId =>
+        adminDb.collection('profile_update_requests')
+          .where('busId', '==', busId)
+          .where('status', '==', 'pending')
+          .get()
+      )
+    );
 
-      requestsSnapshot.docs.forEach((doc: any) => {
+    for (const snapshot of busSnapshots) {
+      snapshot.docs.forEach((doc: any) => {
         const data = doc.data();
         requests.push({
           requestId: doc.id,
@@ -56,40 +59,43 @@ export const POST = withSecurity(
     }
 
     // Also check for legacy requests without busId by looking at student_profiles in PostgreSQL
+    // OPTIMIZATION: Single batch query with .in('bus_id', busIds) instead of sequential loop
     const supabase = getSupabaseServer();
-    for (const busId of busIds) {
-      const { data: students } = await supabase
-        .from('student_profiles')
-        .select('*')
-        .or(`bus_id.eq.${busId},bus_id.eq.${busId}`);
+    const { data: students } = await supabase
+      .from('student_profiles')
+      .select('uid, bus_id, "pendingProfileUpdate"')
+      .in('bus_id', busIds)
+      .not('pendingProfileUpdate', 'is', null);
 
-      for (const studentData of students || []) {
-        const pendingProfileUpdate = studentData.pendingProfileUpdate;
-        if (pendingProfileUpdate) {
-          const existingRequest = requests.find(r => r.requestId === pendingProfileUpdate);
-          if (!existingRequest) {
-            const requestDoc = await adminDb.collection('profile_update_requests')
-              .doc(pendingProfileUpdate)
-              .get();
+    const pendingToFetch = (students || [])
+      .map((s: any) => ({ pendingId: s.pendingProfileUpdate as string, busId: s.bus_id as string }))
+      .filter(s => s.pendingId && !requests.some(r => r.requestId === s.pendingId));
 
-            if (requestDoc.exists) {
-              const data = requestDoc.data();
-              if (data && data.status === 'pending') {
-                requests.push({
-                  requestId: requestDoc.id,
-                  ...data,
-                  busId: busId,
-                  createdAt: data.createdAt ? (data.createdAt.toDate ? data.createdAt.toDate().toISOString() : data.createdAt) : null,
-                  approvedAt: data.approvedAt ? (data.approvedAt.toDate ? data.approvedAt.toDate().toISOString() : data.approvedAt) : null,
-                  rejectedAt: data.rejectedAt ? (data.rejectedAt.toDate ? data.rejectedAt.toDate().toISOString() : data.rejectedAt) : null
-                });
+    if (pendingToFetch.length > 0) {
+      // Parallelize Firestore document lookups
+      const requestDocs = await Promise.all(
+        pendingToFetch.map(item => adminDb.collection('profile_update_requests').doc(item.pendingId).get())
+      );
 
-                if (!data.busId) {
-                  await adminDb.collection('profile_update_requests').doc(requestDoc.id).update({
-                    busId: busId
-                  });
-                }
-              }
+      for (let i = 0; i < requestDocs.length; i++) {
+        const requestDoc = requestDocs[i];
+        const item = pendingToFetch[i];
+        if (requestDoc.exists) {
+          const data = requestDoc.data();
+          if (data && data.status === 'pending') {
+            requests.push({
+              requestId: requestDoc.id,
+              ...data,
+              busId: item.busId,
+              createdAt: data.createdAt ? (data.createdAt.toDate ? data.createdAt.toDate().toISOString() : data.createdAt) : null,
+              approvedAt: data.approvedAt ? (data.approvedAt.toDate ? data.approvedAt.toDate().toISOString() : data.approvedAt) : null,
+              rejectedAt: data.rejectedAt ? (data.rejectedAt.toDate ? data.rejectedAt.toDate().toISOString() : data.rejectedAt) : null
+            });
+
+            if (!data.busId) {
+              adminDb.collection('profile_update_requests').doc(requestDoc.id).update({
+                busId: item.busId
+              }).catch((err: any) => console.error('Error backfilling busId:', err));
             }
           }
         }
@@ -102,15 +108,25 @@ export const POST = withSecurity(
         .where('status', '==', 'pending')
         .get();
 
-      for (const requestDoc of orphanedRequestsSnapshot.docs) {
-        const requestData = requestDoc.data();
-        if (requests.find(r => r.requestId === requestDoc.id)) continue;
-        if (requestData.busId && !busIds.includes(requestData.busId)) continue;
+      const candidateDocs = orphanedRequestsSnapshot.docs.filter((doc: any) => {
+        const data = doc.data();
+        if (requests.find(r => r.requestId === doc.id)) return false;
+        if (data.busId && !busIds.includes(data.busId)) return false;
+        return !!data.studentUid;
+      });
 
-        if (requestData.studentUid) {
-          const studentData = await getStudentById(requestData.studentUid);
+      if (candidateDocs.length > 0) {
+        const studentLookups = await Promise.all(
+          candidateDocs.map((doc: any) => getStudentById(doc.data().studentUid).catch(() => null))
+        );
+
+        for (let i = 0; i < candidateDocs.length; i++) {
+          const requestDoc = candidateDocs[i];
+          const requestData = requestDoc.data();
+          const studentData = studentLookups[i] as any;
+
           if (studentData) {
-            const studentBusId = studentData.busId || studentData.busId;
+            const studentBusId = studentData.busId || studentData.bus_id;
 
             if (studentBusId && busIds.includes(studentBusId)) {
               requests.push({
@@ -122,9 +138,9 @@ export const POST = withSecurity(
                 rejectedAt: requestData.rejectedAt ? (requestData.rejectedAt.toDate ? requestData.rejectedAt.toDate().toISOString() : requestData.rejectedAt) : null
               });
 
-              await adminDb.collection('profile_update_requests').doc(requestDoc.id).update({
+              adminDb.collection('profile_update_requests').doc(requestDoc.id).update({
                 busId: studentBusId
-              });
+              }).catch((err: any) => console.error('Error updating orphaned busId:', err));
             }
           }
         }

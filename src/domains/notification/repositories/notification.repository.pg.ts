@@ -85,6 +85,8 @@ interface PgNotification {
   metadata: Record<string, any>;
 }
 
+const PG_NOTIFICATION_COLUMNS = 'id, title, content, type, sender, sender_user_id, target, recipient_ids, auto_injected_recipient_ids, read_by_user_ids, hidden_for_user_ids, is_edited, is_deleted_globally, deleted_by_user_id, deleted_at, created_at, updated_at, expires_at, edit_history, metadata';
+
 /** Notification type compatible with existing codebase */
 export interface NotificationRecord {
   id: string;
@@ -220,7 +222,7 @@ export async function pgFindNotificationsByUser(
 
   const { data, error } = await db
     .from('notifications')
-    .select('*')
+    .select(PG_NOTIFICATION_COLUMNS)
     .or(`recipient_ids.cs.{${uid}},sender_user_id.eq.${uid}`)
     .order('created_at', { ascending: false })
     .limit(limit);
@@ -242,7 +244,7 @@ export async function pgFindNotificationById(
 
   const { data, error } = await db
     .from('notifications')
-    .select('*')
+    .select(PG_NOTIFICATION_COLUMNS)
     .eq('id', id)
     .maybeSingle();
 
@@ -264,7 +266,7 @@ export async function pgFindExpiredNotifications(): Promise<NotificationRecord[]
 
   const { data, error } = await db
     .from('notifications')
-    .select('*')
+    .select(PG_NOTIFICATION_COLUMNS)
     .not('expires_at', 'is', null)
     .lte('expires_at', new Date().toISOString());
 

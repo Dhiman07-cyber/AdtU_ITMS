@@ -1,6 +1,5 @@
 "use client";
 
-import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import { Avatar,AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/contexts/auth-context";
@@ -112,7 +111,17 @@ export default function DriverStudentDetailPage({ params }: { params: Promise<{ 
   }, [userData, router]);
 
   if (loading) {
-    return <PremiumPageLoader message="Loading student profile..." subMessage="Fetching details..." />;
+    return (
+      <div className="flex-1 min-h-[calc(100dvh-120px)] pb-12 bg-gradient-to-br from-background via-background to-muted/20">
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 pt-20 pb-4 md:pt-24 md:pb-6 space-y-6">
+          <div className="h-32 rounded-2xl bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 animate-pulse p-6" />
+          <div className="grid md:grid-cols-2 gap-6">
+            <div className="h-64 rounded-2xl bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 animate-pulse p-6" />
+            <div className="h-64 rounded-2xl bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 animate-pulse p-6" />
+          </div>
+        </div>
+      </div>
+    );
   }
 
   if (error || !student) {

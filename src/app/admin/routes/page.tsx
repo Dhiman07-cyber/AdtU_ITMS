@@ -1,8 +1,7 @@
 "use client";
 
 import { ExportButton } from '@/components/ExportButton';
-import { PremiumPageLoader, TableLoader } from '@/components/LoadingSpinner';
-import { usePageShellLoader } from '@/hooks/usePageShellLoader';
+import { TableRowLoader } from '@/components/LoadingSpinner';
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -49,6 +48,7 @@ import { supabase } from '@/lib/supabase-client';
 import { cn } from '@/lib/utils';
 import {
 	Bus as BusIcon,
+	Download,
 	Edit,
 	Eye,
 	Filter,
@@ -59,12 +59,121 @@ import {
 	Search,
 	Trash2
 } from "lucide-react";
+import { MobileActionFAB } from '@/components/layout/MobileActionFAB';
 import { useRouter } from 'next/navigation';
 import { useMemo,useState } from "react";
 // Migrated: Server-side API → PostgreSQL (no Firestore client reads)
 import { useTheme } from '@/components/theme-provider';
 import { invalidateCollectionCache,useApiCollection } from '@/hooks/useApiCollection';
 import { useEventDrivenRefresh } from '@/hooks/useEventDrivenRefresh';
+
+function RouteRow({
+  route,
+  theme,
+  onView,
+  onEdit,
+  onDelete,
+}: {
+  route: any;
+  theme: string | undefined;
+  onView: (id: string) => void;
+  onEdit: (id: string) => void;
+  onDelete: (id: string, name: string) => void;
+}) {
+  const statusInfo = normalizeRouteStatus(route.status);
+  const badgeVariant = statusInfo.variant === 'default' ? 'default' : statusInfo.variant as "default" | "destructive" | "outline" | "secondary";
+
+  return (
+    <TableRow style={{ contentVisibility: 'auto', containIntrinsicSize: '0 52px' }}>
+      <TableCell>
+        <div className="flex items-center">
+          <MapPin className="mr-2 h-4 w-4 text-muted-foreground" />
+          <span className="font-medium text-sm">{route.routeName}</span>
+        </div>
+      </TableCell>
+      <TableCell className="text-sm">
+        {route.stops && route.stops.length > 0
+          ? `${route.stops[0]?.name || ''} - ADTU Campus`
+          : 'No stops defined'}
+      </TableCell>
+      <TableCell className="text-sm">{route.totalStops}</TableCell>
+      <TableCell>
+        <div className="flex flex-col gap-1">
+          {route.assignedBuses && route.assignedBuses.length > 0 ? (
+            route.assignedBuses.map((bus: any) => (
+              <div key={bus.id} className="flex items-center text-xs text-blue-400">
+                <BusIcon className="mr-1.5 h-3 w-3" />
+                <span>{bus.busNumber}</span>
+              </div>
+            ))
+          ) : (
+            <span className="text-muted-foreground text-xs italic">No buses assigned</span>
+          )}
+        </div>
+      </TableCell>
+      <TableCell>
+        <Badge
+          variant={badgeVariant}
+          className={statusInfo.variant === 'default' ? 'bg-green-600 text-white' : ''}
+          title={statusInfo.tooltip}
+        >
+          {statusInfo.label}
+        </Badge>
+      </TableCell>
+      <TableCell className="text-right">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" className={cn(
+              "h-8 w-8 p-0 cursor-pointer",
+              theme === 'dark' ? "hover:bg-gray-700" : "hover:bg-gray-100"
+            )}>
+              <span className="sr-only">Open menu</span>
+              <MoreHorizontal className="h-4 w-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className={cn(
+            "shadow-xl rounded-lg w-44",
+            theme === 'dark' ? "bg-gray-900 border-gray-600" : "bg-white border-[#E5E7EB]"
+          )}>
+            <DropdownMenuLabel className={cn("font-semibold px-2 py-1.5 text-sm", theme === 'dark' ? "text-white" : "text-[#111827]")}>Actions</DropdownMenuLabel>
+            <DropdownMenuSeparator className={cn(theme === 'dark' ? "bg-gray-600" : "bg-[#E5E7EB]")} />
+            <DropdownMenuItem
+              className={cn(
+                "px-2 py-1.5 text-sm cursor-pointer",
+                theme === 'dark' ? "text-white hover:bg-gray-800 focus:bg-gray-800" : "text-[#111827] hover:bg-gray-100 focus:bg-gray-100"
+              )}
+              onClick={() => onView(route.id)}
+            >
+              <Eye className="mr-2 h-3.5 w-3.5 text-blue-400" />
+              View Details
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              className={cn(
+                "px-2 py-1.5 text-sm cursor-pointer",
+                theme === 'dark' ? "text-white hover:bg-gray-800 focus:bg-gray-800" : "text-[#111827] hover:bg-gray-100 focus:bg-gray-100"
+              )}
+              onClick={() => onEdit(route.id)}
+            >
+              <Edit className="mr-2 h-3.5 w-3.5 text-yellow-400" />
+              Edit Route
+            </DropdownMenuItem>
+            <DropdownMenuSeparator className={cn(theme === 'dark' ? "bg-gray-600" : "bg-[#E5E7EB]")} />
+            <DropdownMenuItem
+              className={cn(
+                "px-2 py-1.5 text-sm cursor-pointer transition-colors",
+                theme === 'dark' ? "text-white hover:!bg-red-600 focus:!bg-red-600" : "text-[#111827] hover:!bg-red-600 focus:!bg-red-600"
+              )}
+              onClick={() => onDelete(route.id, route.routeName)}
+            >
+              <Trash2 className="mr-2 h-3.5 w-3.5" />
+              Delete Route
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </TableCell>
+    </TableRow>
+  );
+}
 
 // Use local interfaces to avoid type conflicts
 interface RouteItem {
@@ -156,7 +265,6 @@ export default function RoutesPage() {
   const [deleteItem, setDeleteItem] = useState<{ id: string; name: string } | null>(null);
 
   const isLoading = loadingRoutes || loadingBuses;
-  const { showLoader } = usePageShellLoader(isLoading && routesData.length === 0, 3500);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   const handleRefresh = async () => {
@@ -209,7 +317,7 @@ export default function RoutesPage() {
       // Fetch all routes directly from Supabase PostgreSQL table 'routes'
       const { data: rawRoutes, error: routesError } = await supabase
         .from('routes')
-        .select('*')
+        .select('id, route_name, route_number, stops, start_location, total_stops, status')
         .order('route_name', { ascending: true });
 
       if (routesError) throw routesError;
@@ -271,7 +379,7 @@ export default function RoutesPage() {
     }
   };
 
-  const commonBtnClass = "group h-8 px-4 bg-white hover:bg-gray-50 text-gray-600 hover:text-blue-600 border border-gray-200 hover:border-blue-200 shadow-sm hover:shadow-lg hover:shadow-blue-500/10 font-bold text-[10px] uppercase tracking-widest rounded-lg transition-all duration-300 active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer";
+  const commonBtnClass = "group h-8 px-3.5 bg-white/80 dark:bg-zinc-800/80 hover:bg-zinc-50 dark:hover:bg-zinc-700/80 text-zinc-700 dark:text-zinc-200 hover:text-blue-600 dark:hover:text-blue-400 border border-zinc-200 dark:border-zinc-700/60 shadow-xs text-xs font-semibold rounded-lg transition-all duration-200 active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer";
 
   const handleDelete = (id: string, name: string) => {
     setDeleteItem({ id, name });
@@ -302,45 +410,59 @@ export default function RoutesPage() {
     }
   };
 
-  if (showLoader) {
-    return <PremiumPageLoader message="Curating Transit Routes..." subMessage="Fetching route definitions and stops..." maxDurationMs={3500} />;
-  }
+
 
   return (
-    <div className="mt-12 space-y-6">
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold dark:text-white">Route Management</h1>
-          <p className="text-muted-foreground">
-            Manage all bus routes and stops
-          </p>
+    <div className="itms-admin-container space-y-6">
+      {/* Page Header */}
+      <div className="itms-page-header-container">
+        <div className="flex items-center justify-between w-full gap-2">
+          <h1 className="text-xl sm:text-2xl md:text-3xl font-bold dark:text-white truncate leading-tight pb-1">Route Management</h1>
+
+          {/* Desktop action toolbar */}
+          <div className="hidden md:flex items-center gap-2 shrink-0">
+            <Button
+              className={cn(
+                "cursor-pointer border transition-all duration-200 hover:scale-105 hover:shadow-lg rounded-md px-2.5 py-1.5 text-xs h-8",
+                theme === 'dark' ? "bg-blue-600 hover:bg-blue-700 text-white border-blue-700" : "bg-[#1E3A8A] hover:bg-[#1E40AF] text-white border-[#1E3A8A]"
+              )}
+              onClick={() => router.push('/admin/routes/add')}
+            >
+              <Plus className="mr-1.5 h-3.5 w-3.5" />
+              Add New Route
+            </Button>
+            <ExportButton
+              onClick={() => handleExportRoutes()}
+              label="Export"
+              className={commonBtnClass}
+            />
+            <Button
+              size="sm"
+              onClick={handleRefresh}
+              disabled={isRefreshing}
+              className={commonBtnClass}
+            >
+              <RefreshCw className={cn("h-3.5 w-3.5 transition-transform duration-500", isRefreshing ? "animate-spin" : "group-hover:rotate-180")} />
+              <span>Refresh</span>
+            </Button>
+          </div>
+
+          {/* Mobile Refresh Button - exact same line as Route Management at rightmost end */}
+          <div className="flex md:hidden items-center shrink-0">
+            <Button
+              size="sm"
+              onClick={handleRefresh}
+              disabled={isRefreshing}
+              className="h-8 px-3 bg-white dark:bg-zinc-800 hover:bg-gray-50 dark:hover:bg-zinc-700 text-gray-700 dark:text-zinc-200 hover:text-blue-600 dark:hover:text-blue-400 border border-gray-200 dark:border-zinc-700 shadow-sm rounded-lg text-xs font-semibold flex items-center gap-1.5 cursor-pointer active:scale-95 transition-all shrink-0"
+            >
+              <RefreshCw className={cn("h-3.5 w-3.5 transition-transform duration-500", isRefreshing ? "animate-spin text-blue-600" : "group-hover:rotate-180")} />
+              <span>Refresh</span>
+            </Button>
+          </div>
         </div>
-        <div className="flex gap-2">
-          <Button
-            className={cn(
-              "w-full md:w-auto cursor-pointer border transition-all duration-200 hover:scale-105 hover:shadow-lg rounded-md px-2.5 py-1.5 text-xs h-8",
-              theme === 'dark' ? "bg-blue-600 hover:bg-blue-700 text-white border-blue-700" : "bg-[#1E3A8A] hover:bg-[#1E40AF] text-white border-[#1E3A8A]"
-            )}
-            onClick={() => router.push('/admin/routes/add')}
-          >
-            <Plus className="mr-1.5 h-3.5 w-3.5" />
-            Add New Route
-          </Button>
-          <ExportButton
-            onClick={() => handleExportRoutes()}
-            label="EXPORT"
-            className={commonBtnClass}
-          />
-          <Button
-            size="sm"
-            onClick={handleRefresh}
-            disabled={isRefreshing}
-            className={commonBtnClass}
-          >
-            <RefreshCw className={cn("h-3.5 w-3.5 transition-transform duration-500", isRefreshing ? "animate-spin" : "group-hover:rotate-180")} />
-            REFRESH
-          </Button>
-        </div>
+        <p className="text-muted-foreground mt-1 text-xs sm:text-sm truncate">
+          Manage all bus routes and stops
+        </p>
       </div>
 
       <Card className={cn("border-border min-h-[480px] flex flex-col", theme === 'dark' ? "bg-gray-900" : "bg-admin-bg")}>
@@ -359,19 +481,17 @@ export default function RoutesPage() {
                 />
               </div>
 
-              {/* Filters - Below Search on Mobile */}
-              <div className="flex gap-2 items-center w-full md:w-auto overflow-x-auto pb-1 md:pb-0 no-scrollbar">
-                <Filter className={cn("h-3.5 w-3.5 flex-shrink-0", theme === 'dark' ? "text-gray-500" : "text-[#6B7280]")} />
-
+              {/* Filters - Side by side on Mobile in the same line */}
+              <div className="flex items-center gap-2 w-full md:w-auto">
                 <Select value={shiftFilter} onValueChange={setShiftFilter}>
                   <SelectTrigger className={cn(
-                    "h-8 text-xs min-w-[120px] flex-1 md:w-[180px] md:bg-transparent border",
+                    "h-9 md:h-8 text-xs w-full md:w-[180px] md:bg-transparent border",
                     theme === 'dark' ? "bg-gray-800 border-gray-700" : "bg-white border-[#E5E7EB]"
                   )}>
-                    <SelectValue placeholder="Shift" />
+                    <SelectValue placeholder="Status" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all" className="text-xs">All Shifts</SelectItem>
+                    <SelectItem value="all" className="text-xs">All Statuses</SelectItem>
                     <SelectItem value="active" className="text-xs">Active</SelectItem>
                     <SelectItem value="inactive" className="text-xs">Inactive</SelectItem>
                     <SelectItem value="maintenance" className="text-xs">Maintenance</SelectItem>
@@ -384,8 +504,7 @@ export default function RoutesPage() {
                     size="sm"
                     onClick={() => setShiftFilter("all")}
                     className={cn(
-                      "h-8 px-3 text-xs",
-                      theme === 'dark' ? "bg-red-500 hover:bg-red-600" : "bg-[#EF4444] hover:bg-[#DC2626]"
+                      "h-8 px-3 text-xs bg-red-500/20 text-red-400 hover:bg-red-500/30 dark:bg-red-500/20 dark:text-red-400 flex-shrink-0"
                     )}
                   >
                     Clear
@@ -407,117 +526,31 @@ export default function RoutesPage() {
                     <TableHead className="text-xs font-semibold text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
-                {filteredRoutes.length > 0 && (
-                  <TableBody>
-                    {filteredRoutes.map((route: any) => (
-                      <TableRow key={route.id}>
-                        <TableCell>
-                          <div className="flex items-center">
-                            <MapPin className="mr-2 h-4 w-4 text-muted-foreground" />
-                            <span className="font-medium text-sm">{route.routeName}</span>
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-sm">
-                          {route.stops && route.stops.length > 0
-                            ? `${route.stops[0]?.name || ''} - ADTU Campus`
-                            : 'No stops defined'}
-                        </TableCell>
-                        <TableCell className="text-sm">{route.totalStops}</TableCell>
-                        <TableCell>
-                          <div className="flex flex-col gap-1">
-                            {route.assignedBuses && route.assignedBuses.length > 0 ? (
-                              route.assignedBuses.map((bus: any) => (
-                                <div key={bus.id} className="flex items-center text-xs text-blue-400">
-                                  <BusIcon className="mr-1.5 h-3 w-3" />
-                                  <span>{bus.busNumber}</span>
-                                </div>
-                              ))
-                            ) : (
-                              <span className="text-muted-foreground text-xs italic">No buses assigned</span>
-                            )}
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          {(() => {
-                            const statusInfo = normalizeRouteStatus(route.status);
-                            const badgeVariant = statusInfo.variant === 'default' ? 'default' : statusInfo.variant as "default" | "destructive" | "outline" | "secondary";
-                            return (
-                              <Badge
-                                variant={badgeVariant}
-                                className={statusInfo.variant === 'default' ? 'bg-green-600 text-white' : ''}
-                                title={statusInfo.tooltip}
-                              >
-                                {statusInfo.label}
-                              </Badge>
-                            );
-                          })()}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" className={cn(
-                                "h-8 w-8 p-0 cursor-pointer",
-                                theme === 'dark' ? "hover:bg-gray-700" : "hover:bg-gray-100"
-                              )}>
-                                <span className="sr-only">Open menu</span>
-                                <MoreHorizontal className="h-4 w-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className={cn(
-                              "shadow-xl rounded-lg w-44",
-                              theme === 'dark' ? "bg-gray-900 border-gray-600" : "bg-white border-[#E5E7EB]"
-                            )}>
-                              <DropdownMenuLabel className={cn("font-semibold px-2 py-1.5 text-sm", theme === 'dark' ? "text-white" : "text-[#111827]")}>Actions</DropdownMenuLabel>
-                              <DropdownMenuSeparator className={cn(theme === 'dark' ? "bg-gray-600" : "bg-[#E5E7EB]")} />
-                              <DropdownMenuItem
-                                className={cn(
-                                  "px-2 py-1.5 text-sm cursor-pointer",
-                                  theme === 'dark' ? "text-white hover:bg-gray-800 focus:bg-gray-800" : "text-[#111827] hover:bg-gray-100 focus:bg-gray-100"
-                                )}
-                                onClick={() => router.push(`/admin/routes/view/${route.id}`)}
-                              >
-                                <Eye className="mr-2 h-3.5 w-3.5 text-blue-400" />
-                                View Details
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                className={cn(
-                                  "px-2 py-1.5 text-sm cursor-pointer",
-                                  theme === 'dark' ? "text-white hover:bg-gray-800 focus:bg-gray-800" : "text-[#111827] hover:bg-gray-100 focus:bg-gray-100"
-                                )}
-                                onClick={() => router.push(`/admin/routes/edit/${route.id}`)}
-                              >
-                                <Edit className="mr-2 h-3.5 w-3.5 text-yellow-400" />
-                                Edit Route
-                              </DropdownMenuItem>
-                              <DropdownMenuSeparator className={cn(theme === 'dark' ? "bg-gray-600" : "bg-[#E5E7EB]")} />
-                              <DropdownMenuItem
-                                className={cn(
-                                  "px-2 py-1.5 text-sm cursor-pointer transition-colors",
-                                  theme === 'dark' ? "text-white hover:!bg-red-600 focus:!bg-red-600" : "text-[#111827] hover:!bg-red-600 focus:!bg-red-600"
-                                )}
-                                onClick={() => handleDelete(route.id, route.routeName)}
-                              >
-                                <Trash2 className="mr-2 h-3.5 w-3.5" />
-                                Delete Route
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                )}
+                <TableBody>
+                  {isLoading && filteredRoutes.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={6} className="p-6">
+                        <TableRowLoader rows={6} />
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    filteredRoutes.map((route: any) => (
+                      <RouteRow
+                        key={route.id}
+                        route={route}
+                        theme={theme}
+                        onView={(id) => router.push(`/admin/routes/view/${id}`)}
+                        onEdit={(id) => router.push(`/admin/routes/edit/${id}`)}
+                        onDelete={handleDelete}
+                      />
+                    ))
+                  )}
+                </TableBody>
               </Table>
-              {filteredRoutes.length === 0 && (
-                isLoading ? (
-                  <div className="p-6">
-                    <TableLoader rows={6} columns={6} />
-                  </div>
-                ) : (
-                  <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-xs text-muted-foreground min-h-[220px]">
-                    No routes found.
-                  </div>
-                )
+              {!isLoading && filteredRoutes.length === 0 && (
+                <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-xs text-muted-foreground min-h-[220px]">
+                  No routes found.
+                </div>
               )}
             </div>
           </div>
@@ -555,6 +588,25 @@ export default function RoutesPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Mobile Floating Action Button (FAB) for Quick Admin Route Actions */}
+      <MobileActionFAB
+        ariaLabel="Route management actions"
+        actions={[
+          {
+            label: "Add New Route",
+            icon: Plus,
+            href: "/admin/routes/add",
+            color: "bg-blue-600 text-white",
+          },
+          {
+            label: "Export Routes",
+            icon: Download,
+            onClick: handleExportRoutes,
+            color: "bg-emerald-600 text-white",
+          },
+        ]}
+      />
     </div>
   );
 }

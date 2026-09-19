@@ -38,7 +38,7 @@ export const useWaitingFlags = (busId: string, getToken: () => Promise<string | 
       try {
         const { data, error } = await supabase
           .from('waiting_flags')
-          .select('*')
+          .select('id, student_uid, student_name, bus_id, route_id, stop_name, stop_lat, stop_lng, status, created_at, expires_at')
           .eq('bus_id', busId)
           .in('status', ['raised', 'waiting', 'acknowledged'])
           .order('created_at', { ascending: false });

@@ -25,8 +25,7 @@ export function trackEvent(eventName: string, parameters?: Record<string, unknow
 export default function Analytics() {
   const measurementId =
     process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID ||
-    process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID ||
-    'G-61NME56S7Y';
+    process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID;
 
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -42,18 +41,21 @@ export default function Analytics() {
     }
   }, [pathname, searchParams, measurementId]);
 
-  if (!measurementId) return null;
+  // Do not load live GTM in development mode or if no measurement ID is configured
+  if (process.env.NODE_ENV === 'development' || !measurementId) {
+    return null;
+  }
 
   return (
     <>
-      {/* Global Site Tag (gtag.js) - Google Analytics 4 */}
+      {/* Global Site Tag (gtag.js) - Google Analytics 4 (Loaded with lazyOnload to avoid preload violations and LCP degradation) */}
       <Script
-        strategy="afterInteractive"
+        strategy="lazyOnload"
         src={`https://www.googletagmanager.com/gtag/js?id=${measurementId}`}
       />
       <Script
         id="google-analytics-init"
-        strategy="afterInteractive"
+        strategy="lazyOnload"
         dangerouslySetInnerHTML={{
           __html: `
             window.dataLayer = window.dataLayer || [];

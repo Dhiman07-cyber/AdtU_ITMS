@@ -1,6 +1,5 @@
 "use client";
 
-import { PremiumPageLoader } from "@/components/LoadingSpinner";
 import { Avatar,AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -48,7 +47,7 @@ import {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { QRCodeCanvas } from 'qrcode.react';
-import { use,useCallback,useEffect,useRef,useState } from "react";
+import { use,useEffect,useRef,useState } from "react";
 
 const formatDate = formatDateFlexible;
 
@@ -215,7 +214,7 @@ export default function ViewStudentPage({ params }: { params: Promise<{ id: stri
   };
 
   // QR Code Download Handler
-  const handleDownloadQR = useCallback(async () => {
+  const handleDownloadQR = async () => {
     if (!student) return;
 
     try {
@@ -357,10 +356,10 @@ export default function ViewStudentPage({ params }: { params: Promise<{ id: stri
       console.error(e);
       addToast('Failed to save bus pass', 'error');
     }
-  }, [student]);
+  };
 
   // QR Code Share Handler
-  const handleShareQR = useCallback(async () => {
+  const handleShareQR = async () => {
     if (!student) return;
 
     try {
@@ -374,10 +373,29 @@ export default function ViewStudentPage({ params }: { params: Promise<{ id: stri
     } catch (e) {
       if ((e as Error).name !== 'AbortError') addToast('Sharing failed', 'error');
     }
-  }, [student]);
+  };
 
   if (loading) {
-    return <PremiumPageLoader message="Loading student profile..." subMessage="Fetching details..." />;
+    return (
+      <div className="min-h-screen pb-12 mt-8 bg-gradient-to-br from-background via-background to-muted/20">
+        <div className="bg-gradient-to-r from-card via-card to-card/95 border-b border-border shadow-sm">
+          <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
+            <h1 className="text-lg md:text-3xl font-black text-foreground tracking-tight">Student Profile</h1>
+            <Link href="/admin/students">
+              <Button variant="outline" className="h-7 px-2.5 py-1.5 rounded-lg text-xs shadow-sm">
+                &lt;- Back
+              </Button>
+            </Link>
+          </div>
+        </div>
+        <div className="max-w-7xl mx-auto px-4 py-8">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 animate-pulse">
+            <div className="h-96 rounded-2xl bg-white/5" />
+            <div className="lg:col-span-2 h-96 rounded-2xl bg-white/5" />
+          </div>
+        </div>
+      </div>
+    );
   }
 
   if (!student) {
@@ -407,42 +425,40 @@ export default function ViewStudentPage({ params }: { params: Promise<{ id: stri
   }
 
   return (
-    <div className="min-h-screen pb-12 mt-8 bg-gradient-to-br from-background via-background to-muted/20">
+    <div className="itms-admin-container space-y-6">
       {/* Header */}
-      <div className="bg-gradient-to-r from-card via-card to-card/95 border-b border-border shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 py-3">
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <div>
-                <h1 className="text-lg md:text-3xl font-black text-foreground tracking-tight">Student Profile</h1>
-                <p className="text-xs md:text-base text-muted-foreground mt-0.5 hidden md:block">View and manage student information</p>
-              </div>
+      <div className="itms-page-header-container bg-gradient-to-r from-card via-card to-card/95 border border-border/60 rounded-2xl shadow-sm px-6 py-4">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <div>
+              <h1 className="text-lg md:text-3xl font-black text-foreground tracking-tight leading-tight pb-1">Student Profile</h1>
+              <p className="text-xs md:text-base text-muted-foreground mt-0.5 hidden md:block">View and manage student information</p>
             </div>
-            <div className="flex items-center gap-1.5">
-              <Link href="/admin/students">
-                <Button variant="outline" className="h-7 px-2.5 py-1.5 rounded-lg text-xs shadow-sm bg-white text-black md:bg-transparent md:text-inherit">
-                  &lt;- Back
-                </Button>
-              </Link>
-              <Button
-                onClick={handleEdit}
-                className="hidden md:inline-flex bg-white hover:bg-gray-100 text-black border border-gray-200 px-2.5 py-1.5 rounded-lg text-xs shadow-sm h-7">
-                <Edit className="w-3 h-3 mr-1" />
-                Edit Profile
+          </div>
+          <div className="flex items-center gap-1.5">
+            <Link href="/admin/students">
+              <Button variant="outline" className="h-8 px-3 rounded-lg text-xs bg-secondary/80 hover:bg-secondary text-secondary-foreground border border-border/50 shadow-sm transition-colors">
+                ← Back
               </Button>
-              <Button
-                onClick={handleDelete}
-                className="hidden md:inline-flex bg-red-600 hover:bg-red-700 text-white px-2.5 py-1.5 rounded-lg text-xs shadow-sm h-7">
-                <Trash2 className="w-3 h-3 mr-1" />
-                Delete
-              </Button>
-            </div>
+            </Link>
+            <Button
+              onClick={handleEdit}
+              className="hidden md:inline-flex bg-secondary/80 hover:bg-secondary text-secondary-foreground border border-border/50 px-3 rounded-lg text-xs shadow-sm h-8 transition-colors">
+              <Edit className="w-3.5 h-3.5 mr-1.5" />
+              Edit Profile
+            </Button>
+            <Button
+              onClick={handleDelete}
+              className="hidden md:inline-flex bg-red-600 hover:bg-red-700 text-white px-3 rounded-lg text-xs shadow-sm h-8 transition-colors">
+              <Trash2 className="w-3.5 h-3.5 mr-1.5" />
+              Delete
+            </Button>
           </div>
         </div>
       </div>
 
       {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 py-4">
+      <main className="w-full">
         {/* Hero Section - Magazine Style */}
         <div className="mb-5 grid md:grid-cols-[180px_1fr] gap-4 items-start">
           {/* Large Avatar Section */}

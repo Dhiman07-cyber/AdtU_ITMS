@@ -34,11 +34,13 @@ export async function GET(request: NextRequest) {
     let studentRows: Record<string, any>[];
     let totalCount = 0;
 
+    const STUDENT_FIELDS = 'uid, full_name, email, phone, alt_phone, enrollment_id, gender, dob, faculty, department, parent_name, parent_phone, bus_id, route_id, stop_name, status, shift, semester, profile_photo_url, session_start_year, session_end_year';
+
     if (enrollmentId) {
       const db = getSupabaseServer();
       const { data, error, count } = await db
         .from('student_profiles')
-        .select('*', { count: 'exact' })
+        .select(STUDENT_FIELDS, { count: 'exact' })
         .ilike('enrollment_id', enrollmentId.trim());
 
       if (error) throw error;
@@ -54,7 +56,6 @@ export async function GET(request: NextRequest) {
     } else if (q) {
       // Server-side search via ILIKE instead of loading all rows
       const db = getSupabaseServer();
-      const STUDENT_FIELDS = 'uid, full_name, email, phone, alt_phone, enrollment_id, gender, dob, faculty, department, parent_name, parent_phone, bus_id, route_id, stop_name, status, shift, semester, profile_photo_url, session_start_year, session_end_year';
 
       // Escape ILIKE wildcards to prevent abuse
       const escaped = q.replace(/%/g, '\\%').replace(/_/g, '\\_');
@@ -71,7 +72,6 @@ export async function GET(request: NextRequest) {
       totalCount = count ?? studentRows.length;
     } else {
       const db = getSupabaseServer();
-      const STUDENT_FIELDS = 'uid, full_name, email, phone, alt_phone, enrollment_id, gender, dob, faculty, department, parent_name, parent_phone, bus_id, route_id, stop_name, status, shift, semester, profile_photo_url, session_start_year, session_end_year';
 
       const { data, error, count } = await db
         .from('student_profiles')

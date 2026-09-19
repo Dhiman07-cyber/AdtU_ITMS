@@ -101,8 +101,7 @@ export default function AdminProfilePage() {
   return (
     <ProfileShell loading={loading} error={error} notFound={notFound}>
       {profile && (
-        <div className="mt-12 min-h-screen bg-gray-50 dark:bg-gray-950 py-8 px-4">
-          <div className="max-w-7xl mx-auto space-y-6">
+        <div className="itms-admin-container space-y-6">
             
             {/* Header Card */}
             <ProfileHeaderCard
@@ -226,7 +225,6 @@ export default function AdminProfilePage() {
                 </ProfileSectionCard>
               </div>
             </div>
-          </div>
         </div>
       )}
     </ProfileShell>

@@ -68,6 +68,8 @@ const BUS_FIELD_MAP: Record<string, string> = {
   updatedAt: 'updated_at',
 };
 
+const BUS_COLUMNS = 'id, bus_number, model, year, capacity, route_id, route_name, status, current_members, morning_load, evening_load, last_started_at, last_ended_at, created_at, updated_at';
+
 const VIRTUAL_BUS_FIELDS = new Set(['busId', 'currentPassengerCount', 'routeRef']);
 
 // ─── Timestamp helper ─────────────────────────────────────────────────────────
@@ -164,14 +166,14 @@ async function enrichBusListWithDriverUid(buses: Bus[]): Promise<Bus[]> {
 
 export async function pgFindAllBuses(): Promise<Bus[]> {
   const db = getSupabaseServer();
-  const { data, error } = await db.from('buses').select('*');
+  const { data, error } = await db.from('buses').select(BUS_COLUMNS);
   if (error) throw new Error(`FleetRepository (PG) findAllBuses failed: ${error.message}`);
   return enrichBusListWithDriverUid((data || []).map(pgRowToBus));
 }
 
 export async function pgFindBusById(id: string): Promise<Bus | null> {
   const db = getSupabaseServer();
-  const { data, error } = await db.from('buses').select('*').eq('id', id).maybeSingle();
+  const { data, error } = await db.from('buses').select(BUS_COLUMNS).eq('id', id).maybeSingle();
   if (error) throw new Error(`FleetRepository (PG) findBusById failed: ${error.message}`);
   if (!data) return null;
   return enrichWithDriverUid(pgRowToBus(data));
@@ -179,7 +181,7 @@ export async function pgFindBusById(id: string): Promise<Bus | null> {
 
 export async function pgFindBusesByRouteId(routeId: string): Promise<Bus[]> {
   const db = getSupabaseServer();
-  const { data, error } = await db.from('buses').select('*').eq('route_id', routeId);
+  const { data, error } = await db.from('buses').select(BUS_COLUMNS).eq('route_id', routeId);
   if (error) throw new Error(`FleetRepository (PG) findBusesByRouteId failed: ${error.message}`);
   return enrichBusListWithDriverUid((data || []).map(pgRowToBus));
 }

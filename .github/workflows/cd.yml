@@ -15,6 +15,10 @@ permissions:
   contents: write
   packages: write
 
+concurrency:
+  group: cd-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   release-build:
     name: Build & Package Release Artifacts
@@ -30,7 +34,7 @@ jobs:
           cache: npm
 
       - name: Install Dependencies
-        run: npm ci
+        run: npm ci --prefer-offline
 
       - name: Generate Release Manifest
         run: npm run manifest
@@ -72,7 +76,7 @@ jobs:
           tags: |
             type=semver,pattern={{version}}
             type=sha,format=short
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=latest,enable=${{ !contains(github.ref, '-alpha') && !contains(github.ref, '-beta') && !contains(github.ref, '-rc') }}
 
       - name: Extract Metadata for WS Image
         id: meta-ws
@@ -82,7 +86,7 @@ jobs:
           tags: |
             type=semver,pattern={{version}}
             type=sha,format=short
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=latest,enable=${{ !contains(github.ref, '-alpha') && !contains(github.ref, '-beta') && !contains(github.ref, '-rc') }}
 
       - name: Build and Push Next.js App Image
         uses: docker/build-push-action@v5
@@ -92,6 +96,8 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta-app.outputs.tags }}
           labels: ${{ steps.meta-app.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - name: Build and Push WebSocket Server Image
         uses: docker/build-push-action@v5
@@ -101,3 +107,5 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta-ws.outputs.tags }}
           labels: ${{ steps.meta-ws.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

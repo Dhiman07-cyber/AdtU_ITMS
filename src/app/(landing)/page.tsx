@@ -32,9 +32,7 @@ function LandingVideo() {
   const fetchVideoUrl = async (retryCount = 0) => {
     try {
       setError(null);
-      const response = await fetch('/api/landing-video', {
-        cache: 'no-store'
-      });
+      const response = await fetch('/api/landing-video');
 
       if (response.ok) {
         const data = await response.json();

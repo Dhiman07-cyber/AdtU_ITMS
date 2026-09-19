@@ -91,6 +91,8 @@ const STUDENT_FIELD_MAP: Record<string, string> = {
   updatedAt: 'updated_at',
 };
 
+const PG_STUDENT_COLUMNS = 'uid, email, full_name, phone, alt_phone, parent_name, parent_phone, faculty, department, gender, dob, enrollment_id, blood_group, address, profile_photo_url, bus_id, route_id, stop_name, shift, status, session_duration, session_start_year, session_end_year, semester, valid_until, soft_block, hard_block, approved_by, approved_at, last_processed_application_id, seat_released_at, pending_profile_update, expiry_reminder_count, last_expiry_reminder_sent_at, created_at, updated_at';
+
 // ─── Mappers ─────────────────────────────────────────────────────────────────
 
 /** Convert domain student data to PostgreSQL row */
@@ -167,7 +169,7 @@ export async function pgFindByUid(uid: string): Promise<Student | null> {
   // Single query: match by uid OR enrollment_id, avoiding a sequential fallback.
   const { data, error } = await db
     .from('student_profiles')
-    .select('*')
+    .select(PG_STUDENT_COLUMNS)
     .or(`uid.eq.${cleanId},enrollment_id.eq.${cleanId}`)
     .maybeSingle();
 
@@ -195,7 +197,7 @@ export async function pgFindAll(): Promise<Student[]> {
 
   const { data, error } = await db
     .from('student_profiles')
-    .select('*');
+    .select(PG_STUDENT_COLUMNS);
 
   if (error) {
     throw new Error(`StudentRepository (PG) findAll failed: ${error.message}`);
@@ -233,7 +235,7 @@ export async function pgFindByEnrollmentId(enrollmentId: string): Promise<Studen
 
   const { data, error } = await db
     .from('student_profiles')
-    .select('*')
+    .select(PG_STUDENT_COLUMNS)
     .eq('enrollment_id', enrollmentId)
     .maybeSingle();
 
@@ -254,7 +256,7 @@ export async function pgFindByShift(shift: string): Promise<Student[]> {
 
   const { data, error } = await db
     .from('student_profiles')
-    .select('*')
+    .select(PG_STUDENT_COLUMNS)
     .eq('shift', shift);
 
   if (error) {
@@ -402,7 +404,7 @@ export async function pgFindByBusIds(busIds: string[]): Promise<Student[]> {
   const db = getSupabaseServer();
   const { data, error } = await db
     .from('student_profiles')
-    .select('*')
+    .select(PG_STUDENT_COLUMNS)
     .in('bus_id', busIds);
 
   if (error) {
@@ -420,7 +422,7 @@ export async function pgFindByRouteIds(routeIds: string[]): Promise<Student[]> {
   const db = getSupabaseServer();
   const { data, error } = await db
     .from('student_profiles')
-    .select('*')
+    .select(PG_STUDENT_COLUMNS)
     .in('route_id', routeIds);
 
   if (error) {
@@ -438,7 +440,7 @@ export async function pgFindByStatuses(statuses: string[]): Promise<Student[]> {
   const db = getSupabaseServer();
   const { data, error } = await db
     .from('student_profiles')
-    .select('*')
+    .select(PG_STUDENT_COLUMNS)
     .in('status', statuses);
   if (error) throw new Error(`StudentRepository (PG) findByStatuses failed: ${error.message}`);
   return (data || []).map(pgRowToStudent);

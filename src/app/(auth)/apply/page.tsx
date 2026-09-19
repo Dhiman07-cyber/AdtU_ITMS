@@ -2,7 +2,6 @@
 
 import ApplyFormNavbar from '@/components/ApplyFormNavbar';
 import Footer from '@/components/Footer';
-import { PremiumPageLoader } from '@/components/LoadingSpinner';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/auth-context';
 import {
@@ -129,8 +128,13 @@ export default function ApplyLandingPage() {
 
 
 
-  if (loading) {
-    return <PremiumPageLoader fullScreen message="Loading your dashboard..." subMessage="Fetching your application status and account details..." />;
+  if (loading && !currentUser) {
+    return (
+      <div className="min-h-screen p-6 max-w-6xl mx-auto space-y-6 animate-pulse pt-20">
+        <div className="h-10 w-48 bg-slate-200 dark:bg-zinc-800 rounded-md" />
+        <div className="h-64 bg-slate-100 dark:bg-zinc-900 rounded-xl border border-slate-200 dark:border-zinc-800" />
+      </div>
+    );
   }
 
   if (!currentUser) {

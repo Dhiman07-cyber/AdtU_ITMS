@@ -167,10 +167,19 @@ export default function StudentProfilePage() {
 
   if (studentDataLoading) {
     return (
-      <div className="flex-1 min-h-[calc(100dvh-120px)] flex items-center justify-center bg-gray-50 dark:bg-gray-950">
-        <div className="text-center">
-          <div className="h-16 w-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-gray-600 dark:text-gray-400 font-medium">Loading your profile...</p>
+      <div className="flex-1 min-h-[calc(100dvh-120px)] bg-gray-50 dark:bg-gray-950">
+        <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-6 pt-20 pb-4 md:pt-24 md:pb-6 space-y-6">
+          <div className="rounded-2xl p-8 bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 animate-pulse flex flex-col md:flex-row items-center gap-6">
+            <div className="w-24 h-24 md:w-32 md:h-32 rounded-full bg-gray-200 dark:bg-gray-800 shrink-0" />
+            <div className="space-y-3 flex-1 text-center md:text-left">
+              <div className="h-8 w-48 bg-gray-200 dark:bg-gray-800 rounded-lg mx-auto md:mx-0" />
+              <div className="h-4 w-64 bg-gray-100 dark:bg-gray-850 rounded mx-auto md:mx-0" />
+            </div>
+          </div>
+          <div className="grid md:grid-cols-2 gap-6">
+            <div className="h-64 rounded-2xl bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 animate-pulse p-6" />
+            <div className="h-64 rounded-2xl bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 animate-pulse p-6" />
+          </div>
         </div>
       </div>
     );

@@ -46,7 +46,7 @@ import {
 import { getCanonicalRouteGeometry } from "@/domains/route/data/canonical-route-geometries";
 import { cn } from "@/lib/utils";
 import { AnimatePresence, motion } from "motion/react";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState, startTransition } from "react";
 
 // Full extent of Guwahati PMTiles vector dataset
 const GUWAHATI_BOUNDS: [[number, number], [number, number]] = [
@@ -240,7 +240,6 @@ function createBusMarkerElement(bus: FleetBusLiveStatus, isSelected: boolean) {
   container.style.display = "flex";
   container.style.flexDirection = "column";
   container.style.alignItems = "center";
-  container.style.transform = "translate(-50%, -50%)";
 
   const ring = document.createElement("div");
   ring.className = "itms-fleet-marker-bubble";
@@ -398,6 +397,7 @@ export default function FleetMap({ role = "admin" }: { role?: "admin" | "moderat
     let ws: WebSocket | null = null;
     let closed = false;
     let retryTimer: NodeJS.Timeout | null = null;
+    let reconnectAttempts = 0;
 
     async function initWs() {
       if (closed) return;
@@ -409,6 +409,7 @@ export default function FleetMap({ role = "admin" }: { role?: "admin" | "moderat
 
         ws.onopen = () => {
           if (closed) return;
+          reconnectAttempts = 0;
           setWsConnected(true);
           ws?.send(JSON.stringify({ type: "auth", token }));
         };
@@ -417,7 +418,9 @@ export default function FleetMap({ role = "admin" }: { role?: "admin" | "moderat
           if (closed) return;
           setWsConnected(false);
           if (!closed) {
-            retryTimer = setTimeout(initWs, 5000);
+            const delay = Math.min(30000, 3000 * Math.pow(1.5, reconnectAttempts));
+            reconnectAttempts++;
+            retryTimer = setTimeout(initWs, delay);
           }
         };
 
@@ -427,44 +430,48 @@ export default function FleetMap({ role = "admin" }: { role?: "admin" | "moderat
         };
 
         ws.onmessage = (evt) => {
-          try {
-            const data = JSON.parse(evt.data);
-            if (data.type === "authenticated") {
-              // Subscribe to all active buses
-              buses.forEach((b) => {
-                ws?.send(
-                  JSON.stringify({
-                    type: "subscribe",
-                    channel: `bus_location_${b.busId}`,
-                  })
-                );
-              });
-            } else if (data.event === "bus_location_update" && data.payload) {
-              const p = data.payload;
-              setBuses((prev) =>
-                prev.map((b) => {
-                  if (b.busId === p.busId || b.busNumber === p.busNumber) {
-                    return {
-                      ...b,
-                      locationStatus: "LIVE",
-                      location: {
-                        lat: Number(p.lat),
-                        lng: Number(p.lng),
-                        accuracy: p.accuracy != null ? Number(p.accuracy) : b.location?.accuracy,
-                        speed: p.speed != null ? Number(p.speed) : b.location?.speed,
-                        heading: p.heading != null ? Number(p.heading) : b.location?.heading,
-                        timestamp: p.timestamp || new Date().toISOString(),
-                        ageSeconds: 0,
-                      },
-                    };
-                  }
-                  return b;
-                })
-              );
+          setTimeout(() => {
+            try {
+              const data = JSON.parse(evt.data);
+              if (data.type === "authenticated") {
+                // Subscribe to all active buses
+                buses.forEach((b) => {
+                  ws?.send(
+                    JSON.stringify({
+                      type: "subscribe",
+                      channel: `bus_location_${b.busId}`,
+                    })
+                  );
+                });
+              } else if (data.event === "bus_location_update" && data.payload) {
+                const p = data.payload;
+                startTransition(() => {
+                  setBuses((prev) =>
+                    prev.map((b) => {
+                      if (b.busId === p.busId || b.busNumber === p.busNumber) {
+                        return {
+                          ...b,
+                          locationStatus: "LIVE",
+                          location: {
+                            lat: Number(p.lat),
+                            lng: Number(p.lng),
+                            accuracy: p.accuracy != null ? Number(p.accuracy) : b.location?.accuracy,
+                            speed: p.speed != null ? Number(p.speed) : b.location?.speed,
+                            heading: p.heading != null ? Number(p.heading) : b.location?.heading,
+                            timestamp: p.timestamp || new Date().toISOString(),
+                            ageSeconds: 0,
+                          },
+                        };
+                      }
+                      return b;
+                    })
+                  );
+                });
+              }
+            } catch {
+              // ignore non-json frames
             }
-          } catch {
-            // ignore non-json frames
-          }
+          }, 0);
         };
       } catch (e) {
         setWsConnected(false);
@@ -506,6 +513,14 @@ export default function FleetMap({ role = "admin" }: { role?: "admin" | "moderat
       await ensurePmtilesProtocolRegistered();
       if (isCancelled || !mapContainerRef.current) return;
 
+      // Ensure container has valid client dimensions before initializing MapLibre
+      if (mapContainerRef.current.clientHeight === 0) {
+        await new Promise<void>((resolve) => {
+          requestAnimationFrame(() => resolve());
+        });
+      }
+      if (isCancelled || !mapContainerRef.current) return;
+
       const pmtilesUrl = getGuwahatiPmtilesUrl();
       const style = buildVectorStyle(pmtilesUrl, true);
 
@@ -516,7 +531,6 @@ export default function FleetMap({ role = "admin" }: { role?: "admin" | "moderat
         zoom: 12.8,
         minZoom: 10,
         maxZoom: 18,
-        maxBounds: GUWAHATI_BOUNDS,
         attributionControl: false,
       });
 
@@ -543,7 +557,7 @@ export default function FleetMap({ role = "admin" }: { role?: "admin" | "moderat
           </div>
         `;
 
-        campusMarkerRef.current = new maplibregl.Marker({ element: campusEl })
+        campusMarkerRef.current = new maplibregl.Marker({ element: campusEl, anchor: "center" })
           .setLngLat([ADTU_COORDS.lng, ADTU_COORDS.lat])
           .addTo(map);
 
@@ -560,9 +574,6 @@ export default function FleetMap({ role = "admin" }: { role?: "admin" | "moderat
         });
       });
       ro.observe(mapContainerRef.current);
-
-      timer1 = setTimeout(() => map.resize(), 100);
-      timer2 = setTimeout(() => map.resize(), 300);
     }
 
     initMap();
@@ -700,7 +711,7 @@ export default function FleetMap({ role = "admin" }: { role?: "admin" | "moderat
           map.flyTo({ center: [clamped.lng, clamped.lat], zoom: 15.5, duration: 800 });
         });
 
-        marker = new maplibregl.Marker({ element: el })
+        marker = new maplibregl.Marker({ element: el, anchor: "center" })
           .setLngLat([clamped.lng, clamped.lat])
           .addTo(map);
 
@@ -772,6 +783,14 @@ export default function FleetMap({ role = "admin" }: { role?: "admin" | "moderat
   useEffect(() => {
     document.body.classList.toggle("fleet-map-fullscreen", isFullScreen);
 
+    if (mapRef.current) {
+      if (isFullScreen) {
+        (mapRef.current as any).cooperativeGestures?.disable();
+      } else {
+        (mapRef.current as any).cooperativeGestures?.enable();
+      }
+    }
+
     const rafId = requestAnimationFrame(() => {
       mapRef.current?.resize();
     });
@@ -811,10 +830,10 @@ export default function FleetMap({ role = "admin" }: { role?: "admin" | "moderat
 
   return (
     <div
-      className={`itms-fleet-map-root relative w-full h-full flex-1 overflow-hidden ${
+      className={`itms-fleet-map-root relative w-full h-full flex-1 ${
         isFullScreen
-          ? "w-full h-full"
-          : "flex flex-col lg:flex-row gap-3 sm:gap-4 min-h-0"
+          ? "w-full h-full overflow-hidden"
+          : "flex flex-col lg:flex-row gap-3 sm:gap-4 min-h-0 overflow-y-auto lg:overflow-hidden no-scrollbar"
       }`}
     >
       {/* SCOPED OVERRIDES: HIDE ALL DEFAULT MAPLIBRE CONTROLS / ATTRIBUTIONS */}
@@ -837,10 +856,10 @@ export default function FleetMap({ role = "admin" }: { role?: "admin" | "moderat
         className={`relative bg-[#05060e] flex flex-col overflow-hidden ${
           isFullScreen
             ? "absolute inset-0 w-full h-full rounded-none border-none z-0"
-            : "flex-1 h-full min-h-[260px] sm:min-h-[320px] rounded-2xl border border-white/10 shadow-lg"
+            : "flex-1 h-[60dvh] min-h-[380px] lg:h-full rounded-2xl border border-white/10 shadow-lg shrink-0 lg:shrink"
         }`}
       >
-        <div ref={mapContainerRef} className="w-full h-full" />
+        <div ref={mapContainerRef} className="absolute inset-0 w-full h-full min-h-[380px]" />
 
         {/* MAP TOP OVERLAY HUD BAR */}
         <motion.div
@@ -850,7 +869,7 @@ export default function FleetMap({ role = "admin" }: { role?: "admin" | "moderat
           className={cn(
             "absolute z-20 flex flex-wrap items-center pointer-events-none transition-all duration-200",
             isFullScreen
-              ? "top-4 left-4 gap-3 right-auto max-w-[calc(100vw-360px)]"
+              ? "top-4 left-4 gap-3 right-4 lg:right-auto lg:max-w-[calc(100vw-420px)] justify-between lg:justify-start"
               : "top-3.5 left-3.5 gap-2 right-3.5 justify-between"
           )}
         >
@@ -892,8 +911,8 @@ export default function FleetMap({ role = "admin" }: { role?: "admin" | "moderat
             </div>
           </div>
 
-          {/* Action buttons (Theme toggle & Fullscreen toggle) */}
-          <div className="flex items-center gap-2 pointer-events-auto">
+          {/* Action buttons (Theme toggle & Fullscreen toggle) - hidden on mobile, visible on lg */}
+          <div className="hidden lg:flex items-center gap-2 pointer-events-auto">
             {/* Map Theme Toggle Button */}
             <Button
               variant="outline"
@@ -945,8 +964,8 @@ export default function FleetMap({ role = "admin" }: { role?: "admin" | "moderat
               transition={{ duration: 0.16, ease: [0.16, 1, 0.3, 1] }}
               className="absolute bottom-3.5 left-3.5 right-3.5 sm:right-auto sm:w-96 z-20 pointer-events-auto"
             >
-              <Card className="bg-[#0c0e1a] border border-sky-500/30 text-white shadow-xl rounded-2xl overflow-hidden">
-                <div className="h-1 bg-gradient-to-r from-sky-400 via-indigo-500 to-emerald-400" />
+              <Card className="bg-[#0c0e1a] border border-sky-500/40 text-white shadow-xl rounded-2xl overflow-hidden">
+                <div className="h-0.5 bg-sky-500/80" />
                 <CardContent className="p-4 space-y-3.5">
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex items-center gap-2.5">
@@ -1026,7 +1045,7 @@ export default function FleetMap({ role = "admin" }: { role?: "admin" | "moderat
                     {/* Occupancy Bar */}
                     <div className="w-full bg-white/10 rounded-full h-1.5 overflow-hidden">
                       <div
-                        className="bg-gradient-to-r from-sky-400 to-indigo-500 h-full rounded-full transition-all duration-500"
+                        className="bg-sky-500 h-full rounded-full transition-all duration-500"
                         style={{
                           width: `${Math.min(100, Math.round(((selectedBus.currentMembers ?? 0) / (selectedBus.capacity ?? 55)) * 100))}%`,
                         }}
@@ -1044,9 +1063,11 @@ export default function FleetMap({ role = "admin" }: { role?: "admin" | "moderat
           initial={{ opacity: 0, scale: 0.96 }}
           animate={{ opacity: 1, scale: 1 }}
           transition={{ duration: 0.15 }}
-          className={`absolute bottom-4 z-20 flex flex-col items-end gap-2 pointer-events-none ${
-            isFullScreen ? "right-3.5 sm:right-[412px]" : "right-3.5"
-          }`}
+          className={cn(
+            "absolute z-20 flex flex-col items-end gap-2 pointer-events-none transition-all duration-200",
+            isFullScreen ? "right-3.5 lg:right-[412px]" : "right-3.5",
+            selectedBus ? "bottom-[235px] sm:bottom-4" : "bottom-4"
+          )}
         >
           {/* Recenter button */}
           <button
@@ -1081,18 +1102,59 @@ export default function FleetMap({ role = "admin" }: { role?: "admin" | "moderat
             </button>
           </div>
         </motion.div>
+
+        {/* MOBILE BOTTOM-LEFT MAP CONTROLS (THEME TOGGLE + FULLSCREEN) */}
+        <motion.div
+          initial={{ opacity: 0, scale: 0.96 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.15 }}
+          className={cn(
+            "lg:hidden absolute left-3.5 z-20 flex flex-col items-start gap-2 pointer-events-none transition-all duration-200",
+            selectedBus ? "bottom-[235px]" : "bottom-4"
+          )}
+        >
+          {/* Map Theme Toggle Button */}
+          <button
+            type="button"
+            onClick={toggleMapTheme}
+            className="pointer-events-auto w-9 h-9 bg-[#0c0e1a] rounded-xl shadow-lg border border-white/15 flex items-center justify-center transition-colors duration-150 text-slate-200 hover:text-white hover:bg-slate-800 active:bg-slate-700 select-none cursor-pointer"
+            title={mapTheme === "dark" ? "Switch to Light Map Theme" : "Switch to Dark Map Theme"}
+            aria-label="Toggle map theme"
+          >
+            {mapTheme === "dark" ? (
+              <Sun className="w-4 h-4 text-amber-400" />
+            ) : (
+              <Moon className="w-4 h-4 text-sky-300" />
+            )}
+          </button>
+
+          {/* Fullscreen Toggle Button */}
+          <button
+            type="button"
+            onClick={() => setIsFullScreen((prev) => !prev)}
+            className="pointer-events-auto w-9 h-9 bg-[#0c0e1a] rounded-xl shadow-lg border border-white/15 flex items-center justify-center transition-colors duration-150 text-slate-200 hover:text-white hover:bg-slate-800 active:bg-slate-700 select-none cursor-pointer"
+            title={isFullScreen ? "Exit Fullscreen" : "Fullscreen"}
+            aria-label={isFullScreen ? "Exit Fullscreen" : "Fullscreen"}
+          >
+            {isFullScreen ? (
+              <Minimize2 className="w-4 h-4" />
+            ) : (
+              <Maximize2 className="w-4 h-4" />
+            )}
+          </button>
+        </motion.div>
       </div>
 
-      {/* RIGHT CARD: ACTIVE BUSES PANEL */}
+      {/* RIGHT CARD: ACTIVE BUSES PANEL (Hidden on mobile/smaller screens in full screen mode) */}
       <motion.div
         key={isFullScreen ? "active-buses-fs" : "active-buses-normal"}
         initial={{ opacity: 0.85, x: isFullScreen ? 18 : 0 }}
         animate={{ opacity: 1, x: 0 }}
         transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
-        className={`bg-[#0c0e1a] border border-white/10 shadow-xl rounded-2xl flex flex-col overflow-hidden shrink-0 z-30 ${
+        className={`bg-[#0c0e1a] border border-white/10 shadow-xl rounded-2xl flex-col overflow-hidden shrink-0 z-30 ${
           isFullScreen
-            ? "absolute top-3.5 right-3.5 bottom-3.5 w-80 sm:w-96 max-w-[calc(100vw-28px)] max-h-[calc(100dvh-76px)]"
-            : "w-full lg:w-88 xl:w-96 h-64 lg:h-full"
+            ? "max-lg:!hidden lg:flex absolute top-3.5 right-3.5 bottom-3.5 w-80 sm:w-96 max-w-[calc(100vw-28px)] max-h-[calc(100dvh-76px)]"
+            : "flex w-full lg:w-88 xl:w-96 h-[60dvh] min-h-[460px] lg:h-full lg:min-h-0"
         }`}
       >
         {/* PANEL HEADER */}
@@ -1134,7 +1196,7 @@ export default function FleetMap({ role = "admin" }: { role?: "admin" | "moderat
                 onClick={() => setFilter(f)}
                 className={`text-[11px] py-1.5 rounded-lg font-medium transition-colors duration-150 ${
                   filter === f
-                    ? "bg-sky-500 text-white shadow-md shadow-sky-500/30"
+                    ? "bg-sky-500 text-white"
                     : "bg-white/[0.04] text-slate-400 hover:text-white hover:bg-white/[0.08]"
                 }`}
               >
@@ -1145,7 +1207,7 @@ export default function FleetMap({ role = "admin" }: { role?: "admin" | "moderat
         </div>
 
         {/* ACTIVE BUSES LIST */}
-        <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
+        <div className="flex-1 overflow-y-auto overflow-x-hidden p-3 space-y-2.5">
           {loading ? (
             <div className="p-6 text-center space-y-3">
               <div className="w-8 h-8 rounded-full border-2 border-sky-400/30 border-t-sky-400 animate-spin mx-auto" />
@@ -1155,7 +1217,7 @@ export default function FleetMap({ role = "admin" }: { role?: "admin" | "moderat
             /* EMPTY STATE: 0 ACTIVE TRIPS (DUPLICATE REFRESH BUTTON REMOVED) */
             <div className="h-full flex flex-col items-center justify-center p-6 text-center space-y-3 select-none">
               <div className="relative flex items-center justify-center mb-1">
-                <div className="w-14 h-14 rounded-full bg-sky-500/10 border border-sky-500/20 flex items-center justify-center text-sky-400 shadow-xl shadow-sky-500/5">
+                <div className="w-14 h-14 rounded-full bg-sky-500/10 border border-sky-500/20 flex items-center justify-center text-sky-400">
                   <Radio className="w-7 h-7 text-sky-400" />
                 </div>
               </div>
@@ -1187,8 +1249,8 @@ export default function FleetMap({ role = "admin" }: { role?: "admin" | "moderat
                   }}
                   className={`p-3 rounded-xl cursor-pointer transition-colors duration-150 border ${
                     isSelected
-                      ? "bg-sky-500/15 border-sky-500/50 shadow-lg shadow-sky-950/50"
-                      : "bg-white/[0.02] hover:bg-white/[0.06] border-white/5"
+                      ? "bg-[#161d36] border-sky-400/80 ring-1 ring-sky-400/40"
+                      : "bg-[#0d0f1d] hover:bg-[#13162b] border-white/10"
                   }`}
                 >
                   <div className="flex items-center justify-between">
@@ -1196,7 +1258,7 @@ export default function FleetMap({ role = "admin" }: { role?: "admin" | "moderat
                       <div
                         className={`w-2.5 h-2.5 rounded-full flex items-center justify-center ${
                           bus.locationStatus === "LIVE"
-                            ? "bg-emerald-400 animate-pulse shadow-sm shadow-emerald-400"
+                            ? "bg-emerald-400 animate-pulse"
                             : bus.locationStatus === "STALE"
                             ? "bg-amber-400"
                             : "bg-rose-500"
@@ -1209,7 +1271,7 @@ export default function FleetMap({ role = "admin" }: { role?: "admin" | "moderat
                       className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${
                         isMoving
                           ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/30"
-                          : "bg-slate-800 text-slate-400"
+                          : "bg-slate-800/80 text-slate-400 border border-slate-700/40"
                       }`}
                     >
                       {isMoving ? `${Math.round(bus.location?.speed || 0)} km/h` : "Idle"}

@@ -106,18 +106,24 @@ export default function AdminSidebar() {
 
   const { theme } = useTheme();
 
-  // Auto-collapse on mobile (to keep desktop view compact if resized)
+  // Auto-collapse on small screens if resized below desktop breakpoint
   useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
     const handleResize = () => {
-      if (window.innerWidth < 1024) {
-        setCollapsed(true);
-      }
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        if (window.innerWidth < 1024 && !collapsed) {
+          setCollapsed(true);
+        }
+      }, 150);
     };
 
-    handleResize();
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, [setCollapsed]);
+    window.addEventListener('resize', handleResize, { passive: true });
+    return () => {
+      if (timer) clearTimeout(timer);
+      window.removeEventListener('resize', handleResize);
+    };
+  }, [collapsed, setCollapsed]);
 
   return (
     <aside
@@ -204,52 +210,58 @@ export default function AdminSidebar() {
                   !adminAllHrefs.some(h => h !== item.href && h.startsWith(item.href) && pathname?.startsWith(h))
                 );
 
-                return (
-                  <Tooltip key={`${item.href}-${collapsed ? 'collapsed' : 'expanded'}`}>
-                    <TooltipTrigger asChild>
-                      <Link
-                        href={item.href}
-                        className={cn(
-                          "group relative flex items-center gap-2.5 px-2.5 rounded-md transition-colors duration-150",
-                          collapsed ? "py-2" : "py-1.5",
-                          "text-[12.5px] font-medium outline-none",
-                          isActive
-                            ? theme === 'dark' ? "text-blue-400 bg-blue-400/5" : "text-admin-primary bg-admin-active"
-                            : theme === 'dark' ? "text-zinc-400 hover:text-zinc-100 hover:bg-white/5" : "text-admin-text-secondary hover:text-admin-text hover:bg-admin-hover"
-                        )}
-                      >
-                        {isActive && (
-                          <div
-                            className="absolute left-0 top-1.5 bottom-1.5 w-[2px] bg-blue-500 rounded-r-full shadow-[0_0_8px_rgba(59,130,246,0.6)]"
-                          />
-                        )}
-
-                        <div className={cn(
-                          "relative flex items-center justify-center",
-                          collapsed ? "mx-auto" : ""
-                        )}>
-                          <Icon className={cn("h-4 w-4", isActive ? "text-blue-400" : item.color)} />
-                          {isActive && (
-                            <div className="absolute inset-0 bg-blue-400/10 rounded-full" />
-                          )}
-                        </div>
-
-                        {!collapsed && (
-                          <span className="truncate relative">
-                            {item.label}
-                          </span>
-                        )}
-                      </Link>
-                    </TooltipTrigger>
-                    {collapsed && (
-                      <TooltipContent
-                        side="right"
-                        sideOffset={10}
-                        className={cn("border text-xs font-semibold px-3 py-1.5 rounded-lg shadow-xl", theme === 'dark' ? "bg-[#090a10] border-slate-700/50 text-slate-100" : "bg-admin-card border-admin-border text-admin-text")}
-                      >
-                        <span>{item.label}</span>
-                      </TooltipContent>
+                const linkContent = (
+                  <Link
+                    href={item.href}
+                    className={cn(
+                      "group relative flex items-center gap-2.5 px-2.5 rounded-md transition-colors duration-150",
+                      collapsed ? "py-2" : "py-1.5",
+                      "text-[12.5px] font-medium outline-none",
+                      isActive
+                        ? theme === 'dark' ? "text-blue-400 bg-blue-400/5" : "text-admin-primary bg-admin-active"
+                        : theme === 'dark' ? "text-zinc-400 hover:text-zinc-100 hover:bg-white/5" : "text-admin-text-secondary hover:text-admin-text hover:bg-admin-hover"
                     )}
+                  >
+                    {isActive && (
+                      <div
+                        className="absolute left-0 top-1.5 bottom-1.5 w-[2px] bg-blue-500 rounded-r-full shadow-[0_0_8px_rgba(59,130,246,0.6)]"
+                      />
+                    )}
+
+                    <div className={cn(
+                      "relative flex items-center justify-center",
+                      collapsed ? "mx-auto" : ""
+                    )}>
+                      <Icon className={cn("h-4 w-4", isActive ? "text-blue-400" : item.color)} />
+                      {isActive && (
+                        <div className="absolute inset-0 bg-blue-400/10 rounded-full" />
+                      )}
+                    </div>
+
+                    {!collapsed && (
+                      <span className="truncate relative">
+                        {item.label}
+                      </span>
+                    )}
+                  </Link>
+                );
+
+                if (!collapsed) {
+                  return <div key={item.href}>{linkContent}</div>;
+                }
+
+                return (
+                  <Tooltip key={item.href}>
+                    <TooltipTrigger asChild>
+                      {linkContent}
+                    </TooltipTrigger>
+                    <TooltipContent
+                      side="right"
+                      sideOffset={10}
+                      className={cn("border text-xs font-semibold px-3 py-1.5 rounded-lg shadow-xl", theme === 'dark' ? "bg-[#090a10] border-slate-700/50 text-slate-100" : "bg-admin-card border-admin-border text-admin-text")}
+                    >
+                      <span>{item.label}</span>
+                    </TooltipContent>
                   </Tooltip>
                 );
               })}
@@ -261,37 +273,24 @@ export default function AdminSidebar() {
       {/* System & Footer Section (Pinned to Bottom) */}
       <div className="mt-auto flex flex-col gap-1 px-2 pb-3">
         <div className="h-px bg-gradient-to-r from-transparent via-white/10 to-transparent mb-1" />
-        <Tooltip key={`sys-config-${collapsed ? 'collapsed' : 'expanded'}`}>
-          <TooltipTrigger asChild>
-            <Link
-              href="/admin/sys-renewal-config-x9k2p"
-              className={cn(
-                "group relative flex items-center gap-2.5 px-2.5 rounded-lg transition-colors duration-200",
-                collapsed ? "py-2" : "py-2",
-                "text-[12.5px] font-medium outline-none",
-                pathname?.includes('sys-renewal-config')
-                  ? theme === 'dark' ? "text-white bg-white/5" : "text-admin-text bg-admin-active"
-                  : theme === 'dark' ? "text-zinc-400 hover:text-zinc-100 hover:bg-white/5" : "text-admin-text-secondary hover:text-admin-text hover:bg-admin-hover"
-              )}
-            >
-              <div className={cn(
-                "relative flex items-center justify-center transition-transform duration-300 group-hover:rotate-90",
-                collapsed ? "mx-auto" : ""
-              )}>
-                <Settings className={cn("h-4 w-4 transition-colors", theme === 'dark' ? "text-zinc-400 group-hover:text-white" : "text-admin-text-secondary group-hover:text-admin-text")} />
-              </div>
-
-              {!collapsed && (
-                <div
-                  className="flex flex-col items-start leading-none"
-                >
-                  <span className={cn(theme === 'dark' ? "text-zinc-200" : "text-admin-text")}>System Config</span>
-                  <span className={cn("text-[9px] mt-0.5", theme === 'dark' ? "text-zinc-400" : "text-admin-text-secondary")}>Core Settings</span>
+        {collapsed ? (
+          <Tooltip key="sys-config-collapsed">
+            <TooltipTrigger asChild>
+              <Link
+                href="/admin/sys-renewal-config-x9k2p"
+                className={cn(
+                  "group relative flex items-center gap-2.5 px-2.5 rounded-lg transition-colors duration-200 py-2",
+                  "text-[12.5px] font-medium outline-none",
+                  pathname?.includes('sys-renewal-config')
+                    ? theme === 'dark' ? "text-white bg-white/5" : "text-admin-text bg-admin-active"
+                    : theme === 'dark' ? "text-zinc-400 hover:text-zinc-100 hover:bg-white/5" : "text-admin-text-secondary hover:text-admin-text hover:bg-admin-hover"
+                )}
+              >
+                <div className="relative flex items-center justify-center transition-transform duration-300 group-hover:rotate-90 mx-auto">
+                  <Settings className={cn("h-4 w-4 transition-colors", theme === 'dark' ? "text-zinc-400 group-hover:text-white" : "text-admin-text-secondary group-hover:text-admin-text")} />
                 </div>
-              )}
-            </Link>
-          </TooltipTrigger>
-          {collapsed && (
+              </Link>
+            </TooltipTrigger>
             <TooltipContent
               side="right"
               sideOffset={10}
@@ -299,8 +298,27 @@ export default function AdminSidebar() {
             >
               <span>System Config</span>
             </TooltipContent>
-          )}
-        </Tooltip>
+          </Tooltip>
+        ) : (
+          <Link
+            href="/admin/sys-renewal-config-x9k2p"
+            className={cn(
+              "group relative flex items-center gap-2.5 px-2.5 rounded-lg transition-colors duration-200 py-2",
+              "text-[12.5px] font-medium outline-none",
+              pathname?.includes('sys-renewal-config')
+                ? theme === 'dark' ? "text-white bg-white/5" : "text-admin-text bg-admin-active"
+                : theme === 'dark' ? "text-zinc-400 hover:text-zinc-100 hover:bg-white/5" : "text-admin-text-secondary hover:text-admin-text hover:bg-admin-hover"
+            )}
+          >
+            <div className="relative flex items-center justify-center transition-transform duration-300 group-hover:rotate-90">
+              <Settings className={cn("h-4 w-4 transition-colors", theme === 'dark' ? "text-zinc-400 group-hover:text-white" : "text-admin-text-secondary group-hover:text-admin-text")} />
+            </div>
+            <div className="flex flex-col items-start leading-none">
+              <span className={cn(theme === 'dark' ? "text-zinc-200" : "text-admin-text")}>System Config</span>
+              <span className={cn("text-[9px] mt-0.5", theme === 'dark' ? "text-zinc-400" : "text-admin-text-secondary")}>Core Settings</span>
+            </div>
+          </Link>
+        )}
 
         {/* Active Status Footer */}
         {!collapsed ? (

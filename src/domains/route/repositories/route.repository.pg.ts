@@ -74,14 +74,14 @@ function pgRowToRoute(row: Record<string, any>): Route {
 
 export async function pgFindAll(): Promise<Route[]> {
   const db = getSupabaseServer();
-  const { data, error } = await db.from('routes').select('*');
+  const { data, error } = await db.from('routes').select('id, route_name, stops, total_stops, estimated_time, status, created_at, updated_at');
   if (error) throw new Error(`RouteRepository (PG) findAll failed: ${error.message}`);
   return (data || []).map(pgRowToRoute);
 }
 
 export async function pgFindById(id: string): Promise<Route | null> {
   const db = getSupabaseServer();
-  const { data, error } = await db.from('routes').select('*').eq('id', id).maybeSingle();
+  const { data, error } = await db.from('routes').select('id, route_name, stops, total_stops, estimated_time, status, created_at, updated_at').eq('id', id).maybeSingle();
   if (error) throw new Error(`RouteRepository (PG) findById failed: ${error.message}`);
   if (!data) return null;
   return pgRowToRoute(data);
