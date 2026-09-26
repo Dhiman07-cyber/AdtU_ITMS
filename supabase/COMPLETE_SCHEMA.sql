@@ -342,7 +342,7 @@ CREATE TABLE IF NOT EXISTS public.active_trips (
   driver_id TEXT NOT NULL UNIQUE,
   route_id TEXT NOT NULL,
   shift TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'ended', 'interrupted')),
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status = 'active'),
   start_time TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   last_heartbeat TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   expires_at TIMESTAMPTZ NOT NULL,
@@ -435,14 +435,16 @@ CREATE TABLE IF NOT EXISTS public.device_sessions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id TEXT NOT NULL,
   device_id TEXT NOT NULL,
-  platform TEXT NOT NULL,
+  feature TEXT NOT NULL,
+  platform TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_active_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   last_active TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  expires_at TIMESTAMPTZ NOT NULL,
+  expires_at TIMESTAMPTZ,
   ip_address TEXT,
   user_agent TEXT,
   app_version TEXT,
-  UNIQUE(user_id, device_id)
+  CONSTRAINT unique_user_feature UNIQUE(user_id, feature)
 );
 
 CREATE TABLE IF NOT EXISTS public.reassignment_logs (
@@ -592,12 +594,14 @@ CREATE INDEX IF NOT EXISTS idx_waiting_flags_route_id ON waiting_flags(route_id)
 CREATE INDEX IF NOT EXISTS idx_waiting_flags_status ON waiting_flags(status);
 CREATE INDEX IF NOT EXISTS idx_waiting_flags_trip ON waiting_flags(trip_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_waiting_flags_one_active ON waiting_flags(student_uid, bus_id) WHERE status IN ('raised', 'acknowledged', 'waiting');
+CREATE UNIQUE INDEX IF NOT EXISTS idx_waiting_flags_one_active_student ON waiting_flags(student_uid) WHERE status IN ('raised', 'acknowledged', 'waiting');
 
 CREATE INDEX IF NOT EXISTS idx_driver_trip_history_bus_id ON driver_trip_history(bus_id);
 CREATE INDEX IF NOT EXISTS idx_driver_trip_history_driver_id ON driver_trip_history(driver_id);
 CREATE INDEX IF NOT EXISTS idx_driver_trip_history_created_at ON driver_trip_history(created_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_device_sessions_user_id ON device_sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_device_sessions_user_feature ON device_sessions(user_id, feature);
 CREATE INDEX IF NOT EXISTS idx_device_sessions_expires_at ON device_sessions(expires_at);
 
 CREATE INDEX IF NOT EXISTS idx_reassignment_logs_operation_id ON reassignment_logs(operation_id);
@@ -1360,7 +1364,9 @@ DECLARE
   deleted_count INTEGER;
 BEGIN
   DELETE FROM public.device_sessions
-  WHERE expires_at < NOW();
+  WHERE (expires_at IS NOT NULL AND expires_at < NOW())
+     OR (last_active_at < NOW() - INTERVAL '24 hours')
+     OR (last_active < NOW() - INTERVAL '24 hours');
   GET DIAGNOSTICS deleted_count = ROW_COUNT;
   RETURN deleted_count;
 END;
@@ -2147,13 +2153,18 @@ BEGIN
         v_processed := v_processed + 1;
     END LOOP;
 
-    -- Recalculate bus load counts for all affected buses to ensure 100% precision
+    -- Recalculate bus load counts for all affected buses to ensure 100% precision (single pass)
     FOR v_to_bus_id IN SELECT DISTINCT unnest(v_affected_buses) LOOP
         UPDATE buses b SET
-            morning_load = (SELECT COUNT(*) FROM student_profiles sp WHERE (sp.bus_id = b.id OR sp.bus_id = b.bus_number) AND LOWER(sp.shift) = 'morning' AND sp.status = 'active'),
-            evening_load = (SELECT COUNT(*) FROM student_profiles sp WHERE (sp.bus_id = b.id OR sp.bus_id = b.bus_number) AND LOWER(sp.shift) = 'evening' AND sp.status = 'active'),
-            current_members = (SELECT COUNT(*) FROM student_profiles sp WHERE (sp.bus_id = b.id OR sp.bus_id = b.bus_number) AND sp.status = 'active'),
-            updated_at = NOW()
+            (morning_load, evening_load, current_members, updated_at) = (
+                SELECT 
+                    COUNT(*) FILTER (WHERE LOWER(sp.shift) = 'morning'),
+                    COUNT(*) FILTER (WHERE LOWER(sp.shift) = 'evening'),
+                    COUNT(*),
+                    NOW()
+                FROM student_profiles sp
+                WHERE (sp.bus_id = b.id OR sp.bus_id = b.bus_number) AND sp.status = 'active'
+            )
         WHERE b.id = v_to_bus_id OR b.bus_number = v_to_bus_id;
     END LOOP;
 
@@ -2316,13 +2327,18 @@ BEGIN
         END IF;
     END LOOP;
 
-    -- 4. Recalculate bus load counts for all affected buses
+    -- 4. Recalculate bus load counts for all affected buses (single pass)
     FOR v_bus_id_item IN SELECT DISTINCT unnest(v_affected_buses) LOOP
         UPDATE buses b SET
-            morning_load = (SELECT COUNT(*) FROM student_profiles sp WHERE (sp.bus_id = b.id OR sp.bus_id = b.bus_number) AND LOWER(sp.shift) = 'morning' AND sp.status = 'active'),
-            evening_load = (SELECT COUNT(*) FROM student_profiles sp WHERE (sp.bus_id = b.id OR sp.bus_id = b.bus_number) AND LOWER(sp.shift) = 'evening' AND sp.status = 'active'),
-            current_members = (SELECT COUNT(*) FROM student_profiles sp WHERE (sp.bus_id = b.id OR sp.bus_id = b.bus_number) AND sp.status = 'active'),
-            updated_at = NOW()
+            (morning_load, evening_load, current_members, updated_at) = (
+                SELECT 
+                    COUNT(*) FILTER (WHERE LOWER(sp.shift) = 'morning'),
+                    COUNT(*) FILTER (WHERE LOWER(sp.shift) = 'evening'),
+                    COUNT(*),
+                    NOW()
+                FROM student_profiles sp
+                WHERE (sp.bus_id = b.id OR sp.bus_id = b.bus_number) AND sp.status = 'active'
+            )
         WHERE b.id = v_bus_id_item OR b.bus_number = v_bus_id_item;
     END LOOP;
 
@@ -2376,6 +2392,7 @@ ALTER TABLE public.device_sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.reassignment_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.fcm_tokens ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.processed_payments ENABLE ROW LEVEL SECURITY;
 
 -- ── 8.1 Identity Domain Policies ──────────────────────────────────────────────
 
@@ -2518,6 +2535,9 @@ CREATE POLICY "reassignment_logs_update_service" ON public.reassignment_logs FOR
 
 DROP POLICY IF EXISTS "reassignment_logs_delete_service" ON public.reassignment_logs;
 CREATE POLICY "reassignment_logs_delete_service" ON public.reassignment_logs FOR DELETE TO service_role USING (true);
+
+DROP POLICY IF EXISTS "processed_payments_service_role" ON public.processed_payments;
+CREATE POLICY "processed_payments_service_role" ON public.processed_payments FOR ALL TO service_role USING (true) WITH CHECK (true);
 
 DROP POLICY IF EXISTS "fcm_tokens_select_own" ON public.fcm_tokens;
 CREATE POLICY "fcm_tokens_select_own" ON public.fcm_tokens FOR SELECT TO authenticated

@@ -126,9 +126,11 @@ export class ReassignmentService {
         );
       }
 
-      // Driver notifications
-      for (const [busId, busPlans] of busPlanGroups) {
-        const bus = await fleetService.getBusById(busId);
+      // Driver notifications (parallelized batch resolution)
+      const busEntries = Array.from(busPlanGroups.entries());
+      const buses = await Promise.all(busEntries.map(([busId]) => fleetService.getBusById(busId)));
+      busEntries.forEach(([busId, busPlans], idx) => {
+        const bus = buses[idx];
         if (bus?.driverUID) {
           notificationPromises.push(
             pgInsertNotification({
@@ -143,7 +145,7 @@ export class ReassignmentService {
             })
           );
         }
-      }
+      });
 
       await Promise.all(notificationPromises);
       console.log(`📧 Sent ${notificationPromises.length} notifications`);

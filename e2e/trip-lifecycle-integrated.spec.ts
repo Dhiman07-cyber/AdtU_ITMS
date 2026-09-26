@@ -83,27 +83,22 @@ test.describe('golden trip lifecycle', () => {
 
     // ── 3. Driver: connect WS + presence ────────────────────────────────────
     await drv.connectWs(WS_BASE);
+    // Disable initial waypoint dwell so simulated bus cruises and advances coordinates
+    (drv.liveGps as any).dwellUntilMs = 0;
 
-    // ── 4. Start driver GPS loop ────────────────────────────────────────────
-    // Production sends via BOTH WS (low-latency) and HTTP (validated/persistent).
-    // The DriverAgent mirrors this dual-path pattern exactly.
     let ticking = true;
-    let gpsLoop: Promise<void> | null = null;
     let gpsTickCount = 0;
-    const startGpsLoop = () => {
-      gpsLoop = (async () => {
-        while (ticking) {
-          const t0 = Date.now();
-          const rec = await drv.tick(t0);
-          gpsTickCount++;
-          if (gpsTickCount % 5 === 0) {
-            console.log(`  GPS tick #${gpsTickCount}: http=${rec?.httpStatus}, ws.sent=${drv.wsStats.sent}, sent.total=${drv.sent.length}`);
-          }
-          await sleep(Math.max(0, GPS_INTERVAL_MS - (Date.now() - t0)));
+    const gpsLoop: Promise<void> = (async () => {
+      while (ticking) {
+        const t0 = Date.now();
+        const rec = await drv.tick(t0);
+        gpsTickCount++;
+        if (gpsTickCount % 5 === 0) {
+          console.log(`  GPS tick #${gpsTickCount}: http=${rec?.httpStatus}, ws.sent=${drv.wsStats.sent}, sent.total=${drv.sent.length}`);
         }
-      })();
-    };
-    startGpsLoop();
+        await sleep(Math.max(0, GPS_INTERVAL_MS - (Date.now() - t0)));
+      }
+    })();
 
     // ── 5. Student: browser sign-in ─────────────────────────────────────────
     await page.goto(`${APP_URL}/e2e-signin?token=${encodeURIComponent(sTokA)}`);
@@ -329,7 +324,7 @@ test.describe('golden trip lifecycle', () => {
 
     // ── 20. Driver ends trip ────────────────────────────────────────────────
     ticking = false;
-    await gpsLoop?.catch(() => {});
+    await gpsLoop.catch(() => {});
     await drv.endTrip();
     await sleep(2000);
 

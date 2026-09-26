@@ -392,18 +392,22 @@ export async function GET(request: NextRequest) {
         //   them — therefore we skip the auto-correction entirely when the flag is off.
         let reconciliation: unknown = { skipped: true, reason: 'seat-release flag disabled' };
         if (isSeatReleaseAtSoftBlockEnabled()) {
-            try {
-                const summary = await adminReconcileBusLoads({ dryRun: false, alertOnLargeDelta: true });
-                reconciliation = {
-                    busesWithDiscrepancies: summary.busesWithDiscrepancies,
-                    busesCorrected: summary.busesCorrected,
-                    largeDeltaBuses: summary.largeDeltaBuses,
-                    invalidShiftStudents: summary.invalidShiftStudents,
-                };
-                console.log(`🔧 Cron tail reconciliation:`, reconciliation);
-            } catch (reconErr: any) {
-                console.error('⚠️ Cron tail reconciliation failed (counts may be stale until next run):', reconErr);
-                reconciliation = { error: reconErr?.message || 'reconciliation failed' };
+            if (results.softBlocked > 0 || results.hardDeleted > 0) {
+                try {
+                    const summary = await adminReconcileBusLoads({ dryRun: false, alertOnLargeDelta: true });
+                    reconciliation = {
+                        busesWithDiscrepancies: summary.busesWithDiscrepancies,
+                        busesCorrected: summary.busesCorrected,
+                        largeDeltaBuses: summary.largeDeltaBuses,
+                        invalidShiftStudents: summary.invalidShiftStudents,
+                    };
+                    console.log(`🔧 Cron tail reconciliation:`, reconciliation);
+                } catch (reconErr: any) {
+                    console.error('⚠️ Cron tail reconciliation failed (counts may be stale until next run):', reconErr);
+                    reconciliation = { error: reconErr?.message || 'reconciliation failed' };
+                }
+            } else {
+                reconciliation = { skipped: true, reason: 'zero students soft-blocked or deleted' };
             }
         }
 

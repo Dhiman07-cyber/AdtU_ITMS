@@ -127,14 +127,12 @@ async function checkNodeVersion() {
 async function checkDiskSpace() {
   const start = Date.now();
   try {
-    const out = execSync('df -k .').toString().trim().split('\n');
-    const parts = out[1].trim().split(/\s+/);
-    const availKb = parseInt(parts[3]);
-    const availMb = Math.round(availKb / 1024);
+    const stats = fs.statfsSync('.');
+    const availMb = Math.round((Number(stats.bavail) * Number(stats.bsize)) / (1024 * 1024));
     // Warn below 500 MB
     record('Disk Space', 'warning', availMb > 500, `${availMb} MB available`, Date.now() - start);
   } catch {
-    record('Disk Space', 'warning', true, 'check skipped (non-Linux)', Date.now() - start);
+    record('Disk Space', 'warning', true, 'check skipped (statfs unavailable)', Date.now() - start);
   }
 }
 

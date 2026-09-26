@@ -60,8 +60,18 @@ export class BrowserAgent {
   async start(): Promise<void> {
     try {
       this.browser = await chromium.launch({ headless: true });
-      this.context = await this.browser.newContext();
+      this.context = await this.browser.newContext({
+        permissions: ['geolocation'],
+        geolocation: { latitude: 26.144, longitude: 91.736 },
+      });
       this.page = await this.context.newPage();
+      this.page.on('console', (msg) => {
+        const txt = msg.text();
+        if (txt.includes('useBusLocation') || txt.includes('WebSocket') || txt.includes('subscribe') || txt.includes('TrackBus') || txt.includes('setPresence') || txt.includes('ws-client') || txt.includes('WS') || txt.includes('__itms') || txt.includes('redirecting') || txt.includes('Error')) {
+          console.log(`  [BROWSER ${this.label}] ${txt}`);
+        }
+      });
+      this.page.on('pageerror', (err) => console.log(`  [BROWSER ERROR ${this.label}] ${err.message}`));
 
       // Sign in via e2e-signin page
       const customToken = await mintCustomToken(this.uid);
@@ -76,8 +86,10 @@ export class BrowserAgent {
       // Navigate to appropriate page
       if (this.role === 'student') {
         await this.page.goto(`${APP_URL}/student/track-bus`, { waitUntil: 'domcontentloaded' });
+        await this.page.waitForSelector('main, [data-testid="track-bus-container"]', { state: 'attached' }).catch(() => {});
       } else {
         await this.page.goto(`${APP_URL}/driver`, { waitUntil: 'domcontentloaded' });
+        await this.page.waitForSelector('main', { state: 'attached' }).catch(() => {});
       }
       this._result.pageOpened = true;
     } catch (e: any) {

@@ -33,10 +33,10 @@ vi.mock('@/lib/security/role-cache', () => ({
   resolveUserRole: vi.fn().mockResolvedValue({ role: 'student', name: 'Student' }),
 }));
 
-import { POST } from '../route';
+import { POST, DELETE } from '../route';
 
 interface MockChain {
-  select: any; eq: any; in: any; limit: any; maybeSingle: any; single: any; insert: any; gte: any; order: any;
+  select: any; eq: any; in: any; limit: any; maybeSingle: any; single: any; insert: any; update: any; gte: any; order: any;
 }
 
 let currentInsertResult: any = null;
@@ -54,6 +54,7 @@ function makeChain(data: any): MockChain {
     return Promise.resolve(r);
   });
   chain.insert = vi.fn(() => chain);
+  chain.update = vi.fn(() => chain);
   chain.gte = vi.fn(() => chain);
   chain.order = vi.fn(() => chain);
   return chain;
@@ -71,17 +72,35 @@ function makeRequest(overrides = {}) {
   });
 }
 
-describe('WaitingFlag POST — concurrency safety', () => {
+describe('WaitingFlag POST & DELETE — concurrency & real-world invariants', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     currentInsertResult = null;
     mockFrom.mockReturnValue(makeChain(null));
   });
 
-  it('returns 409 when unique violation (23505) occurs on insert', async () => {
+  it('returns 409 when pre-check detects existing active flag', async () => {
+    // Simulates: student queries waiting_flags, found an active flag
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'waiting_flags') {
+        const chain = makeChain(null);
+        // Pre-check select returns active flag
+        chain.limit = vi.fn().mockResolvedValue({ data: [{ id: 'flag-existing-1' }], error: null });
+        return chain;
+      }
+      return makeChain(null);
+    });
+
+    const res = await POST(makeRequest());
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.error).toContain('already have an active waiting flag');
+  });
+
+  it('returns 409 when unique violation (23505) occurs on insert (idx_waiting_flags_one_active_student)', async () => {
     setInsertResult({
       data: null,
-      error: { code: '23505', message: 'duplicate key value violates unique constraint "idx_waiting_flags_one_active"' },
+      error: { code: '23505', message: 'duplicate key value violates unique constraint "idx_waiting_flags_one_active_student"' },
     });
 
     const res = await POST(makeRequest());
@@ -103,5 +122,37 @@ describe('WaitingFlag POST — concurrency safety', () => {
     const results = await Promise.all([POST(makeRequest()), POST(makeRequest())]);
     expect(results.filter((r) => r.status === 200).length).toBe(1);
     expect(results.filter((r) => r.status === 409).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('rejects flag creation for an unassigned bus with 403', async () => {
+    const res = await POST(makeRequest({ busId: 'bus-other-unassigned' }));
+    expect(res.status).toBe(403);
+    const body = await res.json();
+    expect(body.error).toContain('Forbidden');
+  });
+
+  it('allows student to cancel active flag via DELETE /api/student/waiting-flag', async () => {
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'waiting_flags') {
+        const chain: any = {};
+        chain.update = vi.fn(() => chain);
+        chain.eq = vi.fn(() => chain);
+        chain.in = vi.fn(() => chain);
+        chain.select = vi.fn().mockResolvedValue({ data: [{ id: 'f1' }], error: null });
+        return chain;
+      }
+      return makeChain(null);
+    });
+
+    const req = new Request('http://localhost/api/student/waiting-flag', {
+      method: 'DELETE',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer test-token' },
+      body: JSON.stringify({ flagId: 'f1', busId: 'b1' }),
+    });
+
+    const res = await DELETE(req);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.success).toBe(true);
   });
 });

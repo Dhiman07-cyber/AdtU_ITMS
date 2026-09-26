@@ -59,12 +59,14 @@ export async function GET(
             );
         }
 
-        // Authorization check: Students can only view their own payments
-        if (userData.role === 'student' && details.studentUid !== userId) {
-            return NextResponse.json(
-                { success: false, error: 'Access denied' },
-                { status: 403 }
-            );
+        // Authorization check: Only Admin, Moderator, or the owning Student can view payment details
+        if (userData.role !== 'admin' && userData.role !== 'moderator') {
+            if (userData.role !== 'student' || details.studentUid !== userId) {
+                return NextResponse.json(
+                    { success: false, error: 'Access denied' },
+                    { status: 403 }
+                );
+            }
         }
 
         // Serialize dates to ISO strings for JSON response

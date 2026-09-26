@@ -34,6 +34,9 @@ export class DriverAgent {
   readonly sent: GpsSentRec[] = [];
   readonly failures: Failure[] = [];
   readonly flagsAcked: string[] = [];
+  readonly flagsAccepted: string[] = [];
+  readonly flagsRejected: string[] = [];
+  readonly flagsBoarded: string[] = [];
   readonly presenceHistory: { busId: string; timestamp: number; lat?: number; lng?: number; accuracy?: number }[] = [];
   wsStats = { reconnects: 0, sent: 0 };
 
@@ -64,7 +67,9 @@ export class DriverAgent {
     ws.presence(this.busId, this.tripId || undefined, this.routeId);
     this.presenceHistory.push({ busId: this.busId, timestamp: Date.now() });
     if (this.autoAckFlags) {
-      ws.onChannel(`waiting_flags_${this.busId}`, (m) => this.onWaitingFlag(m).catch(() => { }));
+      ws.onPresenceOk(() => {
+        ws.onChannel(`waiting_flags_${this.busId}`, (m) => this.onWaitingFlag(m).catch(() => { }));
+      });
     }
   }
 
@@ -125,10 +130,42 @@ export class DriverAgent {
   private async onWaitingFlag(m: ReceivedMessage): Promise<void> {
     if (m.msg.event !== 'waiting_flag_created') return;
     const flagId = m.msg.payload?.flagId || m.msg.payload?.id;
+    const studentId = m.msg.payload?.studentId || m.msg.payload?.student_uid || m.msg.payload?.studentUid;
     if (!flagId) return;
+
+    // 1. Driver acknowledges the flag
     const r = await apiCall('POST', '/api/driver/ack-flag', this.idToken, { flagId });
-    if (r.status === 200) this.flagsAcked.push(flagId);
-    else this.failures.push({ stage: 'ack-flag', persona: this.label, correlationId: flagId, error: `HTTP ${r.status}: ${JSON.stringify(r.json).slice(0, 160)}`, at: new Date().toISOString() });
+    if (r.status === 200) {
+      this.flagsAcked.push(flagId);
+    } else {
+      this.failures.push({ stage: 'ack-flag', persona: this.label, correlationId: flagId, error: `HTTP ${r.status}: ${JSON.stringify(r.json).slice(0, 160)}`, at: new Date().toISOString() });
+    }
+
+    // 2. Realistic driver randomized response and boarding actions:
+    if (studentId) {
+      const rand = Math.random();
+      if (rand < 0.5) {
+        // 50% Accept
+        const res = await apiCall('POST', '/api/driver/respond-wait', this.idToken, {
+          studentId,
+          response: 'accepted',
+          busId: this.busId,
+        });
+        if (res.status === 200) this.flagsAccepted.push(flagId);
+      } else if (rand < 0.75) {
+        // 25% Reject
+        const res = await apiCall('POST', '/api/driver/respond-wait', this.idToken, {
+          studentId,
+          response: 'rejected',
+          busId: this.busId,
+        });
+        if (res.status === 200) this.flagsRejected.push(flagId);
+      } else {
+        // 25% Mark Boarded
+        const res = await apiCall('POST', '/api/driver/mark-boarded', this.idToken, { flagId });
+        if (res.status === 200) this.flagsBoarded.push(flagId);
+      }
+    }
   }
 
   async endTrip(): Promise<{ status: number; json: any }> {
@@ -157,8 +194,13 @@ export class StudentAgent {
   readonly failures: Failure[] = [];
   readonly httpSamples: { route: string; status: number; latencyMs: number }[] = [];
   flagsRaised = 0;
+  flagsRaisedThisTrip = 0;
+  activeFlagId: string | null = null;
+  flagsCancelled = 0;
+  appRefreshes = 0;
+  readonly waitResponses: any[] = [];
   wsReconnects = 0;
-  private raisedFlag = false;
+  currentTripId: string | null = null;
 
   /** Explicit reconnect windows for event-time eligibility. */
   readonly reconnectWindows: {
@@ -250,9 +292,37 @@ export class StudentAgent {
     ws.onChannel(`bus_location_${this.busId}`, onLoc);
 
     ws.onChannel(`trip-status-${this.busId}`, (m) => {
-      if (m.msg.event === 'trip_ended') this.tripActive = false;
-      if (m.msg.event === 'trip_started') this.tripActive = true;
+      if (m.msg.event === 'trip_ended') {
+        this.tripActive = false;
+        this.activeFlagId = null;
+        this.currentTripId = null;
+      }
+      if (m.msg.event === 'trip_started') {
+        this.tripActive = true;
+        const newTripId = (m.msg.payload?.tripId as string) || null;
+        if (newTripId && newTripId !== this.currentTripId) {
+          this.currentTripId = newTripId;
+          this.flagsRaisedThisTrip = 0; // Fresh trip quota: student can raise at most 1 flag per trip
+          this.activeFlagId = null;
+        }
+      }
     });
+
+    const handleStudentMessage = (m: ReceivedMessage) => {
+      if (m.msg.event === 'wait_response') {
+        this.waitResponses.push(m.msg.payload);
+        if (m.msg.payload?.response === 'rejected') {
+          this.activeFlagId = null;
+        }
+      }
+      if (m.msg.event === 'boarded' || m.msg.event === 'waiting_flag_boarded') {
+        this.activeFlagId = null;
+      }
+      if (m.msg.event === 'waiting_flag_removed') {
+        this.activeFlagId = null;
+      }
+    };
+    ws.onChannel(`student_${this.uid}`, handleStudentMessage);
   }
 
   async reconnectCycle(nodeUrl: string): Promise<void> {
@@ -290,9 +360,36 @@ export class StudentAgent {
     };
     ws.onChannel(`bus_location_${this.busId}`, onLoc);
     ws.onChannel(`trip-status-${this.busId}`, (m) => {
-      if (m.msg.event === 'trip_ended') this.tripActive = false;
-      if (m.msg.event === 'trip_started') this.tripActive = true;
+      if (m.msg.event === 'trip_ended') {
+        this.tripActive = false;
+        this.activeFlagId = null;
+        this.currentTripId = null;
+      }
+      if (m.msg.event === 'trip_started') {
+        this.tripActive = true;
+        const newTripId = (m.msg.payload?.tripId as string) || null;
+        if (newTripId && newTripId !== this.currentTripId) {
+          this.currentTripId = newTripId;
+          this.flagsRaisedThisTrip = 0; // Fresh trip quota
+          this.activeFlagId = null;
+        }
+      }
     });
+    const handleStudentMessage = (m: ReceivedMessage) => {
+      if (m.msg.event === 'wait_response') {
+        this.waitResponses.push(m.msg.payload);
+        if (m.msg.payload?.response === 'rejected') {
+          this.activeFlagId = null;
+        }
+      }
+      if (m.msg.event === 'boarded' || m.msg.event === 'waiting_flag_boarded') {
+        this.activeFlagId = null;
+      }
+      if (m.msg.event === 'waiting_flag_removed') {
+        this.activeFlagId = null;
+      }
+    };
+    ws.onChannel(`student_${this.uid}`, handleStudentMessage);
     // What the UI does on resume: re-sync from DB.
     await this.pollTripStatus();
     this.reconnectWindows.push(reconnectWindow);
@@ -302,6 +399,10 @@ export class StudentAgent {
     if (m.msg.event !== 'bus_location_update') return;
     const p = m.msg.payload || {};
     const key = `${p.driverUid}|${p.timestamp}`;
+    if (p.tripId && p.tripId !== this.currentTripId) {
+      this.currentTripId = p.tripId;
+      this.flagsRaisedThisTrip = 0;
+    }
     // Server-tagged snapshot (subscribe-time cache push) is never a live event,
     // regardless of whether it arrived before or after the sub ACK. This also
     // catches the snapshot re-push after a reconnect — an OLD cached event must
@@ -316,18 +417,42 @@ export class StudentAgent {
     });
   }
 
-  /** Raise a waiting flag near the last known bus position (real journey step). */
+  /** Raise a waiting flag near the last known bus position (enforces at most ONE flag per student per trip). */
   async raiseWaitingFlag(lastLat: number, lastLng: number): Promise<void> {
-    if (this.raisedFlag || !this.tripActive) return;
-    this.raisedFlag = true;
+    if (this.flagsRaisedThisTrip >= 1 || this.activeFlagId !== null || !this.tripActive) return;
+    this.flagsRaisedThisTrip++;
     const r = await apiCall('POST', '/api/waiting-flag/create', this.idToken, {
       busId: this.busId, routeId: this.routeId, stop_name: 'Staging Stop', accuracy: 15,
       stopLat: lastLat + 0.0005, stopLng: lastLng + 0.0005, message: 'staging flag',
     });
-    if (r.status === 200 || r.json?.success) this.flagsRaised++;
-    else if (r.status !== 409) { // 409/duplicate is a legitimate idempotent response
+    if (r.status === 200 || r.json?.success) {
+      this.flagsRaised++;
+      this.activeFlagId = r.json?.flagId || r.json?.data?.id || r.json?.id || null;
+    } else if (r.status === 409) { // 409/duplicate confirms already raised / active flag
+      this.flagsRaisedThisTrip = Math.max(1, this.flagsRaisedThisTrip);
+    } else {
       this.failures.push({ stage: 'raise-flag', persona: this.label, error: `HTTP ${r.status}: ${JSON.stringify(r.json).slice(0, 160)}`, at: new Date().toISOString() });
     }
+  }
+
+  /** Cancel an active waiting flag (real journey step). */
+  async cancelWaitingFlag(): Promise<void> {
+    if (!this.activeFlagId) return;
+    const flagId = this.activeFlagId;
+    const r = await apiCall('DELETE', '/api/student/waiting-flag', this.idToken, {
+      flagId,
+      busId: this.busId,
+    });
+    if (r.status === 200 || r.json?.success) {
+      this.flagsCancelled++;
+      this.activeFlagId = null;
+    }
+  }
+
+  /** Periodic app refresh: re-polls trip status. */
+  async refreshApp(): Promise<void> {
+    this.appRefreshes++;
+    await this.pollTripStatus();
   }
 
   get serverErrors(): string[] { return this.ws?.serverErrors ?? []; }

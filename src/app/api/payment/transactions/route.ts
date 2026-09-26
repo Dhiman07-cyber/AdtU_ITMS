@@ -1,5 +1,5 @@
 import { getByApplicantUid } from '@/domains/application';
-import { getUserByEmail, getUserById } from '@/domains/identity';
+import { getUserByEmail, getUserById, getUsersByEmails, getUsersByIds } from '@/domains/identity';
 import { getByUid as getStudentByUid } from '@/domains/student';
 import { getAllPayments, getPaymentsByStudent } from '@/lib/payment/payment.service';
 import { withSecurity } from '@/lib/security/api-security';
@@ -50,28 +50,25 @@ export const GET = withSecurity(
 
         if (userIdsToFetch.size === 0 && emailsToFetch.size === 0) return;
 
-        await Promise.all([
-          ...Array.from(userIdsToFetch).map(async (uid) => {
-            try {
-              const user = await getUserById(uid);
-              if (user) {
-                userCache.set(uid, (user as any).fullName || (user as any).name || uid);
-              }
-            } catch (e) {
-              console.warn('Failed to pre-fetch user by ID', e);
+        try {
+          const [usersById, usersByEmail] = await Promise.all([
+            userIdsToFetch.size > 0 ? getUsersByIds(Array.from(userIdsToFetch)) : Promise.resolve([]),
+            emailsToFetch.size > 0 ? getUsersByEmails(Array.from(emailsToFetch)) : Promise.resolve([]),
+          ]);
+
+          for (const user of usersById) {
+            if (user?.uid) {
+              userCache.set(user.uid, (user as any).fullName || (user as any).name || user.uid);
             }
-          }),
-          ...Array.from(emailsToFetch).map(async (email) => {
-            try {
-              const user = await getUserByEmail(email);
-              if (user) {
-                userCache.set(email, (user as any).fullName || (user as any).name || email);
-              }
-            } catch (e) {
-              console.warn('Failed to pre-fetch user by email', e);
+          }
+          for (const user of usersByEmail) {
+            if (user?.email) {
+              userCache.set(user.email, (user as any).fullName || (user as any).name || user.email);
             }
-          }),
-        ]);
+          }
+        } catch (e) {
+          console.warn('Failed to pre-fetch approvers in batch', e);
+        }
       };
 
       const mapToFrontend = async (p: any) => {

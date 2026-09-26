@@ -1,6 +1,7 @@
 import { clearHistory } from '@/domains/gps';
 import { emitEvent } from '@/domains/realtime/event-emitter';
 import { clearTripBreadcrumbCache } from '@/lib/services/location-write-throttle';
+import { invalidateCachedDeviceSession } from '@/lib/services/device-session-cache';
 import { getSupabaseServer } from '@/lib/supabase-server';
 
 export async function cleanupTrip(params: {
@@ -17,11 +18,11 @@ export async function cleanupTrip(params: {
     supabase.from('waiting_flags')
       .delete()
       .eq('bus_id', params.busId)
-      .eq('trip_id', params.tripId)
       .in('status', ['raised', 'acknowledged', 'waiting'])
       .select('id, student_uid, bus_id'),
     supabase.from('device_sessions').delete().eq('user_id', params.driverId),
   ]);
+  invalidateCachedDeviceSession(params.driverId);
 
   // 2. Broadcast only the flags that were actually deleted.
   if (deletedFlags && deletedFlags.length > 0) {

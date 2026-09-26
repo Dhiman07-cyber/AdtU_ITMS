@@ -22,18 +22,23 @@ services:
 
   ws1:
     container_name: itms-ws1
-    image: itms-ws:latest
+    image: itms-ws:1.0.0
     build:
       context: .
       dockerfile: server/Dockerfile
     ports:
       - "127.0.0.1:3001:3001"
+    volumes:
+      - ./server:/app/server:ro
+      - ./src:/app/src:ro
     environment:
       - NODE_ENV=production
       - WS_PORT=3001
       - HEALTH_PORT=9090
       - LOG_LEVEL=info
       - REDIS_URL=redis://redis:6379
+      - RATE_LIMIT_PER_IP=100000
+      - STAGING_MODE=true
     env_file:
       - .env
     depends_on:
@@ -56,18 +61,23 @@ services:
 
   ws2:
     container_name: itms-ws2
-    image: itms-ws:latest
+    image: itms-ws:1.0.0
     build:
       context: .
       dockerfile: server/Dockerfile
     ports:
       - "127.0.0.1:3003:3001"
+    volumes:
+      - ./server:/app/server:ro
+      - ./src:/app/src:ro
     environment:
       - NODE_ENV=production
       - WS_PORT=3001
       - HEALTH_PORT=9090
       - LOG_LEVEL=info
       - REDIS_URL=redis://redis:6379
+      - RATE_LIMIT_PER_IP=100000
+      - STAGING_MODE=true
     env_file:
       - .env
     depends_on:
@@ -90,7 +100,7 @@ services:
 
   nextjs:
     container_name: itms-nextjs
-    image: itms-nextjs:latest
+    image: itms-nextjs:1.0.0
     build:
       context: .
       dockerfile: Dockerfile

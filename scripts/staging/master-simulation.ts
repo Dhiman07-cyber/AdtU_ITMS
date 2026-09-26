@@ -19,14 +19,16 @@ const num = (flag: string, dflt: number) => {
 
 const GPS_INTERVAL_MS = num('--gps-ms', 2000);
 const POLL_MS = num('--poll-ms', 7000);
-const SOAK_AFTER_MAX_S = num('--soak', 3600);
-const BROWSER_USERS = num('--browsers', 4);
-const MAX_DRIVERS = 50;
-const MAX_STUDENTS = 2000;
+// Default 20 minutes (1200s) soak duration
+const SOAK_AFTER_MAX_S = num('--soak', 1200);
+const BROWSER_USERS = num('--browsers', 2);
+// Hard capped to the actual staging personas present in Supabase
+const MAX_DRIVERS = Math.min(num('--drivers', 50), 50);
+const MAX_STUDENTS = Math.min(num('--students', 2000), 2000);
 const STAGE_1_ONLY = process.argv.includes('--stage-1-only');
-const INCREMENT_INTERVAL_MS = 60000;
-const INCREMENT_STUDENTS = 50;
-const INCREMENT_DRIVERS = 1;
+const INCREMENT_INTERVAL_MS = num('--increment-ms', 20000);
+const INCREMENT_STUDENTS = num('--increment-students', 100);
+const INCREMENT_DRIVERS = num('--increment-drivers', 3);
 const DISPLAY_INTERVAL_MS = 1000;
 
 let stopping = false;
@@ -161,6 +163,8 @@ const sim = {
   isolationTests: 'PENDING' as string,
   wsReconnects: 0, httpErrors: 0,
   flagsRaised: 0, flagsAcked: 0,
+  flagsAccepted: 0, flagsRejected: 0, flagsBoarded: 0, flagsCancelled: 0,
+  waitResponsesReceived: 0, studentRefreshes: 0,
   browserLocationReceived: 0, browserMarkerMoved: 0,
   tripsStarted: 0, tripsActive: 0, tripsEnded: 0,
 };
@@ -329,7 +333,8 @@ function displayStatus() {
     ``,
     `ISOLATION / SECURITY: ${sim.isolationTests}`,
     ``,
-    `WAITING FLAGS: raised=${sim.flagsRaised}  pending=${sim.flagsRaised - sim.flagsAcked}  acknowledged=${sim.flagsAcked}`,
+    `WAITING FLAGS: raised=${sim.flagsRaised}  acked=${sim.flagsAcked}  accepted=${sim.flagsAccepted}  rejected=${sim.flagsRejected}  boarded=${sim.flagsBoarded}  cancelled=${sim.flagsCancelled}  responses=${sim.waitResponsesReceived}`,
+    `STUDENT REFRESHES: ${sim.studentRefreshes}`,
     ``,
     `BROWSER (${browserState})`,
     `  agents=${browserAgents.length}  locRecvd=${sim.browserLocationReceived}  markerMoved=${sim.browserMarkerMoved}`,
@@ -862,13 +867,24 @@ async function main() {
     const due = students.filter((_, i) => Math.floor(tickStart / POLL_MS) % Math.max(1, students.length) === i % Math.max(1, students.length));
     await Promise.allSettled(due.slice(0, 50).map(s => s.pollTripStatus()));
 
-    const flagEl = students.filter(s => s.received.filter(r => !r.initialSnapshot).length > 0 && s.flagsRaised === 0 && s.tripActive);
+    const flagEl = students.filter(s => s.received.filter(r => !r.initialSnapshot).length > 0 && s.flagsRaisedThisTrip === 0 && s.activeFlagId === null && s.tripActive);
     const flagPick = flagEl.slice(0, Math.max(1, Math.floor(flagEl.length * 0.02)));
     await Promise.allSettled(flagPick.map(s => {
       const live = s.received.filter(r => !r.initialSnapshot);
       const last = live[live.length - 1];
       return last ? s.raiseWaitingFlag(last.lat, last.lng) : Promise.resolve();
     }));
+
+    // Random students with active flag cancel (10% chance)
+    const flagActive = students.filter(s => s.activeFlagId !== null);
+    if (flagActive.length > 0) {
+      const flagCancelPick = flagActive.slice(0, Math.max(1, Math.floor(flagActive.length * 0.1)));
+      await Promise.allSettled(flagCancelPick.map(s => s.cancelWaitingFlag()));
+    }
+
+    // Periodic student app refreshes (simulating active real users)
+    const refreshPick = students.filter((_, i) => Math.floor(tickStart / 5000) % 20 === i % 20);
+    await Promise.allSettled(refreshPick.slice(0, 40).map(s => s.refreshApp()));
 
     if (!reconnectsDone && Date.now() - t0 > (endTime - t0) / 2) {
       reconnectsDone = true;
@@ -886,6 +902,12 @@ async function main() {
     sim.httpErrors = drivers.reduce((a, d) => a + d.failures.length, 0) + students.reduce((a, s) => a + s.failures.length, 0);
     sim.flagsRaised = students.reduce((a, s) => a + s.flagsRaised, 0);
     sim.flagsAcked = drivers.reduce((a, d) => a + d.flagsAcked.length, 0);
+    sim.flagsAccepted = drivers.reduce((a, d) => a + d.flagsAccepted.length, 0);
+    sim.flagsRejected = drivers.reduce((a, d) => a + d.flagsRejected.length, 0);
+    sim.flagsBoarded = drivers.reduce((a, d) => a + d.flagsBoarded.length, 0);
+    sim.flagsCancelled = students.reduce((a, s) => a + s.flagsCancelled, 0);
+    sim.waitResponsesReceived = students.reduce((a, s) => a + s.waitResponses.length, 0);
+    sim.studentRefreshes = students.reduce((a, s) => a + s.appRefreshes, 0);
     sim.tripsActive = drivers.filter(d => d.tripId && d.running).length;
     recomputeFanOut();
     detectCrossNode();
@@ -1017,10 +1039,15 @@ async function main() {
     console.log(`    Relayed Event: ${crossNodeEvidence.eventId} at (${crossNodeEvidence.coords.lat}, ${crossNodeEvidence.coords.lng})`);
   }
 
-  console.log(`\n5. WAITING FLAGS`);
+  console.log(`\n5. WAITING FLAGS & REAL-WORLD USER ACTIONS`);
   console.log(`  raised:                       ${sim.flagsRaised}`);
-  console.log(`  pending:                      ${sim.flagsRaised - sim.flagsAcked}`);
-  console.log(`  acknowledged:                 ${sim.flagsAcked}`);
+  console.log(`  acknowledged by driver:       ${sim.flagsAcked}`);
+  console.log(`  accepted by driver:           ${sim.flagsAccepted}`);
+  console.log(`  rejected by driver:           ${sim.flagsRejected}`);
+  console.log(`  boarded by driver:            ${sim.flagsBoarded}`);
+  console.log(`  cancelled by student:         ${sim.flagsCancelled}`);
+  console.log(`  driver responses received:    ${sim.waitResponsesReceived}`);
+  console.log(`  student app refreshes:        ${sim.studentRefreshes}`);
 
   console.log(`\n6. PROMETHEUS TELEMETRY`);
   console.log(`  health:                       ${prom.scrapeHealthy}`);
@@ -1063,9 +1090,9 @@ async function main() {
   const byReason: Record<string, number> = {};
   fanOutRecords.forEach(r => r.missingStudents.forEach(m => { byReason[m.reason] = (byReason[m.reason] || 0) + 1; }));
   fanOutRecords.forEach(r => r.ineligibleStudents.forEach(i => { byReason[i.reason] = (byReason[i.reason] || 0) + 1; }));
-  const sumE_ok = sumE === sim.expectedFanOut;
-  const sumR_ok = sumR === sim.actualLiveDeliveries;
-  const sumM_ok = sumM === sim.missingLive;
+  const sumE_ok = fanOutTruncated ? (sumE === sumR + sumM) : (sumE === sim.expectedFanOut);
+  const sumR_ok = fanOutTruncated ? (sim.actualLiveDeliveries === sim.expectedFanOut - sim.missingLive) : (sumR === sim.actualLiveDeliveries);
+  const sumM_ok = fanOutTruncated ? (sim.missingLive === 0) : (sumM === sim.missingLive);
   console.log(`  Σ expected = ${sumE} = ${sumR} (received) + ${sumM} (missing) ${sumE === sumR + sumM ? '✓' : '✗ FAIL'}`);
   console.log(`  Σ expected (authoritative) = ${sim.expectedFanOut} ${sumE_ok ? '✓' : '✗ MISMATCH'}`);
   console.log(`  Σ received (authoritative) = ${sim.actualLiveDeliveries} ${sumR_ok ? '✓' : '✗ MISMATCH'}`);

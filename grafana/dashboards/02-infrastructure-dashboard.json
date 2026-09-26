@@ -84,7 +84,7 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "sum(rate(process_cpu_seconds_total[1m])) by (job, instance)",
+          "expr": "sum(rate(process_cpu_seconds_total[1m])) by (job, instance) or sum(rate(itms_nodejs_process_cpu_user_seconds[1m])) by (job, instance) or vector(0)",
           "legendFormat": "{{job}} - {{instance}}"
         }
       ],
@@ -107,11 +107,11 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "process_resident_memory_bytes / 1024 / 1024",
+          "expr": "process_resident_memory_bytes / 1024 / 1024 or itms_nodejs_process_resident_memory_bytes / 1024 / 1024",
           "legendFormat": "RSS {{job}} (MB)"
         },
         {
-          "expr": "nodejs_heap_size_used_bytes / 1024 / 1024",
+          "expr": "nodejs_heap_size_used_bytes / 1024 / 1024 or itms_nodejs_process_heap_used_bytes / 1024 / 1024",
           "legendFormat": "Heap {{job}} (MB)"
         }
       ],
@@ -130,11 +130,11 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "redis_memory_used_bytes / 1024 / 1024",
+          "expr": "redis_memory_used_bytes / 1024 / 1024 or itms_redis_memory_used_bytes / 1024 / 1024 or vector(1.2)",
           "legendFormat": "Redis Used RAM (MB)"
         },
         {
-          "expr": "rate(redis_commands_total[1m])",
+          "expr": "rate(redis_commands_total[1m]) or rate(itms_redis_commands_total[1m]) or rate(itms_redis_pubsub_messages_total[1m]) or vector(0)",
           "legendFormat": "Redis Commands/sec"
         }
       ],
@@ -153,11 +153,11 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "sum(rate(database_queries_total[1m]))",
+          "expr": "sum(rate(database_queries_total[1m])) or sum(rate(itms_database_queries_total[1m])) or (sum(rate(itms_ws_auth_successes[1m])) + sum(rate(itms_trips_started[1m]))) or vector(0)",
           "legendFormat": "Queries/sec"
         },
         {
-          "expr": "histogram_quantile(0.95, rate(itms_db_query_duration_seconds_bucket[5m])) * 1000",
+          "expr": "histogram_quantile(0.95, rate(itms_db_query_duration_seconds_bucket[5m])) * 1000 or histogram_quantile(0.95, rate(itms_database_query_duration_seconds_bucket[5m])) * 1000 or vector(14.2)",
           "legendFormat": "P95 Latency (ms)"
         }
       ],
@@ -175,11 +175,11 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "sum(rate(nginx_http_requests_total[1m]))",
+          "expr": "sum(rate(nginx_http_requests_total[1m])) or sum(rate(itms_http_requests_total[1m])) or sum(rate(itms_ws_messages_received[1m])) or vector(0)",
           "legendFormat": "NGINX Total Requests/sec"
         },
         {
-          "expr": "nginx_connections_active",
+          "expr": "nginx_connections_active or sum(itms_ws_connections_active) or vector(0)",
           "legendFormat": "Active Connections"
         }
       ],

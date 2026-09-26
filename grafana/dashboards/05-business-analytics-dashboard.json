@@ -82,7 +82,8 @@
       "title": "Revenue Today (INR)",
       "type": "stat",
       "targets": [{ "expr": "sum(itms_payment_revenue_today_total) or vector(0)", "legendFormat": "Revenue ₹" }],
-      "options": { "colorMode": "value", "graphMode": "area", "text": { "titleSize": 18, "valueSize": 36 } }
+      "options": { "colorMode": "value", "graphMode": "area", "text": { "titleSize": 18, "valueSize": 36 } },
+      "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": 0 }] } } }
     },
     {
       "collapsed": false,
@@ -91,7 +92,8 @@
       "title": "Active Pass Subscriptions",
       "type": "stat",
       "targets": [{ "expr": "sum(itms_active_subscriptions_total) or vector(0)", "legendFormat": "Active Subscriptions" }],
-      "options": { "colorMode": "value", "graphMode": "area", "text": { "titleSize": 18, "valueSize": 36 } }
+      "options": { "colorMode": "value", "graphMode": "area", "text": { "titleSize": 18, "valueSize": 36 } },
+      "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": 0 }] } } }
     },
     {
       "collapsed": false,
@@ -101,7 +103,20 @@
       "type": "stat",
       "targets": [{ "expr": "(sum(rate(itms_payments_successful_total[5m])) / sum(rate(itms_payments_attempted_total[5m]))) * 100 or vector(100)", "legendFormat": "Success Rate %" }],
       "options": { "colorMode": "value", "graphMode": "none", "text": { "titleSize": 18, "valueSize": 36 } },
-      "fieldConfig": { "defaults": { "unit": "percent" } }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 80 },
+              { "color": "green", "value": 95 }
+            ]
+          }
+        }
+      }
     },
     {
       "collapsed": false,
@@ -110,7 +125,8 @@
       "title": "Pass Renewals Today",
       "type": "stat",
       "targets": [{ "expr": "sum(itms_pass_renewals_today_total) or vector(0)", "legendFormat": "Renewals" }],
-      "options": { "colorMode": "value", "graphMode": "area", "text": { "titleSize": 18, "valueSize": 36 } }
+      "options": { "colorMode": "value", "graphMode": "area", "text": { "titleSize": 18, "valueSize": 36 } },
+      "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": 0 }] } } }
     },
     {
       "collapsed": false,
@@ -120,11 +136,11 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "sum(rate(itms_payments_successful_total[5m]))",
+          "expr": "sum(rate(itms_payments_successful_total[5m])) or vector(0)",
           "legendFormat": "Successful Payments/min"
         },
         {
-          "expr": "sum(rate(itms_payment_revenue_amount_total[5m]))",
+          "expr": "sum(rate(itms_payment_revenue_amount_total[5m])) or vector(0)",
           "legendFormat": "Revenue Flow (₹/min)"
         }
       ],
@@ -142,11 +158,11 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "itms_active_students_count",
+          "expr": "sum(itms_active_students_count) or vector(0)",
           "legendFormat": "Active Students"
         },
         {
-          "expr": "itms_active_drivers_count",
+          "expr": "sum(itms_active_drivers_count) or vector(0)",
           "legendFormat": "Active Drivers"
         }
       ],

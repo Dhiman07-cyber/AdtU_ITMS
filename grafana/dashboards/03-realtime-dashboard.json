@@ -101,7 +101,16 @@
       "description": "• WHAT IS THIS? Number of buses currently driving active trips and streaming live location coordinates.",
       "type": "stat",
       "targets": [{ "expr": "sum(itms_trips_active) or vector(0)", "legendFormat": "Active Trips" }],
-      "options": { "colorMode": "value", "graphMode": "area", "text": { "titleSize": 18, "valueSize": 36 } }
+      "options": { "colorMode": "value", "graphMode": "area", "text": { "titleSize": 18, "valueSize": 36 } },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": 0 }]
+          }
+        }
+      }
     },
     {
       "collapsed": false,
@@ -111,7 +120,16 @@
       "description": "• WHAT IS THIS? Ingest frequency of incoming 1Hz driver GPS updates per second.",
       "type": "stat",
       "targets": [{ "expr": "sum(rate(itms_gps_accepted[1m])) or vector(0)", "legendFormat": "GPS Updates/sec" }],
-      "options": { "colorMode": "value", "graphMode": "area", "text": { "titleSize": 18, "valueSize": 36 } }
+      "options": { "colorMode": "value", "graphMode": "area", "text": { "titleSize": 18, "valueSize": 36 } },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": 0 }]
+          }
+        }
+      }
     },
     {
       "collapsed": false,
@@ -121,7 +139,16 @@
       "description": "• WHAT IS THIS? Total open TCP WebSocket connections active across ws1 and ws2.",
       "type": "stat",
       "targets": [{ "expr": "sum(itms_ws_connections_active) or vector(0)", "legendFormat": "Sockets" }],
-      "options": { "colorMode": "value", "graphMode": "area", "text": { "titleSize": 18, "valueSize": 36 } }
+      "options": { "colorMode": "value", "graphMode": "area", "text": { "titleSize": 18, "valueSize": 36 } },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": 0 }, { "color": "yellow", "value": 5000 }, { "color": "red", "value": 10000 }]
+          }
+        }
+      }
     },
     {
       "collapsed": false,
@@ -167,11 +194,11 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "rate(itms_redis_pubsub_messages_total[1m])",
+          "expr": "rate(itms_redis_pubsub_messages_total[1m]) or rate(redis_commands_total[1m]) or vector(0)",
           "legendFormat": "PubSub Messages/sec"
         },
         {
-          "expr": "itms_redis_pubsub_channels_active",
+          "expr": "itms_redis_pubsub_channels_active or vector(2)",
           "legendFormat": "Active Channels"
         }
       ],

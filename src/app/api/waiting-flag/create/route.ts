@@ -56,8 +56,7 @@ export const POST = withSecurity(
           .from('waiting_flags')
           .select('id')
           .eq('student_uid', studentUid)
-          .eq('bus_id', busId)
-          .in('status', ['raised', 'acknowledged'])
+          .in('status', ['raised', 'acknowledged', 'waiting'])
           .limit(1)
       ]);
 
@@ -123,6 +122,13 @@ export const POST = withSecurity(
         .single();
 
       if (insertError) {
+        if ((insertError as any).code === '23505') {
+          return NextResponse.json({ 
+            success: false, 
+            error: 'You already have an active waiting flag for this bus', 
+            requestId 
+          }, { status: 409 });
+        }
         console.error(`[${requestId}] Supabase insert error:`, insertError);
         return NextResponse.json({ success: false, error: 'Failed to record waiting flag', requestId }, { status: 500 });
       }

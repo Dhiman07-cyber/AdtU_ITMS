@@ -20,10 +20,6 @@ scrape_configs:
         labels:
           node: 'app-node-01'
           tier: 'frontend-api'
-      - targets: ['host.docker.internal:3000']
-        labels:
-          node: 'app-host-fallback'
-          tier: 'frontend-api'
 
   - job_name: 'itms-websocket-cluster'
     metrics_path: '/metrics'

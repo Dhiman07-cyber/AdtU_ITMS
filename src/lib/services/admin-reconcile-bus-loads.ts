@@ -1,4 +1,4 @@
-﻿/**
+/**
  * ─────────────────────────────────────────────────────────────────────────────
  * CANONICAL BUS-LOAD RECONCILIATION (PostgreSQL-backed, server-safe)
  * ─────────────────────────────────────────────────────────────────────────────
@@ -18,7 +18,7 @@
  */
 
 import { getAllBuses,updateBus } from '@/domains/fleet';
-import { getAllStudents,getUsersByRole } from '@/domains/identity';
+import { getSeatOccupyingStudents,getUsersByRole } from '@/domains/identity';
 import { pgInsertNotification } from '@/domains/notification/repositories/notification.repository.pg';
 import { getShiftDeltas } from '@/lib/utils/shift-utils';
 
@@ -97,11 +97,8 @@ export async function adminReconcileBusLoads(options: ReconcileOptions = {}): Pr
   }
   const targetBusIds = new Set(targetBuses.map((b) => b.id || b.busId));
 
-  // 2. Recount seat-owning students per bus from PostgreSQL.
-  const allStudents = await getAllStudents();
-  const candidateStudents = allStudents.filter((s) =>
-    ['active', 'soft_blocked', 'pending_deletion'].includes(s.status || '')
-  );
+  // 2. Recount seat-owning students per bus from PostgreSQL (streamlined query).
+  const candidateStudents = await getSeatOccupyingStudents();
 
   type Counts = { currentMembers: number; morningCount: number; eveningCount: number; invalidShift: number };
   const counts = new Map<string, Counts>();

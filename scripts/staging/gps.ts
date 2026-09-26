@@ -105,12 +105,12 @@ export class RouteGps {
   private lastAdvanceMs = 0;
   private lastDwelledWaypoint = -1;
   private advance(nowMs: number, speedMs: number): { lat: number; lng: number; headingDeg: number } {
-    const dtMs = this.lastAdvanceMs ? Math.max(0, nowMs - this.lastAdvanceMs) : 0;
+    const dtMs = this.lastAdvanceMs ? Math.max(0, nowMs - this.lastAdvanceMs) : 2000;
     this.lastAdvanceMs = nowMs;
     this.posMeters += (speedMs * dtMs) / 1000 * this.dir;
 
     if (this.posMeters >= this.totalMeters) { this.posMeters = this.totalMeters; this.dir = -1; this.dwell(nowMs); }
-    if (this.posMeters <= 0) { this.posMeters = 0; this.dir = 1; this.dwell(nowMs); }
+    if (this.posMeters <= 0 && this.dir === -1) { this.posMeters = 0; this.dir = 1; this.dwell(nowMs); }
 
     // Dwell when crossing an exact waypoint (arriving at a stop).
     // lastDwelledAt prevents re-triggering on the same waypoint forever.

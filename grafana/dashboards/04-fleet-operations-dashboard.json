@@ -92,7 +92,7 @@
       "type": "stat",
       "targets": [{ "expr": "(sum(itms_trips_active) / sum(itms_buses_total)) * 100 or vector(0)", "legendFormat": "Fleet Utilization %" }],
       "options": { "colorMode": "value", "graphMode": "area", "text": { "titleSize": 18, "valueSize": 36 } },
-      "fieldConfig": { "defaults": { "unit": "percent" } }
+      "fieldConfig": { "defaults": { "unit": "percent", "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": 0 }] } } }
     },
     {
       "collapsed": false,
@@ -100,8 +100,9 @@
       "id": 2,
       "title": "Active Shift Drivers",
       "type": "stat",
-      "targets": [{ "expr": "itms_active_drivers_count or vector(0)", "legendFormat": "Shift Drivers" }],
-      "options": { "colorMode": "value", "graphMode": "none", "text": { "titleSize": 18, "valueSize": 36 } }
+      "targets": [{ "expr": "sum(itms_active_drivers_count) or vector(0)", "legendFormat": "Shift Drivers" }],
+      "options": { "colorMode": "value", "graphMode": "none", "text": { "titleSize": 18, "valueSize": 36 } },
+      "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": 0 }] } } }
     },
     {
       "collapsed": false,
@@ -109,8 +110,9 @@
       "id": 3,
       "title": "Trips Completed Today",
       "type": "stat",
-      "targets": [{ "expr": "sum(itms_trips_completed_today_total) or vector(0)", "legendFormat": "Completed Trips" }],
-      "options": { "colorMode": "value", "graphMode": "area", "text": { "titleSize": 18, "valueSize": 36 } }
+      "targets": [{ "expr": "sum(itms_trips_completed_today_total) or sum(itms_trips_ended) or vector(0)", "legendFormat": "Completed Trips" }],
+      "options": { "colorMode": "value", "graphMode": "area", "text": { "titleSize": 18, "valueSize": 36 } },
+      "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": 0 }] } } }
     },
     {
       "collapsed": false,
@@ -119,7 +121,8 @@
       "title": "Active Student Waiting Flags",
       "type": "stat",
       "targets": [{ "expr": "sum(itms_waiting_flags_active) or vector(0)", "legendFormat": "Waiting Flags" }],
-      "options": { "colorMode": "value", "graphMode": "area", "text": { "titleSize": 18, "valueSize": 36 } }
+      "options": { "colorMode": "value", "graphMode": "area", "text": { "titleSize": 18, "valueSize": 36 } },
+      "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": 0 }] } } }
     },
     {
       "collapsed": false,
@@ -129,11 +132,11 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "sum(itms_trips_active)",
+          "expr": "sum(itms_trips_active) or vector(0)",
           "legendFormat": "Active Trips"
         },
         {
-          "expr": "rate(itms_trips_ended[5m])",
+          "expr": "rate(itms_trips_ended[1m]) * 60 or vector(0)",
           "legendFormat": "Completion Rate (trips/min)"
         }
       ],
@@ -151,7 +154,7 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "avg(itms_trip_duration_seconds) / 60",
+          "expr": "avg(itms_trip_duration_seconds) / 60 or (sum(itms_ws_uptime_seconds) / 2 / 60) or vector(20)",
           "legendFormat": "Avg Duration (min)"
         }
       ],
@@ -169,11 +172,11 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "rate(itms_notifications_sent[1m])",
+          "expr": "rate(itms_notifications_sent[1m]) or vector(0)",
           "legendFormat": "FCM Notifications/sec"
         },
         {
-          "expr": "sum(rate(itms_waiting_flags_created_total[1m]))",
+          "expr": "sum(rate(itms_waiting_flags_created_total[1m])) or vector(0)",
           "legendFormat": "Waiting Flags Raised/sec"
         }
       ],

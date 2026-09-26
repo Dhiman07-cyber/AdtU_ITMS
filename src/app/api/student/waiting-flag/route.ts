@@ -28,7 +28,6 @@ export const POST = withSecurity(
             supabase.from('waiting_flags')
                 .select('id')
                 .eq('student_uid', studentUid)
-                .eq('bus_id', busId)
                 .in('status', ['raised', 'waiting', 'acknowledged'])
                 .limit(1),
             supabase.from('active_trips')

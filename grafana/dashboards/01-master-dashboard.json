@@ -242,7 +242,16 @@
       "description": "• WHAT IS THIS? Live persistent socket handles active across ws1 and ws2.",
       "type": "stat",
       "targets": [{ "expr": "sum(itms_ws_connections_active) or vector(0)", "legendFormat": "Connections" }],
-      "options": { "colorMode": "value", "graphMode": "area", "text": { "titleSize": 18, "valueSize": 36 } }
+      "options": { "colorMode": "value", "graphMode": "area", "text": { "titleSize": 18, "valueSize": 36 } },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": 0 }, { "color": "yellow", "value": 5000 }, { "color": "red", "value": 10000 }]
+          }
+        }
+      }
     },
     {
       "collapsed": false,
@@ -250,8 +259,17 @@
       "id": 11,
       "title": "Drivers Online",
       "type": "stat",
-      "targets": [{ "expr": "itms_active_drivers_count or vector(0)", "legendFormat": "Drivers" }],
-      "options": { "colorMode": "value", "graphMode": "area", "text": { "titleSize": 18, "valueSize": 34 } }
+      "targets": [{ "expr": "sum(itms_active_drivers_count) or vector(0)", "legendFormat": "Drivers" }],
+      "options": { "colorMode": "value", "graphMode": "area", "text": { "titleSize": 18, "valueSize": 34 } },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": 0 }]
+          }
+        }
+      }
     },
     {
       "collapsed": false,
@@ -259,8 +277,17 @@
       "id": 12,
       "title": "Students Connected",
       "type": "stat",
-      "targets": [{ "expr": "itms_active_students_count or vector(0)", "legendFormat": "Students" }],
-      "options": { "colorMode": "value", "graphMode": "area", "text": { "titleSize": 18, "valueSize": 34 } }
+      "targets": [{ "expr": "sum(itms_active_students_count) or vector(0)", "legendFormat": "Students" }],
+      "options": { "colorMode": "value", "graphMode": "area", "text": { "titleSize": 18, "valueSize": 34 } },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": 0 }]
+          }
+        }
+      }
     },
     {
       "collapsed": false,
@@ -270,7 +297,16 @@
       "description": "• WHAT IS THIS? Verified Razorpay student transport pass revenue collected today.",
       "type": "stat",
       "targets": [{ "expr": "sum(itms_payment_revenue_today_total) or vector(0)", "legendFormat": "Revenue ₹" }],
-      "options": { "colorMode": "value", "graphMode": "area", "text": { "titleSize": 18, "valueSize": 34 } }
+      "options": { "colorMode": "value", "graphMode": "area", "text": { "titleSize": 18, "valueSize": 34 } },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": 0 }]
+          }
+        }
+      }
     },
     {
       "collapsed": false,

@@ -25,6 +25,30 @@ export async function GET(request: NextRequest) {
     }
 
     const { searchParams } = new URL(request.url);
+
+    if (searchParams.get('stats') === 'true') {
+      const db = getSupabaseServer();
+      const [
+        { count: total },
+        { count: active },
+        { count: suspended },
+        { count: warning },
+      ] = await Promise.all([
+        db.from('student_profiles').select('*', { count: 'exact', head: true }),
+        db.from('student_profiles').select('*', { count: 'exact', head: true }).eq('status', 'active'),
+        db.from('student_profiles').select('*', { count: 'exact', head: true }).or('status.eq.suspended,status.eq.inactive'),
+        db.from('student_profiles').select('*', { count: 'exact', head: true }).or('status.eq.soft_blocked,status.eq.expired'),
+      ]);
+
+      const headers = new Headers(rl.headers || {});
+      return NextResponse.json({
+        total: total ?? 0,
+        active: active ?? 0,
+        suspended: suspended ?? 0,
+        warning: warning ?? 0,
+      }, { headers });
+    }
+
     const busId = searchParams.get('busId');
     const enrollmentId = searchParams.get('enrollmentId');
     const q = searchParams.get('q');
@@ -119,6 +143,7 @@ export async function GET(request: NextRequest) {
     responseHeaders.set('X-Has-More', String(hasMore));
     responseHeaders.set('X-Page-Offset', String(offset));
     responseHeaders.set('X-Page-Limit', String(limit));
+    responseHeaders.set('Access-Control-Expose-Headers', 'X-Total-Count, X-Has-More, X-Page-Offset, X-Page-Limit');
 
     if (searchParams.get('paginate') === 'true' || searchParams.get('format') === 'paginated') {
       return NextResponse.json({

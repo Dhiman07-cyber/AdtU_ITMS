@@ -82,7 +82,16 @@
       "title": "Auth Failures (1h)",
       "type": "stat",
       "targets": [{ "expr": "sum(increase(itms_ws_auth_failures[1h])) or vector(0)", "legendFormat": "Auth Failures" }],
-      "options": { "colorMode": "value", "graphMode": "none", "text": { "titleSize": 18, "valueSize": 36 } }
+      "options": { "colorMode": "value", "graphMode": "none", "text": { "titleSize": 18, "valueSize": 36 } },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": 0 }, { "color": "yellow", "value": 10 }, { "color": "red", "value": 50 }]
+          }
+        }
+      }
     },
     {
       "collapsed": false,
@@ -91,7 +100,16 @@
       "title": "Rate Limit Blocks (1h)",
       "type": "stat",
       "targets": [{ "expr": "sum(increase(itms_ws_rate_limit_blocks[1h])) or vector(0)", "legendFormat": "Rate Limits" }],
-      "options": { "colorMode": "value", "graphMode": "none", "text": { "titleSize": 18, "valueSize": 36 } }
+      "options": { "colorMode": "value", "graphMode": "none", "text": { "titleSize": 18, "valueSize": 36 } },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": 0 }, { "color": "yellow", "value": 100 }, { "color": "red", "value": 500 }]
+          }
+        }
+      }
     },
     {
       "collapsed": false,
@@ -118,7 +136,16 @@
       "title": "Device Lock Conflicts (1h)",
       "type": "stat",
       "targets": [{ "expr": "sum(increase(itms_device_session_conflicts_total[1h])) or vector(0)", "legendFormat": "Device Conflicts" }],
-      "options": { "colorMode": "value", "graphMode": "none", "text": { "titleSize": 18, "valueSize": 36 } }
+      "options": { "colorMode": "value", "graphMode": "none", "text": { "titleSize": 18, "valueSize": 36 } },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [{ "color": "green", "value": 0 }, { "color": "yellow", "value": 5 }, { "color": "red", "value": 20 }]
+          }
+        }
+      }
     },
     {
       "collapsed": false,
@@ -128,11 +155,11 @@
       "type": "timeseries",
       "targets": [
         {
-          "expr": "sum(rate(itms_http_requests_total{status=~\"4..\"}[1m]))",
+          "expr": "sum(rate(itms_http_requests_total{status=~\"4..\"}[1m])) or vector(0)",
           "legendFormat": "4xx Client Errors"
         },
         {
-          "expr": "sum(rate(itms_http_requests_total{status=~\"5..\"}[1m]))",
+          "expr": "sum(rate(itms_http_requests_total{status=~\"5..\"}[1m])) or vector(0)",
           "legendFormat": "5xx Server Errors"
         }
       ],

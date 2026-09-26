@@ -199,6 +199,18 @@ export async function submitFinal(
     throw new Error('Shift selection (Morning or Evening) is required for application submission.');
   }
 
+  let needsCapacityReview = Boolean(body.needsCapacityReview);
+  if (busId && !needsCapacityReview) {
+    try {
+      const cap = await Seat.getCapacity(busId, shift);
+      if (cap && (!cap.available || cap.shiftLoad >= cap.capacity)) {
+        needsCapacityReview = true;
+      }
+    } catch (e) {
+      console.warn('Could not verify server-side bus capacity at submission:', e);
+    }
+  }
+
   const applicationData: any = {
     applicationId: body.applicationId || uid,
     applicantUid: uid,
@@ -218,7 +230,7 @@ export async function submitFinal(
       ? 'system_online_payment'
       : 'system_offline_submission_bypass',
     verifiedAt: now,
-    needsCapacityReview: body.needsCapacityReview || false,
+    needsCapacityReview,
     applicationType: appType,
     targetSession: body.targetSession || (startYear ? { startYear, endYear: startYear + 1 } : undefined),
     eligibleApproval: body.eligibleApproval,

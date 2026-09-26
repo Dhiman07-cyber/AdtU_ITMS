@@ -1,4 +1,4 @@
-import { getStudentById,getUserById } from '@/domains/identity';
+import { getStudentById, getStudentsByIds, getUserById } from '@/domains/identity';
 import { getDeadlineConfig } from '@/lib/deadline-config-service';
 import { adminAuth } from '@/lib/firebase-admin';
 import {
@@ -84,17 +84,23 @@ export async function POST(req: NextRequest) {
         let wouldSoftBlock = 0;
         let wouldHardDelete = 0;
 
-        // Fetch all students in parallel
-        const studentResults = await Promise.all(
-            studentIds.map(async (studentId: string) => {
-                try {
-                    const studentData = await getStudentById(studentId);
-                    return { studentId, studentData, error: null };
-                } catch (err: any) {
-                    return { studentId, studentData: null, error: err };
-                }
-            })
-        );
+        // Batch fetch students in a single DB query
+        const studentMap = new Map<string, any>();
+        try {
+            const students = await getStudentsByIds(studentIds);
+            for (const s of students) {
+                if (s.uid) studentMap.set(s.uid, s);
+                if (s.id) studentMap.set(s.id, s);
+                if (s.enrollmentId) studentMap.set(s.enrollmentId, s);
+            }
+        } catch (err: any) {
+            console.error('Failed to batch-fetch students for deadline preview:', err);
+        }
+
+        const studentResults = studentIds.map((studentId: string) => {
+            const studentData = studentMap.get(studentId) || null;
+            return { studentId, studentData, error: null };
+        });
 
         for (const { studentId, studentData, error } of studentResults) {
             if (error) {

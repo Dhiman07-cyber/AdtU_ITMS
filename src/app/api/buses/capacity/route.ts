@@ -45,6 +45,34 @@ export async function GET(request: NextRequest) {
   }
 }
 
+interface CacheEntry<T> {
+  data: T;
+  expiresAt: number;
+}
+let cachedRoutes: CacheEntry<any[]> | null = null;
+let cachedBuses: CacheEntry<any[]> | null = null;
+const CACHE_TTL_MS = 30_000;
+
+async function getCachedRoutes(): Promise<any[]> {
+  const now = Date.now();
+  if (cachedRoutes && cachedRoutes.expiresAt > now) {
+    return cachedRoutes.data;
+  }
+  const routes = await getAllRoutes();
+  cachedRoutes = { data: routes, expiresAt: now + CACHE_TTL_MS };
+  return routes;
+}
+
+async function getCachedBuses(): Promise<any[]> {
+  const now = Date.now();
+  if (cachedBuses && cachedBuses.expiresAt > now) {
+    return cachedBuses.data;
+  }
+  const buses = await getAllBuses();
+  cachedBuses = { data: buses, expiresAt: now + CACHE_TTL_MS };
+  return buses;
+}
+
 /**
  * POST /api/buses/capacity
  * Body: { routeId, stop_name, stop_name, busId?, shift? }
@@ -70,8 +98,8 @@ export async function POST(request: NextRequest) {
 
     const normalizedShift = normalizeShift(shift);
 
-    // Find all routes that contain this stop
-    const allRoutes = await getAllRoutes();
+    // Find all routes that contain this stop (using cached lookup)
+    const allRoutes = await getCachedRoutes();
     const matchingRouteIds = allRoutes
       .filter(route => {
         const stops = route.stops || [];
@@ -99,8 +127,8 @@ export async function POST(request: NextRequest) {
       }, { headers: rl.headers });
     }
 
-    // Get all buses and filter by matching routes + shift
-    const allBuses = await getAllBuses();
+    // Get all buses and filter by matching routes + shift (using cached lookup)
+    const allBuses = await getCachedBuses();
     const candidateBuses = allBuses.filter(bus => matchingRouteIds.includes(bus.routeId || ''));
 
     // Filter by shift compatibility
