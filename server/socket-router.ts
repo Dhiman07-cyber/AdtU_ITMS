@@ -93,12 +93,18 @@ handle('subscribe', (ws, session, payload) => {
   const channel = payload.channel as string | undefined;
   if (!channel) { send(ws, { type: 'error', message: 'subscribe requires "channel"' }); return; }
 
-  // SECURITY: Students may only subscribe to channels for their assigned bus.
-  // Drivers may only subscribe to channels for their active trip's bus.
-  // Admins/moderators/server have unrestricted access.
-  // driver_wait_request_* is driver-only: it carries other students' names
-  // and stops, so students are never allowed to subscribe to it even for
-  // their own bus.
+  // SECURITY:
+  // 1. Only drivers (for their active trip bus) and students (for their assigned bus) have access to waiting flags.
+  //    Administrators and moderators have ZERO access to student waiting flags or driver wait requests.
+  //    Admins/mods may ONLY subscribe to fleet GPS location streams (bus_location_*, bus:*, etc.).
+  if ((channel.startsWith('waiting_flags_') || channel.startsWith('driver_wait_request_')) && (session.role === 'admin' || session.role === 'moderator')) {
+    send(ws, { type: 'error', message: 'Not authorized: Admin and Moderator roles have no access to student waiting flags' });
+    metricsService.inc('errors');
+    logger.warn('subscribe_unauthorized_admin_mod_waiting_channel', { uid: session.uid, role: session.role, channel });
+    return;
+  }
+
+  // 2. driver_wait_request_* is strictly driver-only: carries student names and stops.
   if (channel.startsWith('driver_wait_request_') && session.role === 'student') {
     send(ws, { type: 'error', message: 'Not authorized to subscribe to this channel' });
     metricsService.inc('errors');
@@ -301,6 +307,8 @@ handle('broadcast', (ws, session, payload) => {
   publishToRedis(channel, event, eventPayload);
   if (event === 'trip_started') metricsService.inc('tripsStarted');
   if (event === 'trip_ended') metricsService.inc('tripsEnded');
+  if (event === 'waiting_flag_raised' || event === 'waiting_flag_created') metricsService.inc('waitingFlagsCreated');
+  if (event === 'waiting_flag_cancelled' || event === 'waiting_flag_resolved' || event === 'waiting_flag_removed' || event === 'waiting_flag_boarded') metricsService.inc('waitingFlagsCancelled');
 });
 
 export { send as sendToSocket };

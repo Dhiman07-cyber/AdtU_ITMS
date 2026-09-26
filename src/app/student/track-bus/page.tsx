@@ -163,23 +163,49 @@ function TrackBusLive() {
       { enableHighAccuracy: true, timeout: 5000, maximumAge: 10000 }
     );
 
-    // Watch position continuously
-    locationWatchIdRef.current = navigator.geolocation.watchPosition(
-      handleLocationSuccess,
-      (error) => {
-        console.debug("Location watch error:", error.message);
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 10000,
-      }
-    );
+    const startWatch = () => {
+      if (locationWatchIdRef.current !== null || !navigator.geolocation) return;
+      locationWatchIdRef.current = navigator.geolocation.watchPosition(
+        handleLocationSuccess,
+        (error) => {
+          console.debug("Location watch error:", error.message);
+        },
+        {
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 10000,
+        }
+      );
+    };
 
-    return () => {
+    const stopWatch = () => {
       if (locationWatchIdRef.current !== null) {
         navigator.geolocation.clearWatch(locationWatchIdRef.current);
         locationWatchIdRef.current = null;
+      }
+    };
+
+    // Watch position continuously while tab/screen is visible
+    startWatch();
+
+    const handleVisibilityChange = () => {
+      if (typeof document !== 'undefined') {
+        if (document.visibilityState === 'visible') {
+          startWatch();
+        } else {
+          stopWatch();
+        }
+      }
+    };
+
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+    }
+
+    return () => {
+      stopWatch();
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
       }
     };
   }, []); // Run once on mount
@@ -523,6 +549,12 @@ function TrackBusLive() {
 
     const checkActiveTrip = async () => {
       if (!isMounted || inFlight) return;
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+        if (isMounted) {
+          timerId = setTimeout(checkActiveTrip, pollIntervalMs);
+        }
+        return;
+      }
       inFlight = true;
 
       try {
@@ -588,12 +620,26 @@ function TrackBusLive() {
       }
     };
 
+    const handleVisibilityChange = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible' && isMounted) {
+        if (timerId) clearTimeout(timerId);
+        checkActiveTrip();
+      }
+    };
+
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+    }
+
     // Immediate initial check
     checkActiveTrip();
 
     return () => {
       isMounted = false;
       if (timerId) clearTimeout(timerId);
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+      }
     };
   }, [targetBusId, wsConnected, authToken, currentUser]);
 

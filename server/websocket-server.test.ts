@@ -32,6 +32,8 @@ const { authenticateSocket } = vi.hoisted(() => ({
       'tok-driver2': { uid: 'driver-2', role: 'driver' },
       'tok-student': { uid: 'student-1', role: 'student' },
       'tok-server': { uid: 'server', role: 'server' },
+      'tok-admin': { uid: 'admin-1', role: 'admin' },
+      'tok-moderator': { uid: 'mod-1', role: 'moderator' },
     };
     const mapped = map[token];
     if (!mapped) return { authenticated: false, error: 'unknown token' };
@@ -498,4 +500,40 @@ describe('WS server — location pipeline', () => {
       server.ws.close();
     });
   });
+
+  describe('Role-based Channel Segregation (Admin/Mod vs Driver/Student)', () => {
+    it('forbids admin and moderator from subscribing to waiting_flags_* and driver_wait_request_*', async () => {
+      const admin = await connect('?token=tok-admin');
+      await admin.next(); // auth_ok
+      admin.ws.send(JSON.stringify({ type: 'subscribe', channel: 'waiting_flags_b1' }));
+      const adminErr = await admin.next();
+      expect(adminErr.type).toBe('error');
+      expect(adminErr.message).toContain('Admin and Moderator roles have no access to student waiting flags');
+
+      admin.ws.send(JSON.stringify({ type: 'subscribe', channel: 'driver_wait_request_b1' }));
+      const adminErr2 = await admin.next();
+      expect(adminErr2.type).toBe('error');
+      expect(adminErr2.message).toContain('Admin and Moderator roles have no access to student waiting flags');
+      admin.ws.close();
+
+      const mod = await connect('?token=tok-moderator');
+      await mod.next(); // auth_ok
+      mod.ws.send(JSON.stringify({ type: 'subscribe', channel: 'waiting_flags_b1' }));
+      const modErr = await mod.next();
+      expect(modErr.type).toBe('error');
+      expect(modErr.message).toContain('Admin and Moderator roles have no access to student waiting flags');
+      mod.ws.close();
+    });
+
+    it('permits admin and moderator to subscribe to fleet bus location channels (bus_location_*)', async () => {
+      const admin = await connect('?token=tok-admin');
+      await admin.next(); // auth_ok
+      admin.ws.send(JSON.stringify({ type: 'subscribe', channel: 'bus_location_b1' }));
+      const sub = await admin.next();
+      expect(sub.type).toBe('subscribed');
+      expect(sub.channel).toBe('bus_location_b1');
+      admin.ws.close();
+    });
+  });
 });
+

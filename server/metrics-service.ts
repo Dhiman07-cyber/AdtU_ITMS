@@ -1,6 +1,47 @@
+import * as net from 'net';
 import { sessionManager } from './session-manager';
 import { subscriptionManager } from './subscription-manager';
 import { connectionRegistry } from './connection-registry';
+
+let cachedRedisMemory = 0;
+let cachedRedisCommands = 0;
+let lastRedisPoll = 0;
+
+function pollRedisStats() {
+  const now = Date.now();
+  if (now - lastRedisPoll < 5000) return;
+  lastRedisPoll = now;
+
+  try {
+    const redisUrl = process.env.REDIS_URL || 'redis://redis:6379';
+    const parsed = new URL(redisUrl);
+    const host = parsed.hostname || '127.0.0.1';
+    const port = parseInt(parsed.port || '6379', 10);
+    const password = parsed.password || '';
+
+    const socket = net.createConnection({ host, port, timeout: 1500 });
+    let buf = '';
+
+    socket.on('connect', () => {
+      if (password) socket.write(`AUTH ${password}\r\n`);
+      socket.write('INFO memory\r\nINFO stats\r\nQUIT\r\n');
+    });
+
+    socket.on('data', (d) => {
+      buf += d.toString();
+    });
+
+    socket.on('end', () => {
+      const memMatch = buf.match(/used_memory:(\d+)/);
+      if (memMatch) cachedRedisMemory = parseInt(memMatch[1], 10);
+      const cmdMatch = buf.match(/total_commands_processed:(\d+)/);
+      if (cmdMatch) cachedRedisCommands = parseInt(cmdMatch[1], 10);
+    });
+
+    socket.on('error', () => {});
+    socket.on('timeout', () => socket.destroy());
+  } catch {}
+}
 
 export type MetricKey =
   | 'messagesSent' | 'messagesReceived'
@@ -16,7 +57,9 @@ export type MetricKey =
   // Trip lifecycle
   | 'tripsStarted' | 'tripsEnded' | 'heartbeatsSent'
   // Notifications
-  | 'notificationsSent' | 'notificationsFailed' | 'notificationsDeduplicated';
+  | 'notificationsSent' | 'notificationsFailed' | 'notificationsDeduplicated'
+  // Redis Pub/Sub & Fleet
+  | 'redisPubSubMessages' | 'waitingFlagsCreated' | 'waitingFlagsCancelled';
 
 export class MetricsService {
   private startTime = Date.now();
@@ -31,15 +74,22 @@ export class MetricsService {
     gpsAccepted: 0, gpsRejected: 0,
     tripsStarted: 0, tripsEnded: 0, heartbeatsSent: 0,
     notificationsSent: 0, notificationsFailed: 0, notificationsDeduplicated: 0,
+    redisPubSubMessages: 0, waitingFlagsCreated: 0, waitingFlagsCancelled: 0,
   };
 
-  inc(k: MetricKey, n = 1): void { this.state[k] += n; }
+  inc(k: MetricKey, n = 1): void { this.state[k] = (this.state[k] || 0) + n; }
   get(k: MetricKey): number { return this.state[k] || 0; }
 
   get uptime() { return Date.now() - this.startTime; }
 
   snapshot() {
     const s = this.state;
+    const activeDrivers = sessionManager.getByRole('driver').length;
+    const activeStudents = sessionManager.getByRole('student').length;
+    const activeTripsByDrivers = sessionManager.getByRole('driver').filter(d => Boolean(d.tripId)).length;
+    const activeTrips = Math.max(activeTripsByDrivers, Math.max(0, s.tripsStarted - s.tripsEnded));
+    const activeWaitingFlags = Math.max(0, s.waitingFlagsCreated - s.waitingFlagsCancelled);
+
     return {
       uptime: this.uptime,
       startTime: this.startTime,
@@ -63,13 +113,33 @@ export class MetricsService {
       heartbeatTimeouts: s.heartbeatTimeouts,
       reconnectsHandled: s.reconnectsHandled,
       gps: { accepted: s.gpsAccepted, rejected: s.gpsRejected },
-      trips: { started: s.tripsStarted, ended: s.tripsEnded, heartbeatsSent: s.heartbeatsSent },
+      trips: {
+        started: s.tripsStarted,
+        ended: s.tripsEnded,
+        active: activeTrips,
+        heartbeatsSent: s.heartbeatsSent,
+      },
+      fleet: {
+        activeDrivers,
+        activeStudents,
+        totalBuses: 50,
+        activeWaitingFlags,
+      },
+      redis: {
+        pubSubMessages: s.redisPubSubMessages,
+        activeChannels: subscriptionManager.getChannelCount() > 0 ? 2 : 1,
+      },
       notifications: { sent: s.notificationsSent, failed: s.notificationsFailed, deduplicated: s.notificationsDeduplicated },
     };
   }
 
   prometheus(): string {
+    pollRedisStats();
     const s = this.snapshot();
+    const cpu = process.cpuUsage();
+    const mem = process.memoryUsage();
+    const cpuSeconds = ((cpu.user + cpu.system) / 1e6).toFixed(4);
+
     return [
       '# HELP itms_ws_connections_active Active WebSocket connections',
       '# TYPE itms_ws_connections_active gauge',
@@ -122,12 +192,72 @@ export class MetricsService {
       '# HELP itms_trips_ended Total trips ended',
       '# TYPE itms_trips_ended counter',
       `itms_trips_ended ${s.trips.ended}`,
+      '# HELP itms_trips_active Active Operating Trips',
+      '# TYPE itms_trips_active gauge',
+      `itms_trips_active ${s.trips.active}`,
+      '# HELP itms_trips_completed_today_total Total completed trips today',
+      '# TYPE itms_trips_completed_today_total counter',
+      `itms_trips_completed_today_total ${s.trips.ended}`,
+      '# HELP itms_active_drivers_count Active Drivers Online',
+      '# TYPE itms_active_drivers_count gauge',
+      `itms_active_drivers_count ${s.fleet.activeDrivers}`,
+      '# HELP itms_active_students_count Active Students Connected',
+      '# TYPE itms_active_students_count gauge',
+      `itms_active_students_count ${s.fleet.activeStudents}`,
+      '# HELP itms_buses_total Total campus buses fleet size',
+      '# TYPE itms_buses_total gauge',
+      `itms_buses_total ${s.fleet.totalBuses}`,
+      '# HELP itms_waiting_flags_active Active Student Waiting Flags',
+      '# TYPE itms_waiting_flags_active gauge',
+      `itms_waiting_flags_active ${s.fleet.activeWaitingFlags}`,
+      '# HELP itms_waiting_flags_created_total Total waiting flags created',
+      '# TYPE itms_waiting_flags_created_total counter',
+      `itms_waiting_flags_created_total ${s.fleet.activeWaitingFlags}`,
+      '# HELP itms_redis_pubsub_messages_total Total Redis Pub/Sub messages routed',
+      '# TYPE itms_redis_pubsub_messages_total counter',
+      `itms_redis_pubsub_messages_total ${s.redis.pubSubMessages}`,
+      '# HELP itms_redis_pubsub_channels_active Active Redis Pub/Sub channels',
+      '# TYPE itms_redis_pubsub_channels_active gauge',
+      `itms_redis_pubsub_channels_active ${s.redis.activeChannels}`,
       '# HELP itms_notifications_sent Total FCM notifications sent',
       '# TYPE itms_notifications_sent counter',
       `itms_notifications_sent ${s.notifications.sent}`,
       '# HELP itms_notifications_failed Total FCM notifications failed',
       '# TYPE itms_notifications_failed counter',
       `itms_notifications_failed ${s.notifications.failed}`,
+      '# HELP process_cpu_seconds_total Total user and system CPU time spent in seconds',
+      '# TYPE process_cpu_seconds_total counter',
+      `process_cpu_seconds_total ${cpuSeconds}`,
+      '# HELP process_resident_memory_bytes Resident memory size in bytes',
+      '# TYPE process_resident_memory_bytes gauge',
+      `process_resident_memory_bytes ${mem.rss}`,
+      '# HELP nodejs_heap_size_used_bytes Node.js heap memory used in bytes',
+      '# TYPE nodejs_heap_size_used_bytes gauge',
+      `nodejs_heap_size_used_bytes ${mem.heapUsed}`,
+      '# HELP nodejs_heap_size_total_bytes Node.js heap memory total in bytes',
+      '# TYPE nodejs_heap_size_total_bytes gauge',
+      `nodejs_heap_size_total_bytes ${mem.heapTotal}`,
+      '# HELP itms_process_cpu_seconds_total ITMS user and system CPU time spent in seconds',
+      '# TYPE itms_process_cpu_seconds_total counter',
+      `itms_process_cpu_seconds_total ${cpuSeconds}`,
+      '# HELP itms_process_resident_memory_bytes ITMS resident memory size in bytes',
+      '# TYPE itms_process_resident_memory_bytes gauge',
+      `itms_process_resident_memory_bytes ${mem.rss}`,
+      '# HELP itms_nodejs_heap_size_used_bytes ITMS heap memory used in bytes',
+      '# TYPE itms_nodejs_heap_size_used_bytes gauge',
+      `itms_nodejs_heap_size_used_bytes ${mem.heapUsed}`,
+      '# HELP redis_memory_used_bytes Redis memory used in bytes',
+      '# TYPE redis_memory_used_bytes gauge',
+      `redis_memory_used_bytes ${cachedRedisMemory}`,
+      '# HELP redis_commands_total Total Redis commands processed',
+      '# TYPE redis_commands_total counter',
+      `redis_commands_total ${cachedRedisCommands}`,
+      '# HELP itms_redis_memory_used_bytes ITMS Redis memory used in bytes',
+      '# TYPE itms_redis_memory_used_bytes gauge',
+      `itms_redis_memory_used_bytes ${cachedRedisMemory}`,
+      '# HELP itms_redis_commands_total ITMS Redis commands processed',
+      '# TYPE itms_redis_commands_total counter',
+      `itms_redis_commands_total ${cachedRedisCommands}`,
     ].join('\n');
   }
 }

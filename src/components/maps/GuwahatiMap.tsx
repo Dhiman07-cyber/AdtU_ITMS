@@ -199,6 +199,14 @@ function animateMarkerTo(
   if (isNaN(toLng) || isNaN(toLat)) return;
 
   if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+
+  // If tab/screen is hidden, do not spin a 60fps RAF loop; jump directly to save battery/GPU
+  if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+    marker.setLngLat([toLng, toLat]);
+    rafRef.current = null;
+    return;
+  }
+
   const start = performance.now();
   const step = (t: number) => {
     const p = Math.min(1, (t - start) / 1000);

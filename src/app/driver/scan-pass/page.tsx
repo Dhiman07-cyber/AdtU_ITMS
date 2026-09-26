@@ -222,6 +222,11 @@ export default function DriverScanPassPage() {
   const scanQRCode = async () => {
     if (!isScanningRef.current) return;
 
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+      setTimeout(scanQRCode, 500);
+      return;
+    }
+
     if (!videoRef.current || !canvasRef.current) {
       // Throttle: wait 100ms before retrying
       setTimeout(scanQRCode, 100);

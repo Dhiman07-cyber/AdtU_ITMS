@@ -177,3 +177,58 @@ describe('GPS Reliability — Replay Resistance (raw client clock)', () => {
     expect(recovered.accepted).toBe(true);
   });
 });
+
+describe('GPS Reliability — High-Frequency Burst & Jitter Resilience', () => {
+  beforeEach(() => {
+    clearInMemoryLastLocation('bus-1');
+  });
+
+  it('accepts a rapid burst of monotonic coordinates along a realistic road trajectory', async () => {
+    const startMs = Date.now();
+    for (let i = 0; i < 5; i++) {
+      const res = await processLocationUpdate({
+        ...base,
+        lat: 12.9716 + i * 0.0001, // ~11m step
+        lng: 77.5946 + i * 0.0001,
+        timestamp: new Date(startMs + i * 1000).toISOString(),
+      });
+      expect(res.accepted).toBe(true);
+    }
+  });
+
+  it('filters out-of-order jitter while accepting strictly increasing subsequent packets', async () => {
+    const t0 = Date.now();
+    // 1. First packet at t0
+    const p1 = await processLocationUpdate({ ...base, lat: 12.9716, lng: 77.5946, timestamp: new Date(t0).toISOString() });
+    expect(p1.accepted).toBe(true);
+
+    // 2. Second packet at t0 + 2000ms
+    const p2 = await processLocationUpdate({ ...base, lat: 12.9718, lng: 77.5948, timestamp: new Date(t0 + 2000).toISOString() });
+    expect(p2.accepted).toBe(true);
+
+    // 3. Stale lagging packet at t0 + 1000ms (arrived late over cellular network) -> must reject
+    const pLag = await processLocationUpdate({ ...base, lat: 12.9717, lng: 77.5947, timestamp: new Date(t0 + 1000).toISOString() });
+    expect(pLag.accepted).toBe(false);
+    expect(pLag.reason).toMatch(/out-of-order/i);
+
+    // 4. Fresh packet at t0 + 3000ms -> must accept
+    const p3 = await processLocationUpdate({ ...base, lat: 12.9720, lng: 77.5950, timestamp: new Date(t0 + 3000).toISOString() });
+    expect(p3.accepted).toBe(true);
+  });
+
+  it('rejects calculated velocity exceeding speed limit during short intervals', async () => {
+    const t0 = Date.now();
+    const p1 = await processLocationUpdate({ ...base, lat: 12.9716, lng: 77.5946, timestamp: new Date(t0).toISOString() });
+    expect(p1.accepted).toBe(true);
+
+    // Moves 600 meters in 1 second (~2160 km/h)
+    const pSuperFast = await processLocationUpdate({
+      ...base,
+      lat: 12.9770, // ~600m away
+      lng: 77.5946,
+      timestamp: new Date(t0 + 1000).toISOString(),
+    });
+    expect(pSuperFast.accepted).toBe(false);
+    expect(pSuperFast.reason).toMatch(/calculated speed/i);
+  });
+});

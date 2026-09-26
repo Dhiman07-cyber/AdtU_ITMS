@@ -30,6 +30,7 @@ import { logger } from './structured-logger';
 import { invalidateTokenAuthCache } from './authenticator';
 import { sessionManager } from './session-manager';
 import { connectionRegistry } from './connection-registry';
+import { metricsService } from './metrics-service';
 
 /** Unique identifier for this WS server process. Never changes after startup. */
 export const MY_NODE_ID = crypto.randomUUID();
@@ -67,6 +68,7 @@ export function publishToRedis(
     originNodeId: MY_NODE_ID,
   };
 
+  metricsService.inc('redisPubSubMessages');
   redisPubSub.publish(REDIS_BROADCAST_CHANNEL, JSON.stringify(envelope)).catch((err) => {
     logger.warn('redis_broadcast_publish_error', {
       channel,
@@ -90,6 +92,7 @@ export async function initRedisBroadcastRelay(
   onTripEnded?: (busId: string) => void,
 ): Promise<void> {
   await redisPubSub.subscribe(REDIS_BROADCAST_CHANNEL, (raw) => {
+    metricsService.inc('redisPubSubMessages');
     let envelope: BroadcastEnvelope;
     try {
       envelope = JSON.parse(raw) as BroadcastEnvelope;
@@ -110,6 +113,11 @@ export async function initRedisBroadcastRelay(
     } else if (envelope.event === 'trip_ended' && busId) {
       onTripEnded?.(busId);
     }
+
+    if (envelope.event === 'trip_started') metricsService.inc('tripsStarted');
+    if (envelope.event === 'trip_ended') metricsService.inc('tripsEnded');
+    if (envelope.event === 'waiting_flag_raised' || envelope.event === 'waiting_flag_created') metricsService.inc('waitingFlagsCreated');
+    if (envelope.event === 'waiting_flag_cancelled' || envelope.event === 'waiting_flag_resolved' || envelope.event === 'waiting_flag_removed' || envelope.event === 'waiting_flag_boarded') metricsService.inc('waitingFlagsCancelled');
 
     // Relay to local subscribers.
     onBroadcast(envelope.channel, envelope.event, envelope.payload);

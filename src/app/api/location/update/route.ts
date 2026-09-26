@@ -4,6 +4,7 @@ import { withSecurity } from '@/lib/security/api-security';
 import { RateLimits } from '@/lib/security/rate-limiter';
 import { LocationUpdateBodySchema } from '@/lib/security/validation-schemas';
 import { getSupabaseServer } from '@/lib/supabase-server';
+import { getCachedDeviceSession, setCachedDeviceSession } from '@/lib/services/device-session-cache';
 import { shouldWriteLocationBreadcrumb, shouldWriteHeartbeat } from '@/lib/services/location-write-throttle';
 import { NextResponse } from 'next/server';
 
@@ -15,18 +16,27 @@ export const POST = withSecurity(
 
     const requestDeviceId = deviceId || (request instanceof Request ? request.headers.get('x-device-id') : (request as any).headers?.get?.('x-device-id'));
     const supabase = getSupabaseServer();
-    const { data: sessionData } = await supabase
-      .from('device_sessions')
-      .select('device_id, last_active_at')
-      .eq('user_id', driverUid)
-      .eq('feature', 'driver_location_share')
-      .order('last_active_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    let sessionData = getCachedDeviceSession(driverUid);
+    if (!sessionData) {
+      const { data } = await supabase
+        .from('device_sessions')
+        .select('device_id, last_active_at')
+        .eq('user_id', driverUid)
+        .eq('feature', 'driver_location_share')
+        .order('last_active_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (data) {
+        const lastActiveAtMs = new Date(data.last_active_at).getTime();
+        setCachedDeviceSession(driverUid, data.device_id, lastActiveAtMs);
+        sessionData = { deviceId: data.device_id, lastActiveAtMs, cachedAtMs: Date.now() };
+      }
+    }
 
     if (sessionData) {
-      const sessionAge = Date.now() - new Date(sessionData.last_active_at).getTime();
-      if (sessionAge <= 30000 && (!requestDeviceId || sessionData.device_id !== requestDeviceId)) {
+      const sessionAge = Date.now() - sessionData.lastActiveAtMs;
+      if (sessionAge <= 30000 && (!requestDeviceId || sessionData.deviceId !== requestDeviceId)) {
         return NextResponse.json({
           success: false,
           error: 'Active session exists on another device. Location update rejected.',

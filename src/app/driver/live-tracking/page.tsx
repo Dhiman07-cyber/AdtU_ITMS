@@ -720,6 +720,9 @@ export default function DriverLiveTrackingPage() {
   useEffect(() => {
     if (!currentUser || (!tripActive && !busLockedByOther)) return;
     const interval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden' && !tripActiveRef.current) {
+        return;
+      }
       // Re-use the same checkActiveTrip defined in the effect above by calling
       // the driver check-active-trip API directly here (tiny duplication is
       // better than hoisting the whole async function out of its scope).
@@ -991,8 +994,11 @@ export default function DriverLiveTrackingPage() {
     // Subscribe and keep the unsubscribe function
     const unsubscribe = wsClient.subscribe(`waiting_flags_${targetBusId}`, handleWaitingFlagPayload);
 
-    // Also reload flags from API periodically (every 8s) as safety fallback
+    // Also reload flags from API periodically (every 30s) as safety fallback
     const fetchFlags = async () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+        return;
+      }
       try {
         const idToken = await currentUser.getIdToken();
         const res = await fetch('/api/driver/dashboard-data', {
@@ -1012,10 +1018,22 @@ export default function DriverLiveTrackingPage() {
     fetchFlags();
     const pollInterval = setInterval(fetchFlags, 30000);
 
+    const handleFlagsVisibility = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        fetchFlags();
+      }
+    };
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', handleFlagsVisibility);
+    }
+
     return () => {
       console.log("🔕 [WAITING_FLAG_PIPELINE Step 6/6] Unsubscribing from:", `waiting_flags_${targetBusId}`);
       clearInterval(pollInterval);
       unsubscribe();
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', handleFlagsVisibility);
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wsClientReady, targetBusId, currentUser]);

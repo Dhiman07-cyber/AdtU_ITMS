@@ -1,4 +1,7 @@
-const PER_IP_LIMIT = parseInt(process.env.RATE_LIMIT_PER_IP || '100', 10);
+const PER_IP_LIMIT = parseInt(
+  process.env.RATE_LIMIT_PER_IP || (process.env.STAGING_MODE === 'true' ? '100000' : '100'),
+  10
+);
 const PER_USER_LIMIT = parseInt(process.env.RATE_LIMIT_PER_USER || '200', 10);
 const PER_SOCKET_LIMIT = parseInt(process.env.RATE_LIMIT_PER_SOCKET || '60', 10);
 const WINDOW_MS = parseInt(process.env.RATE_LIMIT_WINDOW_MS || '10000', 10);
@@ -29,7 +32,11 @@ function checkBucket(map: Map<string, Bucket>, key: string, limit: number): bool
 }
 
 export function checkRateLimit(ip: string, uid: string, socketId: string): boolean {
-  const ipOk = checkBucket(ipBuckets, ip, PER_IP_LIMIT);
+  const isStagingLocal = process.env.STAGING_MODE === 'true' && (
+    ip === '127.0.0.1' || ip === '::1' || ip === 'localhost' ||
+    ip.startsWith('172.') || ip.startsWith('10.') || ip.startsWith('192.168.')
+  );
+  const ipOk = isStagingLocal || checkBucket(ipBuckets, ip, PER_IP_LIMIT);
   const userOk = checkBucket(userBuckets, uid, PER_USER_LIMIT);
   const socketOk = checkBucket(socketBuckets, socketId, PER_SOCKET_LIMIT);
   return ipOk && userOk && socketOk;
