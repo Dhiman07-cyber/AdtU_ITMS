@@ -1,6 +1,7 @@
 "use client";
 
 import DriverLayout from "@/components/DriverLayout";
+import { PermissionDeniedCard } from '@/components/PermissionDeniedCard';
 import { useAuth } from '@/contexts/auth-context';
 import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
@@ -35,6 +36,19 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
   if (!currentUser || userData?.role !== 'driver') {
     return null;
+  }
+
+  if (userData.status && userData.status !== 'active') {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
+        <PermissionDeniedCard
+          title="Driver Access Suspended"
+          description="Your driver account access has been temporarily deactivated or suspended by an administrator. Please contact the transport office."
+          actionName="Driver Portal Access"
+          showGoBack={false}
+        />
+      </div>
+    );
   }
 
   return <DriverLayout>{children}</DriverLayout>;

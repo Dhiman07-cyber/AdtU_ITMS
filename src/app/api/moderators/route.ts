@@ -47,6 +47,10 @@ export async function GET(request: NextRequest) {
       dob: row.dob || '',
       aadharNumber: row.aadharNumber || '',
       employeeId: row.employeeId || '',
+      status: row.status || 'active',
+      permissions: row.permissions || null,
+      permissionsUpdatedAt: row.permissionsUpdatedAt || null,
+      permissionsUpdatedBy: row.permissionsUpdatedBy || null,
     }));
 
     return NextResponse.json(moderators, { headers: rl.headers });

@@ -3,24 +3,16 @@ import { RateLimits } from '@/lib/security/rate-limiter';
 import { safeErrorMessage } from '@/lib/security/safe-error';
 import { DeviceSessionSchema } from '@/lib/security/validation-schemas';
 import { getSupabaseServer } from '@/lib/supabase-server';
+import { invalidateCachedDeviceSession, setCachedDeviceSession } from '@/lib/services/device-session-cache';
 import { NextResponse } from 'next/server';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-/**
- * POST /api/driver/device-session
- * 
- * Server-side device session management using service_role key.
- * This bypasses RLS to avoid "permission denied for table device_sessions" errors.
- * 
- * Body: { action, feature, deviceId }
- * action: 'check' | 'register' | 'heartbeat' | 'release'
- */
 export const POST = withSecurity(
     async (request, { auth, body }) => {
         const { action, feature, deviceId } = body as any;
         const userId = auth.uid;
+
+        const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+        const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
         // Use service role key (bypasses RLS)
         if (!supabaseUrl || !supabaseKey) {
@@ -63,15 +55,19 @@ export const POST = withSecurity(
             }
 
             case 'register': {
-                const now = new Date().toISOString();
+                const now = new Date();
+                const nowIso = now.toISOString();
+                const expiresAtIso = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString();
                 const { error } = await supabase
                     .from('device_sessions')
                     .upsert({
                         user_id: userId,
                         device_id: deviceId,
                         feature: feature,
-                        last_active_at: now,
-                        created_at: now
+                        last_active_at: nowIso,
+                        last_active: nowIso,
+                        expires_at: expiresAtIso,
+                        created_at: nowIso
                     }, {
                         onConflict: 'user_id,feature',
                         ignoreDuplicates: false
@@ -82,13 +78,24 @@ export const POST = withSecurity(
                     return NextResponse.json({ success: false, error: safeErrorMessage(error, 'Failed to register device session') }, { status: 500 });
                 }
 
+                if (feature === 'driver_location_share') {
+                    setCachedDeviceSession(userId, deviceId, now.getTime());
+                }
+
                 return NextResponse.json({ success: true });
             }
 
             case 'heartbeat': {
+                const now = new Date();
+                const nowIso = now.toISOString();
+                const expiresAtIso = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString();
                 const { error } = await supabase
                     .from('device_sessions')
-                    .update({ last_active_at: new Date().toISOString() })
+                    .update({
+                        last_active_at: nowIso,
+                        last_active: nowIso,
+                        expires_at: expiresAtIso
+                    })
                     .eq('user_id', userId)
                     .eq('feature', feature)
                     .eq('device_id', deviceId);
@@ -96,6 +103,10 @@ export const POST = withSecurity(
                 if (error) {
                     console.error('Error heartbeating session:', error);
                     return NextResponse.json({ success: false, error: safeErrorMessage(error, 'Failed to update session') }, { status: 500 });
+                }
+
+                if (feature === 'driver_location_share') {
+                    setCachedDeviceSession(userId, deviceId, now.getTime());
                 }
 
                 return NextResponse.json({ success: true });
@@ -112,6 +123,10 @@ export const POST = withSecurity(
                 if (error) {
                     console.error('Error releasing session:', error);
                     return NextResponse.json({ success: false, error: safeErrorMessage(error, 'Failed to release session') }, { status: 500 });
+                }
+
+                if (feature === 'driver_location_share') {
+                    invalidateCachedDeviceSession(userId);
                 }
 
                 return NextResponse.json({ success: true });

@@ -19,13 +19,13 @@ export {
 	// Moderator Permissions
 	getModeratorPermissions,getModeratorsByStatus,getSeatOccupyingStudents,
 	// Student Profiles
-	getStudentById,getStudentsByBusIds,
+	getStudentById,getStudentsByIds,getStudentsByBusIds,
 	getStudentsByRouteIds,getStudentsByShift,getStudentsByStatus,
 	getStudentsByStatuses,
 	// Unauth Users
 	getUnauthUserById,getUserByEmail,
 	// Users
-	getUserById,getUsersByRole,getValidFcmTokensForUsers,hashFcmToken,requireModeratorPermission,
+	getUserById,getUsersByEmails,getUsersByIds,getUsersByRole,getValidFcmTokensForUsers,hashFcmToken,requireModeratorPermission,
 	// FCM Tokens
 	saveFcmToken,updateAdmin,updateDriver,updateModerator,
 	updateModeratorPermissions,updateStudent,updateUnauthUser,updateUser

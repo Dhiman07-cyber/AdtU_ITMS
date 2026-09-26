@@ -22,6 +22,7 @@ import {
 	pgFindById,
 	pgFindByStatus,
 	pgFindByUid,
+	pgFindByUids,
 	pgInsert,
 	pgRemove,
 	pgUnassignRoute,
@@ -35,6 +36,10 @@ export async function findByUid(uid: string): Promise<Student | null> {
 
 export async function findById(id: string): Promise<Student | null> {
   return pgFindById(id);
+}
+
+export async function findByUids(ids: string[]): Promise<Student[]> {
+  return pgFindByUids(ids);
 }
 
 export async function findAll(): Promise<Student[]> {

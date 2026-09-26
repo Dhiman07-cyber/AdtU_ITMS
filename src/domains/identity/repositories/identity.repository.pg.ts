@@ -201,6 +201,37 @@ export async function pgFindUserById(uid: string): Promise<IdentityUser | null> 
     } else {
       user.status = 'active';
     }
+  } else if (user.role === 'moderator') {
+    const { data: modProfile } = await db
+      .from('moderator_profiles')
+      .select('status, permissions, employee_id, phone, faculty')
+      .eq('uid', uid)
+      .maybeSingle();
+
+    if (modProfile) {
+      user.status = modProfile.status || 'active';
+      user.permissions = modProfile.permissions;
+      user.employeeId = modProfile.employee_id;
+      user.phone = modProfile.phone;
+      user.faculty = modProfile.faculty;
+    } else {
+      user.status = 'active';
+    }
+  } else if (user.role === 'driver') {
+    const { data: driverProfile } = await db
+      .from('driver_profiles')
+      .select('status, employee_id, phone, license_number')
+      .eq('uid', uid)
+      .maybeSingle();
+
+    if (driverProfile) {
+      user.status = driverProfile.status || 'active';
+      user.employeeId = driverProfile.employee_id;
+      user.phone = driverProfile.phone;
+      user.licenseNumber = driverProfile.license_number;
+    } else {
+      user.status = 'active';
+    }
   }
 
   return user;
@@ -260,6 +291,46 @@ export async function pgFindUserByEmail(email: string): Promise<IdentityUser | n
   if (!data) return null;
 
   return pgRowToUser(data as PgUser);
+}
+
+/**
+ * Find users by a list of UIDs in a single batched query.
+ */
+export async function pgFindUsersByIds(uids: string[]): Promise<IdentityUser[]> {
+  const db = getSupabaseServer();
+  const cleanUids = Array.from(new Set(uids.map(u => (u || '').trim()).filter(Boolean)));
+  if (cleanUids.length === 0) return [];
+
+  const { data, error } = await db
+    .from('users')
+    .select(USER_COLUMNS)
+    .in('uid', cleanUids);
+
+  if (error) {
+    throw new Error(`IdentityRepository (PG) batch read by UIDs failed: ${error.message}`);
+  }
+
+  return (data || []).map(row => pgRowToUser(row as PgUser));
+}
+
+/**
+ * Find users by a list of emails in a single batched query.
+ */
+export async function pgFindUsersByEmails(emails: string[]): Promise<IdentityUser[]> {
+  const db = getSupabaseServer();
+  const cleanEmails = Array.from(new Set(emails.map(e => (e || '').trim()).filter(Boolean)));
+  if (cleanEmails.length === 0) return [];
+
+  const { data, error } = await db
+    .from('users')
+    .select(USER_COLUMNS)
+    .in('email', cleanEmails);
+
+  if (error) {
+    throw new Error(`IdentityRepository (PG) batch read by emails failed: ${error.message}`);
+  }
+
+  return (data || []).map(row => pgRowToUser(row as PgUser));
 }
 
 /**
@@ -354,6 +425,11 @@ export async function pgUpdateLastLogin(uid: string): Promise<void> {
 /** Find a student profile by UID */
 export async function pgFindStudentById(uid: string): Promise<Record<string, any> | null> {
   return studentRepo.pgFindByUid(uid);
+}
+
+/** Find students by multiple UIDs or enrollment IDs in a single batch query */
+export async function pgFindStudentsByIds(uids: string[]): Promise<Record<string, any>[]> {
+  return studentRepo.pgFindByUids(uids);
 }
 
 /** Find students by bus ID */

@@ -25,6 +25,10 @@ export async function getById(id: string): Promise<Student | null> {
   return studentRepository.findById(id);
 }
 
+export async function getByUids(ids: string[]): Promise<Student[]> {
+  return studentRepository.findByUids(ids);
+}
+
 export async function getAll(): Promise<Student[]> {
   return studentRepository.findAll();
 }

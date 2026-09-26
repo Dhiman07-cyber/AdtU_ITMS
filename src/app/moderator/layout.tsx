@@ -1,5 +1,6 @@
 "use client";
 
+import { PermissionDeniedCard } from '@/components/PermissionDeniedCard';
 import { useAuth } from '@/contexts/auth-context';
 import { useRouter } from 'next/navigation';
 import { useEffect,useState } from 'react';
@@ -58,6 +59,20 @@ export default function ModeratorLayout({
   const isAuthorized = userData?.role === 'admin' || userData?.role === 'moderator';
   if (!currentUser || !isAuthorized) {
     return null;
+  }
+
+  // Suspended or inactive moderator check - completely block access
+  if (userData.role === 'moderator' && userData.status && userData.status !== 'active') {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
+        <PermissionDeniedCard
+          title="Moderator Access Suspended"
+          description="Your moderator account access has been temporarily revoked or suspended by an administrator. Please contact your system administrator for assistance."
+          actionName="Moderator Portal Access"
+          showGoBack={false}
+        />
+      </div>
+    );
   }
 
   return <>{children}</>;

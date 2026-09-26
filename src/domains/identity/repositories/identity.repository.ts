@@ -26,6 +26,7 @@ import {
 	pgFindModeratorsByStatus,
 	pgFindSeatOccupyingStudents,
 	pgFindStudentById,
+	pgFindStudentsByIds,
 	pgFindStudentsByBusIds,
 	pgFindStudentsByRouteIds,
 	pgFindStudentsByShift,
@@ -34,6 +35,8 @@ import {
 	pgFindUnauthUserById,
 	pgFindUserByEmail,
 	pgFindUserById,
+	pgFindUsersByEmails,
+	pgFindUsersByIds,
 	pgFindUsersByRole,
 	pgGetBusOccupancyStats,
 	pgInsertAdmin,
@@ -69,8 +72,16 @@ export async function findUserById(uid: string): Promise<User | null> {
   return pgFindUserById(uid);
 }
 
+export async function findUsersByIds(uids: string[]): Promise<User[]> {
+  return pgFindUsersByIds(uids);
+}
+
 export async function findUserByEmail(email: string): Promise<User | null> {
   return pgFindUserByEmail(email);
+}
+
+export async function findUsersByEmails(emails: string[]): Promise<User[]> {
+  return pgFindUsersByEmails(emails);
 }
 
 export async function findUsersByRole(role: UserRole): Promise<User[]> {
@@ -97,6 +108,10 @@ export async function removeUser(uid: string): Promise<void> {
 
 export async function findStudentById(uid: string): Promise<Record<string, any> | null> {
   return pgFindStudentById(uid);
+}
+
+export async function findStudentsByIds(uids: string[]): Promise<Record<string, any>[]> {
+  return pgFindStudentsByIds(uids);
 }
 
 export async function findStudentsByStatus(status: string): Promise<Record<string, any>[]> {

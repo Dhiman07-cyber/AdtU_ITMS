@@ -1,5 +1,6 @@
 "use client";
 
+import StudentAccessBlockScreen from '@/components/StudentAccessBlockScreen';
 import { useAuth } from '@/contexts/auth-context';
 import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
@@ -9,12 +10,11 @@ interface StudentAuthWrapperProps {
 }
 
 /**
- * Wrapper component that ensures user is a student
- * NO LONGER blocks access for expired students - they can access dashboard
- * Expiry check is now only on Track Bus page
+ * Wrapper component that ensures user is an authenticated student.
+ * If admin has revoked or suspended access, all screens (dashboard, pass, profile, etc.) are blocked.
  */
 export default function StudentAuthWrapper({ children }: StudentAuthWrapperProps) {
-  const { userData, loading } = useAuth();
+  const { userData, loading, signOut } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
@@ -34,6 +34,23 @@ export default function StudentAuthWrapper({ children }: StudentAuthWrapperProps
     return null; // Auth context will handle redirect
   }
 
-  // Show content regardless of expiry status
+  // Check if admin has revoked/suspended access
+  const isRevoked =
+    userData.role === 'student' &&
+    userData.status &&
+    ['suspended', 'inactive', 'revoked'].includes(userData.status);
+
+  if (isRevoked) {
+    return (
+      <StudentAccessBlockScreen
+        validUntil={(userData as any)?.validUntil ?? null}
+        studentName={(userData as any)?.fullName || (userData as any)?.name || 'Student'}
+        reason="inactive_status"
+        onLogout={signOut}
+        deadlineConfig={null}
+      />
+    );
+  }
+
   return <>{children}</>;
 }

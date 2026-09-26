@@ -121,6 +121,14 @@ export function useModeratorPermissions(): UseModeratorPermissionsReturn {
             return;
         }
 
+        // Suspended or inactive moderator has zero permissions
+        if (userData?.role === 'moderator' && userData.status && userData.status !== 'active') {
+            const { ZERO_MODERATOR_PERMISSIONS } = require('@/lib/types/moderator-permissions');
+            setPermissions(ZERO_MODERATOR_PERMISSIONS);
+            setLoading(false);
+            return;
+        }
+
         // Non-moderators use defaults
         if (!currentUser || userData?.role !== 'moderator') {
             setPermissions(DEFAULT_MODERATOR_PERMISSIONS);

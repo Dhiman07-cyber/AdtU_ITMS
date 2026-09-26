@@ -2,7 +2,9 @@ import { getModeratorById } from '@/domains/identity';
 import type { SecurityAuth } from '@/lib/security/api-security';
 import {
 	DEFAULT_MODERATOR_PERMISSIONS,
+	mergeWithDefaults,
 	type ModeratorPermissions,
+	ZERO_MODERATOR_PERMISSIONS,
 } from '@/lib/types/moderator-permissions';
 import { NextResponse } from 'next/server';
 
@@ -11,17 +13,6 @@ type PermissionKey<C extends PermissionCategory> = keyof ModeratorPermissions[C]
 
 const permissionCache = new Map<string, { permissions: ModeratorPermissions; expiresAt: number }>();
 const PERMISSION_CACHE_TTL_MS = 60 * 1000;
-
-function mergeWithDefaults(partial?: Partial<ModeratorPermissions>): ModeratorPermissions {
-  return {
-    students: { ...DEFAULT_MODERATOR_PERMISSIONS.students, ...(partial?.students || {}) },
-    drivers: { ...DEFAULT_MODERATOR_PERMISSIONS.drivers, ...(partial?.drivers || {}) },
-    buses: { ...DEFAULT_MODERATOR_PERMISSIONS.buses, ...(partial?.buses || {}) },
-    routes: { ...DEFAULT_MODERATOR_PERMISSIONS.routes, ...(partial?.routes || {}) },
-    applications: { ...DEFAULT_MODERATOR_PERMISSIONS.applications, ...(partial?.applications || {}) },
-    payments: { ...DEFAULT_MODERATOR_PERMISSIONS.payments, ...(partial?.payments || {}) },
-  };
-}
 
 export async function getModeratorPermissions(uid: string): Promise<ModeratorPermissions> {
   const cached = permissionCache.get(uid);
@@ -33,8 +24,16 @@ export async function getModeratorPermissions(uid: string): Promise<ModeratorPer
   }
 
   const moderator = await getModeratorById(uid);
+  if (!moderator || (moderator.status && moderator.status !== 'active')) {
+    permissionCache.set(uid, {
+      permissions: ZERO_MODERATOR_PERMISSIONS,
+      expiresAt: Date.now() + PERMISSION_CACHE_TTL_MS,
+    });
+    return ZERO_MODERATOR_PERMISSIONS;
+  }
+
   const permissions = mergeWithDefaults(
-    moderator?.permissions as Partial<ModeratorPermissions> | undefined
+    moderator.permissions as Partial<ModeratorPermissions> | undefined
   );
 
   permissionCache.set(uid, {

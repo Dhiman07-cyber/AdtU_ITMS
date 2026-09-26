@@ -29,6 +29,7 @@ import {
 	findModeratorsByStatus as repoFindModeratorsByStatus,
 	findSeatOccupyingStudents as repoFindSeatOccupyingStudents,
 	findStudentById as repoFindStudentById,
+	findStudentsByIds as repoFindStudentsByIds,
 	findStudentsByBusIds as repoFindStudentsByBusIds,
 	findStudentsByRouteIds as repoFindStudentsByRouteIds,
 	findStudentsByShift as repoFindStudentsByShift,
@@ -37,6 +38,8 @@ import {
 	findUnauthUserById as repoFindUnauthUserById,
 	findUserByEmail as repoFindUserByEmail,
 	findUserById as repoFindUserById,
+	findUsersByEmails as repoFindUsersByEmails,
+	findUsersByIds as repoFindUsersByIds,
 	findUsersByRole as repoFindUsersByRole,
 	getBusOccupancyStats as repoGetBusOccupancyStats,
 	insertAdmin as repoInsertAdmin,
@@ -67,8 +70,16 @@ export async function getUserById(uid: string): Promise<User | null> {
   return repoFindUserById(uid);
 }
 
+export async function getUsersByIds(uids: string[]): Promise<User[]> {
+  return repoFindUsersByIds(uids);
+}
+
 export async function getUserByEmail(email: string): Promise<User | null> {
   return repoFindUserByEmail(email);
+}
+
+export async function getUsersByEmails(emails: string[]): Promise<User[]> {
+  return repoFindUsersByEmails(emails);
 }
 
 export async function getUsersByRole(role: UserRole): Promise<User[]> {
@@ -95,6 +106,10 @@ export async function deleteUser(uid: string) {
 
 export async function getStudentById(uid: string): Promise<Record<string, any> | null> {
   return repoFindStudentById(uid);
+}
+
+export async function getStudentsByIds(uids: string[]): Promise<Record<string, any>[]> {
+  return repoFindStudentsByIds(uids);
 }
 
 export async function getStudentsByStatus(status: string): Promise<Record<string, any>[]> {

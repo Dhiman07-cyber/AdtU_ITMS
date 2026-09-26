@@ -164,6 +164,65 @@ export const FULL_MODERATOR_PERMISSIONS: ModeratorPermissions = {
 };
 
 /**
+ * Zero permissions preset - all actions revoked/disabled.
+ * Used when moderator access is suspended or revoked.
+ */
+export const ZERO_MODERATOR_PERMISSIONS: ModeratorPermissions = {
+  students: {
+    canView: false,
+    canAdd: false,
+    canEdit: false,
+    canDelete: false,
+    canReassign: false,
+  },
+  drivers: {
+    canView: false,
+    canAdd: false,
+    canEdit: false,
+    canDelete: false,
+    canReassign: false,
+  },
+  buses: {
+    canView: false,
+    canAdd: false,
+    canEdit: false,
+    canDelete: false,
+    canReassign: false,
+  },
+  routes: {
+    canView: false,
+    canAdd: false,
+    canEdit: false,
+    canDelete: false,
+  },
+  applications: {
+    canView: false,
+    canApprove: false,
+    canReject: false,
+    canGenerateVerificationCode: false,
+    canAppearInModeratorList: false,
+  },
+  payments: {
+    canApproveOfflinePayment: false,
+    canRejectOfflinePayment: false,
+  },
+};
+
+/**
+ * Merge partial permissions with defaults for backward compatibility.
+ */
+export function mergeWithDefaults(partial?: Partial<ModeratorPermissions>): ModeratorPermissions {
+  return {
+    students: { ...DEFAULT_MODERATOR_PERMISSIONS.students, ...(partial?.students || {}) },
+    drivers: { ...DEFAULT_MODERATOR_PERMISSIONS.drivers, ...(partial?.drivers || {}) },
+    buses: { ...DEFAULT_MODERATOR_PERMISSIONS.buses, ...(partial?.buses || {}) },
+    routes: { ...DEFAULT_MODERATOR_PERMISSIONS.routes, ...(partial?.routes || {}) },
+    applications: { ...DEFAULT_MODERATOR_PERMISSIONS.applications, ...(partial?.applications || {}) },
+    payments: { ...DEFAULT_MODERATOR_PERMISSIONS.payments, ...(partial?.payments || {}) },
+  };
+}
+
+/**
  * Permission category labels for the UI
  */
 export const PERMISSION_CATEGORIES = {
@@ -223,7 +282,7 @@ export const PERMISSION_CATEGORIES = {
       canApprove: 'Approve Applications',
       canReject: 'Reject Applications',
       canGenerateVerificationCode: 'Generate Verification Codes',
-      canAppearInModeratorList: 'Visible in Student Apply Form',
+      canAppearInModeratorList: 'Available for Student Application Review',
     },
   },
   payments: {

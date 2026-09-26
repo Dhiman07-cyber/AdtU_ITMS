@@ -476,6 +476,7 @@ export const UpdatePermissionsSchema = z.object({
         applications: z.object({ canView: z.boolean(), canApprove: z.boolean(), canReject: z.boolean(), canGenerateVerificationCode: z.boolean(), canAppearInModeratorList: z.boolean() }),
         payments: z.object({ canApproveOfflinePayment: z.boolean(), canRejectOfflinePayment: z.boolean() }),
     }),
+    status: z.enum(['active', 'inactive', 'suspended']).optional(),
 });
 
 export const ApproveRenewalSchema = z.object({

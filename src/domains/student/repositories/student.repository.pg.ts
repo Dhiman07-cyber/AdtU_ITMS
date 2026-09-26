@@ -190,6 +190,43 @@ export async function pgFindById(id: string): Promise<Student | null> {
 }
 
 /**
+ * Find students by multiple UIDs or enrollment IDs in a single batch query.
+ */
+export async function pgFindByUids(ids: string[]): Promise<Student[]> {
+  const db = getSupabaseServer();
+  const cleanIds = Array.from(new Set(ids.map(id => decodeURIComponent(id || '').trim()).filter(Boolean)));
+  if (cleanIds.length === 0) return [];
+
+  const { data: byUid, error: uidError } = await db
+    .from('student_profiles')
+    .select(PG_STUDENT_COLUMNS)
+    .in('uid', cleanIds);
+
+  if (uidError) {
+    throw new Error(`StudentRepository (PG) batch read by UID failed: ${uidError.message}`);
+  }
+
+  const foundUids = new Set((byUid || []).map((r: any) => r.uid));
+  const remainingIds = cleanIds.filter(id => !foundUids.has(id));
+
+  let byEnrollment: any[] = [];
+  if (remainingIds.length > 0) {
+    const { data: byEnroll, error: enrollError } = await db
+      .from('student_profiles')
+      .select(PG_STUDENT_COLUMNS)
+      .in('enrollment_id', remainingIds);
+
+    if (enrollError) {
+      throw new Error(`StudentRepository (PG) batch read by enrollment_id failed: ${enrollError.message}`);
+    }
+    byEnrollment = byEnroll || [];
+  }
+
+  const combined = [...(byUid || []), ...byEnrollment];
+  return combined.map(pgRowToStudent);
+}
+
+/**
  * Find all students.
  */
 export async function pgFindAll(): Promise<Student[]> {

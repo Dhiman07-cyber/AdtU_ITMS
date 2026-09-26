@@ -1,4 +1,4 @@
-import { getModeratorById,updateModeratorPermissions } from '@/domains/identity';
+import { getModeratorById, updateModerator, updateModeratorPermissions } from '@/domains/identity';
 import { withSecurity } from '@/lib/security/api-security';
 import { invalidateModeratorPermissionCache } from '@/lib/security/moderator-permissions';
 import { invalidateCachedRole } from '@/lib/security/role-cache';
@@ -69,9 +69,16 @@ export const PUT = withSecurity(
                 return NextResponse.json({ error: 'Moderator not found' }, { status: 404 });
             }
 
-            const { permissions } = body as { permissions: Record<string, any> };
+            const { permissions, status } = body as { permissions: Record<string, any>; status?: string };
 
             await updateModeratorPermissions(id, permissions as any, auth.uid);
+
+            if (status && ['active', 'suspended', 'inactive'].includes(status)) {
+                await updateModerator(id, {
+                    status,
+                    updatedAt: new Date().toISOString(),
+                });
+            }
 
             invalidateCachedRole(id);
             invalidateModeratorPermissionCache(id);
