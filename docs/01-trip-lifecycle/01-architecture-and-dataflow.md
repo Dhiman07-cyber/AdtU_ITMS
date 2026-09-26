@@ -12,9 +12,10 @@ The platform is designed as a distributed, dual-path architecture combining dura
 +----------------------------------------------------------------------------------------------------+
 
    [ Driver Mobile Web App ]                                [ Student Mobile/Desktop Web App ]
-       │              │                                            ▲                   ▲
-       │ 1. HTTP API  │ 2. WS Live Telemetry                       │ 4. MapLibre GL    │ 5. Notifications
-       ▼              ▼                                            │    Target Update  │    (Flags & Alerts)
+       │                                                           ▲                   ▲
+       │ 1. HTTP Ingress API                                       │ 4. MapLibre GL    │ 5. Notifications
+       │    (GPS Bounds, Speed, Jump, Lua Guard)                   │    Target Update  │    (Flags & Alerts)
+       ▼                                                           │                   │
 +───────────────────────────────────+                              │                   │
 |        NGINX Reverse Proxy        |                              │                   │
 |   - SSL/TLS Termination           |                              │                   │
@@ -22,22 +23,30 @@ The platform is designed as a distributed, dual-path architecture combining dura
 |   - /api -> nextjs_backend        |                              │                   │
 +─────────────────┬─────────────────+                              │                   │
                   │                                                │                   │
-         ┌────────┴────────────────────────┐                       │                   │
-         ▼                                 ▼                       │                   │
-+─────────────────────+         +─────────────────────+            │                   │
-|  Next.js API Engine |         | WebSocket Cluster   |────────────┴───────────────────┘
-|  (Stateless Node)   |         | (ws1:3001, ws2:3001)|
-+──────────┬──────────+         +──────────┬──────────+
-           │                               │
-           │ 3. Database Transactions      │ 6. Cross-Node Relay
-           │    & Distributed Locks        │    (ws:broadcast)
-           ▼                               ▼
-+─────────────────────+         +─────────────────────+
-| Supabase PostgreSQL |         | Redis 7.2 Broker    |
-| - active_trips      |         | - Pub/Sub bus       |
-| - bus_locations     |         | - Node dedup        |
-| - waiting_flags     |         | - Transient cache   |
-+─────────────────────+         +─────────────────────+
+                  ▼                                                │                   │
++───────────────────────────────────+                              │                   │
+|  Next.js API Engine               |                              │                   │
+|  (Authoritative Ingress & State)  |                              │                   │
++──────────┬────────────────────────+                              │                   │
+           │                                                       │                   │
+           │ 2. Validated Coordinates                              │                   │
+           │    & Trip Lifecycle Events                            │                   │
+           ▼                                                       │                   │
++─────────────────────+     Cross-Node Relay        +─────────────────────+            │
+| Redis 7.2 Broker    |────────────────────────────►| WebSocket Cluster   |────────────┘
+| - Pub/Sub Bus       |     (ws:broadcast)          | (ws1:3001, ws2:3001)|
+| - Distributed Lua   |                             | Sub-50ms Fan-out    |
+| - GPS Monotonicity  |                             +─────────────────────+
++──────────┬──────────+
+           │
+           │ 3. Throttled Heartbeats & Persistence
+           ▼
++─────────────────────+
+| Supabase PostgreSQL |
+| - active_trips      |
+| - bus_locations     |
+| - waiting_flags     |
++─────────────────────+
 ```
 
 ---
@@ -46,12 +55,13 @@ The platform is designed as a distributed, dual-path architecture combining dura
 
 | Actor / Component | Core Responsibility | Auth Mechanism | Primary Protocol |
 | :--- | :--- | :--- | :--- |
-| **Driver** | Initiates trips, streams GPS telemetry (dual-path), acks student waiting flags, terminates trips. | Firebase Auth (Bearer ID Token) with `role: "driver"`. Verified via Supabase `driver_profiles`. | HTTPS POST & WSS |
-| **Student** | Subscribes to bus routes, views real-time bus motion, raises waiting flags, verifies boarding passes. | Firebase Auth (Bearer ID Token) with `role: "student"`. Verified via Supabase `student_profiles`. | HTTPS GET & WSS |
+| **Driver** | Initiates trips, streams GPS telemetry via authoritative HTTP ingress, acks student waiting flags, terminates trips. | Firebase Auth (Bearer ID Token) with `role: "driver"`. Verified via Supabase `driver_profiles`. | HTTPS POST & WSS (notifications) |
+| **Student** | Subscribes to bus routes, views real-time bus motion, raises waiting flags, verifies boarding passes. | Firebase Auth (Bearer ID Token) with `role: "student"`. Verified via Supabase `student_profiles`. | HTTPS GET & WSS (stream subscriber) |
 | **Next.js Engine** | Authoritative API gateway, handles trip state transitions, validates GPS pipeline, executes PostgreSQL RPCs. | Service Role to Supabase; verifies client Firebase JWTs via Admin SDK. | Internal IPC / SQL |
 | **WebSocket Cluster** | High-concurrency push server (`server/websocket-server.ts`). Handles client sessions, heartbeats, channel routing. | Authenticates client JWT on connection handshake (`{ type: "auth", token }`). | RFC 6455 WebSockets |
-| **Redis Broker** | Inter-node message bus. Relays broadcasts between `ws1` and `ws2` using node-origin deduplication. | Authenticated via Redis connection string (`REDIS_URL`). | TCP / RESP |
+| **Redis Broker** | Inter-node message bus. Relays broadcasts between `ws1` and `ws2` using node-origin deduplication, metric sync, and distributed Lua guards. | Authenticated via Redis connection string (`REDIS_URL`). | TCP / RESP |
 | **PostgreSQL Database** | Single source of truth for persistent state (trips, buses, driver assignments, route coordinates, waiting flags). | PostgreSQL connection pooling via Supabase client. | TCP / SQL |
+| **Admin / Moderator** | Fleet observability only. Monitors live bus locations across routes on the fleet radar map (`/admin/fleet-map`, `/moderator/fleet-map`). Has ZERO operational involvement in starting/stopping trips or interacting with student waiting flags. | Firebase Auth (`role: "admin"` / `"moderator"`). | HTTPS GET & WSS (location subscriber only) |
 
 ---
 
@@ -93,29 +103,36 @@ Driver App                 Next.js API Gateway           Supabase PostgreSQL    
 
 ---
 
-### Phase B: Dual-Path GPS Telemetry Ingestion
+### Phase B: Authoritative GPS Telemetry Ingestion & Real-Time Fan-Out
 
-GPS telemetry operates across two synchronized paths:
-- **Fast Realtime Path (WSS)**: Directly pushes low-latency coordinates (<50ms) to connected students.
-- **Authoritative Durable Path (HTTP)**: Validates coordinates against road bounds, checks speed/jumps, extends database locks, and throttles DB breadcrumbs.
+GPS telemetry operates across an authoritative ingress and real-time distribution architecture:
+- **Authoritative Ingress (HTTP POST)**: Validates coordinates against road bounds, checks speed (<200 km/h), horizontal accuracy (<150m), jump detection (<5000m), enforces single-device exclusivity, and validates monotonic ordering via an atomic Redis Lua script (`gps_guard.lua`).
+- **Real-Time Distribution (Redis PubSub -> WebSocket)**: The API gateway immediately dispatches accepted coordinates to Redis channel `ws:broadcast`, fanning out to `ws1` and `ws2` for sub-50ms push to connected student map clients.
+- **Durable Persistence (PostgreSQL)**: Throttled heartbeats extend `active_trips.expires_at` (every 20s), and fallback breadcrumb coordinates are upserted into `bus_locations` (every 30s).
+- **Direct WS Ingress Deprecation**: Unauthenticated or bypass WebSocket `location_update` packets are ignored by the WebSocket server to prevent bypassing server-side security checks.
 
 ```
- Driver App                    WebSocket Node                 Next.js API Gateway        PostgreSQL / Redis
-     │                               │                                 │                         │
-     │── [Path A: WSS 1Hz] ─────────►│                                 │                         │
-     │   { type: 'location_update',  ├── Broadcast to Local Clients ───┼────────────────────────►│
-     │     busId, lat, lng }         └── Relay to Redis ───────────────┼────────────────────────►│ Redis ws:broadcast
-     │                                                                 │                         │
-     │── [Path B: HTTPS POST 1Hz] ────────────────────────────────────►│                         │
-     │   /api/location/update                                          ├── GPS Pipeline Check    │
-     │   { busId, tripId, lat, lng }                                   │   (Bounds, Jump, Speed) │
-     │                                                                 │                         │
-     │                                                                 ├── Heartbeat Throttle ──►│ UPDATE active_trips
-     │                                                                 │   (Every 20s)           │ expires_at = now+600s
-     │                                                                 │                         │
-     │                                                                 ├── DB Location Throttle ─►│ UPSERT bus_locations
-     │                                                                 │   (Every 30s)           │ (Fallback snapshot)
-     │◄── 200 OK { success: true } ────────────────────────────────────┤                         │
+ Driver App                    Next.js API Gateway             Redis Broker              WS Cluster (ws1/ws2)      PostgreSQL DB
+     │                                 │                            │                             │                      │
+     │── [HTTPS POST 1Hz] ────────────►│                            │                             │                      │
+     │   /api/location/update          ├── 1. Device Exclusivity    │                             │                      │
+     │   { busId, tripId, lat, lng }   ├── 2. GPS Pipeline Bounds   │                             │                      │
+     │                                 │   (Bounds, Jump, Speed)    │                             │                      │
+     │                                 │                            │                             │                      │
+     │                                 ├── 3. Redis Lua Guard ─────►│                             │                      │
+     │                                 │      (gps_guard.lua)       │                             │                      │
+     │                                 │                            │                             │                      │
+     │                                 ├── 4. emitEvent() ─────────►│                             │                      │
+     │                                 │   channel: bus_location    │                             │                      │
+     │                                 │                            ├── 5. Relay ws:broadcast ───►│                      │
+     │                                 │                            │                             ├── 6. Push to Students│
+     │                                 │                            │                             │      (Sub-50ms)      │
+     │                                 ├── 7. Heartbeat Throttle ───┼─────────────────────────────┼─────────────────────►│ UPDATE active_trips
+     │                                 │   (Every 20s)              │                             │                      │ expires_at = now+600s
+     │                                 │                            │                             │                      │
+     │                                 ├── 8. Location Throttle ────┼─────────────────────────────┼─────────────────────►│ UPSERT bus_locations
+     │                                 │   (Every 30s)              │                             │                      │ (Fallback snapshot)
+     │◄── 200 OK { success: true } ────┤                            │                             │                      │
 ```
 
 ---
@@ -148,12 +165,24 @@ WebSocket Cluster Node                 Student Browser                     MapLi
 ### Phase D: Waiting Flags (Student-Driver Interaction)
 
 Students waiting at assigned stops can signal the approaching driver by raising a waiting flag.
+- **Global Single Active Flag Invariant**: A student can have at most **one** active waiting flag across the entire university system at any given time. This invariant is enforced both at the application service level and at the database engine level via a unique partial index:
+  ```sql
+  CREATE UNIQUE INDEX idx_waiting_flags_one_active_student
+  ON public.waiting_flags (student_uid)
+  WHERE (status IN ('raised', 'acknowledged', 'waiting'));
+  ```
+- **Lifecycle Transitions**:
+  - `raised`: Student creates flag -> driver notified via WebSocket.
+  - `acknowledged`: Approaching driver acknowledges flag -> student notified.
+  - `boarded`: Student verifies boarding -> flag resolved.
+  - `cancelled` / `removed`: Student cancels or trip completes -> flag purged.
 
 ```
 Student App                    Next.js API Gateway             PostgreSQL DB              Driver App (WS)
      │                                  │                            │                          │
      ├── POST /api/waiting-flag/create ►│                            │                          │
      │   { busId, stopName, lat, lng }  ├── Verify Active Trip ─────►│                          │
+     │                                  ├── Enforce Single Flag ────►│ (Unique index check)     │
      │                                  ├── Insert waiting_flags ───►│                          │
      │                                  │   (status = 'raised')      │                          │
      │                                  │                            │                          │
@@ -185,8 +214,8 @@ Driver App                 Next.js API Gateway           Supabase PostgreSQL    
     │                              │                              │                         │
     │                              ├── Delete bus_locations ─────►│ (Remove marker rows)    │
     │                              │                              │                         │
-    │                              ├── Delete active flags ──────►│ (Cancel pending flags)  │
-    │                              │                              │                         │
+    │                              ├── Purge Active Flags by Bus ─►│ (Purge all active flags │
+    │                              │                              │  on bus_id unconditionally│
     │                              ├── clearInMemoryLastLocation ─┼────────────────────────►│ Purge local memory map
     │                              │                              │                         │
     │                              ├── broadcastTripEvent ─────────────────────────────────►│ Redis 'trip_ended'
@@ -201,9 +230,9 @@ Driver App                 Next.js API Gateway           Supabase PostgreSQL    
 | State Entity | Authoritative Source | Cache / Transient Mirror | Eviction / Invalidation Trigger |
 | :--- | :--- | :--- | :--- |
 | **Active Trip Registration** | PostgreSQL table `active_trips` | Redis key `trip:{busId}` & Next.js memory cache | `end_trip_atomically` RPC or lock expiry (`expires_at < now`). |
-| **Live Bus Position** | WebSocket Stream (Transient Event) | PostgreSQL table `bus_locations` (30s throttled fallback) | Trip completion deletes `bus_locations` rows and clears in-memory map. |
+| **Live Bus Position** | Authoritative HTTP Ingress (`/api/location/update`) | Redis Pub/Sub (`ws:broadcast`), WS in-memory map, and PostgreSQL `bus_locations` (30s fallback) | Trip completion deletes `bus_locations` rows, clears in-memory map, and broadcasts `trip_ended`. |
 | **Driver Lock Ownership** | PostgreSQL table `active_trips` (`driver_id`, `bus_id`) | In-memory `activeTripCache` | `invalidateActiveTripCache()` on start/end. |
-| **Waiting Flags** | PostgreSQL table `waiting_flags` | Channel `waiting_flags_{busId}` | Deleted and broadcasted as `waiting_flag_removed` on trip completion. |
+| **Waiting Flags** | PostgreSQL table `waiting_flags` (single active flag invariant: `idx_waiting_flags_one_active_student`) | Channel `waiting_flags_{busId}` & `student_{uid}` | Purged unconditionally on `bus_id` upon trip end and broadcasted as `waiting_flag_removed`. |
 | **Student UI Render State** | Local MapLibre GL Target (`__itmsMarkerPosition`) | React Hook `useBusLocation` | Cleared immediately upon receiving `trip_ended` event. |
 
 ---

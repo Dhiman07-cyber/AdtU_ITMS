@@ -93,9 +93,13 @@ Connection: Upgrade
 
 On connection, `SessionManager` restores the client's previous channel subscriptions automatically.
 
-### 3.3 Channel Subscription
+### 3.3 Channel Subscription & Role-Based Channel Isolation
 
-Clients join channels to receive real-time updates for specific buses or personal student notifications.
+Clients join channels to receive real-time updates for specific buses or personal student notifications:
+
+- **Fleet GPS Channels (`bus_location_{busId}`, `fleet_locations`)**: Students may only subscribe to their assigned bus. Admins and moderators may subscribe to all fleet buses to observe live positions on the fleet map.
+- **Waiting Flag Channels (`waiting_flags_{busId}`)**: Communicated exclusively between students and the active trip driver. Administrators and moderators are **strictly forbidden** and receive an error frame if they attempt to subscribe.
+- **Driver Dispatch Channels (`driver_wait_request_{busId}`, `driver_{driverId}`)**: Strictly driver-only. Students, administrators, and moderators are rejected.
 
 **Client Request:**
 ```json
@@ -188,12 +192,17 @@ To protect the cluster from misbehaving or buggy clients streaming infinite tele
 
 1. **Per-Socket Limit**: 60 messages / 10s window (prevents single-tab runaway loops).
 2. **Per-User Limit**: 200 messages / 10s window across all client devices.
-3. **Per-IP Limit**: 100 messages / 10s window for unauthenticated IP sources.
+3. **Per-IP Limit**: 100 messages / 10s window for unauthenticated IP sources (active in production; configurable/bypassable in staging via `RATE_LIMIT_PER_IP=0` to support multi-agent load simulations from a single runner container).
+4. **Privileged Server Exemption**: Sockets authenticated with `role: 'server'` are strictly exempt from rate limiting to guarantee high-frequency fan-out broadcasts are never throttled or dropped.
+5. **Authoritative Ingress Gating**: Direct client `location_update` packets over WebSockets are deprecated and ignored by `socketRouter`. GPS coordinates must enter through the authoritative HTTP pipeline (`/api/location/update`), ensuring validation before fan-out.
 
 ```typescript
 // server/rate-limiter.ts
-export function checkRateLimit(socketId: string, uid?: string): { allowed: boolean; reason?: string } {
-  const now = Date.now();
+export function checkRateLimit(socketId: string, uid?: string, role?: string): { allowed: boolean; reason?: string } {
+  // Privileged server processes (Next.js internal bridge) are never throttled
+  if (role === 'server') {
+    return { allowed: true };
+  }
   
   if (!socketLimiter.consume(socketId, 1)) {
     return { allowed: false, reason: 'Socket message rate exceeded' };

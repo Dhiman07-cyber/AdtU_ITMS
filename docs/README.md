@@ -57,11 +57,12 @@ If you are a new engineer or contributor joining the project, read through the s
 
 ### [03. Identity & Access](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/03-identity-and-access/)
 - **[01. Dual Authentication Architecture](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/03-identity-and-access/01-auth-architecture.md)**: Firebase Auth integration with Supabase PostgreSQL, Next.js 16 Edge proxy, and token verification flows.
-- **[02. Role Permissions & Security Matrix](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/03-identity-and-access/02-role-permissions-matrix.md)**: RBAC access rules for Students, Drivers, Moderators, and Admins; scanner context validation and PostgreSQL RLS policies.
+- **[02. Role Permissions & Security Matrix](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/03-identity-and-access/02-role-permissions-matrix.md)**: RBAC access rules, granular 6-category moderator permission matrix (`students`, `drivers`, `buses`, `routes`, `applications`, `payments`), unified `/admin/moderators` UI, status endpoints, and universal access block screen.
 
 ### [04. Students & Allocation](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/04-students-and-allocation/)
-- **[01. Student Applications & Digital Bus Passes](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/04-students-and-allocation/01-application-and-boarding.md)**: Registration workflow, application state machine, dynamic QR code contract, and mobile boarding scanners.
-- **[02. Smart Seat Allocation & Routes](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/04-students-and-allocation/02-smart-seat-allocation.md)**: Route stops, atomic seat capacity counters (`bus_increment_capacity`), shift scheduling, and vehicle reallocations.
+- **[01. Student Applications & Digital Bus Passes](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/04-students-and-allocation/01-application-and-boarding.md)**: Registration workflow, three application streams (Fresh, Upcoming Gated, Renewals), dynamic QR code contract, and open-seating boarding scanner validation.
+- **[02. Bus Capacity Quota Management & Route Allocation](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/04-students-and-allocation/02-smart-seat-allocation.md)**: Open seating philosophy, route stop sequences, atomic shift load counters (`bus_increment_capacity`), the three allocation cases, and the 3-tab unified Smart Allocation hub (`/admin/smart-allocation`).
+- **[03. Admin & Moderator Student Reassignment Domain](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/04-students-and-allocation/03-student-reassignment-domain.md)**: Single and bulk student reassignments, shift transfers, atomic stored procedure `reassign_students_atomically`, deadlock avoidance, rollback engine `execute_reassignment_rollback`, and soft-blocked seat release edge cases.
 
 ### [05. Operations & Observability](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/05-operations-and-observability/)
 - **[01. Metrics Telemetry & Health Probes](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/05-operations-and-observability/01-telemetry-and-metrics.md)**: Prometheus scraping, custom `itms_*` metric catalogs, Alertmanager triggers, and Grafana dashboards.
@@ -83,9 +84,18 @@ If you are a new engineer or contributor joining the project, read through the s
 - **[Schema Reproducibility Report](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/06-evidence-and-verification/SCHEMA_REPRODUCIBILITY_REPORT.md)**: PostgreSQL schema audit, migration idempotency, RPC parameter alignment, and RLS policy verification.
 - **[Bus Marker Route Alignment Final Report](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/06-evidence-and-verification/ADTU_ITMS_BUS_MARKER_ROUTE_ALIGNMENT_FINAL_REPORT.md)**: Bus marker route alignment, interpolation, and GPS pipeline report.
 
-### [07. GPS & Location Integrity](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/07-gps/)
-- **[GPS Forensic Audit & Verification Report (Ruth)](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/07-gps/ADTU_ITMS_GPS_REAL_WORLD_FORENSIC_AUDIT_RUTH.md)**: Master audit report certifying Source-to-Screen pipeline, answers to Sir's 10 questions with measured distributions, real-browser Playwright simulation, route deviation hysteresis, and hardware transition readiness.
-- **[GPS Forensic Audit Final Report](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/07-gps/ADTU_ITMS_GPS_FORENSIC_AUDIT_FINAL_REPORT.md)**: Canonical submission copy covering waiting-flag abuse testing, live fleet radar map, and Docker build performance optimizations.
+### [07. GPS & Location Integrity](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/07-gps-and-location-integrity/)
+- **[GPS Forensic Audit & Verification Report](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/07-gps-and-location-integrity/ADTU_ITMS_GPS_FORENSIC_AUDIT_FINAL_REPORT.md)**: Master audit report certifying Source-to-Screen pipeline, answers to Sir's 10 questions with measured distributions, real-browser Playwright simulation, route deviation hysteresis, and hardware transition readiness.
+- **[Bus Marker Route Alignment Final Report](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/07-gps-and-location-integrity/ADTU_ITMS_BUS_MARKER_ROUTE_ALIGNMENT_FINAL_REPORT.md)**: Comprehensive report detailing the MapLibre bus marker route alignment, interpolation dynamics, easing curves, and client-side telemetry smoothing.
+
+### [08. Admin System Configuration](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/08-admin-system-configuration/)
+- **[01. Academic Calendar, Deadlines & Lifecycle Automation](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/08-admin-system-configuration/01-academic-calendar-and-deadlines.md)**: Dynamic per-student year derivation, programmatic lifecycle milestones (`deriveAcademicLifecycle`), leap year normalization, simulation mode, and automated crons.
+- **[02. Bus Fees, Pricing Engine & Financial Verification](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/08-admin-system-configuration/02-bus-fees-and-pricing.md)**: Server-authoritative fee storage, versioned adjustment history, automated announcement broadcasts, Razorpay checkout calculations, and offline challan verification.
+- **[03. System Settings, SRE Controls & Audit Logging](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/08-admin-system-configuration/03-system-settings-and-maintenance.md)**: Global system settings, public landing config, UI presentation stripping, data retention crons, in-memory caching with TTL, and immutable forensic audit logging.
+
+### [09. Canonical Verification Suites](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/verification/)
+- **[Master System Specification](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/verification/ITMS_SYSTEM_SPECIFICATION.md)**: System overview, trip-first operational spine, open seating rules, container topology, and state lifecycle.
+- **[Master Failure & Resilience Matrix](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/verification/ITMS_FAILURE_AND_RESILIENCE_MATRIX.md)**: Failure mode analysis, recovery actions, and verification results across Redis, PostgreSQL, and WebSocket clusters.
 
 ---
 

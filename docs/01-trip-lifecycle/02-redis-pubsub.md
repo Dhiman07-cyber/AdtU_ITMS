@@ -98,11 +98,12 @@ export function publishToRedis(
 }
 ```
 
-### 3.2 Relay & In-Process Cache Synchronization
+### 3.2 Relay & In-Process Cache & Metric Synchronization
 
-When a message arrives over Redis from a peer node, two operations occur:
+When a message arrives over Redis from a peer node, three operations occur:
 1. **Cache Synchronization**: If the event is `bus_location_update`, the local in-process `liveBusLocations` map is updated so newly connected clients on this node get instant initial positions.
-2. **Local Relay**: The event is pushed directly to all local clients subscribed to `envelope.channel`.
+2. **Prometheus Metric Synchronization**: Relay nodes increment matching counters (`tripsStarted`, `tripsEnded`, `waitingFlagsCreated`, `waitingFlagsCancelled`), ensuring Prometheus scrapers observe identical metrics regardless of which node handles the primary event.
+3. **Local Relay**: The event is pushed directly to all local clients subscribed to `envelope.channel`.
 
 ```typescript
 // server/redis-broadcast.ts
@@ -125,6 +126,14 @@ export async function initRedisBroadcastRelay(
     // Keep local live-location cache in sync across nodes.
     if (envelope.event === 'bus_location_update' && envelope.payload.busId) {
       onLocationUpdate(envelope.payload.busId as string, envelope.payload);
+    }
+
+    // Synchronize cluster-wide Prometheus counters on relay nodes
+    if (envelope.event === 'trip_started') metricsService.inc('tripsStarted');
+    if (envelope.event === 'trip_ended') metricsService.inc('tripsEnded');
+    if (envelope.event === 'waiting_flag_created') metricsService.inc('waitingFlagsCreated');
+    if (envelope.event === 'waiting_flag_cancelled' || envelope.event === 'waiting_flag_boarded' || envelope.event === 'waiting_flag_removed') {
+      metricsService.inc('waitingFlagsCancelled');
     }
 
     // Relay to local subscribers.
@@ -165,6 +174,15 @@ export class RedisPubSub implements PubSubAdapter {
 export const redisPubSub = new RedisPubSub();
 ```
 
+### 3.4 Live Redis TCP Monitoring Probe (`server/metrics-service.ts`)
+
+To avoid blind spots in Redis health during high-concurrency GPS bursts:
+- `MetricsService` maintains an asynchronous periodic probe executing native Redis `INFO memory` and `INFO stats` commands over TCP.
+- Exposes real-time Prometheus gauges:
+  - `itms_redis_memory_used_bytes`: Instantaneous memory allocation by Redis.
+  - `itms_redis_commands_total`: Total commands processed by the Redis server engine.
+- If Redis becomes unreachable, the gauge gracefully logs a warning without blocking socket throughput.
+
 ---
 
 ## 4. Resilience & Degradation Guarantees
@@ -176,3 +194,5 @@ export const redisPubSub = new RedisPubSub();
    - `publishToRedis` catches and logs errors asynchronously. A transient Redis timeout or packet drop will never block the driver's WebSocket connection or fail an HTTP response.
 3. **Deduplication Invariant**:
    - Because `publishToRedis` is called *after* local broadcast, and `envelope.originNodeId === MY_NODE_ID` is strictly ignored by the publisher node, no client ever receives duplicate packets from Redis reflection.
+4. **Instant Multi-Node Role Invalidation**:
+   - When user roles are updated or revoked, publication to `role_invalidate` triggers instant cross-node socket termination with code `4401`, guaranteeing revoked users cannot maintain stale administrative access across cluster instances.

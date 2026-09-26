@@ -179,7 +179,10 @@ $$;
 
 ## 4. Post-Trip Cleanup Pipeline (`src/domains/trip/services/trip-cleanup.service.ts`)
 
-Once `end_trip_atomically` succeeds, the orchestrator invokes the post-trip cleanup service to purge transient state:
+Once `end_trip_atomically` succeeds, the orchestrator invokes the post-trip cleanup service to purge transient state.
+
+### Unconditional Bus-Scoped Flag Purge (Ghost Flag Elimination)
+To prevent orphaned waiting flags from lingering on a bus (e.g., flags created with a null `trip_id` or before the trip ID was attached to the client), `cleanupTrip` purges all active waiting flags scoped strictly to `bus_id`, irrespective of `trip_id`:
 
 ```typescript
 // src/domains/trip/services/trip-cleanup.service.ts
@@ -187,25 +190,30 @@ Once `end_trip_atomically` succeeds, the orchestrator invokes the post-trip clea
 export async function cleanupTrip(params: { driverId: string; busId: string; tripId: string }) {
   const supabase = getSupabaseServer();
 
-  // 1. Delete waiting flags and notify students their flag was closed due to trip end
+  // 1. Delete all active waiting flags on this bus unconditionally
+  //    (Eliminates orphaned flags with null or mismatched tripId)
   const [{ data: deletedFlags }] = await Promise.all([
     supabase.from('waiting_flags')
       .delete()
       .eq('bus_id', params.busId)
-      .eq('trip_id', params.tripId)
       .in('status', ['raised', 'acknowledged', 'waiting'])
       .select('id, student_uid, bus_id'),
     supabase.from('device_sessions').delete().eq('user_id', params.driverId),
   ]);
 
-  // 2. Broadcast removal to affected students
+  // 2. Broadcast removal to affected students and driver channel
   if (deletedFlags && deletedFlags.length > 0) {
     for (const flag of deletedFlags) {
-      emitEvent(`student_${flag.student_uid}`, 'waiting_flag_removed', {
+      const payload = {
         flagId: flag.id,
         status: 'cancelled',
         reason: 'trip_ended',
-      });
+        busId: params.busId,
+      };
+      // Student private notification channel
+      emitEvent(`student_${flag.student_uid}`, 'waiting_flag_removed', payload);
+      // Bus driver channel
+      emitEvent(`waiting_flags_${params.busId}`, 'waiting_flag_removed', payload);
     }
   }
 

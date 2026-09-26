@@ -130,3 +130,23 @@ The application (`src/proxy.ts`, `src/lib/security/api-security.ts`, and sensiti
 1. **`X-Real-IP`**: Evaluated first. Set directly by NGINX using `$remote_addr` (`proxy_set_header X-Real-IP $remote_addr;`). The client cannot forge or overwrite this header.
 2. **`CF-Connecting-IP`**: Used when fronted by Cloudflare CDN edges.
 3. **Rightmost Element of `X-Forwarded-For`**: When `X-Forwarded-For` is evaluated, the application inspects `parts[parts.length - 1]`, corresponding to the IP address appended by the closest trusted reverse proxy hop, completely defeating client-side header spoofing.
+
+---
+
+## 7. Buffer Sizing & Ingress Boundary Hardening
+
+### 7.1 Ingress Body Sizing (`client_max_body_size 10M;`)
+The default NGINX request body limit (1MB) was prone to dropping diagnostic support bundles, incident dumps, or bulk CSV student rostering imports. The NGINX configuration explicitly configures:
+```nginx
+http {
+  ...
+  client_max_body_size 10M;
+  ...
+}
+```
+This ensures legitimate administrative uploads succeed without exposing upstream processes to memory exhaustion attacks.
+
+### 7.2 Metrics & Health Endpoint Isolation
+Internal operational endpoints are strictly segregated:
+- Prometheus (`itms-prometheus:9090`) and Alertmanager (`itms-alertmanager:9093`) scrape internal Node.js metrics over the private Docker bridge network (`itms`).
+- Public requests to `/metrics` or `/health` from internet clients are filtered at the NGINX perimeter, ensuring infrastructure monitoring surfaces remain inaccessible to unauthorized external traffic.

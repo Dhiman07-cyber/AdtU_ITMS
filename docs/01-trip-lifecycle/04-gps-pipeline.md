@@ -1,37 +1,45 @@
 # GPS Telemetry Pipeline & Client Ingestion Guards
 
-## 1. Overview & Dual-Path Philosophy
+## 1. Overview & Pipeline Philosophy
 
 Tracking high-frequency bus coordinates in an educational transport system involves competing trade-offs:
-- **Low Latency (<100ms)**: Students tracking an arriving bus require smooth vehicle movement on MapLibre maps without buffering lag.
+- **Low Latency (<50ms)**: Students tracking an arriving bus require smooth vehicle movement on MapLibre maps without buffering lag.
 - **Physical Accuracy & Security**: Bad GPS sensors (null island, teleport jumps, erratic speeds) and forged telemetry must be rejected before reaching other passengers or database logs.
 - **Database Scalability**: Streaming 50 buses at 1Hz produces 3,000 writes/minute. Writing every raw coordinate to PostgreSQL would exhaust database connection pools and bloat storage.
 
-ITMS solves this with a **Dual-Path Ingestion Pipeline**:
+ITMS solves this with an **Authoritative Ingress & Real-Time Fan-Out Architecture**:
 
 ```
                                       GPS TELEMETRY PIPELINE
                                       
-               [ Driver Mobile App ]
-                         │
-        ┌────────────────┴────────────────┐
-        ▼                                 ▼
-   [ Path A: WebSocket Push ]        [ Path B: HTTP POST /api/location/update ]
-   - Sub-50ms latency                - Authoritative security boundary
-   - Fast client distribution        - Validates physical bounds & speeds
-   - In-memory session check         - Prevents sensor jumps & null island
-        │                            - Throttled DB write (1 write / 30s)
-        │                            - Throttled Heartbeat (1 write / 20s)
-        ▼                                 │
-   [ Redis ws:broadcast ]                 ▼
-        │                            [ GPS Pipeline Service ]
-        └──────────────┬──────────────────┘
-                       │
-                       ▼
-             [ Client Packet Guard ]
-             - Rejects ended trips
-             - Monotonic timestamps (5s skew tolerance)
-             - Smooth MapLibre coordinate animation
+                               [ Driver Mobile App ]
+                                         │
+                                         ▼ [1Hz HTTPS POST]
+                       [ /api/location/update or /api/driver/update-location ]
+                                         │
+                                         ▼
+                             [ GPS Pipeline Service ]
+                             - Validates physical bounds & speeds (<200 km/h)
+                             - Horizontal accuracy threshold (<150m)
+                             - Jump detection (<5000m) & speed checks
+                             - Device session exclusivity (1 device per driver)
+                             - Redis atomic Lua guard (gps_guard.lua)
+                                         │
+                                         ├──────────────────────────┐
+                                         │                          │
+                        (Instant WS Fan-out)       (Throttled Persistence)
+                                         │                          │
+                                         ▼                          ▼
+                               [ Redis ws:broadcast ]    [ Supabase PostgreSQL ]
+                                         │               - Heartbeat (1 write / 20s)
+                                         ▼               - Breadcrumb (1 write / 30s)
+                               [ WS Cluster (ws1/ws2) ]
+                                         │
+                                         ▼
+                               [ Client Packet Guard ]
+                               - Rejects ended trips
+                               - Monotonic timestamps (5s skew tolerance)
+                               - Smooth MapLibre coordinate animation
 ```
 
 ---

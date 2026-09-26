@@ -8,7 +8,7 @@ This section contains the authoritative forensic audit, real-browser Playwright 
 
 ## 📑 Documents in This Directory
 
-### 1. [ADTU_ITMS_GPS_REAL_WORLD_FORENSIC_AUDIT_RUTH.md](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/07-gps/ADTU_ITMS_GPS_REAL_WORLD_FORENSIC_AUDIT_RUTH.md)
+### 1. [ADTU_ITMS_GPS_FORENSIC_AUDIT_FINAL_REPORT.md](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/07-gps-and-location-integrity/ADTU_ITMS_GPS_FORENSIC_AUDIT_FINAL_REPORT.md)
 * **Author:** **Ruth** (Lead Forensic Engineering & Verification Agent)
 * **Classification:** Canonical Master Report & Architectural Proof
 * **Contents:**
@@ -21,8 +21,8 @@ This section contains the authoritative forensic audit, real-browser Playwright 
   - Docker optimization analysis (fixing the 857 MB build context bottleneck)
   - Phone to dedicated onboard GPS hardware readiness roadmap
 
-### 2. [ADTU_ITMS_GPS_FORENSIC_AUDIT_FINAL_REPORT.md](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/07-gps/ADTU_ITMS_GPS_FORENSIC_AUDIT_FINAL_REPORT.md)
-* Standard canonical copy of the master forensic report for university review and submission.
+### 2. [ADTU_ITMS_BUS_MARKER_ROUTE_ALIGNMENT_FINAL_REPORT.md](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/07-gps-and-location-integrity/ADTU_ITMS_BUS_MARKER_ROUTE_ALIGNMENT_FINAL_REPORT.md)
+* Comprehensive report detailing the MapLibre bus marker route alignment, interpolation dynamics, easing curves, and client-side telemetry smoothing.
 
 ---
 
