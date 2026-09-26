@@ -138,8 +138,28 @@ export default function BusPassScannerModal({ isOpen, onClose, onScanSuccess }: 
         }
     };
 
+    useEffect(() => {
+        const handleVisibilityChange = () => {
+            if (typeof document !== 'undefined' && document.visibilityState === 'visible' && isScanningRef.current) {
+                if (animationRef.current) cancelAnimationFrame(animationRef.current);
+                animationRef.current = requestAnimationFrame(scanQRCode);
+            }
+        };
+        if (typeof document !== 'undefined') {
+            document.addEventListener('visibilitychange', handleVisibilityChange);
+        }
+        return () => {
+            if (typeof document !== 'undefined') {
+                document.removeEventListener('visibilitychange', handleVisibilityChange);
+            }
+        };
+    }, []);
+
     const scanQRCode = async () => {
         if (!isScanningRef.current) return;
+        if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+            return;
+        }
 
         if (!videoRef.current || !canvasRef.current) {
             animationRef.current = requestAnimationFrame(scanQRCode);

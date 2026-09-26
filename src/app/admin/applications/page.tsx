@@ -98,7 +98,30 @@ export default function AdminApplicationsPage() {
       }
     }
     return map;
-  }, [stagedBusesTrigger, pendingApplications]);
+  }, [stagedBusesTrigger]);
+
+  /** O(1) inverted index mapping normalized stop names to route IDs */
+  const stopToRouteIdsMap = useMemo(() => {
+    const map = new Map<string, string[]>();
+    routes.forEach((route: any) => {
+      const routeId = route.routeId || route.id;
+      if (!routeId) return;
+      const route_stops = route.stops || [];
+      route_stops.forEach((stop: any) => {
+        const rsId = (stop.stop_name || stop.id || stop.name || '').toLowerCase().trim();
+        const rsName = (stop.name || stop.stop_name || '').toLowerCase().trim();
+        if (rsId) {
+          if (!map.has(rsId)) map.set(rsId, []);
+          if (!map.get(rsId)!.includes(routeId)) map.get(rsId)!.push(routeId);
+        }
+        if (rsName && rsName !== rsId) {
+          if (!map.has(rsName)) map.set(rsName, []);
+          if (!map.get(rsName)!.includes(routeId)) map.get(rsName)!.push(routeId);
+        }
+      });
+    });
+    return map;
+  }, [routes]);
 
   /** Open the alternative-bus picker for a Case 2 application. */
   const openAlternativePicker = (item: any) => {
@@ -121,20 +144,9 @@ export default function AdminApplicationsPage() {
         }
       : { id: appBusId, busNumber: `Bus-${appBusId}`, capacity: 55, shift: 'both' };
 
-    // Alternative buses (re-use the getCapacityStatus logic to find them)
-    const matchingRouteIds: string[] = [];
-    routes.forEach((route: any) => {
-      const route_stops = route.stops || [];
-      const hasStop = route_stops.some((stop: any) => {
-        const rsId = (stop.stop_name || stop.id || stop.name || '').toLowerCase().trim();
-        const rsName = (stop.name || stop.stop_name || '').toLowerCase().trim();
-        const normStopId = stop_name.toLowerCase().trim();
-        const normStopName = stop_name.toLowerCase().trim();
-        return rsId === normStopId || rsName === normStopName ||
-          rsName === normStopId || rsId === normStopName;
-      });
-      if (hasStop) matchingRouteIds.push(route.routeId || route.id);
-    });
+    // Alternative buses (O(1) inverted index lookup)
+    const normStopName = stop_name.toLowerCase().trim();
+    const matchingRouteIds = stopToRouteIdsMap.get(normStopName) || [];
 
     const alternatives: AlternativeBusData[] = buses
       .filter((b: any) => {
@@ -196,52 +208,38 @@ export default function AdminApplicationsPage() {
   };
 
   const { showToast } = useToast();
-  const [renewalRequests, setRenewalRequests] = useState<any[]>([]);
-  const [loadingRenewals, setLoadingRenewals] = useState(false);
   const [activeSection, setActiveSection] = useState<'applications' | 'upcoming' | 'renewals'>('applications');
-  const [currentTime, setCurrentTime] = useState(new Date());
 
-  const fetchRenewalRequests = async () => {
-    try {
-      setLoadingRenewals(true);
-      if (!currentUser) return;
-      const token = await currentUser.getIdToken();
-      const res = await fetch('/api/applications/all?limit=200', {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (!res.ok) throw new Error(`API error: ${res.status}`);
-      const responseData = await res.json();
-      const apps = responseData.applications || [];
-
-      const requests = apps
-        .filter((row: any) => {
-          const state = row.state || '';
-          const type = row.applicationType || row.application_type || '';
-          return (state === 'submitted' || state === 'awaiting_verification' || state === 'pending') &&
-                 (type === 'renewal' || type === 'renewal_after_soft_block');
-        })
-        .map((row: any) => ({
-          id: row.applicationId || row.application_id || row.id,
-          studentId: row.applicantUid || row.applicant_uid || row.studentId,
-          enrollmentId: row.formData?.enrollmentId || row.form_data?.enrollmentId || '',
-          studentName: row.formData?.studentName || row.form_data?.studentName || row.applicantEmail || '',
-          totalFee: row.formData?.totalFee || row.form_data?.totalFee || 0,
-          durationYears: row.formData?.durationYears || row.form_data?.durationYears || 0,
-          paymentMode: row.formData?.paymentMode || row.form_data?.paymentMode || 'online',
-          paymentId: row.formData?.paymentId || row.form_data?.paymentId || row.paymentId || '',
-          receiptImageUrl: row.formData?.receiptImageUrl || row.form_data?.receiptImageUrl || '',
-          studentEmail: row.formData?.studentEmail || row.form_data?.studentEmail || row.applicantEmail || '',
-          paidAt: row.formData?.paidAt || row.form_data?.paidAt || row.createdAt || row.created_at || '',
-          status: row.state || 'pending',
-          createdAt: row.createdAt || row.created_at,
-        }));
-      setRenewalRequests(requests);
-    } catch (error) {
-      console.error('Error fetching renewal requests:', error);
-    } finally {
-      setLoadingRenewals(false);
-    }
-  };
+  // Derive renewalRequests directly from pendingApplications dataset — zero redundant roundtrips
+  const renewalRequests: any[] = useMemo(() => {
+    return (pendingApplications || [])
+      .filter((row: any) => {
+        const state = row.state || '';
+        const type = row.applicationType || row.application_type || '';
+        const id = row.applicationId || row.application_id || row.id;
+        return (state === 'submitted' || state === 'awaiting_verification' || state === 'pending') &&
+               (type === 'renewal' || type === 'renewal_after_soft_block') &&
+               !processedIds.has(id);
+      })
+      .map((row: any) => ({
+        id: row.applicationId || row.application_id || row.id,
+        applicationId: row.applicationId || row.application_id || row.id,
+        studentId: row.applicantUid || row.applicant_uid || row.studentId,
+        enrollmentId: row.formData?.enrollmentId || row.form_data?.enrollmentId || '',
+        studentName: row.formData?.studentName || row.form_data?.studentName || row.applicantEmail || '',
+        totalFee: row.formData?.totalFee || row.form_data?.totalFee || 0,
+        durationYears: row.formData?.durationYears || row.form_data?.durationYears || 0,
+        paymentMode: row.formData?.paymentMode || row.form_data?.paymentMode || 'online',
+        paymentId: row.formData?.paymentId || row.form_data?.paymentId || row.paymentId || '',
+        receiptImageUrl: row.formData?.receiptImageUrl || row.form_data?.receiptImageUrl || '',
+        studentEmail: row.formData?.studentEmail || row.form_data?.studentEmail || row.applicantEmail || '',
+        paidAt: row.formData?.paidAt || row.form_data?.paidAt || row.createdAt || row.created_at || '',
+        status: row.state || 'pending',
+        createdAt: row.createdAt || row.created_at,
+        busNumber: row.busNumber || row.bus_number || row.formData?.busNumber || row.form_data?.busNumber || '',
+        formData: row.formData || row.form_data || {},
+      }));
+  }, [pendingApplications, processedIds]);
 
   // Manual refresh handler for applications page
   const handleRefresh = async () => {
@@ -253,7 +251,6 @@ export default function AdminApplicationsPage() {
         refreshApplications(),
         refreshRoutes(),
         refreshBuses(),
-        fetchRenewalRequests()
       ]);
     } catch (error) {
       console.error('Error refreshing applications:', error);
@@ -273,19 +270,6 @@ export default function AdminApplicationsPage() {
       router.push(`/${userData.role}`);
     }
   }, [userData, router]);
-
-  useEffect(() => {
-    if (currentUser) {
-      fetchRenewalRequests();
-    }
-  }, [currentUser]);
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setCurrentTime(new Date());
-    }, 1000);
-    return () => clearInterval(timer);
-  }, []);
 
   // Filter applications relevant to the admin queue:
   const applicationApplications = useMemo(
@@ -497,20 +481,7 @@ export default function AdminApplicationsPage() {
 
     // Bus is full - check if alternatives exist for this stop
     const normalizedStopName = (stop_name || '').toLowerCase().trim();
-
-    // Find routes that have this stop
-    const matchingRouteIds: string[] = [];
-    routes.forEach((route: any) => {
-      const route_stops = route.stops || [];
-      const hasStop = route_stops.some((stop: any) => {
-        const routeStopId = (stop.stop_name || stop.id || stop.name || '').toLowerCase().trim();
-        const routeStopName = (stop.name || stop.stop_name || '').toLowerCase().trim();
-        return routeStopId === normalizedStopName || routeStopName === normalizedStopName;
-      });
-      if (hasStop) {
-        matchingRouteIds.push(route.routeId || route.id);
-      }
-    });
+    const matchingRouteIds = stopToRouteIdsMap.get(normalizedStopName) || [];
 
     // Find alternative buses
     const alternativeBuses = buses.filter((bus: any) => {
@@ -603,9 +574,10 @@ export default function AdminApplicationsPage() {
     if (!isApplicationSection) return map;
 
     for (const item of filteredData) {
-      map.set(item.applicationId, {
+      const anyItem = item as any;
+      map.set(anyItem.applicationId, {
         capacity: getCapacityStatus(item),
-        busDisplay: item.formData?.busAssigned || getBusDisplayFromRoute(item.formData?.routeId),
+        busDisplay: anyItem.formData?.busAssigned || getBusDisplayFromRoute(anyItem.formData?.routeId),
       });
     }
     return map;
@@ -615,8 +587,8 @@ export default function AdminApplicationsPage() {
   const handleApproveRenewal = async (requestId: string) => {
     if (!currentUser) return;
 
-    const renewalItem = renewalRequests.find(r => r.id === requestId);
-    const busName = renewalItem?.busNumber ? `Bus ${renewalItem.busNumber}` : 'Requested Bus';
+    const renewalItem = renewalRequests.find((r: any) => r.id === requestId);
+    const busName = (renewalItem as any)?.busNumber ? `Bus ${(renewalItem as any).busNumber}` : 'Requested Bus';
 
     setApproving(requestId);
     try {
@@ -632,7 +604,7 @@ export default function AdminApplicationsPage() {
 
       if (response.ok) {
         showToast('Renewal request approved successfully', 'success');
-        setRenewalRequests(prev => prev.filter(r => r.id !== requestId));
+        setProcessedIds(prev => new Set([...prev, requestId]));
       } else {
         const errorData = await response.json().catch(() => ({}));
         const studentName = renewalItem?.studentName || 'Student';
@@ -798,7 +770,7 @@ export default function AdminApplicationsPage() {
           setError("");
           setShowRejectDialog(false);
           setRejectionReason("");
-          setRenewalRequests(prev => prev.filter(r => r.id !== selectedApplication));
+          setProcessedIds(prev => new Set([...prev, selectedApplication]));
           setSelectedApplication(null);
         }
       } else {
@@ -1078,7 +1050,7 @@ export default function AdminApplicationsPage() {
       )}
 
       {/* Content Area */}
-      {(loading || loadingRenewals || routesLoading || busesLoading) && pendingApplications.length === 0 ? (
+      {(loading || routesLoading || busesLoading) && pendingApplications.length === 0 ? (
         <div className="space-y-4">
           <CardLoader />
           <CardLoader />
@@ -1086,7 +1058,7 @@ export default function AdminApplicationsPage() {
         </div>
       ) : (
         <>
-          {(loading || loadingRenewals || routesLoading || busesLoading) && (
+          {(loading || routesLoading || busesLoading) && (
             <div className="w-full h-1 bg-indigo-500/10 overflow-hidden mb-4 rounded-full">
               <div className="animate-progress w-full h-full bg-indigo-500 origin-left-right"></div>
             </div>

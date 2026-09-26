@@ -90,6 +90,7 @@ const Navbar = React.memo(function Navbar({ onMenuToggle, isSidebarOpen = false 
     if (userData?.role === 'admin') {
       return [
         { label: 'Dashboard', href: '/admin', icon: LayoutDashboard, color: 'text-blue-500' },
+        { label: 'Control Hub', href: '/admin/control-hub', icon: ShieldCheck, color: 'text-indigo-500' },
         { label: 'Students', href: '/admin/students', icon: GraduationCap, color: 'text-indigo-500' },
         { label: 'Drivers', href: '/admin/drivers', icon: UserCog, color: 'text-purple-500' },
         { label: 'Moderators', href: '/admin/moderators', icon: ShieldCheck, color: 'text-pink-500' },

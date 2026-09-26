@@ -6,9 +6,16 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { safeImageSrc } from '@/lib/security/url-sanitizer';
 import { cn } from '@/lib/utils';
-import { ChevronRight,Filter,MapPin,Search,Users,Zap } from 'lucide-react';
+import { ChevronRight, Filter, MapPin, Search, Users, Zap } from 'lucide-react';
 import { useState } from 'react';
 
 interface StudentRosterProps {
@@ -151,94 +158,87 @@ export default function StudentRoster({
   };
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="h-full flex flex-col min-h-0 overflow-hidden">
       {/* Filters - All in one line */}
-      <div className="p-3 border-b">
+      <div className="p-2.5 sm:p-3 border-b border-zinc-200 dark:border-zinc-800 shrink-0">
         <div className="flex items-center gap-2">
-          {/* Search - wider */}
-          <div className="relative flex-1">
+          {/* Search - Maximize width */}
+          <div className="relative flex-1 min-w-0">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
             <Input
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search students..."
-              className="pl-9 h-9 text-xs"
+              className="pl-8 h-8 text-xs bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-700 w-full"
             />
           </div>
 
-          {/* Filter Tag */}
-          <div className="flex items-center gap-1.5 px-2.5 py-1.5 bg-gradient-to-r from-purple-50 to-pink-50 dark:from-purple-950/30 dark:to-pink-950/30 rounded-lg border border-purple-200 dark:border-purple-800">
-            <Filter className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
-            <span className="text-xs font-semibold text-purple-700 dark:text-purple-300">Filters</span>
-          </div>
-
-          {/* Stop Filter */}
-          <select
-            value={stopFilter}
-            onChange={(e) => setStopFilter(e.target.value)}
-            className="px-3 py-1.5 border-2 border-zinc-300 dark:border-zinc-700 rounded-lg text-xs h-9 bg-white dark:bg-zinc-900 text-gray-900 dark:text-gray-100 hover:border-purple-400 dark:hover:border-purple-600 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all font-medium shadow-sm min-w-[160px]"
-          >
-            <option value="all" className="bg-white dark:bg-zinc-900">📍 All Stops</option>
-            {uniqueStops.map(stop => (
-              <option key={stop.id} value={stop.id} className="bg-white dark:bg-zinc-900">
-                📍 {stop.name} ({stopGroups.get(stop.id)?.length || 0})
-              </option>
-            ))}
-          </select>
+          {/* Stop Filter Dropdown - Compact */}
+          <Select value={stopFilter} onValueChange={setStopFilter}>
+            <SelectTrigger className="h-8 w-[110px] sm:w-[130px] shrink-0 text-xs bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-700 text-foreground font-medium shadow-xs rounded-lg px-2.5">
+              <SelectValue placeholder="All Stops" />
+            </SelectTrigger>
+            <SelectContent align="end" className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-xl max-h-60 rounded-xl">
+              <SelectItem value="all" className="text-xs cursor-pointer">
+                All Stops
+              </SelectItem>
+              {uniqueStops.map((stop) => (
+                <SelectItem key={stop.id} value={stop.id} className="text-xs cursor-pointer">
+                  {stop.name} ({stopGroups.get(stop.id)?.length || 0})
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
 
         {/* Active Filters Badge */}
         {stopFilter !== 'all' && (
-          <div className="flex items-center gap-2 mt-2 p-2 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/20 dark:to-indigo-950/20 rounded-lg border border-blue-200 dark:border-blue-800">
-            <div className="flex items-center gap-1.5">
-              <div className="w-5 h-5 rounded-full bg-gradient-to-br from-blue-500 to-indigo-500 flex items-center justify-center">
-                <Filter className="w-3 h-3 text-white" />
-              </div>
-              <span className="text-xs font-semibold text-blue-700 dark:text-blue-300">Active:</span>
+          <div className="flex items-center gap-2 mt-2 p-1.5 px-2 bg-blue-50/60 dark:bg-blue-950/20 rounded-lg border border-blue-200 dark:border-blue-800">
+            <div className="flex items-center gap-1">
+              <Filter className="w-3 h-3 text-blue-600 dark:text-blue-400" />
+              <span className="text-[11px] font-semibold text-blue-700 dark:text-blue-300">Active:</span>
             </div>
             <Badge
-              className="text-xs cursor-pointer bg-blue-600 hover:bg-blue-700 text-white border-0 shadow-sm transition-all hover:scale-105 px-2.5 py-0.5"
+              className="text-[10px] cursor-pointer bg-blue-600 hover:bg-blue-700 text-white border-0 shadow-xs transition-all hover:scale-105 px-2 py-0.5"
               onClick={() => setStopFilter('all')}
             >
-              📍 {uniqueStops.find(s => s.id === stopFilter)?.name} ✕
+              {uniqueStops.find(s => s.id === stopFilter)?.name} ✕
             </Badge>
             <Button
               size="sm"
               variant="ghost"
-              className="h-6 text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 ml-auto"
+              className="h-5 text-[11px] text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 ml-auto px-1.5"
               onClick={() => setStopFilter('all')}
             >
-              Clear All
+              Clear
             </Button>
           </div>
         )}
 
         {/* Quick Select by Stop */}
         {stopFilter !== 'all' && stopGroups.get(stopFilter) && (
-          <div className="flex items-center gap-2 p-2 bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-950/20 dark:to-emerald-950/20 rounded-lg border border-green-200 dark:border-green-800">
-            <div className="flex items-center gap-1.5">
-              <div className="w-5 h-5 rounded-full bg-gradient-to-br from-green-500 to-emerald-500 flex items-center justify-center">
-                <Zap className="w-3 h-3 text-white" />
-              </div>
-              <span className="text-xs font-semibold text-green-700 dark:text-green-300">Quick Select:</span>
+          <div className="flex items-center gap-1.5 mt-2 p-1.5 px-2 bg-emerald-50/60 dark:bg-emerald-950/20 rounded-lg border border-emerald-200 dark:border-emerald-800">
+            <div className="flex items-center gap-1">
+              <Zap className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+              <span className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">Quick Select:</span>
             </div>
             <Button
               size="sm"
-              className="text-xs h-7 bg-green-600 hover:bg-green-700 text-white shadow-sm px-3"
+              className="text-[10px] h-6 bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs px-2"
               onClick={() => onSelectByStop(stopFilter, 5)}
             >
               Top 5
             </Button>
             <Button
               size="sm"
-              className="text-xs h-7 bg-green-600 hover:bg-green-700 text-white shadow-sm px-3"
+              className="text-[10px] h-6 bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs px-2"
               onClick={() => onSelectByStop(stopFilter, 10)}
             >
               Top 10
             </Button>
             <Button
               size="sm"
-              className="text-xs h-7 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white shadow-sm px-3 font-semibold"
+              className="text-[10px] h-6 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white shadow-xs px-2.5 font-semibold"
               onClick={() => onSelectByStop(stopFilter)}
             >
               Select All ({stopGroups.get(stopFilter)?.length || 0})
@@ -247,19 +247,17 @@ export default function StudentRoster({
         )}
       </div>
 
-      {/* Student List */}
-      <div className="flex-1">
+      {/* Student List (No scrollbar) */}
+      <div className="flex-1 min-h-0 overflow-y-auto no-scrollbar">
         {filteredStudents.length > 0 ? (
-          <ScrollArea className="h-full">
-            <div>
-              {filteredStudents.map(student => renderStudentRow(student))}
-            </div>
-          </ScrollArea>
+          <div>
+            {filteredStudents.map(student => renderStudentRow(student))}
+          </div>
         ) : (
-          <div className="flex items-center justify-center h-full">
+          <div className="flex items-center justify-center h-full p-6">
             <div className="text-center">
-              <Users className="w-10 h-10 mx-auto mb-2 text-muted-foreground opacity-50" />
-              <p className="text-sm text-muted-foreground">No students found</p>
+              <Users className="w-9 h-9 mx-auto mb-2 text-muted-foreground opacity-40" />
+              <p className="text-xs text-muted-foreground font-medium">No students found</p>
             </div>
           </div>
         )}

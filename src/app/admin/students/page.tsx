@@ -1,280 +1,190 @@
 "use client";
 
-import Avatar from '@/components/Avatar';
-import { ExportButton } from '@/components/ExportButton';
-import { TableRowLoader } from '@/components/LoadingSpinner';
+import Avatar from "@/components/Avatar";
+import { ExportButton } from "@/components/ExportButton";
+import { MobileActionFAB } from "@/components/layout/MobileActionFAB";
+import { TableRowLoader } from "@/components/LoadingSpinner";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import {
-	Card,
-	CardContent,
-} from "@/components/ui/card";
-import {
-	Dialog,
-	DialogContent,
-	DialogDescription,
-	DialogFooter,
-	DialogHeader,
-	DialogTitle,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
 } from "@/components/ui/dialog";
 import {
-	DropdownMenu,
-	DropdownMenuContent,
-	DropdownMenuItem,
-	DropdownMenuLabel,
-	DropdownMenuSeparator,
-	DropdownMenuTrigger,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import {
-	Select,
-	SelectContent,
-	SelectItem,
-	SelectTrigger,
-	SelectValue,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from "@/components/ui/select";
 import {
-	Table,
-	TableBody,
-	TableCell,
-	TableHead,
-	TableHeader,
-	TableRow,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
 } from "@/components/ui/table";
-import { useAuth } from '@/contexts/auth-context';
-import { useToast } from '@/contexts/toast-context';
-import { deleteStudent } from '@/lib/dataService';
-import { exportToExcel } from '@/lib/export-helpers';
+import { useAuth } from "@/contexts/auth-context";
+import { useToast } from "@/contexts/toast-context";
+import { invalidateCollectionCache, useApiCollection } from "@/hooks/useApiCollection";
+import { useEventDrivenRefresh } from "@/hooks/useEventDrivenRefresh";
+import { deleteStudent } from "@/lib/dataService";
+import { exportToExcel } from "@/lib/export-helpers";
 import { safeImageSrc } from "@/lib/security/url-sanitizer";
-import { supabase } from '@/lib/supabase-client';
-import { ArrowRightLeft,Download,Edit,Eye,Filter,Loader2,MoreHorizontal,Plus,QrCode,RefreshCw,Search,Trash2 } from "lucide-react";
-import { MobileActionFAB } from '@/components/layout/MobileActionFAB';
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { useEffect,useMemo,useState } from 'react';
-// Migrated: Server-side API → PostgreSQL (no Firestore client reads)
-import { useTheme } from '@/components/theme-provider';
-import { invalidateCollectionCache,useApiCollection } from '@/hooks/useApiCollection';
-import { useEventDrivenRefresh } from '@/hooks/useEventDrivenRefresh';
-import { cn } from '@/lib/utils';
+import { supabase } from "@/lib/supabase-client";
+import { cn } from "@/lib/utils";
+import {
+  AlertTriangle,
+  ArrowRightLeft,
+  Bus,
+  CheckCircle2,
+  Clock,
+  Download,
+  Edit,
+  Eye,
+  GraduationCap,
+  Loader2,
+  Lock,
+  MoreHorizontal,
+  Plus,
+  QrCode,
+  RefreshCw,
+  Search,
+  ShieldAlert,
+  Trash2,
+  UserCheck,
+  Users,
+  UserX,
+  X,
+} from "lucide-react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
 
-function StudentRow({
-  student,
-  theme,
-  busDisplay,
-  onDelete,
-}: {
-  student: any;
-  theme: string | undefined;
-  busDisplay: string;
-  onDelete: (item: { id: string; name: string }) => void;
-}) {
-  return (
-    <TableRow className="h-auto" style={{ contentVisibility: 'auto', containIntrinsicSize: '0 52px' }}>
-      <TableCell className="py-1.5">
-        <div className="flex flex-row items-center gap-2">
-          <Avatar
-            src={safeImageSrc(student.profilePhotoUrl || student.photoURL)}
-            name={student.name || student.fullName}
-            size="xs"
-            className="flex-shrink-0"
-          />
-          <div className="flex flex-col min-w-0">
-            <div className="text-sm font-medium text-foreground truncate max-w-[180px]">{student.name || student.fullName}</div>
-            <div className="text-xs text-muted-foreground">{student.email}</div>
-          </div>
-        </div>
-      </TableCell>
-      <TableCell className="py-2">
-        <div className="space-y-0.5">
-          <div className="text-xs font-medium text-foreground">
-            Ph: {student.phone || student.phoneNumber || 'N/A'}
-          </div>
-          {(student.alternatePhone || student.altPhone) && (
-            <div className="text-xs text-muted-foreground">
-              Alt: {student.alternatePhone || student.altPhone}
-            </div>
-          )}
-        </div>
-      </TableCell>
-      <TableCell className="py-2">
-        <div className="font-mono text-xs text-foreground whitespace-nowrap">
-          {student.enrollmentId || student.studentId || 'N/A'}
-        </div>
-      </TableCell>
-      <TableCell className="py-1.5">
-        <div className="text-[10px] whitespace-nowrap">{busDisplay}</div>
-      </TableCell>
-      <TableCell className="py-1.5">
-        <span className={cn(
-          "inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium",
-          student.shift?.toLowerCase() === 'morning'
-            ? theme === 'dark' ? 'bg-blue-100 text-blue-800' : 'bg-blue-50 text-blue-700'
-            : theme === 'dark' ? 'bg-orange-100 text-orange-800' : 'bg-orange-50 text-orange-700'
-        )}>
-          {student.shift || 'N/A'}
-        </span>
-      </TableCell>
-      <TableCell className="py-1.5">
-        <div className="flex flex-col items-center gap-0.5">
-          <span className={cn(
-            "inline-block px-1.5 py-0.5 rounded-full text-[9px] font-medium",
-            student.status === 'active' ? 'bg-green-500 text-white' :
-              student.status === 'expired' ? 'bg-red-500 text-white' :
-                student.status === 'maintenance' ? 'bg-yellow-500 text-white' :
-                  theme === 'dark' ? 'bg-gray-100 text-gray-700' : 'bg-gray-200 text-gray-700'
-          )}>
-            {student.status ? (student.status.charAt(0).toUpperCase() + student.status.slice(1)) : 'Unknown'}
-          </span>
-          <div className="text-[10px] text-muted-foreground whitespace-nowrap">
-            {student.sessionStartYear && student.sessionEndYear
-              ? `${student.sessionStartYear}-${student.sessionEndYear}`
-              : 'N/A'
-            }
-          </div>
-        </div>
-      </TableCell>
-      <TableCell className="py-1.5 text-right">
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" className={cn(
-              "h-7 w-7 p-0 cursor-pointer",
-              theme === 'dark' ? "hover:bg-gray-700" : "hover:bg-gray-100"
-            )}>
-              <MoreHorizontal className="h-3.5 w-3.5" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className={cn(
-            "shadow-xl rounded-lg w-40",
-            theme === 'dark' ? "bg-gray-900 border-gray-600" : "bg-white border-[#E5E7EB]"
-          )}>
-            <DropdownMenuLabel className={cn("text-[11px] font-semibold px-2 py-1.5", theme === 'dark' ? "text-white" : "text-[#111827]")}>Actions</DropdownMenuLabel>
-            <DropdownMenuSeparator className={cn(theme === 'dark' ? "bg-gray-600" : "bg-[#E5E7EB]")} />
-            <DropdownMenuItem asChild>
-              <Link href={`/admin/students/view/${encodeURIComponent(student.uid || student.id)}`} className={cn(
-                "px-2 py-1.5 text-[11px]",
-                theme === 'dark' ? "text-white hover:bg-gray-800 focus:bg-gray-800" : "text-[#111827] hover:bg-gray-100 focus:bg-gray-100"
-              )}>
-                <Eye className="mr-1.5 h-3 w-3 text-blue-400" />
-                View Details
-              </Link>
-            </DropdownMenuItem>
-            <DropdownMenuItem asChild>
-              <Link href={`/admin/students/edit/${encodeURIComponent(student.uid || student.id)}`} className={cn(
-                "px-2 py-1.5 text-[11px]",
-                theme === 'dark' ? "text-white hover:bg-gray-800 focus:bg-gray-800" : "text-[#111827] hover:bg-gray-100 focus:bg-gray-100"
-              )}>
-                <Edit className="mr-1.5 h-3 w-3 text-yellow-400" />
-                Edit
-              </Link>
-            </DropdownMenuItem>
-            <DropdownMenuSeparator className={cn(theme === 'dark' ? "bg-gray-600" : "bg-[#E5E7EB]")} />
-            <DropdownMenuItem
-              className={cn(
-                "px-2 py-1.5 text-[11px] cursor-pointer transition-colors",
-                theme === 'dark' ? "text-white hover:!bg-red-600 focus:!bg-red-600" : "text-[#111827] hover:!bg-red-600 focus:!bg-red-600"
-              )}
-              onClick={() => onDelete({ id: student.id, name: student.name })}
-            >
-              <Trash2 className="mr-1.5 h-3 w-3" />
-              Delete
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </TableCell>
-    </TableRow>
-  );
-}
-
-export default function AdminStudents() {
+export default function AdminStudentsHub() {
   const { currentUser, userData, loading: authLoading } = useAuth();
   const { addToast } = useToast();
   const router = useRouter();
-  const { theme } = useTheme();
 
-  // SPARK PLAN SAFETY: Event-driven refresh - only fetches when mutations occur
-  // No polling/auto-refresh to conserve Firestore quota
-  // Server-side API reads from PostgreSQL — no Firestore client reads
+  // Load students & buses via optimized collections
   const {
-    data: students,
+    data: rawStudents,
     loading: loadingStudents,
     refresh: refreshStudents,
     fetchNextPage: fetchMoreStudents,
     hasMore: hasMoreStudents,
-  } = useApiCollection('students', {
+    totalCount: serverTotalStudents,
+  } = useApiCollection("students", {
     pageSize: 50,
-    orderByField: 'updatedAt',
-    orderDirection: 'desc',
-    autoRefresh: false, // EVENT-DRIVEN: Only refresh when mutations occur
+    orderByField: "updatedAt",
+    orderDirection: "desc",
+    autoRefresh: false,
   });
 
   const {
     data: buses,
     loading: loadingBuses,
     refresh: refreshBuses,
-  } = useApiCollection('buses', {
-    pageSize: 50,
-    orderByField: 'busNumber',
-    orderDirection: 'asc',
+  } = useApiCollection("buses", {
+    pageSize: 100,
+    orderByField: "busNumber",
+    orderDirection: "asc",
     autoRefresh: false,
   });
 
-  // Event-driven refresh: auto-refresh when navigating back from add/edit pages
-  useEventDrivenRefresh({
-    collectionName: 'students',
-    onRefresh: async () => {
-      await Promise.all([refreshStudents(), refreshBuses()]);
+  // Accurate overall student stats from database
+  const [studentStats, setStudentStats] = useState<{
+    total: number;
+    active: number;
+    suspended: number;
+    warning: number;
+  } | null>(null);
+
+  const fetchStudentStats = async () => {
+    try {
+      const token = await currentUser?.getIdToken();
+      const res = await fetch("/api/students?stats=true", {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (res.ok) {
+        const stats = await res.json();
+        setStudentStats(stats);
+      }
+    } catch (e) {
+      console.error("Failed to load student stats:", e);
     }
+  };
+
+  useEffect(() => {
+    if (currentUser) {
+      fetchStudentStats();
+    }
+  }, [currentUser]);
+
+  // Event-driven refresh
+  useEventDrivenRefresh({
+    collectionName: "students",
+    onRefresh: async () => {
+      await Promise.all([refreshStudents(), refreshBuses(), fetchStudentStats()]);
+    },
   });
 
-  const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [isDeleting, setIsDeleting] = useState(false);
-  const [deleteItem, setDeleteItem] = useState<{ id: string, name: string } | null>(null);
-
-  const handleDeleteClick = (item: { id: string; name: string }) => {
-    setDeleteItem(item);
-    setIsDialogOpen(true);
-  };
+  // Search state
   const [searchTerm, setSearchTerm] = useState("");
-  const [shiftFilter, setShiftFilter] = useState<string>("all");
-  const [busFilter, setBusFilter] = useState<string>("all");
-  const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(false);
-
-  // Search State
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
   const [searchResults, setSearchResults] = useState<any[] | null>(null);
   const [isSearching, setIsSearching] = useState(false);
 
-  const isLoading = loadingStudents || loadingBuses || isSearching;
-  const [isRefreshing, setIsRefreshing] = useState(false);
+  // Filters
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [shiftFilter, setShiftFilter] = useState("all");
+  const [busFilter, setBusFilter] = useState("all");
 
-  // Manual refresh handler
-  const handleRefresh = async () => {
-    setIsRefreshing(true);
-    try {
-      invalidateCollectionCache('students');
-      await Promise.all([refreshStudents(), refreshBuses()]);
-      addToast('Data refreshed', 'success');
-    } catch (error) {
-      console.error('Error refreshing students:', error);
-      addToast('Failed to refresh data', 'error');
-    } finally {
-      setIsRefreshing(false);
-    }
-  };
+  // Local optimistic overrides for instant access status updates
+  const [localOverrides, setLocalOverrides] = useState<Record<string, { status: string }>>({});
+
+  // Status Action Modal State
+  const [statusConfirmItem, setStatusConfirmItem] = useState<{
+    id: string;
+    name: string;
+    currentStatus: string;
+    targetStatus: "active" | "suspended" | "soft_blocked" | "expired";
+  } | null>(null);
+  const [updatingStatus, setUpdatingStatus] = useState(false);
+
+  // Delete Modal State
+  const [deleteItem, setDeleteItem] = useState<{ id: string; name: string } | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Debounce search term
   useEffect(() => {
     const timer = setTimeout(() => {
       setDebouncedSearchTerm(searchTerm);
-    }, 500);
-
+    }, 450);
     return () => clearTimeout(timer);
   }, [searchTerm]);
 
   // Server-side search effect
   useEffect(() => {
     async function performSearch() {
-      if (!debouncedSearchTerm || debouncedSearchTerm.trim() === '') {
+      if (!debouncedSearchTerm || debouncedSearchTerm.trim() === "") {
         setSearchResults(null);
         return;
       }
@@ -283,12 +193,11 @@ export default function AdminStudents() {
       try {
         const term = debouncedSearchTerm.trim();
         const token = await currentUser?.getIdToken();
-        const res = await fetch('/api/students?q=' + encodeURIComponent(term), {
-          headers: token ? { Authorization: 'Bearer ' + token } : {},
+        const res = await fetch("/api/students?q=" + encodeURIComponent(term), {
+          headers: token ? { Authorization: "Bearer " + token } : {},
         });
         const data = await res.json();
         setSearchResults(data.students || []);
-
       } catch (error) {
         console.error("Search failed:", error);
         addToast("Search failed. Please try again.", "error");
@@ -300,152 +209,297 @@ export default function AdminStudents() {
     performSearch();
   }, [debouncedSearchTerm, addToast, currentUser]);
 
-
-
-
+  // Auth routing verification
   useEffect(() => {
     if (!authLoading && !currentUser) {
-      router.push('/login');
+      router.push("/login");
     }
-
-    if (userData && userData.role !== 'admin') {
+    if (userData && userData.role !== "admin") {
       router.push(`/${userData.role}`);
     }
   }, [currentUser, userData, authLoading, router]);
 
-  // Real-time listeners handle data fetching automatically
-
-  // Index buses by both id fields once so per-row lookups are O(1) instead of
-  // scanning the whole bus array for every student row on every render.
+  // Index buses for O(1) lookups
   const busById = useMemo(() => {
     const map = new Map<string, any>();
-    for (const b of buses) {
+    for (const b of buses || []) {
       if (b.busId) map.set(b.busId, b);
       if (b.id) map.set(b.id, b);
+      if (b.busNumber) map.set(b.busNumber, b);
     }
     return map;
   }, [buses]);
 
   const getBusDisplay = (busId: string) => {
-    if (!busId) return 'Not Assigned';
-
+    if (!busId) return "Not Assigned";
     const bus = busById.get(busId);
-    if (!bus) return busId;
-
-    const busNum = busId.replace(/[^0-9]/g, '') || '?';
-    return `Bus-${busNum} (${bus.busNumber || 'N/A'})`;
+    if (!bus) return busId.startsWith("Bus-") ? busId : `Bus-${busId}`;
+    const busNum = bus.busNumber || busId.replace(/[^0-9]/g, "") || "?";
+    return `Bus ${busNum}${bus.routeNumber ? ` (R-${bus.routeNumber})` : ""}`;
   };
 
-  // Get unique values for filters with proper numeric sorting
-  const uniqueBuses = useMemo(() => Array.from(new Set(students.map(s => s.busId).filter(Boolean)))
-    .sort((a, b) => {
-      const numA = parseInt(a.replace(/\D/g, '')) || 0;
-      const numB = parseInt(b.replace(/\D/g, '')) || 0;
+  // Base list merged with local overrides
+  const students = useMemo(() => {
+    const base = searchResults !== null ? searchResults : rawStudents;
+    return (base || []).map((s: any) => {
+      const id = s.id || s.uid;
+      const override = localOverrides[id];
+      return {
+        ...s,
+        id,
+        status: override?.status || s.status || "active",
+      };
+    });
+  }, [rawStudents, searchResults, localOverrides]);
+
+  // Unique buses for filtering
+  const uniqueBuses = useMemo(() => {
+    return Array.from(new Set(students.map((s) => s.busId).filter(Boolean))).sort((a, b) => {
+      const numA = parseInt(a.replace(/\D/g, "")) || 0;
+      const numB = parseInt(b.replace(/\D/g, "")) || 0;
       return numA - numB;
-    }), [students]);
+    });
+  }, [students]);
 
-  // Decide source: Search Results (if available) OR Paginated List
-  const sourceStudents = searchResults !== null ? searchResults : students;
+  // Role-Specific Metrics: Top 4 Control Cards for Students
+  const metrics = useMemo(() => {
+    // Prefer authoritative database statistics if available
+    const total = studentStats?.total ?? (serverTotalStudents > 0 ? serverTotalStudents : students.length);
+    const activeCount = studentStats?.active ?? (serverTotalStudents > 0 ? serverTotalStudents : students.filter(s => (s.status || "active").toLowerCase() === "active").length);
+    const softBlockedOrExpiredCount = studentStats?.warning ?? students.filter(s => {
+      const st = (s.status || "active").toLowerCase();
+      return st === "soft_blocked" || st === "expired";
+    }).length;
+    const suspendedCount = studentStats?.suspended ?? students.filter(s => {
+      const st = (s.status || "active").toLowerCase();
+      return st === "suspended" || st === "inactive";
+    }).length;
 
+    return { total, activeCount, softBlockedOrExpiredCount, suspendedCount };
+  }, [studentStats, serverTotalStudents, students]);
+
+  // Filtered Students
   const filteredStudents = useMemo(() => {
-    return sourceStudents.filter(student => {
-      // Search filter - check both name and fullName fields
-      const matchesSearch = !searchTerm ||
-        (student.name && student.name.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        (student.fullName && student.fullName.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        (student.email && student.email.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        (student.phone && student.phone.includes(searchTerm)) ||
-        (student.phoneNumber && student.phoneNumber.includes(searchTerm)) ||
-        (student.enrollmentId && student.enrollmentId.toLowerCase().includes(searchTerm.toLowerCase()));
+    const term = searchTerm.toLowerCase();
 
-      // Shift filter
-      const matchesShift = shiftFilter === "all" || (student.shift && student.shift.toLowerCase() === shiftFilter.toLowerCase());
+    return students.filter((student) => {
+      const name = (student.name || student.fullName || "").toLowerCase();
+      const email = (student.email || "").toLowerCase();
+      const phone = (student.phone || student.phoneNumber || "");
+      const altPhone = (student.alternatePhone || student.altPhone || "");
+      const enrollmentId = (student.enrollmentId || student.enrollment_id || student.studentId || "").toLowerCase();
+      const assignedBus = busById.get(student.busId);
+      const busText = assignedBus ? `${assignedBus.busNumber} ${assignedBus.routeNumber || ""}` : (student.busId || "");
 
-      // Bus filter
+      const matchesSearch =
+        !searchTerm ||
+        name.includes(term) ||
+        email.includes(term) ||
+        phone.includes(searchTerm) ||
+        altPhone.includes(searchTerm) ||
+        enrollmentId.includes(term) ||
+        busText.toLowerCase().includes(term);
+
+      const currentStatus = (student.status || "active").toLowerCase();
+      let matchesStatus = true;
+      if (statusFilter === "active") {
+        matchesStatus = currentStatus === "active";
+      } else if (statusFilter === "soft_blocked") {
+        matchesStatus = currentStatus === "soft_blocked";
+      } else if (statusFilter === "expired") {
+        matchesStatus = currentStatus === "expired";
+      } else if (statusFilter === "suspended") {
+        matchesStatus = currentStatus === "suspended" || currentStatus === "inactive";
+      }
+
+      const matchesShift =
+        shiftFilter === "all" ||
+        (student.shift && student.shift.toLowerCase() === shiftFilter.toLowerCase());
+
       const matchesBus = busFilter === "all" || (student.busId && student.busId === busFilter);
 
-      return matchesSearch && matchesShift && matchesBus;
+      return matchesSearch && matchesStatus && matchesShift && matchesBus;
     });
-  }, [sourceStudents, searchTerm, shiftFilter, busFilter]);
+  }, [students, searchTerm, statusFilter, shiftFilter, busFilter, busById]);
 
   // Unique key safety
-  const uniqueFilteredStudents = useMemo(() => filteredStudents.filter((student, index, self) =>
-    index === self.findIndex((s) => s.id === student.id)
-  ), [filteredStudents]);
+  const uniqueFilteredStudents = useMemo(() => {
+    return filteredStudents.filter(
+      (student, index, self) => index === self.findIndex((s) => s.id === student.id)
+    );
+  }, [filteredStudents]);
 
-  // Export students data from Supabase
-  const handleExportStudents = async () => {
+  // Refresh handler
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
     try {
-      const currentDate = new Date();
-      const dateStr = currentDate.toISOString().split('T')[0].replace(/-/g, '-');
-
-      // Fetch all students directly from Supabase PostgreSQL table 'student_profiles'
-      const { data: rawStudents, error: studentsError } = await supabase
-        .from('student_profiles')
-        .select('uid, full_name, email, phone, faculty, enrollment_id, bus_id, shift, session_start_year, session_end_year, session_duration, status')
-        .order('full_name', { ascending: true });
-
-      if (studentsError) throw studentsError;
-
-      // Fetch buses to map assigned bus IDs to bus numbers
-      const { data: rawBuses } = await supabase
-        .from('buses')
-        .select('id, bus_number, registration_number');
-
-      const busMap = new Map((rawBuses || []).map((b: any) => [b.id, b.bus_number || b.registration_number]));
-
-      const studentsData = (rawStudents || []).map((student: any, index: number) => {
-        const busId = student.bus_id || student.bus_id;
-        const busDisplay = busMap.get(busId) || (busId ? `Bus-${busId}` : 'Not Assigned');
-        const status = student.status || 'N/A';
-        const sessionDuration = student.session_duration ? `${student.session_duration} year${Number(student.session_duration) > 1 ? 's' : ''}` : 'N/A';
-
-        return [
-          (index + 1).toString(),
-          student.full_name || student.name || 'N/A',
-          student.email || 'N/A',
-          student.phone || student.phoneNumber || 'N/A',
-          student.faculty || 'N/A',
-          student.enrollment_id || student.enrollmentId || 'N/A',
-          busDisplay,
-          student.shift ? student.shift.charAt(0).toUpperCase() + student.shift.slice(1) : 'N/A',
-          student.sessionStartYear || student.session_start_year || 'N/A',
-          student.sessionEndYear || student.session_end_year || 'N/A',
-          sessionDuration,
-          status
-        ];
-      });
-
-      // Add headers
-      studentsData.unshift([
-        'Sl No', 'Name', 'Email', 'Phone', 'Faculty', 'Enrollment ID',
-        'Bus Assigned', 'Shift', 'Session Start', 'Session End', 'Session Duration', 'Status'
-      ]);
-
-      // Add section header
-      studentsData.unshift(['ALL STUDENTS REPORT (SUPABASE)'], ['']);
-
-      await exportToExcel(studentsData, `ADTU_Students_Report_${dateStr}`, 'Students');
-
-      addToast(
-        `Exported ${(rawStudents || []).length} students to ADTU_Students_Report_${dateStr}.xlsx`,
-        'success'
-      );
+      invalidateCollectionCache("students");
+      invalidateCollectionCache("buses");
+      await Promise.all([refreshStudents(), refreshBuses(), fetchStudentStats()]);
+      addToast("Student directory refreshed", "success");
     } catch (error) {
-      console.error('❌ Error exporting students from Supabase:', error);
-      addToast(
-        'Failed to export students data. Please try again.',
-        'error'
-      );
+      console.error("Error refreshing students:", error);
+      addToast("Failed to refresh data", "error");
+    } finally {
+      setIsRefreshing(false);
     }
   };
 
-  // Helper function to extract number from string
-  const extractNumber = (str: string): string => {
-    if (!str) return '0';
-    const match = str.match(/\d+/);
-    return match ? match[0] : '0';
+  // Toggle or change status
+  const handleToggleStatus = (student: any) => {
+    const current = (student.status || "active").toLowerCase();
+    const isCurrentlyActive = current === "active";
+    const targetStatus = isCurrentlyActive ? "suspended" : "active";
+
+    setStatusConfirmItem({
+      id: student.id,
+      name: student.name || student.fullName || "Student",
+      currentStatus: current,
+      targetStatus,
+    });
   };
+
+  const executeStatusChange = async () => {
+    if (!statusConfirmItem) return;
+
+    try {
+      setUpdatingStatus(true);
+      const token = await currentUser?.getIdToken();
+      if (!token) {
+        addToast("Authentication required", "error");
+        return;
+      }
+
+      const res = await fetch(`/api/students/${statusConfirmItem.id}/status`, {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ status: statusConfirmItem.targetStatus }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to update student access status");
+      }
+
+      setLocalOverrides((prev) => ({
+        ...prev,
+        [statusConfirmItem.id]: { status: statusConfirmItem.targetStatus },
+      }));
+
+      invalidateCollectionCache("students");
+
+      const statusLabels: Record<string, string> = {
+        active: "Active Access restored",
+        suspended: "Transport access revoked",
+        soft_blocked: "Account soft-blocked",
+        expired: "Pass expired",
+      };
+
+      addToast(
+        `${statusConfirmItem.name}: ${statusLabels[statusConfirmItem.targetStatus] || statusConfirmItem.targetStatus}`,
+        statusConfirmItem.targetStatus === "active" ? "success" : "info"
+      );
+    } catch (err: any) {
+      console.error("Status update error:", err);
+      addToast(err.message || "Failed to update student status", "error");
+    } finally {
+      setUpdatingStatus(false);
+      setStatusConfirmItem(null);
+    }
+  };
+
+  // Delete student
+  const executeDelete = async () => {
+    if (!deleteItem) return;
+    setIsDeleting(true);
+    try {
+      await deleteStudent(deleteItem.id);
+      invalidateCollectionCache("students");
+      await refreshStudents();
+      addToast("Student record deleted successfully", "success");
+    } catch (error) {
+      console.error("Error deleting student:", error);
+      addToast("Failed to delete student", "error");
+    } finally {
+      setIsDeleting(false);
+      setDeleteItem(null);
+    }
+  };
+
+  // Export students to Excel
+  const handleExportStudents = async () => {
+    try {
+      const dateStr = new Date().toISOString().split("T")[0];
+
+      const { data: rawData, error: studentsError } = await supabase
+        .from("student_profiles")
+        .select(
+          "uid, full_name, email, phone, faculty, enrollment_id, bus_id, shift, session_start_year, session_end_year, session_duration, status"
+        )
+        .order("full_name", { ascending: true });
+
+      if (studentsError) throw studentsError;
+
+      const { data: rawBuses } = await supabase
+        .from("buses")
+        .select("id, bus_number, registration_number");
+
+      const busMap = new Map(
+        (rawBuses || []).map((b: any) => [b.id, b.bus_number || b.registration_number])
+      );
+
+      const exportData = (rawData || []).map((student: any, index: number) => {
+        const busDisplay =
+          busMap.get(student.bus_id) || (student.bus_id ? `Bus-${student.bus_id}` : "Not Assigned");
+        const status = (student.status || "N/A").toUpperCase();
+        const sessionDuration = student.session_duration
+          ? `${student.session_duration} yr${Number(student.session_duration) > 1 ? "s" : ""}`
+          : "N/A";
+
+        return [
+          (index + 1).toString(),
+          student.full_name || student.name || "N/A",
+          student.email || "N/A",
+          student.phone || student.phoneNumber || "N/A",
+          student.faculty || "N/A",
+          student.enrollment_id || student.enrollmentId || "N/A",
+          busDisplay,
+          student.shift ? student.shift.charAt(0).toUpperCase() + student.shift.slice(1) : "N/A",
+          student.session_start_year || "N/A",
+          student.session_end_year || "N/A",
+          sessionDuration,
+          status,
+        ];
+      });
+
+      exportData.unshift([
+        "Sl No",
+        "Name",
+        "Email",
+        "Phone",
+        "Faculty",
+        "Enrollment ID",
+        "Bus Assigned",
+        "Shift",
+        "Session Start",
+        "Session End",
+        "Duration",
+        "Access Status",
+      ]);
+      exportData.unshift(["STUDENT TRANSPORT ENROLLMENT & CONTROL REPORT"], [""]);
+
+      await exportToExcel(exportData, `ADTU_Students_Report_${dateStr}`, "Students");
+      addToast(`Exported ${(rawData || []).length} students to Excel`, "success");
+    } catch (error) {
+      console.error("❌ Error exporting students:", error);
+      addToast("Failed to export students data. Please try again.", "error");
+    }
+  };
+
+  const isLoading = authLoading || loadingStudents || loadingBuses || isSearching;
 
   if (authLoading && !currentUser) {
     return (
@@ -456,282 +510,689 @@ export default function AdminStudents() {
     );
   }
 
-  if (!currentUser || !userData || userData.role !== 'admin') {
+  if (!currentUser || !userData || userData.role !== "admin") {
     return null;
   }
 
-  const commonBtnClass = "group h-8 px-3.5 bg-white/80 dark:bg-zinc-800/80 hover:bg-zinc-50 dark:hover:bg-zinc-700/80 text-zinc-700 dark:text-zinc-200 hover:text-blue-600 dark:hover:text-blue-400 border border-zinc-200 dark:border-zinc-700/60 shadow-xs text-xs font-semibold rounded-lg transition-all duration-200 active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer";
-
   return (
-    <div className="itms-admin-container space-y-6">
-      {/* Page Header */}
+    <div className="itms-admin-container space-y-6 pb-20">
+      {/* ── HEADER ── */}
       <div className="itms-page-header-container">
-        <div className="flex items-center justify-between w-full gap-2">
-          <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-foreground truncate leading-tight pb-1">Student Management</h1>
+        <div className="flex flex-row items-center justify-between gap-3">
+          <div className="space-y-0.5 min-w-0">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 rounded-xl bg-blue-600/10 border border-blue-500/20 text-blue-500">
+                <GraduationCap className="w-6 h-6" />
+              </div>
+              <h1 className="text-xl sm:text-2xl md:text-3xl font-black text-foreground tracking-tight leading-tight">
+                Student Management Hub
+              </h1>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Manage student transport enrollment, digital pass validity, shift distribution, and portal access control.
+            </p>
+          </div>
 
-          {/* Desktop action toolbar */}
+          {/* Desktop Toolbar */}
           <div className="hidden md:flex items-center gap-2 shrink-0">
             <Link href="/admin/students/add">
-              <Button className="bg-blue-600 hover:bg-blue-700 text-white border border-blue-700 shadow-sm transition-all duration-200 hover:scale-105 hover:shadow-lg rounded-md px-2.5 py-1.5 text-xs h-8 cursor-pointer">
-                <Plus className="mr-1.5 h-3.5 w-3.5" />
-                Add New Student
-              </Button>
-            </Link>
-
-            <Link href="/admin/smart-allocation">
-              <Button className="bg-teal-600/90 hover:bg-teal-600 text-white border border-teal-500/40 shadow-sm transition-all duration-200 hover:scale-105 hover:shadow-lg rounded-md px-2.5 py-1.5 text-xs h-8 cursor-pointer">
-                <ArrowRightLeft className="mr-1.5 h-3.5 w-3.5" />
-                Student Reassignment
-              </Button>
-            </Link>
-            <Link href="/admin/verification">
-              <Button className="bg-cyan-600/90 hover:bg-cyan-600 text-white border border-cyan-500/40 shadow-sm transition-all duration-200 hover:scale-105 hover:shadow-lg rounded-md px-2.5 py-1.5 text-xs h-8 cursor-pointer">
-                <QrCode className="mr-1.5 h-3.5 w-3.5" />
-                Verification
+              <Button className="bg-blue-600 hover:bg-blue-700 text-white border border-blue-700 shadow-sm transition-all duration-200 hover:scale-105 hover:shadow-lg rounded-lg px-3 py-1.5 text-xs h-9 cursor-pointer gap-1.5">
+                <Plus className="h-4 w-4" />
+                <span>Add Student</span>
               </Button>
             </Link>
             <ExportButton
               onClick={handleExportStudents}
               label="Export"
-              className={commonBtnClass}
+              className="h-9 px-3.5 bg-white/80 dark:bg-zinc-800/80 hover:bg-zinc-50 dark:hover:bg-zinc-700/80 text-zinc-700 dark:text-zinc-200 border border-zinc-200 dark:border-zinc-700/60 shadow-xs text-xs font-semibold rounded-lg transition-all flex items-center gap-1.5 cursor-pointer"
             />
             <Button
               size="sm"
               onClick={handleRefresh}
               disabled={isRefreshing}
-              className={commonBtnClass}
+              className="h-9 px-3.5 bg-white/80 dark:bg-zinc-800/80 hover:bg-zinc-50 dark:hover:bg-zinc-700/80 text-zinc-700 dark:text-zinc-200 border border-zinc-200 dark:border-zinc-700/60 shadow-xs text-xs font-semibold rounded-lg transition-all flex items-center gap-1.5 cursor-pointer"
             >
-              <RefreshCw className={cn("h-3.5 w-3.5 transition-transform duration-500", isRefreshing ? "animate-spin" : "group-hover:rotate-180")} />
+              <RefreshCw
+                className={cn(
+                  "h-3.5 w-3.5 transition-transform duration-500",
+                  isRefreshing && "animate-spin"
+                )}
+              />
               <span>Refresh</span>
             </Button>
           </div>
 
-          {/* Mobile Refresh Button - exact same line as Student Management at rightmost end */}
+          {/* Mobile Refresh Button */}
           <div className="flex md:hidden items-center shrink-0">
             <Button
               size="sm"
               onClick={handleRefresh}
               disabled={isRefreshing}
-              className="h-8 px-3 bg-white dark:bg-zinc-800 hover:bg-gray-50 dark:hover:bg-zinc-700 text-gray-700 dark:text-zinc-200 hover:text-blue-600 dark:hover:text-blue-400 border border-gray-200 dark:border-zinc-700 shadow-sm rounded-lg text-xs font-semibold flex items-center gap-1.5 cursor-pointer active:scale-95 transition-all shrink-0"
+              className="h-8 px-3 bg-white dark:bg-zinc-800 hover:bg-gray-50 dark:hover:bg-zinc-700 text-gray-700 dark:text-zinc-200 border border-gray-200 dark:border-zinc-700 shadow-sm rounded-lg text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
             >
-              <RefreshCw className={cn("h-3.5 w-3.5 transition-transform duration-500", isRefreshing ? "animate-spin text-blue-600" : "group-hover:rotate-180")} />
+              <RefreshCw
+                className={cn(
+                  "h-3.5 w-3.5 transition-transform duration-500",
+                  isRefreshing ? "animate-spin text-blue-600" : "group-hover:rotate-180"
+                )}
+              />
               <span>Refresh</span>
             </Button>
           </div>
         </div>
-        <p className="text-muted-foreground mt-1 text-xs sm:text-sm truncate">View and manage all students</p>
+
+        {/* ── TOP 4 ROLE-SPECIFIC CONTROL CARDS (STUDENTS) ── */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-5">
+          {/* Card 1: Total Enrolled */}
+          <Card className="bg-white/60 dark:bg-zinc-900/60 border border-zinc-200/80 dark:border-zinc-800/80 shadow-xs">
+            <CardContent className="p-3.5 flex items-center justify-between">
+              <div>
+                <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
+                  Total Enrolled
+                </p>
+                <p className="text-xl md:text-2xl font-black text-foreground mt-0.5">
+                  {metrics.total.toLocaleString()}
+                </p>
+              </div>
+              <div className="p-2.5 rounded-xl bg-blue-500/10 text-blue-500 border border-blue-500/20">
+                <Users className="w-4 h-4" />
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Card 2: Active Access */}
+          <Card className="bg-white/60 dark:bg-zinc-900/60 border border-zinc-200/80 dark:border-zinc-800/80 shadow-xs">
+            <CardContent className="p-3.5 flex items-center justify-between">
+              <div>
+                <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
+                  Active Access
+                </p>
+                <p className="text-xl md:text-2xl font-black text-emerald-500 mt-0.5">
+                  {metrics.activeCount.toLocaleString()}
+                </p>
+              </div>
+              <div className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
+                <UserCheck className="w-4 h-4" />
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Card 3: Soft Blocked / Expired */}
+          <Card className="bg-white/60 dark:bg-zinc-900/60 border border-zinc-200/80 dark:border-zinc-800/80 shadow-xs">
+            <CardContent className="p-3.5 flex items-center justify-between">
+              <div>
+                <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
+                  Soft Block / Expired
+                </p>
+                <p className="text-xl md:text-2xl font-black text-amber-500 mt-0.5">
+                  {metrics.softBlockedOrExpiredCount.toLocaleString()}
+                </p>
+              </div>
+              <div className="p-2.5 rounded-xl bg-amber-500/10 text-amber-500 border border-amber-500/20">
+                <Clock className="w-4 h-4" />
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Card 4: Access Suspended */}
+          <Card className="bg-white/60 dark:bg-zinc-900/60 border border-zinc-200/80 dark:border-zinc-800/80 shadow-xs">
+            <CardContent className="p-3.5 flex items-center justify-between">
+              <div>
+                <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
+                  Access Suspended
+                </p>
+                <p className="text-xl md:text-2xl font-black text-rose-500 mt-0.5">
+                  {metrics.suspendedCount.toLocaleString()}
+                </p>
+              </div>
+              <div className="p-2.5 rounded-xl bg-rose-500/10 text-rose-500 border border-rose-500/20">
+                <UserX className="w-4 h-4" />
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       </div>
 
-      <Card className={cn("border-border min-h-[480px] flex flex-col", theme === 'dark' ? "bg-gray-900" : "bg-admin-bg")}>
-        <CardContent className="pt-3 flex-1 flex flex-col min-h-0 pb-4">
-          <div className="mb-3">
-            {/* Search Bar and Filters */}
-            <div className="flex flex-col md:flex-row gap-3">
-              {/* Search Bar - Top (Full Width on Mobile) */}
-              <div className="relative w-full md:flex-1">
-                <Search className={cn("absolute left-2.5 top-2.5 h-3.5 w-3.5", theme === 'dark' ? "text-gray-400" : "text-[#9CA3AF]")} />
-                <Input
-                  placeholder="Search by name, email, or phone..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-9 h-9 text-xs w-full"
-                />
-              </div>
+      {/* ── SEARCH & FILTERS ── */}
+      <Card className="bg-white dark:bg-zinc-900/80 border border-zinc-200 dark:border-zinc-800 shadow-sm">
+        <CardContent className="p-4 space-y-4">
+          <div className="flex flex-col md:flex-row gap-3">
+            {/* Search Input */}
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search students by name, email, phone, enrollment ID, or bus..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-9 h-9 text-xs w-full bg-slate-50 dark:bg-zinc-800/70 border-zinc-200 dark:border-zinc-700/60 rounded-lg"
+              />
+              {searchTerm && (
+                <button
+                  type="button"
+                  onClick={() => setSearchTerm("")}
+                  className="absolute right-2.5 top-2.5 text-muted-foreground hover:text-foreground p-0.5 cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
 
-              {/* Filters - Side by side on Mobile in the same line */}
-              <div className="grid grid-cols-2 gap-2 items-center w-full md:w-auto md:flex md:flex-row">
-                <Select value={shiftFilter} onValueChange={setShiftFilter}>
-                  <SelectTrigger className={cn(
-                    "h-9 md:h-8 text-xs w-full md:w-[140px] md:bg-transparent border",
-                    theme === 'dark' ? "bg-gray-800 border-gray-700" : "bg-white border-[#E5E7EB]"
-                  )}>
-                    <SelectValue placeholder="Shift" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all" className="text-xs">All Shifts</SelectItem>
-                    <SelectItem value="morning" className="text-xs">Morning</SelectItem>
-                    <SelectItem value="evening" className="text-xs">Evening</SelectItem>
-                  </SelectContent>
-                </Select>
+            {/* Filter Group */}
+            <div className="grid grid-cols-2 md:flex md:flex-row gap-2">
+              {/* Status Filter */}
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger className="h-9 text-xs w-full md:w-[155px] bg-slate-50 dark:bg-zinc-800/70 border-zinc-200 dark:border-zinc-700/60">
+                  <SelectValue placeholder="Status" />
+                </SelectTrigger>
+                <SelectContent className="bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800">
+                  <SelectItem value="all" className="text-xs">
+                    All Statuses
+                  </SelectItem>
+                  <SelectItem value="active" className="text-xs text-emerald-500">
+                    Active Access
+                  </SelectItem>
+                  <SelectItem value="soft_blocked" className="text-xs text-amber-500">
+                    Soft Blocked
+                  </SelectItem>
+                  <SelectItem value="expired" className="text-xs text-orange-500">
+                    Expired Pass
+                  </SelectItem>
+                  <SelectItem value="suspended" className="text-xs text-rose-500">
+                    Access Suspended
+                  </SelectItem>
+                </SelectContent>
+              </Select>
 
-                <Select value={busFilter} onValueChange={setBusFilter}>
-                  <SelectTrigger className={cn(
-                    "h-9 md:h-8 text-xs w-full md:w-[200px] md:bg-transparent border",
-                    theme === 'dark' ? "bg-gray-800 border-gray-700" : "bg-white border-[#E5E7EB]"
-                  )}>
-                    <SelectValue placeholder="Bus" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all" className="text-xs">All Buses</SelectItem>
-                    {uniqueBuses.map(busId => (
-                      <SelectItem key={busId} value={busId} className="text-xs">
-                        {getBusDisplay(busId)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {(shiftFilter !== "all" || busFilter !== "all") && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      setShiftFilter("all");
-                      setBusFilter("all");
-                    }}
-                    className={cn(
-                      "h-8 px-3 text-xs col-span-2 md:col-span-1",
-                      theme === 'dark' ? "bg-red-500/20 text-red-400 hover:bg-red-500/30" : "bg-red-50 text-red-600 hover:bg-red-100"
-                    )}
-                  >
-                    Clear
-                  </Button>
-                )}
-              </div>
+              {/* Shift Filter */}
+              <Select value={shiftFilter} onValueChange={setShiftFilter}>
+                <SelectTrigger className="h-9 text-xs w-full md:w-[130px] bg-slate-50 dark:bg-zinc-800/70 border-zinc-200 dark:border-zinc-700/60">
+                  <SelectValue placeholder="Shift" />
+                </SelectTrigger>
+                <SelectContent className="bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800">
+                  <SelectItem value="all" className="text-xs">
+                    All Shifts
+                  </SelectItem>
+                  <SelectItem value="morning" className="text-xs text-blue-500">
+                    Morning
+                  </SelectItem>
+                  <SelectItem value="evening" className="text-xs text-amber-500">
+                    Evening
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+
+              {/* Bus Filter */}
+              <Select value={busFilter} onValueChange={setBusFilter}>
+                <SelectTrigger className="h-9 text-xs w-full md:w-[180px] bg-slate-50 dark:bg-zinc-800/70 border-zinc-200 dark:border-zinc-700/60">
+                  <SelectValue placeholder="Bus" />
+                </SelectTrigger>
+                <SelectContent className="bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 max-h-60">
+                  <SelectItem value="all" className="text-xs">
+                    All Buses
+                  </SelectItem>
+                  {uniqueBuses.map((bId) => (
+                    <SelectItem key={bId} value={bId} className="text-xs">
+                      {getBusDisplay(bId)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              {(statusFilter !== "all" ||
+                shiftFilter !== "all" ||
+                busFilter !== "all" ||
+                searchTerm) && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setStatusFilter("all");
+                    setShiftFilter("all");
+                    setBusFilter("all");
+                    setSearchTerm("");
+                  }}
+                  className="h-9 px-3 text-xs bg-rose-500/10 text-rose-500 dark:text-rose-400 hover:bg-rose-500/20 rounded-lg col-span-2 md:col-span-1"
+                >
+                  Clear Filters
+                </Button>
+              )}
             </div>
           </div>
 
-          <div className="students-section md:mt-5 flex-1 flex flex-col min-h-0">
-              <div className="students-scroll-wrapper rounded-md border overflow-x-auto flex-1 flex flex-col min-h-0" role="region" aria-label="Student list">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="h-10">
-                      <TableHead className="text-xs font-semibold py-2">Student</TableHead>
-                      <TableHead className="text-xs font-semibold py-2">Phone</TableHead>
-                      <TableHead className="text-xs font-semibold py-2">Enrollment ID</TableHead>
-                      <TableHead className="text-xs font-semibold py-2">Bus Assigned</TableHead>
-                      <TableHead className="text-xs font-semibold py-2">Shift</TableHead>
-                      <TableHead className="text-xs font-semibold py-2">Session</TableHead>
-                      <TableHead className="text-xs font-semibold py-2 text-right">Actions</TableHead>
+          {/* ── STUDENTS TABLE ── */}
+          <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 overflow-hidden shadow-xs">
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader className="bg-slate-50 dark:bg-zinc-800/50">
+                  <TableRow className="h-9 border-b border-zinc-200 dark:border-zinc-800">
+                    <TableHead className="text-[11px] font-bold py-2">Student</TableHead>
+                    <TableHead className="text-[11px] font-bold py-2">Contact Details</TableHead>
+                    <TableHead className="text-[11px] font-bold py-2">Enrollment & Shift</TableHead>
+                    <TableHead className="text-[11px] font-bold py-2">Assigned Bus</TableHead>
+                    <TableHead className="text-[11px] font-bold py-2">Session Period</TableHead>
+                    <TableHead className="text-[11px] font-bold py-2">Portal Access</TableHead>
+                    <TableHead className="text-[11px] font-bold py-2 text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {isLoading && uniqueFilteredStudents.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={7} className="p-8">
+                        <TableRowLoader rows={6} />
+                      </TableCell>
                     </TableRow>
-                  </TableHeader>
-                  {uniqueFilteredStudents.length > 0 && (
-                    <TableBody>
-                      {/* Show loader inside table when refreshing/searching with existing data */}
-                      {isLoading && (students.length > 0 || searchResults) && (
-                        <TableRow>
-                          <TableCell colSpan={7} className="h-1 p-0">
-                            <div className={cn("w-full h-1 overflow-hidden", theme === 'dark' ? "bg-blue-900" : "bg-blue-100")}>
-                              <div className="animate-progress w-full h-full bg-blue-500 origin-left-right"></div>
+                  ) : uniqueFilteredStudents.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={7} className="h-44 text-center">
+                        <div className="flex flex-col items-center justify-center space-y-2">
+                          <ShieldAlert className="w-8 h-8 text-muted-foreground/60" />
+                          <p className="text-sm font-medium text-foreground">No students found</p>
+                          <p className="text-xs text-muted-foreground">
+                            Try adjusting your search terms or filters.
+                          </p>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    uniqueFilteredStudents.map((student) => {
+                      const currentStatus = (student.status || "active").toLowerCase();
+                      const isActive = currentStatus === "active";
+                      const isSoftBlocked = currentStatus === "soft_blocked";
+                      const isExpired = currentStatus === "expired";
+                      const isSuspended = currentStatus === "suspended" || currentStatus === "inactive";
+
+                      const assignedBus = busById.get(student.busId);
+                      const shift = (student.shift || "N/A").toLowerCase();
+                      const isMorning = shift === "morning";
+
+                      return (
+                        <TableRow
+                          key={student.id}
+                          className="hover:bg-slate-50/60 dark:hover:bg-zinc-800/40 transition-colors border-b border-zinc-100 dark:border-zinc-800/60"
+                        >
+                          {/* Student Name & Email */}
+                          <TableCell className="py-2.5">
+                            <div className="flex items-center gap-2.5">
+                              <Avatar
+                                src={safeImageSrc(student.profilePhotoUrl || student.photoURL)}
+                                name={student.name || student.fullName}
+                                size="sm"
+                                className="flex-shrink-0 border border-zinc-200 dark:border-zinc-700"
+                              />
+                              <div className="min-w-0">
+                                <div className="text-xs font-bold text-foreground truncate max-w-[170px] sm:max-w-none">
+                                  {student.name || student.fullName || "Unnamed Student"}
+                                </div>
+                                <div className="text-[11px] text-muted-foreground truncate max-w-[170px] sm:max-w-none">
+                                  {student.email || "No email"}
+                                </div>
+                              </div>
+                            </div>
+                          </TableCell>
+
+                          {/* Contact */}
+                          <TableCell className="py-2.5">
+                            <div className="space-y-0.5">
+                              <div className="text-[11px] font-medium text-foreground">
+                                Ph: {student.phone || student.phoneNumber || "N/A"}
+                              </div>
+                              {(student.alternatePhone || student.altPhone) && (
+                                <div className="text-[10px] text-muted-foreground">
+                                  Alt: {student.alternatePhone || student.altPhone}
+                                </div>
+                              )}
+                            </div>
+                          </TableCell>
+
+                          {/* Enrollment ID & Shift */}
+                          <TableCell className="py-2.5">
+                            <div className="space-y-1">
+                              <div className="font-mono text-[11px] font-semibold text-foreground">
+                                {student.enrollmentId || student.enrollment_id || student.studentId || "N/A"}
+                              </div>
+                              <span
+                                className={cn(
+                                  "inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-medium",
+                                  isMorning
+                                    ? "bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20"
+                                    : "bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20"
+                                )}
+                              >
+                                {student.shift ? student.shift.charAt(0).toUpperCase() + student.shift.slice(1) : "N/A"}
+                              </span>
+                            </div>
+                          </TableCell>
+
+                          {/* Assigned Bus */}
+                          <TableCell className="py-2.5">
+                            {assignedBus ? (
+                              <div className="flex items-center gap-1.5">
+                                <Badge
+                                  variant="outline"
+                                  className="bg-indigo-500/10 text-indigo-500 dark:text-indigo-400 border-indigo-500/30 text-[10px] font-semibold px-2 py-0.5 rounded-md flex items-center gap-1"
+                                >
+                                  <Bus className="w-3 h-3" />
+                                  <span>Bus {assignedBus.busNumber}</span>
+                                </Badge>
+                                {assignedBus.routeNumber && (
+                                  <span className="text-[10px] text-muted-foreground">
+                                    (R-{assignedBus.routeNumber})
+                                  </span>
+                                )}
+                              </div>
+                            ) : student.busId ? (
+                              <Badge
+                                variant="outline"
+                                className="bg-slate-500/10 text-slate-500 dark:text-slate-400 border-slate-500/30 text-[10px] font-semibold px-2 py-0.5 rounded-md"
+                              >
+                                {getBusDisplay(student.busId)}
+                              </Badge>
+                            ) : (
+                              <Badge
+                                variant="outline"
+                                className="bg-zinc-500/10 text-zinc-500 dark:text-zinc-400 border-zinc-500/30 text-[10px] font-semibold px-2 py-0.5 rounded-md"
+                              >
+                                Not Assigned
+                              </Badge>
+                            )}
+                          </TableCell>
+
+                          {/* Session Period */}
+                          <TableCell className="py-2.5">
+                            <div className="space-y-0.5">
+                              <div className="text-[11px] font-medium text-foreground">
+                                {student.sessionStartYear && student.sessionEndYear
+                                  ? `${student.sessionStartYear}-${student.sessionEndYear}`
+                                  : student.session_start_year && student.session_end_year
+                                  ? `${student.session_start_year}-${student.session_end_year}`
+                                  : "N/A"}
+                              </div>
+                              {student.faculty && (
+                                <div className="text-[10px] text-muted-foreground truncate max-w-[120px]">
+                                  {student.faculty}
+                                </div>
+                              )}
+                            </div>
+                          </TableCell>
+
+                          {/* Access Status */}
+                          <TableCell className="py-2.5">
+                            <Badge
+                              variant="outline"
+                              className={cn(
+                                "text-[10px] font-semibold px-2 py-0.5 rounded-full flex items-center gap-1 w-fit",
+                                isActive
+                                  ? "bg-emerald-500/10 text-emerald-500 dark:text-emerald-400 border-emerald-500/30"
+                                  : isSoftBlocked
+                                  ? "bg-amber-500/10 text-amber-500 dark:text-amber-400 border-amber-500/30"
+                                  : isExpired
+                                  ? "bg-orange-500/10 text-orange-500 dark:text-orange-400 border-orange-500/30"
+                                  : "bg-rose-500/10 text-rose-500 dark:text-rose-400 border-rose-500/30"
+                              )}
+                            >
+                              <span
+                                className={cn(
+                                  "w-1.5 h-1.5 rounded-full",
+                                  isActive
+                                    ? "bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]"
+                                    : isSoftBlocked
+                                    ? "bg-amber-400"
+                                    : isExpired
+                                    ? "bg-orange-400"
+                                    : "bg-rose-400"
+                                )}
+                              />
+                              {isActive
+                                ? "Active"
+                                : isSoftBlocked
+                                ? "Soft Blocked"
+                                : isExpired
+                                ? "Expired"
+                                : "Suspended"}
+                            </Badge>
+                          </TableCell>
+
+                          {/* Actions Menu */}
+                          <TableCell className="py-2.5 text-right">
+                            <div className="flex items-center justify-end gap-1.5">
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    className="h-7 w-7 p-0 cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg"
+                                  >
+                                    <MoreHorizontal className="h-3.5 w-3.5" />
+                                  </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent
+                                  align="end"
+                                  className="bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 shadow-xl rounded-xl w-48 p-1"
+                                >
+                                  <DropdownMenuLabel className="text-[10px] font-bold text-muted-foreground uppercase px-2 py-1">
+                                    Student Controls
+                                  </DropdownMenuLabel>
+                                  <DropdownMenuSeparator className="bg-zinc-100 dark:bg-zinc-800" />
+                                  <DropdownMenuItem
+                                    onClick={() => handleToggleStatus(student)}
+                                    className="text-xs cursor-pointer flex items-center gap-2 px-2 py-1.5"
+                                  >
+                                    {isActive ? (
+                                      <>
+                                        <Lock className="h-3.5 w-3.5 text-rose-500" />
+                                        <span className="text-rose-500">Revoke Access</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
+                                        <span className="text-emerald-500">Restore Access</span>
+                                      </>
+                                    )}
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem asChild>
+                                    <Link
+                                      href={`/admin/students/view/${encodeURIComponent(student.uid || student.id)}`}
+                                      className="text-xs cursor-pointer flex items-center gap-2 px-2 py-1.5"
+                                    >
+                                      <Eye className="h-3.5 w-3.5 text-blue-500" />
+                                      View Details
+                                    </Link>
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem asChild>
+                                    <Link
+                                      href={`/admin/students/edit/${encodeURIComponent(student.uid || student.id)}`}
+                                      className="text-xs cursor-pointer flex items-center gap-2 px-2 py-1.5"
+                                    >
+                                      <Edit className="h-3.5 w-3.5 text-amber-500" />
+                                      Edit Profile
+                                    </Link>
+                                  </DropdownMenuItem>
+                                  <DropdownMenuSeparator className="bg-zinc-100 dark:bg-zinc-800" />
+                                  <DropdownMenuItem
+                                    onClick={() =>
+                                      setDeleteItem({
+                                        id: student.id,
+                                        name: student.name || student.fullName || "Student",
+                                      })
+                                    }
+                                    className="text-xs text-rose-500 hover:!bg-rose-500/10 cursor-pointer flex items-center gap-2 px-2 py-1.5"
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                    Delete Student
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
                             </div>
                           </TableCell>
                         </TableRow>
-                      )}
-                      {uniqueFilteredStudents.map((student, index) => (
-                        <StudentRow
-                          key={student.uid || student.id || `student-${index}`}
-                          student={student}
-                          theme={theme}
-                          busDisplay={getBusDisplay(student.busId)}
-                          onDelete={handleDeleteClick}
-                        />
-                      ))}
-                    </TableBody>
+                      );
+                    })
                   )}
-                </Table>
-                {uniqueFilteredStudents.length === 0 && (
-                  isLoading ? (
-                    <div className="p-6">
-                      <TableRowLoader rows={6} />
-                    </div>
-                  ) : (
-                    <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-[11px] text-gray-500 min-h-[220px]">
-                      No students found
-                    </div>
-                  )
-                )}
-              </div>
+                </TableBody>
+              </Table>
             </div>
+          </div>
 
-            {/* Pagination / Load More */}
-            {!isSearching && hasMoreStudents && (
-              <div className="mt-4 flex justify-center">
+          {/* Pagination / Load More Footer */}
+          {!isSearching && (
+            <div className="pt-3 pb-1 flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-zinc-200/60 dark:border-zinc-800/60 px-2">
+              <span className="text-xs text-zinc-500 dark:text-zinc-400 font-mono">
+                Showing <strong className="text-zinc-700 dark:text-zinc-200 font-semibold">{uniqueFilteredStudents.length}</strong> of{" "}
+                <strong className="text-zinc-700 dark:text-zinc-200 font-semibold">{metrics.total.toLocaleString()}</strong> students
+              </span>
+
+              {hasMoreStudents && (
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={() => fetchMoreStudents()}
                   disabled={loadingStudents}
-                  className={cn(
-                    "text-xs border",
-                    theme === 'dark' ? "bg-white text-black hover:bg-gray-200 border-gray-200" : "bg-white text-[#111827] hover:bg-gray-100 border-[#E5E7EB]"
-                  )}
+                  className="text-xs border bg-white dark:bg-zinc-800 text-foreground hover:bg-zinc-50 dark:hover:bg-zinc-700/80 rounded-lg px-4 h-8 cursor-pointer"
                 >
                   {loadingStudents ? (
                     <>
-                      <Loader2 className="mr-2 h-3 w-3 animate-spin" />
-                      Loading...
+                      <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+                      Loading next batch...
                     </>
                   ) : (
-                    'Load More Students'
+                    "Load More Students"
                   )}
                 </Button>
-              </div>
-            )}
+              )}
+            </div>
+          )}
         </CardContent>
       </Card>
 
-      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent>
+      {/* ── CONFIRM ACCESS REVOCATION / RESTORATION MODAL ── */}
+      <Dialog
+        open={Boolean(statusConfirmItem)}
+        onOpenChange={(open) => !open && setStatusConfirmItem(null)}
+      >
+        <DialogContent className="bg-slate-900 border-zinc-800 text-slate-100 max-w-md">
           <DialogHeader>
-            <DialogTitle>Delete Student</DialogTitle>
-            <DialogDescription>
-              Are you sure you want to delete {deleteItem?.name}? This action cannot be undone.
+            <div className="flex items-center gap-3">
+              <div
+                className={cn(
+                  "p-2.5 rounded-xl border",
+                  statusConfirmItem?.targetStatus === "suspended"
+                    ? "bg-rose-500/10 text-rose-400 border-rose-500/30"
+                    : "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
+                )}
+              >
+                {statusConfirmItem?.targetStatus === "suspended" ? (
+                  <UserX className="w-5 h-5" />
+                ) : (
+                  <UserCheck className="w-5 h-5" />
+                )}
+              </div>
+              <DialogTitle className="text-base font-bold text-white">
+                {statusConfirmItem?.targetStatus === "suspended"
+                  ? "Revoke Student Transport Access"
+                  : "Restore Student Transport Access"}
+              </DialogTitle>
+            </div>
+            <DialogDescription className="text-xs text-slate-400 pt-2">
+              {statusConfirmItem?.targetStatus === "suspended" ? (
+                <>
+                  Are you sure you want to revoke transport access for{" "}
+                  <strong className="text-white">{statusConfirmItem?.name}</strong>? They will be
+                  immediately blocked from the student portal, live bus tracking, and bus pass verification.
+                </>
+              ) : (
+                <>
+                  Restore transport portal access for{" "}
+                  <strong className="text-white">{statusConfirmItem?.name}</strong>? Their bus pass and
+                  operational privileges will become active immediately.
+                </>
+              )}
             </DialogDescription>
           </DialogHeader>
-          <DialogFooter>
+          <DialogFooter className="mt-4 flex gap-2 justify-end">
             <Button
-              className={cn(
-                "border font-medium",
-                theme === 'dark' ? "bg-gray-800 hover:bg-gray-700 text-gray-100 border-gray-600" : "bg-white hover:bg-gray-50 text-[#111827] border-[#E5E7EB]"
-              )}
-              onClick={() => setIsDialogOpen(false)}
-              disabled={isDeleting}
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setStatusConfirmItem(null)}
+              disabled={updatingStatus}
+              className="bg-slate-800 hover:bg-slate-700 text-slate-200 border-zinc-700 text-xs"
             >
               Cancel
             </Button>
             <Button
+              type="button"
+              size="sm"
+              onClick={executeStatusChange}
+              disabled={updatingStatus}
               className={cn(
-                "border font-medium min-w-[80px]",
-                theme === 'dark' ? "bg-red-600 hover:bg-red-700 text-white border-red-600 hover:border-red-700" : "bg-[#EF4444] hover:bg-[#DC2626] text-white border-[#EF4444] hover:border-[#DC2626]"
+                "text-xs font-semibold text-white",
+                statusConfirmItem?.targetStatus === "suspended"
+                  ? "bg-rose-600 hover:bg-rose-700"
+                  : "bg-emerald-600 hover:bg-emerald-700"
               )}
-              onClick={async () => {
-                if (!deleteItem) return;
-                setIsDeleting(true);
-                try {
-                  await deleteStudent(deleteItem.id);
-                  // Refresh data immediately after deletion
-                  invalidateCollectionCache('students');
-                  await refreshStudents();
-                  addToast(
-                    'The student has been removed from the system.',
-                    'success'
-                  );
-                  setIsDialogOpen(false);
-                  setDeleteItem(null);
-                } catch (error) {
-                  console.error('Error deleting student:', error);
-                  addToast(
-                    'Failed to delete the student. Please try again.',
-                    'error'
-                  );
-                } finally {
-                  setIsDeleting(false);
-                }
-              }}
-              disabled={isDeleting}
             >
-              {isDeleting ? (
-                <div className="flex items-center gap-2">
-                  <span className="h-4 w-4 border-2 border-white/50 border-t-white rounded-full animate-spin" />
-                  <span>Deleting...</span>
+              {updatingStatus ? (
+                <div className="flex items-center gap-1.5">
+                  <span className="h-3.5 w-3.5 border-2 border-white/50 border-t-white rounded-full animate-spin" />
+                  <span>Updating...</span>
                 </div>
+              ) : statusConfirmItem?.targetStatus === "suspended" ? (
+                "Revoke Access"
               ) : (
-                'Delete'
+                "Restore Access"
               )}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      {/* Mobile Floating Action Button (FAB) for Quick Admin Actions */}
+
+      {/* ── DELETE CONFIRMATION DIALOG ── */}
+      <Dialog open={Boolean(deleteItem)} onOpenChange={(open) => !open && setDeleteItem(null)}>
+        <DialogContent className="bg-slate-900 border-zinc-800 text-slate-100 max-w-md">
+          <DialogHeader>
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-xl bg-rose-500/10 text-rose-400 border border-rose-500/30">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <DialogTitle className="text-base font-bold text-white">Delete Student</DialogTitle>
+            </div>
+            <DialogDescription className="text-xs text-slate-400 pt-2">
+              Are you sure you want to permanently delete{" "}
+              <strong className="text-white">{deleteItem?.name}</strong>? This action will remove
+              all transport allocations, pass history, and profile records. This cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="mt-4 flex gap-2 justify-end">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setDeleteItem(null)}
+              disabled={isDeleting}
+              className="bg-slate-800 hover:bg-slate-700 text-slate-200 border-zinc-700 text-xs"
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              onClick={executeDelete}
+              disabled={isDeleting}
+              className="bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold"
+            >
+              {isDeleting ? (
+                <div className="flex items-center gap-1.5">
+                  <span className="h-3.5 w-3.5 border-2 border-white/50 border-t-white rounded-full animate-spin" />
+                  <span>Deleting...</span>
+                </div>
+              ) : (
+                "Delete Student"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── MOBILE FAB ── */}
       <MobileActionFAB
         ariaLabel="Student management actions"
         actions={[
@@ -745,7 +1206,7 @@ export default function AdminStudents() {
             label: "Student Reassignment",
             icon: ArrowRightLeft,
             href: "/admin/smart-allocation",
-            color: "bg-slate-800 text-white",
+            color: "bg-teal-600 text-white",
           },
           {
             label: "Verification",
@@ -764,4 +1225,3 @@ export default function AdminStudents() {
     </div>
   );
 }
-

@@ -191,6 +191,10 @@ export default function AdminVerificationPage() {
     // QR scanning loop - throttled for performance
     const scanQRCode = async () => {
         if (!isScanningRef.current) return;
+        if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+            setTimeout(scanQRCode, 500);
+            return;
+        }
         if (!videoRef.current || !canvasRef.current) {
             setTimeout(scanQRCode, 100);
             return;

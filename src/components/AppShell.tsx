@@ -13,6 +13,7 @@ import { usePathname } from 'next/navigation';
 import { createContext,useContext,useEffect,useState } from 'react';
 
 
+import UniversalAccessBlockScreen from '@/components/UniversalAccessBlockScreen';
 import { FCMTokenManager } from '@/components/FCMTokenManager';
 import FloatingPermissionBanner from '@/components/FloatingPermissionBanner';
 import MapRuntimeBootstrap from '@/components/maps/MapRuntimeBootstrap';
@@ -36,10 +37,18 @@ export const useSidebar = () => useContext(SidebarContext);
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const { currentUser, userData, loading: authLoading } = useAuth();
+  const { currentUser, userData, loading: authLoading, signOut } = useAuth();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const { theme } = useTheme();
+
+  // Check if user access has been revoked or suspended by admin
+  const isAccessRevoked =
+    !authLoading &&
+    currentUser &&
+    userData &&
+    userData.status &&
+    ['suspended', 'inactive', 'revoked', 'soft_blocked'].includes(String(userData.status).toLowerCase());
 
   // Determine if we're on landing page
   const isLandingPage = pathname === '/';
@@ -65,15 +74,16 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   // Determine if we're on privacy policy page (has custom layout)
   const isPrivacyPage = pathname === '/privacy-policy';
 
-  // Determine if we're on fleet map or verification pages (no footer required)
+  // Determine if we're on full-height workspace pages (no footer required)
   const isFleetMapPage = pathname === '/admin/fleet-map' || pathname === '/moderator/fleet-map' || pathname?.startsWith('/admin/fleet-map') || pathname?.startsWith('/moderator/fleet-map');
   const isVerificationPage = pathname === '/admin/verification' || pathname === '/moderator/verification' || pathname?.startsWith('/admin/verification') || pathname?.startsWith('/moderator/verification');
+  const isWorkspaceHubPage = pathname?.startsWith('/admin/smart-allocation') || pathname?.startsWith('/admin/driver-assignment') || pathname?.startsWith('/admin/route-allocation') || pathname === '/admin/moderators';
 
   // Show navbar/footer based on specific page logic
-  // Update: Hide footer on /apply/form, terms, privacy, fleet-map and verification routes
+  // Update: Hide footer on /apply/form, terms, privacy, fleet-map, verification, and full-height workspace routes
   const showNavAndFooter = !authLoading && !isLandingPage && !isLoginPage && !isApplyPage && !isContactPage && !isTermsPage && !isPrivacyPage && currentUser;
   const showGlobalNavbar = showNavAndFooter; // Follow the existing logic for navbar
-  const showGlobalFooter = !authLoading && !isLandingPage && !isLoginPage && !isApplyFormPage && !isApplyLandingPage && !isContactPage && !isTermsPage && !isPrivacyPage && !isFleetMapPage && !isVerificationPage && currentUser;
+  const showGlobalFooter = !authLoading && !isLandingPage && !isLoginPage && !isApplyFormPage && !isApplyLandingPage && !isContactPage && !isTermsPage && !isPrivacyPage && !isFleetMapPage && !isVerificationPage && !isWorkspaceHubPage && currentUser;
 
   // Show sidebar for admin/moderator only after auth is ready
   const showSidebar = !authLoading && (isAdminArea || isModeratorArea) && currentUser && userData;
@@ -110,6 +120,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       document.body.style.overflow = '';
     };
   }, [mobileOpen]);
+
+  if (isAccessRevoked) {
+    return (
+      <TooltipProvider delayDuration={0}>
+        <UniversalAccessBlockScreen userData={userData} onLogout={signOut} />
+      </TooltipProvider>
+    );
+  }
 
   return (
     <>
@@ -166,7 +184,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                   {/* Main Content Column */}
                   <main
                     suppressHydrationWarning
-                    className="main-content"
+                    className={cn("main-content", isWorkspaceHubPage && "overflow-hidden h-[100dvh] max-h-[100dvh]")}
                     style={{
                       gridColumn: 2,
                       gridRow: 1,
@@ -175,7 +193,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                       paddingLeft: '0',
                       paddingBottom: '0',
                       boxSizing: 'border-box',
-                      minHeight: '100%'
+                      minHeight: '100%',
+                      ...(isWorkspaceHubPage ? { height: '100dvh', maxHeight: '100dvh', overflow: 'hidden' } : {})
                     }}
                   >
                     {children}

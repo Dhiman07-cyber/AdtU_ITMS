@@ -390,7 +390,7 @@ export default function BusesPage() {
             </Button>
             <Button
               className="w-full md:w-auto cursor-pointer bg-amber-600/90 hover:bg-amber-600 text-white border border-amber-500/40 shadow-sm transition-all duration-200 hover:scale-105 hover:shadow-lg rounded-md px-2.5 py-1.5 text-xs h-8"
-              onClick={() => router.push('/admin/route-allocation')}
+              onClick={() => router.push('/admin/smart-allocation?tab=buses')}
               title="Manage route reassignments for buses"
             >
               <RouteIcon className="mr-1.5 h-3.5 w-3.5" />
@@ -663,7 +663,7 @@ export default function BusesPage() {
           {
             label: "Bus Reassignment",
             icon: RouteIcon,
-            onClick: () => router.push('/admin/route-allocation'),
+            onClick: () => router.push('/admin/smart-allocation?tab=buses'),
           },
           {
             label: "Fleet Map",

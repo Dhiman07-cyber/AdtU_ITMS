@@ -1,576 +1,1289 @@
 "use client";
 
-import { ExportButton } from '@/components/ExportButton';
-import { TableRowLoader } from '@/components/LoadingSpinner';
+import Avatar from "@/components/Avatar";
+import { ExportButton } from "@/components/ExportButton";
+import { MobileActionFAB } from "@/components/layout/MobileActionFAB";
+import { TableRowLoader } from "@/components/LoadingSpinner";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
-	Card,
-	CardContent
-} from "@/components/ui/card";
-import {
-	Dialog,
-	DialogContent,
-	DialogDescription,
-	DialogFooter,
-	DialogHeader,
-	DialogTitle,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
 } from "@/components/ui/dialog";
 import {
-	DropdownMenu,
-	DropdownMenuContent,
-	DropdownMenuItem,
-	DropdownMenuLabel,
-	DropdownMenuSeparator,
-	DropdownMenuTrigger,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
-import {
-	Select,
-	SelectContent,
-	SelectItem,
-	SelectTrigger,
-	SelectValue,
-} from "@/components/ui/select";
-import {
-	Table,
-	TableBody,
-	TableCell,
-	TableHead,
-	TableHeader,
-	TableRow,
-} from "@/components/ui/table";
-import { useAuth } from '@/contexts/auth-context';
-import { useToast } from '@/contexts/toast-context';
-import { deleteModerator } from '@/lib/dataService';
-import { exportToExcel } from '@/lib/export-helpers';
-import { supabase } from '@/lib/supabase-client';
-import { cn } from '@/lib/utils';
-import { Download,Edit,Eye,Filter,MoreHorizontal,Plus,RefreshCw,Search,Shield,Trash2 } from "lucide-react";
-import { MobileActionFAB } from '@/components/layout/MobileActionFAB';
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { useEffect,useMemo,useState } from 'react';
-// Migrated: Server-side API → PostgreSQL (no Firestore client reads)
-import Avatar from '@/components/Avatar';
-import { invalidateCollectionCache,useApiCollection } from '@/hooks/useApiCollection';
-import { useEventDrivenRefresh } from '@/hooks/useEventDrivenRefresh';
+import { Switch } from "@/components/ui/switch";
+import { useAuth } from "@/contexts/auth-context";
+import { useToast } from "@/contexts/toast-context";
+import { invalidateCollectionCache, useApiCollection } from "@/hooks/useApiCollection";
+import { useEventDrivenRefresh } from "@/hooks/useEventDrivenRefresh";
+import { deleteModerator } from "@/lib/dataService";
+import { exportToExcel } from "@/lib/export-helpers";
 import { safeImageSrc } from "@/lib/security/url-sanitizer";
-import { formatDateDDMMYYYY } from '@/lib/utils/date-utils';
+import { supabase } from "@/lib/supabase-client";
+import {
+  DEFAULT_MODERATOR_PERMISSIONS,
+  FULL_MODERATOR_PERMISSIONS,
+  mergeWithDefaults,
+  ModeratorPermissions,
+  PERMISSION_CATEGORIES,
+  ZERO_MODERATOR_PERMISSIONS,
+} from "@/lib/types/moderator-permissions";
+import { cn } from "@/lib/utils";
+import { formatDateDDMMYYYY } from "@/lib/utils/date-utils";
+import {
+  AlertTriangle,
+  Bus,
+  Check,
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  ChevronUp,
+  ClipboardCheck,
+  CreditCard,
+  Download,
+  Edit,
+  Eye,
+  Lock,
+  MapPin,
+  MoreHorizontal,
+  Plus,
+  RefreshCw,
+  RotateCcw,
+  Save,
+  Search,
+  Shield,
+  ShieldAlert,
+  ShieldCheck,
+  Trash2,
+  UserCheck,
+  UserCog,
+  Users,
+  UserX,
+  X,
+} from "lucide-react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
 
-function ModeratorRow({
-  moderator,
-  onDelete,
-}: {
-  moderator: any;
-  onDelete: (id: string, name: string) => void;
-}) {
-  const joining = moderator.joiningDate || moderator.joinDate;
-  const yearsLabel = (() => {
-    if (!joining) return 'N/A';
-    const joinDate = new Date(joining);
-    const years = Math.floor((Date.now() - joinDate.getTime()) / (365.25 * 24 * 60 * 60 * 1000));
-    return years > 0 ? `${years} year${years > 1 ? 's' : ''}` : '< 1 year';
-  })();
-  const sinceLabel = (() => {
-    if (!joining) return 'N/A';
-    const d = new Date(joining);
-    return d.toLocaleDateString('en-GB', { year: 'numeric', month: '2-digit', day: '2-digit' }).split('/').join('-');
-  })();
-  const status = moderator.status || 'active';
-  const isActive = status.toLowerCase() === 'active';
+// Category icon map for permissions
+const categoryIcons: Record<string, any> = {
+  students: Users,
+  drivers: UserCog,
+  buses: Bus,
+  routes: MapPin,
+  applications: ClipboardCheck,
+  payments: CreditCard,
+};
 
-  return (
-    <TableRow className="h-auto" style={{ contentVisibility: 'auto', containIntrinsicSize: '0 52px' }}>
-      <TableCell className="py-1.5">
-        <div className="flex flex-row items-center gap-2">
-          <Avatar
-            src={safeImageSrc(moderator.profilePhotoUrl)}
-            name={moderator.name || moderator.fullName}
-            size="xs"
-            className="flex-shrink-0"
-          />
-          <div className="flex flex-col min-w-0">
-            <div className="text-sm font-medium text-foreground truncate">{moderator.name || moderator.fullName || 'N/A'}</div>
-            <div className="text-xs text-muted-foreground">{moderator.email}</div>
-          </div>
-        </div>
-      </TableCell>
-      <TableCell className="py-2">
-        <div className="space-y-0.5">
-          <div className="text-xs font-medium text-foreground">
-            Ph: {moderator.phone || moderator.phoneNumber || 'N/A'}
-          </div>
-          {(moderator.alternatePhone || moderator.altPhone || moderator.alternativePhone) && (
-            <div className="text-xs text-muted-foreground">
-              Alt: {moderator.alternatePhone || moderator.altPhone || moderator.alternativePhone}
-            </div>
-          )}
-        </div>
-      </TableCell>
-      <TableCell className="py-1.5">
-        <div className="font-mono text-[10px] text-foreground whitespace-nowrap">
-          {moderator.employeeId || 'N/A'}
-        </div>
-      </TableCell>
-      <TableCell className="py-1.5">
-        <div className="space-y-0.5">
-          <div className="text-[10px] font-medium text-foreground">{yearsLabel}</div>
-          <div className="text-[9px] text-muted-foreground">Since {sinceLabel}</div>
-        </div>
-      </TableCell>
-      <TableCell className="py-1.5">
-        <div className="text-[10px] text-foreground truncate max-w-[150px]">
-          {moderator.approvedBy || 'N/A'}
-        </div>
-      </TableCell>
-      <TableCell className="py-1.5">
-        <span className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium ${isActive ? 'bg-green-500 text-white' : 'bg-red-500 text-white'}`}>
-          {status.charAt(0).toUpperCase() + status.slice(1).toLowerCase()}
-        </span>
-      </TableCell>
-      <TableCell className="py-1.5 text-right">
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" className="h-7 w-7 p-0 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700">
-              <MoreHorizontal className="h-3.5 w-3.5" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="bg-gray-800 dark:bg-gray-900 border-gray-700 dark:border-gray-600 shadow-xl rounded-lg w-40">
-            <DropdownMenuLabel className="text-white text-[11px] font-semibold px-2 py-1.5">Actions</DropdownMenuLabel>
-            <DropdownMenuSeparator className="bg-gray-600" />
-            <DropdownMenuItem asChild>
-              <Link href={`/admin/moderators/view/${moderator.id}`} className="text-white hover:bg-gray-700 dark:hover:bg-gray-800 focus:bg-gray-700 dark:focus:bg-gray-800 px-2 py-1.5 !text-white text-[11px]">
-                <Eye className="mr-1.5 h-3 w-3 text-blue-400" />
-                View Details
-              </Link>
-            </DropdownMenuItem>
-            <DropdownMenuItem asChild>
-              <Link href={`/admin/moderators/edit/${moderator.id}`} className="text-white hover:bg-gray-700 dark:hover:bg-gray-800 focus:bg-gray-700 dark:focus:bg-gray-800 px-2 py-1.5 !text-white text-[11px]">
-                <Edit className="mr-1.5 h-3 w-3 text-yellow-400" />
-                Edit
-              </Link>
-            </DropdownMenuItem>
-            <DropdownMenuItem asChild>
-              <Link href={`/admin/moderators/config/${moderator.id}`} className="text-white hover:bg-gray-700 dark:hover:bg-gray-800 focus:bg-gray-700 dark:focus:bg-gray-800 px-2 py-1.5 !text-white text-[11px]">
-                <Shield className="mr-1.5 h-3 w-3 text-emerald-400" />
-                Configuration
-              </Link>
-            </DropdownMenuItem>
-            <DropdownMenuSeparator className="bg-gray-600" />
-            <DropdownMenuItem
-              className="text-white hover:!bg-red-600 focus:!bg-red-600 px-2 py-1.5 !text-white text-[11px] cursor-pointer transition-colors"
-              onClick={() => onDelete(moderator.id, moderator.name)}
-            >
-              <Trash2 className="mr-1.5 h-3 w-3" />
-              Delete
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </TableCell>
-    </TableRow>
-  );
+// Unified Category Theme styling for clean, professional single-color consistency
+// (Similar to blue but distinct from the left selected card, avoiding green/yellow/orange rainbow)
+const UNIFIED_PERMISSION_THEME = {
+  badgeBg: "bg-indigo-500/15 dark:bg-indigo-950/60",
+  badgeBorder: "border-indigo-500/30",
+  badgeText: "text-indigo-700 dark:text-indigo-300",
+  iconBg: "bg-indigo-500/15 dark:bg-indigo-950/70",
+  iconBorder: "border-indigo-500/30",
+  iconText: "text-indigo-600 dark:text-indigo-400",
+  activeBorder: "border-indigo-500/60 dark:border-indigo-500/50",
+  activeBg: "bg-indigo-50/80 dark:bg-indigo-950/30",
+  activeRing: "ring-1 ring-indigo-500/30",
+  activeDot: "bg-indigo-500 shadow-xs shadow-indigo-500/50",
+  switchActive: "data-[state=checked]:bg-indigo-600",
+};
+
+const categoryThemeMap: Record<
+  string,
+  {
+    badgeBg: string;
+    badgeBorder: string;
+    badgeText: string;
+    iconBg: string;
+    iconBorder: string;
+    iconText: string;
+    activeBorder: string;
+    activeBg: string;
+    activeRing: string;
+    activeDot: string;
+    switchActive: string;
+  }
+> = {
+  students: UNIFIED_PERMISSION_THEME,
+  drivers: UNIFIED_PERMISSION_THEME,
+  buses: UNIFIED_PERMISSION_THEME,
+  routes: UNIFIED_PERMISSION_THEME,
+  applications: UNIFIED_PERMISSION_THEME,
+  payments: UNIFIED_PERMISSION_THEME,
+};
+
+// Count active permissions helper
+function countActivePermissions(perms: ModeratorPermissions | null | undefined): {
+  total: number;
+  active: number;
+} {
+  let total = 0;
+  let active = 0;
+  if (!perms) return { total: 22, active: 0 };
+
+  for (const category of Object.values(perms)) {
+    if (category && typeof category === "object") {
+      for (const val of Object.values(category)) {
+        total++;
+        if (val) active++;
+      }
+    }
+  }
+  return { total: total || 22, active };
 }
 
-export default function AdminModerators() {
+export default function ModeratorManagementHub() {
   const { currentUser, userData, loading: authLoading } = useAuth();
   const { addToast } = useToast();
   const router = useRouter();
 
-  // Server-side API reads from PostgreSQL — no Firestore client reads
-  const { data: moderators, loading: loadingModerators, refresh: refreshModerators } = useApiCollection('moderators', {
-    pageSize: 50, orderByField: 'updatedAt', orderDirection: 'desc', autoRefresh: false,
+  // Load moderators using collection hook
+  const {
+    data: rawModerators,
+    loading: loadingModerators,
+    refresh: refreshModerators,
+  } = useApiCollection("moderators", {
+    pageSize: 100,
+    orderByField: "updatedAt",
+    orderDirection: "desc",
+    autoRefresh: false,
   });
 
-  // Event-driven refresh: auto-refresh when mutations occur in other pages
   useEventDrivenRefresh({
-    collectionName: 'moderators',
+    collectionName: "moderators",
     onRefresh: async () => {
       await refreshModerators();
-    }
+    },
   });
 
-  const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [isDeleting, setIsDeleting] = useState(false);
-  const [deleteItem, setDeleteItem] = useState<{ id: string, name: string } | null>(null);
+  // Local optimistic overrides for status & permissions
+  const [localOverrides, setLocalOverrides] = useState<
+    Record<string, { status?: string; permissions?: ModeratorPermissions }>
+  >({});
+
+  const moderators = useMemo(() => {
+    return (rawModerators || []).map((m: any) => {
+      const id = m.id || m.uid;
+      const override = localOverrides[id];
+      return {
+        ...m,
+        id,
+        status: override?.status || m.status || "active",
+        permissions: override?.permissions || mergeWithDefaults(m.permissions),
+      };
+    });
+  }, [rawModerators, localOverrides]);
+
+  // Selected Moderator for Two-Column Right Panel
+  const [selectedModeratorId, setSelectedModeratorId] = useState<string | null>(null);
+
+  // Search & Filters for Left Column
   const [searchTerm, setSearchTerm] = useState("");
-  const [experienceFilter, setExperienceFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [isRefreshing, setIsRefreshing] = useState(false);
 
+  // Editing Permissions State for the active moderator
+  const [activePermissions, setActivePermissions] = useState<ModeratorPermissions | null>(null);
+  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(
+    new Set(Object.keys(PERMISSION_CATEGORIES))
+  );
+  const [savingPermissions, setSavingPermissions] = useState(false);
+
+  // Status Confirmation Modal State
+  const [statusConfirmItem, setStatusConfirmItem] = useState<{
+    id: string;
+    name: string;
+    targetStatus: "active" | "suspended";
+  } | null>(null);
+  const [updatingStatus, setUpdatingStatus] = useState(false);
+
+  // Delete Modal State
+  const [deleteItem, setDeleteItem] = useState<{ id: string; name: string } | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const isLoading = authLoading || loadingModerators;
+
+  // Filtered list for the left column
+  const filteredModerators = useMemo(() => {
+    const term = searchTerm.toLowerCase();
+    return moderators.filter((m) => {
+      const name = (m.name || m.fullName || "").toLowerCase();
+      const email = (m.email || "").toLowerCase();
+      const phone = m.phone || m.phoneNumber || "";
+      const emp = (m.employeeId || m.empId || "").toLowerCase();
+      const fac = (m.faculty || m.assignedFaculty || "").toLowerCase();
+
+      const matchesSearch =
+        !searchTerm ||
+        name.includes(term) ||
+        email.includes(term) ||
+        phone.includes(searchTerm) ||
+        emp.includes(term) ||
+        fac.includes(term);
+
+      const currentStatus = (m.status || "active").toLowerCase();
+      let matchesStatus = true;
+      if (statusFilter === "active") matchesStatus = currentStatus === "active";
+      else if (statusFilter === "suspended") matchesStatus = currentStatus !== "active";
+      else if (statusFilter === "full") {
+        const { active, total } = countActivePermissions(m.permissions);
+        matchesStatus = active === total && total > 0;
+      }
+
+      return matchesSearch && matchesStatus;
+    });
+  }, [moderators, searchTerm, statusFilter]);
+
+  // Keep first moderator selected if none is selected
+  useEffect(() => {
+    if (!selectedModeratorId && filteredModerators.length > 0) {
+      setSelectedModeratorId(filteredModerators[0].id);
+    }
+  }, [filteredModerators, selectedModeratorId]);
+
+  // Active selected moderator object
+  const selectedModerator = useMemo(() => {
+    if (!selectedModeratorId) return null;
+    return moderators.find((m) => m.id === selectedModeratorId) || null;
+  }, [moderators, selectedModeratorId]);
+
+  // Sync active permissions when selecting a different moderator
+  useEffect(() => {
+    if (selectedModerator) {
+      setActivePermissions(mergeWithDefaults(selectedModerator.permissions));
+    } else {
+      setActivePermissions(null);
+    }
+  }, [selectedModeratorId, selectedModerator?.permissions]);
+
+  // Dirty check: has unsaved changes?
+  const hasUnsavedChanges = useMemo(() => {
+    if (!selectedModerator || !activePermissions) return false;
+    const original = mergeWithDefaults(selectedModerator.permissions);
+    return JSON.stringify(original) !== JSON.stringify(activePermissions);
+  }, [selectedModerator, activePermissions]);
+
+  // Auth routing verification
+  useEffect(() => {
+    if (!authLoading && !currentUser) {
+      router.push("/login");
+    }
+    if (userData && userData.role !== "admin") {
+      router.push(`/${userData.role}`);
+    }
+  }, [currentUser, userData, authLoading, router]);
+
+  // Top 4 Metrics Summary
+  const metrics = useMemo(() => {
+    let total = moderators.length;
+    let activeCount = 0;
+    let suspendedCount = 0;
+    let fullAuthorityCount = 0;
+
+    for (const m of moderators) {
+      const st = (m.status || "active").toLowerCase();
+      if (st === "active") activeCount++;
+      else suspendedCount++;
+
+      const { active, total: t } = countActivePermissions(m.permissions);
+      if (active === t && t > 0) fullAuthorityCount++;
+    }
+
+    return { total, activeCount, suspendedCount, fullAuthorityCount };
+  }, [moderators]);
+
+  // Refresh action
   const handleRefresh = async () => {
     setIsRefreshing(true);
     try {
-      invalidateCollectionCache('moderators');
+      invalidateCollectionCache("moderators");
       await refreshModerators();
-      addToast('Data refreshed', 'success');
+      addToast("Moderator directory refreshed", "success");
     } catch (error) {
-      console.error('Error refreshing moderators:', error);
-      addToast('Failed to refresh data', 'error');
+      console.error("Error refreshing moderators:", error);
+      addToast("Failed to refresh data", "error");
     } finally {
       setIsRefreshing(false);
     }
   };
 
-  const isLoading = authLoading || loadingModerators;
-
-  useEffect(() => {
-    if (!authLoading && !currentUser) {
-      router.push('/login');
-    }
-
-    if (userData && userData.role !== 'admin') {
-      router.push(`/${userData.role}`);
-    }
-  }, [currentUser, userData, authLoading, router]);
-
-  // Real-time listeners handle data fetching automatically
-
-  // Delete handler
-  const handleDeleteClick = (id: string, name: string) => {
-    setDeleteItem({ id, name });
-    setIsDialogOpen(true);
+  // Toggle single permission directly on page
+  const handleTogglePermission = (categoryKey: string, permKey: string) => {
+    if (!activePermissions) return;
+    setActivePermissions((prev: any) => {
+      const cat = prev?.[categoryKey] || {};
+      return {
+        ...prev,
+        [categoryKey]: {
+          ...cat,
+          [permKey]: !cat[permKey],
+        },
+      };
+    });
   };
 
-  // Memoized so it only recomputes when the data, search term, or filters change.
-  const filteredModerators = useMemo(() => {
-    const term = searchTerm.toLowerCase();
-    return moderators.filter(moderator => {
-      const matchesSearch = !searchTerm ||
-        (moderator.name && moderator.name.toLowerCase().includes(term)) ||
-        (moderator.email && moderator.email.toLowerCase().includes(term)) ||
-        (moderator.fullName && moderator.fullName.toLowerCase().includes(term)) ||
-        (moderator.phone && moderator.phone.includes(searchTerm)) ||
-        (moderator.phoneNumber && moderator.phoneNumber.includes(searchTerm)) ||
-        (moderator.employeeId && moderator.employeeId.toLowerCase().includes(term)) ||
-        (moderator.staffId && moderator.staffId.toLowerCase().includes(term));
+  // Toggle entire category
+  const handleToggleCategory = (categoryKey: string, enableAll: boolean) => {
+    const categoryDef = PERMISSION_CATEGORIES[categoryKey as keyof typeof PERMISSION_CATEGORIES];
+    if (!categoryDef) return;
 
-      // Default to 'active' if status is missing
-      const currentStatus = (moderator.status || 'active').toLowerCase();
-      const matchesStatus = statusFilter === "all" || currentStatus === statusFilter.toLowerCase();
+    const updatedCategory: Record<string, boolean> = {};
+    for (const key of Object.keys(categoryDef.permissions)) {
+      updatedCategory[key] = enableAll;
+    }
 
-      let matchesExperience = true;
-      if (experienceFilter !== "all") {
-        const joinDateStr = moderator.joiningDate || moderator.joinDate;
-        if (joinDateStr) {
-          const joinDate = new Date(joinDateStr);
-          const years = Math.floor((Date.now() - joinDate.getTime()) / (365.25 * 24 * 60 * 60 * 1000));
+    setActivePermissions((prev: any) => ({
+      ...prev,
+      [categoryKey]: updatedCategory,
+    }));
+  };
 
-          if (experienceFilter === "0-2") matchesExperience = years >= 0 && years <= 2;
-          else if (experienceFilter === "3-5") matchesExperience = years >= 3 && years <= 5;
-          else if (experienceFilter === "6-10") matchesExperience = years >= 6 && years <= 10;
-          else if (experienceFilter === "10+") matchesExperience = years > 10;
-        } else {
-          matchesExperience = false;
-        }
+  // Apply Authority Presets
+  const applyPreset = (preset: "full" | "viewOnly" | "revokeAll") => {
+    if (preset === "full") {
+      setActivePermissions(FULL_MODERATOR_PERMISSIONS);
+    } else if (preset === "viewOnly") {
+      setActivePermissions(DEFAULT_MODERATOR_PERMISSIONS);
+    } else {
+      setActivePermissions(ZERO_MODERATOR_PERMISSIONS);
+    }
+  };
+
+  // Reset Changes
+  const handleResetChanges = () => {
+    if (selectedModerator) {
+      setActivePermissions(mergeWithDefaults(selectedModerator.permissions));
+      addToast("Changes reset to current database state", "info");
+    }
+  };
+
+  // Save Permissions
+  const handleSavePermissions = async () => {
+    if (!selectedModerator || !activePermissions) return;
+
+    try {
+      setSavingPermissions(true);
+      const token = await currentUser?.getIdToken();
+      if (!token) {
+        addToast("Authentication required", "error");
+        return;
       }
 
-      return matchesSearch && matchesStatus && matchesExperience;
-    });
-  }, [moderators, searchTerm, statusFilter, experienceFilter]);
+      const res = await fetch(`/api/moderators/${selectedModerator.id}/permissions`, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ permissions: activePermissions }),
+      });
 
-  // Export moderators data from Supabase
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to save permissions");
+      }
+
+      setLocalOverrides((prev) => ({
+        ...prev,
+        [selectedModerator.id]: {
+          ...prev[selectedModerator.id],
+          permissions: activePermissions,
+        },
+      }));
+
+      invalidateCollectionCache("moderators");
+      addToast(`Permissions updated for ${selectedModerator.name}`, "success");
+    } catch (err: any) {
+      console.error("Save error:", err);
+      addToast(err.message || "Failed to update permissions", "error");
+    } finally {
+      setSavingPermissions(false);
+    }
+  };
+
+  // Toggle Status Prompt
+  const handleToggleStatus = (moderator: any) => {
+    const isCurrentlyActive = (moderator.status || "active").toLowerCase() === "active";
+    setStatusConfirmItem({
+      id: moderator.id,
+      name: moderator.name || moderator.fullName || "Moderator",
+      targetStatus: isCurrentlyActive ? "suspended" : "active",
+    });
+  };
+
+  // Execute Status Change
+  const executeStatusChange = async () => {
+    if (!statusConfirmItem) return;
+
+    try {
+      setUpdatingStatus(true);
+      const token = await currentUser?.getIdToken();
+      if (!token) {
+        addToast("Authentication required", "error");
+        return;
+      }
+
+      const res = await fetch(`/api/moderators/${statusConfirmItem.id}/status`, {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ status: statusConfirmItem.targetStatus }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to update access status");
+      }
+
+      setLocalOverrides((prev) => ({
+        ...prev,
+        [statusConfirmItem.id]: {
+          ...prev[statusConfirmItem.id],
+          status: statusConfirmItem.targetStatus,
+        },
+      }));
+
+      invalidateCollectionCache("moderators");
+      addToast(
+        statusConfirmItem.targetStatus === "active"
+          ? `Access restored for ${statusConfirmItem.name}`
+          : `Access revoked for ${statusConfirmItem.name}`,
+        "success"
+      );
+    } catch (error: any) {
+      console.error("Status error:", error);
+      addToast(error.message || "Failed to update status", "error");
+    } finally {
+      setUpdatingStatus(false);
+      setStatusConfirmItem(null);
+    }
+  };
+
+  // Delete Moderator Execution
+  const executeDelete = async () => {
+    if (!deleteItem) return;
+
+    try {
+      setIsDeleting(true);
+      const success = await deleteModerator(deleteItem.id);
+      if (success) {
+        invalidateCollectionCache("moderators");
+        await refreshModerators();
+        addToast(`Moderator ${deleteItem.name} removed`, "success");
+        if (selectedModeratorId === deleteItem.id) {
+          setSelectedModeratorId(null);
+        }
+      } else {
+        addToast("Failed to delete moderator", "error");
+      }
+    } catch (error) {
+      console.error("Error deleting moderator:", error);
+      addToast("Error deleting moderator", "error");
+    } finally {
+      setIsDeleting(false);
+      setDeleteItem(null);
+    }
+  };
+
+  // Export moderators report
   const handleExportModerators = async () => {
     try {
-      const currentDate = new Date();
-      const dateStr = currentDate.toISOString().split('T')[0].replace(/-/g, '-');
+      const dateStr = new Date().toISOString().split("T")[0];
 
-      // Fetch moderators from Supabase moderator_profiles or users table where role='moderator'
-      let rawModerators: any[] = [];
-      const { data: modProfiles, error: modError } = await supabase
-        .from('moderator_profiles')
-        .select('uid, full_name, email, phone, employee_id, faculty, approved_by, status, created_at');
+      const { data: modProfiles } = await supabase
+        .from("moderator_profiles")
+        .select(
+          "uid, full_name, email, phone, employee_id, faculty, status, created_at, permissions"
+        );
 
-      if (!modError && modProfiles && modProfiles.length > 0) {
-        rawModerators = modProfiles;
-      } else {
-        const { data: userMods } = await supabase
-          .from('users')
-          .select('uid, name, email, role, created_at')
-          .eq('role', 'moderator');
-        rawModerators = userMods || [];
-      }
+      const rawRows = modProfiles && modProfiles.length > 0 ? modProfiles : moderators;
 
-      const moderatorsData = rawModerators.map((moderator: any, index: number) => {
+      const exportData = rawRows.map((mod: any, index: number) => {
+        const { active, total } = countActivePermissions(mod.permissions);
         return [
           (index + 1).toString(),
-          moderator.full_name || moderator.name || 'N/A',
-          moderator.email || 'N/A',
-          moderator.phone || moderator.phoneNumber || 'N/A',
-          moderator.employee_id || moderator.emp_id || 'N/A',
-          moderator.faculty || moderator.assigned_faculty || 'N/A',
-          moderator.approved_by || 'Admin',
-          (moderator.status || 'active').charAt(0).toUpperCase() + (moderator.status || 'active').slice(1),
-          moderator.joining_date || moderator.created_at ? formatDateDDMMYYYY(moderator.joining_date || moderator.created_at) : 'N/A'
+          mod.full_name || mod.name || "N/A",
+          mod.email || "N/A",
+          mod.phone || mod.phoneNumber || "N/A",
+          mod.employee_id || mod.emp_id || mod.employeeId || "N/A",
+          mod.faculty || mod.assigned_faculty || "N/A",
+          (mod.status || "active").toUpperCase(),
+          `${active}/${total} Active`,
+          mod.created_at ? formatDateDDMMYYYY(mod.created_at) : "N/A",
         ];
       });
 
-      // Add headers
-      moderatorsData.unshift([
-        'Sl No', 'Name', 'Email', 'Phone', 'Employee ID', 'Faculty', 'Approved By', 'Status', 'Joining Date'
+      exportData.unshift([
+        "Sl No",
+        "Name",
+        "Email",
+        "Phone",
+        "Employee ID",
+        "Faculty",
+        "Status",
+        "Permissions",
+        "Joined Date",
       ]);
+      exportData.unshift(["MODERATOR GOVERNANCE & ACCESS REPORT"], [""]);
 
-      // Add section header
-      moderatorsData.unshift(['ALL MODERATORS REPORT (SUPABASE)'], ['']);
-
-      await exportToExcel(moderatorsData, `ADTU_Moderators_Report_${dateStr}`, 'Moderators');
-
-      addToast(
-        `Exported ${rawModerators.length} moderators to ADTU_Moderators_Report_${dateStr}.xlsx`,
-        'success'
-      );
+      await exportToExcel(exportData, `ADTU_Moderator_Hub_${dateStr}`, "Moderators");
+      addToast(`Exported ${rawRows.length} moderators to Excel`, "success");
     } catch (error) {
-      console.error('❌ Error exporting moderators from Supabase:', error);
-      addToast(
-        'Failed to export moderators data. Please try again.',
-        'error'
-      );
+      console.error("Export error:", error);
+      addToast("Failed to export moderators data", "error");
     }
   };
 
-  // Helper function to format date
-  const formatDate = formatDateDDMMYYYY;
-
   if (authLoading && !currentUser) {
     return (
-      <div className="itms-admin-container space-y-6 animate-pulse">
+      <div className="itms-admin-container !pt-[60px] space-y-6 animate-pulse">
         <div className="h-10 w-64 bg-slate-200 dark:bg-zinc-800 rounded-md" />
         <div className="h-64 bg-slate-100 dark:bg-zinc-900 rounded-xl border border-slate-200 dark:border-zinc-800" />
       </div>
     );
   }
 
-  if (!currentUser || !userData || userData.role !== 'admin') {
+  if (!currentUser || !userData || userData.role !== "admin") {
     return null;
   }
 
-  const confirmDelete = async () => {
-    if (!deleteItem) return;
-
-    setIsDeleting(true);
-    try {
-      const success = await deleteModerator(deleteItem.id);
-      if (success) {
-        // Refresh data immediately after deletion
-        invalidateCollectionCache('moderators');
-        await refreshModerators();
-        addToast(
-          `Moderator ${deleteItem.name} deleted successfully`,
-          'success'
-        );
-      } else {
-        addToast(
-          'Failed to delete moderator',
-          'error'
-        );
-      }
-    } catch (error) {
-      console.error('Error deleting moderator:', error);
-      addToast(
-        'Error deleting moderator',
-        'error'
-      );
-    } finally {
-      setIsDeleting(false);
-      setIsDialogOpen(false);
-      setDeleteItem(null);
-    }
-  };
-
-  const commonBtnClass = "group h-8 px-3.5 bg-white/80 dark:bg-zinc-800/80 hover:bg-zinc-50 dark:hover:bg-zinc-700/80 text-zinc-700 dark:text-zinc-200 hover:text-blue-600 dark:hover:text-blue-400 border border-zinc-200 dark:border-zinc-700/60 shadow-xs text-xs font-semibold rounded-lg transition-all duration-200 active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer";
-
   return (
-    <div className="itms-admin-container space-y-6">
-      {/* Page Header */}
-      <div className="itms-page-header-container">
-        <div className="flex items-center justify-between w-full gap-2">
-          <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-foreground truncate leading-tight pb-1">Moderator Management</h1>
+    <div className="itms-admin-container h-[100dvh] max-h-[100dvh] !pb-3.5 flex flex-col overflow-hidden gap-3.5">
+      {/* ── HEADER ── */}
+      <div className="itms-page-header-container !mb-0 shrink-0">
+        <div className="flex flex-row items-center justify-between gap-3">
+          <div className="space-y-0.5 min-w-0">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 rounded-xl bg-blue-600/10 border border-blue-500/20 text-blue-500">
+                <ShieldCheck className="w-6 h-6" />
+              </div>
+              <h1 className="text-xl sm:text-2xl md:text-3xl font-black text-foreground tracking-tight leading-tight">
+                Moderator Management Hub
+              </h1>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Manage moderator authority, section permissions, staff roster, and portal access control.
+            </p>
+          </div>
 
-          {/* Desktop action toolbar */}
+          {/* Desktop Toolbar */}
           <div className="hidden md:flex items-center gap-2 shrink-0">
             <Link href="/admin/moderators/add">
-              <Button className="bg-blue-600 hover:bg-blue-700 text-white border border-blue-700 shadow-sm transition-all duration-200 hover:scale-105 hover:shadow-lg rounded-md px-2.5 py-1.5 text-xs h-8 cursor-pointer">
-                <Plus className="mr-1.5 h-3.5 w-3.5" />
-                Add New Moderator
+              <Button className="bg-pink-600 hover:bg-pink-700 text-white border border-pink-700 shadow-sm transition-all duration-200 hover:scale-105 hover:shadow-lg rounded-lg px-3 py-1.5 text-xs h-9 cursor-pointer gap-1.5">
+                <Plus className="h-4 w-4" />
+                <span>Add Moderator</span>
               </Button>
             </Link>
             <ExportButton
-              onClick={() => handleExportModerators()}
+              onClick={handleExportModerators}
               label="Export"
-              className={commonBtnClass}
+              className="h-9 px-3.5 bg-white/80 dark:bg-zinc-800/80 hover:bg-zinc-50 dark:hover:bg-zinc-700/80 text-zinc-700 dark:text-zinc-200 border border-zinc-200 dark:border-zinc-700/60 shadow-xs text-xs font-semibold rounded-lg transition-all flex items-center gap-1.5 cursor-pointer"
             />
             <Button
               size="sm"
               onClick={handleRefresh}
               disabled={isRefreshing}
-              className={commonBtnClass}
+              className="h-9 px-3.5 bg-white/80 dark:bg-zinc-800/80 hover:bg-zinc-50 dark:hover:bg-zinc-700/80 text-zinc-700 dark:text-zinc-200 border border-zinc-200 dark:border-zinc-700/60 shadow-xs text-xs font-semibold rounded-lg transition-all flex items-center gap-1.5 cursor-pointer"
             >
-              <RefreshCw className={cn("h-3.5 w-3.5 transition-transform duration-500", isRefreshing ? "animate-spin" : "group-hover:rotate-180")} />
+              <RefreshCw
+                className={cn(
+                  "h-3.5 w-3.5 transition-transform duration-500",
+                  isRefreshing && "animate-spin"
+                )}
+              />
               <span>Refresh</span>
             </Button>
           </div>
 
-          {/* Mobile Refresh Button - exact same line as Moderator Management at rightmost end */}
+          {/* Mobile Refresh */}
           <div className="flex md:hidden items-center shrink-0">
             <Button
               size="sm"
               onClick={handleRefresh}
               disabled={isRefreshing}
-              className="h-8 px-3 bg-white dark:bg-zinc-800 hover:bg-gray-50 dark:hover:bg-zinc-700 text-gray-700 dark:text-zinc-200 hover:text-blue-600 dark:hover:text-blue-400 border border-gray-200 dark:border-zinc-700 shadow-sm rounded-lg text-xs font-semibold flex items-center gap-1.5 cursor-pointer active:scale-95 transition-all shrink-0"
+              className="h-8 px-3 bg-white dark:bg-zinc-800 hover:bg-gray-50 dark:hover:bg-zinc-700 text-gray-700 dark:text-zinc-200 border border-gray-200 dark:border-zinc-700 shadow-sm rounded-lg text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
             >
-              <RefreshCw className={cn("h-3.5 w-3.5 transition-transform duration-500", isRefreshing ? "animate-spin text-blue-600" : "group-hover:rotate-180")} />
+              <RefreshCw
+                className={cn(
+                  "h-3.5 w-3.5 transition-transform duration-500",
+                  isRefreshing ? "animate-spin text-blue-600" : "group-hover:rotate-180"
+                )}
+              />
               <span>Refresh</span>
             </Button>
           </div>
         </div>
-        <p className="text-muted-foreground mt-1 text-xs sm:text-sm truncate">Manage all moderator accounts</p>
       </div>
 
-      <Card className="bg-gray-50 dark:bg-gray-900 border-border min-h-[480px] flex flex-col">
-        <CardContent className="pt-3 flex-1 flex flex-col min-h-0 pb-4">
-          <div className="mb-3">
-            {/* Search Bar and Filters */}
-            <div className="flex flex-col md:flex-row gap-3">
-              {/* Search Bar - Top (Full Width on Mobile) */}
-              <div className="relative w-full md:flex-1">
-                <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-gray-400" />
+      {/* ── TWO-COLUMN MASTER-DETAIL WORKSPACE (LIKE SMART-ALLOCATION & FLEET-MAP) ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-stretch flex-1 min-h-0 w-full overflow-hidden">
+        {/* ── LEFT COLUMN: MODERATOR SELECTION DIRECTORY (4 OF 12 COLS) ── */}
+        <div className="lg:col-span-4 flex flex-col min-w-0 h-full overflow-hidden">
+          <Card className="bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 shadow-md flex-1 flex flex-col h-full overflow-hidden !p-0 !gap-0">
+            <CardHeader className="p-3.5 pb-2.5 border-b border-zinc-200 dark:border-zinc-800 bg-slate-50/70 dark:bg-zinc-800/40 shrink-0">
+              <div className="flex items-center justify-between gap-2">
+                <CardTitle className="text-xs font-bold text-foreground uppercase tracking-wider flex items-center gap-1.5">
+                  <Users className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                  <span>Moderator Roster</span>
+                </CardTitle>
+                <Badge
+                  variant="outline"
+                  className="text-[10px] font-mono bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/30"
+                >
+                  {filteredModerators.length} Staff
+                </Badge>
+              </div>
+
+              {/* Search Bar */}
+              <div className="relative mt-2">
+                <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
                 <Input
-                  placeholder="Search moderators..."
+                  placeholder="Search by name, email, employee ID..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-9 h-9 text-xs w-full"
+                  className="pl-8 h-8 text-xs w-full bg-white dark:bg-zinc-800/70 border-zinc-200 dark:border-zinc-700/60 rounded-lg"
                 />
-              </div>
-
-              {/* Filters - Side by side on Mobile in the same line */}
-              <div className="grid grid-cols-2 gap-2 items-center w-full md:w-auto md:flex md:flex-row">
-                <Select value={experienceFilter} onValueChange={setExperienceFilter}>
-                  <SelectTrigger className="h-9 md:h-8 text-xs w-full md:w-[140px] bg-white dark:bg-gray-800 md:bg-transparent border-gray-200 dark:border-gray-700">
-                    <SelectValue placeholder="Experience" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all" className="text-xs">All Experience</SelectItem>
-                    <SelectItem value="0-2" className="text-xs">0-2 Years</SelectItem>
-                    <SelectItem value="3-5" className="text-xs">3-5 Years</SelectItem>
-                    <SelectItem value="6-10" className="text-xs">6-10 Years</SelectItem>
-                    <SelectItem value="10+" className="text-xs">10+ Years</SelectItem>
-                  </SelectContent>
-                </Select>
-
-                <Select value={statusFilter} onValueChange={setStatusFilter}>
-                  <SelectTrigger className="h-9 md:h-8 text-xs w-full md:w-[130px] bg-white dark:bg-gray-800 md:bg-transparent border-gray-200 dark:border-gray-700">
-                    <SelectValue placeholder="Status" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all" className="text-xs">All Statuses</SelectItem>
-                    <SelectItem value="active" className="text-xs">Active</SelectItem>
-                    <SelectItem value="inactive" className="text-xs">Inactive</SelectItem>
-                  </SelectContent>
-                </Select>
-
-                {(experienceFilter !== "all" || statusFilter !== "all") && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      setExperienceFilter("all");
-                      setStatusFilter("all");
-                    }}
-                    className="h-8 px-3 text-xs col-span-2 md:col-span-1 bg-red-500/20 text-red-400 hover:bg-red-500/30 dark:bg-red-500/20 dark:text-red-400 flex-shrink-0"
+                {searchTerm && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchTerm("")}
+                    className="absolute right-2 top-2 text-muted-foreground hover:text-foreground p-0.5"
                   >
-                    Clear
-                  </Button>
+                    <X className="w-3.5 h-3.5" />
+                  </button>
                 )}
               </div>
-            </div>
-          </div>
-          <div className="students-section md:mt-5 flex-1 flex flex-col min-h-0">
-            <div className="students-scroll-wrapper rounded-md border overflow-x-auto flex-1 flex flex-col min-h-0" role="region" aria-label="Moderators list">
-              <Table>
-                <TableHeader>
-                  <TableRow className="h-8">
-                    <TableHead className="text-[11px] py-1.5">Moderator</TableHead>
-                    <TableHead className="text-[11px] py-1.5">Phone</TableHead>
-                    <TableHead className="text-[11px] py-1.5">Employee ID</TableHead>
-                    <TableHead className="text-[11px] py-1.5">Years of Service</TableHead>
-                    <TableHead className="text-[11px] py-1.5">Approved By</TableHead>
-                    <TableHead className="text-[11px] py-1.5">Status</TableHead>
-                    <TableHead className="text-[11px] py-1.5 text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {isLoading && filteredModerators.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={7} className="p-6">
-                        <TableRowLoader rows={5} />
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    filteredModerators.map((moderator, index) => (
-                      <ModeratorRow
-                        key={moderator.uid || moderator.id || `moderator-${index}`}
-                        moderator={moderator}
-                        onDelete={handleDeleteClick}
-                      />
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-              {!isLoading && filteredModerators.length === 0 && (
-                <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-[11px] text-gray-500 min-h-[220px]">
-                  No moderators found
+
+              {/* Filter Pills (Full Width with Counts) */}
+              <div className="grid grid-cols-4 gap-1 mt-2 p-0.5 rounded-lg bg-slate-100 dark:bg-zinc-800/60 w-full border border-zinc-200/80 dark:border-zinc-700/50">
+                {[
+                  { id: "all", label: `All (${metrics.total})` },
+                  { id: "active", label: `Active (${metrics.activeCount})` },
+                  { id: "suspended", label: `Suspended (${metrics.suspendedCount})` },
+                  { id: "full", label: `Full Access (${metrics.fullAuthorityCount})` },
+                ].map((f) => (
+                  <button
+                    key={f.id}
+                    type="button"
+                    onClick={() => setStatusFilter(f.id)}
+                    className={cn(
+                      "py-1 rounded-md text-[10px] font-bold transition-all cursor-pointer text-center whitespace-nowrap px-1",
+                      statusFilter === f.id
+                        ? "bg-blue-600 text-white shadow-xs"
+                        : "text-zinc-600 dark:text-zinc-400 hover:text-foreground hover:bg-white/50 dark:hover:bg-zinc-700/50"
+                    )}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+            </CardHeader>
+
+            {/* Scrollable List of Moderator Cards */}
+            <div className="flex-1 overflow-y-auto no-scrollbar min-h-0 p-2.5 space-y-2">
+              {isLoading && filteredModerators.length === 0 ? (
+                <div className="p-4">
+                  <TableRowLoader rows={5} />
                 </div>
+              ) : filteredModerators.length === 0 ? (
+                <div className="p-8 text-center text-xs text-muted-foreground space-y-1">
+                  <ShieldAlert className="w-8 h-8 mx-auto text-muted-foreground/60" />
+                  <p className="font-semibold text-foreground">No moderators found</p>
+                  <p>Try clearing search or filters.</p>
+                </div>
+              ) : (
+                filteredModerators.map((moderator) => {
+                  const isSelected = selectedModeratorId === moderator.id;
+                  const isActive = (moderator.status || "active").toLowerCase() === "active";
+                  const { total, active } = countActivePermissions(moderator.permissions);
+                  const isFull = active === total && total > 0;
+                  const isZero = active === 0;
+
+                  return (
+                    <div
+                      key={moderator.id}
+                      onClick={() => setSelectedModeratorId(moderator.id)}
+                      className={cn(
+                        "p-3 rounded-xl border transition-all cursor-pointer select-none text-left relative",
+                        isSelected
+                          ? "bg-blue-500/10 dark:bg-blue-950/30 border-blue-500 shadow-sm ring-1 ring-blue-500/30"
+                          : "bg-white dark:bg-zinc-800/40 border-zinc-200 dark:border-zinc-800/80 hover:bg-slate-50 dark:hover:bg-zinc-800/80"
+                      )}
+                    >
+                      <div className="flex items-center gap-3">
+                        <Avatar
+                          src={safeImageSrc(moderator.profilePhotoUrl)}
+                          name={moderator.name || moderator.fullName}
+                          size="sm"
+                          className="flex-shrink-0 border border-zinc-200 dark:border-zinc-700"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center justify-between gap-1">
+                            <p
+                              className={cn(
+                                "text-xs font-bold truncate",
+                                isSelected ? "text-blue-600 dark:text-blue-400" : "text-foreground"
+                              )}
+                            >
+                              {moderator.name || moderator.fullName || "Unnamed Moderator"}
+                            </p>
+                            <Badge
+                              variant="outline"
+                              className={cn(
+                                "text-[9px] font-semibold px-1.5 py-0.2 rounded-full shrink-0",
+                                isActive
+                                  ? "bg-emerald-500/10 text-emerald-500 dark:text-emerald-400 border-emerald-500/30"
+                                  : "bg-rose-500/10 text-rose-500 dark:text-rose-400 border-rose-500/30"
+                              )}
+                            >
+                              {isActive ? "Active" : "Suspended"}
+                            </Badge>
+                          </div>
+                          <p className="text-[11px] text-muted-foreground truncate">
+                            {moderator.email}
+                          </p>
+                          <div className="flex items-center justify-between text-[10px] text-muted-foreground mt-1 pt-1 border-t border-zinc-100 dark:border-zinc-800/60 font-mono">
+                            <span>ID: {moderator.employeeId || moderator.empId || "N/A"}</span>
+                            <span
+                              className={cn(
+                                "font-semibold",
+                                isFull
+                                  ? "text-emerald-500 dark:text-emerald-400"
+                                  : isZero
+                                  ? "text-rose-500 dark:text-rose-400"
+                                  : "text-blue-500 dark:text-blue-400"
+                              )}
+                            >
+                              {active}/{total} Granted
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
               )}
             </div>
-          </div>
-        </CardContent>
-      </Card>
+          </Card>
+        </div>
 
-      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent>
+        {/* ── RIGHT COLUMN: DIRECT AUTHORITY & PERMISSIONS COMMAND CENTER (8 OF 12 COLS) ── */}
+        <div className="lg:col-span-8 flex flex-col min-w-0 h-full overflow-hidden">
+          {selectedModerator ? (
+            <Card className="bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 shadow-md flex-1 flex flex-col h-full overflow-hidden !p-0 !gap-0">
+              {/* Profile & Master Access Header */}
+              <div className="p-3.5 border-b border-zinc-200 dark:border-zinc-800 bg-slate-50/70 dark:bg-zinc-800/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
+                <div className="flex items-center gap-3">
+                  <Avatar
+                    src={safeImageSrc(selectedModerator.profilePhotoUrl)}
+                    name={selectedModerator.name || selectedModerator.fullName}
+                    size="md"
+                    className="border-2 border-blue-500/30 shrink-0"
+                  />
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-sm font-black text-foreground">
+                        {selectedModerator.name || selectedModerator.fullName}
+                      </h3>
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          "text-[10px] font-semibold px-2 py-0.2 rounded-full",
+                          (selectedModerator.status || "active").toLowerCase() === "active"
+                            ? "bg-emerald-500/10 text-emerald-500 dark:text-emerald-400 border-emerald-500/30"
+                            : "bg-rose-500/10 text-rose-500 dark:text-rose-400 border-rose-500/30"
+                        )}
+                      >
+                        {(selectedModerator.status || "active").toUpperCase()}
+                      </Badge>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {selectedModerator.email} • {selectedModerator.phone || "No phone"} •{" "}
+                      <span className="font-mono">
+                        {selectedModerator.employeeId || selectedModerator.empId || "N/A"}
+                      </span>
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  {/* Master Portal Access Revoke/Restore Button */}
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleToggleStatus(selectedModerator)}
+                    className={cn(
+                      "h-8 px-3 text-xs font-semibold rounded-lg cursor-pointer flex items-center gap-1.5",
+                      (selectedModerator.status || "active").toLowerCase() === "active"
+                        ? "bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 dark:text-rose-400 border-rose-500/30"
+                        : "bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border-emerald-500/30"
+                    )}
+                  >
+                    {(selectedModerator.status || "active").toLowerCase() === "active" ? (
+                      <>
+                        <Lock className="w-3.5 h-3.5" />
+                        <span>Revoke Access</span>
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        <span>Restore Access</span>
+                      </>
+                    )}
+                  </Button>
+
+                  {/* Actions Dropdown */}
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 rounded-lg cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                      >
+                        <MoreHorizontal className="h-4 w-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent
+                      align="end"
+                      className="bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 shadow-xl rounded-xl w-48 p-1"
+                    >
+                      <DropdownMenuLabel className="text-[10px] font-bold text-muted-foreground uppercase px-2 py-1">
+                        Moderator Options
+                      </DropdownMenuLabel>
+                      <DropdownMenuSeparator className="bg-zinc-100 dark:bg-zinc-800" />
+                      <DropdownMenuItem asChild>
+                        <Link
+                          href={`/admin/moderators/view/${selectedModerator.id}`}
+                          className="text-xs cursor-pointer flex items-center gap-2 px-2 py-1.5"
+                        >
+                          <Eye className="h-3.5 w-3.5 text-blue-500" />
+                          View Details
+                        </Link>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem asChild>
+                        <Link
+                          href={`/admin/moderators/edit/${selectedModerator.id}`}
+                          className="text-xs cursor-pointer flex items-center gap-2 px-2 py-1.5"
+                        >
+                          <Edit className="h-3.5 w-3.5 text-amber-500" />
+                          Edit Profile
+                        </Link>
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator className="bg-zinc-100 dark:bg-zinc-800" />
+                      <DropdownMenuItem
+                        onClick={() =>
+                          setDeleteItem({
+                            id: selectedModerator.id,
+                            name: selectedModerator.name || selectedModerator.fullName || "Moderator",
+                          })
+                        }
+                        className="text-xs text-rose-500 hover:!bg-rose-500/10 cursor-pointer flex items-center gap-2 px-2 py-1.5"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        Delete Moderator
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+              </div>
+
+              {/* Presets & Bulk Controls Bar */}
+              <div className="px-4 py-2 bg-slate-100/70 dark:bg-zinc-800/60 border-b border-zinc-200 dark:border-zinc-800 flex flex-wrap items-center justify-between gap-2 shrink-0">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider mr-1">
+                    Presets:
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => applyPreset("full")}
+                    className="px-2.5 py-1 rounded-md text-[11px] font-semibold bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 transition-all cursor-pointer"
+                  >
+                    Full Access (22)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => applyPreset("viewOnly")}
+                    className="px-2.5 py-1 rounded-md text-[11px] font-semibold bg-blue-500/10 hover:bg-blue-500/20 text-blue-600 dark:text-blue-400 border border-blue-500/30 transition-all cursor-pointer"
+                  >
+                    View Only
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => applyPreset("revokeAll")}
+                    className="px-2.5 py-1 rounded-md text-[11px] font-semibold bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/30 transition-all cursor-pointer"
+                  >
+                    Revoke All (0)
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-1.5 text-xs">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setExpandedCategories(new Set(Object.keys(PERMISSION_CATEGORIES)))
+                    }
+                    className="px-2.5 py-1 rounded-md text-[11px] font-semibold bg-white dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 hover:text-foreground hover:bg-slate-50 dark:hover:bg-zinc-700/80 border border-zinc-200 dark:border-zinc-700/70 shadow-xs transition-all cursor-pointer"
+                  >
+                    Expand All
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setExpandedCategories(new Set())}
+                    className="px-2.5 py-1 rounded-md text-[11px] font-semibold bg-white dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 hover:text-foreground hover:bg-slate-50 dark:hover:bg-zinc-700/80 border border-zinc-200 dark:border-zinc-700/70 shadow-xs transition-all cursor-pointer"
+                  >
+                    Collapse All
+                  </button>
+                </div>
+              </div>
+
+              {/* Scrollable Live Permissions Matrix (Direct on page!) */}
+              <div className="flex-1 overflow-y-auto no-scrollbar min-h-0 p-3 space-y-2.5">
+                {Object.entries(PERMISSION_CATEGORIES).map(([catKey, category]) => {
+                  const Icon = categoryIcons[catKey] || Shield;
+                  const isExpanded = expandedCategories.has(catKey);
+                  const permsInCategory = (activePermissions as any)?.[catKey] || {};
+                  const catTotal = Object.keys(category.permissions).length;
+                  const catActive = Object.values(permsInCategory).filter(Boolean).length;
+                  const isAllEnabled = catActive === catTotal && catTotal > 0;
+
+                  const theme = categoryThemeMap[catKey] || categoryThemeMap.students;
+
+                  return (
+                    <div
+                      key={catKey}
+                      className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 shadow-xs overflow-hidden transition-all duration-200"
+                    >
+                      {/* Category Header */}
+                      <div
+                        onClick={() => {
+                          setExpandedCategories((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(catKey)) next.delete(catKey);
+                            else next.add(catKey);
+                            return next;
+                          });
+                        }}
+                        className="p-3 px-3.5 flex items-center justify-between cursor-pointer bg-slate-50/70 dark:bg-zinc-800/40 hover:bg-slate-100/80 dark:hover:bg-zinc-800/70 transition-colors select-none border-b border-zinc-200 dark:border-zinc-800"
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <div className={cn("p-1.5 rounded-lg border", theme.iconBg, theme.iconBorder, theme.iconText)}>
+                            <Icon className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-bold text-zinc-900 dark:text-zinc-100">
+                                {category.label}
+                              </span>
+                              <Badge
+                                variant="outline"
+                                className={cn(
+                                  "text-[10px] font-mono font-semibold px-2 py-0.2",
+                                  catActive === catTotal
+                                    ? "bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 border-indigo-500/30"
+                                    : catActive > 0
+                                    ? cn(theme.badgeBg, theme.badgeBorder, theme.badgeText)
+                                    : "bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 border-zinc-200 dark:border-zinc-700"
+                                )}
+                              >
+                                {catActive}/{catTotal} Active
+                              </Badge>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div
+                          className="flex items-center gap-2"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => handleToggleCategory(catKey, !isAllEnabled)}
+                            className={cn(
+                              "px-2.5 py-1 rounded-md text-[11px] font-semibold border transition-all cursor-pointer shadow-2xs",
+                              isAllEnabled
+                                ? "bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border-rose-500/30"
+                                : "bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 border-indigo-500/30"
+                            )}
+                          >
+                            {isAllEnabled ? "Disable All" : "Enable All"}
+                          </button>
+
+                          <div className="p-1 text-muted-foreground hover:text-foreground">
+                            {isExpanded ? (
+                              <ChevronUp className="w-4 h-4" />
+                            ) : (
+                              <ChevronDown className="w-4 h-4" />
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Permissions List with Clean Card Styling */}
+                      {isExpanded && (
+                        <div className="p-3 bg-slate-50/30 dark:bg-zinc-900/30 grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                          {Object.entries(category.permissions).map(([permKey, permLabel]) => {
+                            const isGranted = Boolean(permsInCategory?.[permKey]);
+
+                            return (
+                              <div
+                                key={permKey}
+                                onClick={() => handleTogglePermission(catKey, permKey)}
+                                className={cn(
+                                  "p-2.5 px-3 rounded-xl border transition-all flex items-center justify-between gap-3 cursor-pointer select-none",
+                                  isGranted
+                                    ? cn(
+                                        theme.activeBg,
+                                        theme.activeBorder,
+                                        theme.activeRing,
+                                        "shadow-xs"
+                                      )
+                                    : "bg-white dark:bg-zinc-800/40 border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700 hover:bg-slate-50 dark:hover:bg-zinc-800/80"
+                                )}
+                              >
+                                <div className="min-w-0 pr-1 flex-1 flex items-center gap-2">
+                                  <span
+                                    className={cn(
+                                      "w-2 h-2 rounded-full shrink-0 transition-all",
+                                      isGranted ? theme.activeDot : "bg-zinc-300 dark:bg-zinc-700"
+                                    )}
+                                  />
+                                  <p
+                                    className={cn(
+                                      "text-xs truncate transition-colors",
+                                      isGranted
+                                        ? "font-bold text-zinc-950 dark:text-zinc-50"
+                                        : "font-medium text-zinc-600 dark:text-zinc-400"
+                                    )}
+                                  >
+                                    {permLabel}
+                                  </p>
+                                </div>
+
+                                <Switch
+                                  checked={isGranted}
+                                  onCheckedChange={() => handleTogglePermission(catKey, permKey)}
+                                  onClick={(e) => e.stopPropagation()}
+                                  className={cn("shrink-0 scale-90", theme.switchActive)}
+                                />
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Action Footer */}
+              <div className="px-3.5 py-2 border-t border-zinc-200 dark:border-zinc-800 bg-slate-50/80 dark:bg-zinc-800/60 flex items-center justify-end gap-2 shrink-0">
+                {hasUnsavedChanges && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleResetChanges}
+                    disabled={savingPermissions}
+                    className="h-7 px-2.5 text-xs text-muted-foreground hover:text-foreground cursor-pointer flex items-center gap-1.5"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>Reset</span>
+                  </Button>
+                )}
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={handleSavePermissions}
+                  disabled={savingPermissions || !hasUnsavedChanges}
+                  className="h-7 px-3.5 text-xs font-semibold bg-pink-600 hover:bg-pink-700 text-white rounded-lg shadow-sm cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  {savingPermissions ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Saving...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Save className="w-3.5 h-3.5" />
+                      <span>Save Permissions</span>
+                    </>
+                  )}
+                </Button>
+              </div>
+            </Card>
+          ) : (
+            <Card className="bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 shadow-md flex-1 flex flex-col items-center justify-center p-8 text-center min-h-[400px]">
+              <div className="p-4 rounded-2xl bg-blue-500/10 text-blue-500 border border-blue-500/20 mb-3">
+                <Shield className="w-8 h-8" />
+              </div>
+              <h3 className="text-sm font-bold text-foreground">Select a Moderator</h3>
+              <p className="text-xs text-muted-foreground max-w-sm mt-1">
+                Choose a moderator from the left roster to view their profile, configure all 22 granular permissions, or revoke portal access.
+              </p>
+            </Card>
+          )}
+        </div>
+      </div>
+
+      {/* ── CONFIRM ACCESS REVOCATION / RESTORATION MODAL ── */}
+      <Dialog
+        open={Boolean(statusConfirmItem)}
+        onOpenChange={(open) => !open && setStatusConfirmItem(null)}
+      >
+        <DialogContent className="bg-slate-900 border-zinc-800 text-slate-100 max-w-md">
           <DialogHeader>
-            <DialogTitle>Delete Moderator</DialogTitle>
-            <DialogDescription>
-              Are you sure you want to delete {deleteItem?.name}? This action cannot be undone.
+            <div className="flex items-center gap-3">
+              <div
+                className={cn(
+                  "p-2.5 rounded-xl border",
+                  statusConfirmItem?.targetStatus === "suspended"
+                    ? "bg-rose-500/10 text-rose-400 border-rose-500/30"
+                    : "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
+                )}
+              >
+                {statusConfirmItem?.targetStatus === "suspended" ? (
+                  <UserX className="w-5 h-5" />
+                ) : (
+                  <UserCheck className="w-5 h-5" />
+                )}
+              </div>
+              <DialogTitle className="text-base font-bold text-white">
+                {statusConfirmItem?.targetStatus === "suspended"
+                  ? "Revoke Moderator Portal Access"
+                  : "Restore Moderator Portal Access"}
+              </DialogTitle>
+            </div>
+            <DialogDescription className="text-xs text-slate-400 pt-2">
+              {statusConfirmItem?.targetStatus === "suspended" ? (
+                <>
+                  Are you sure you want to temporarily revoke portal access for{" "}
+                  <strong className="text-white">{statusConfirmItem?.name}</strong>? They will be
+                  immediately blocked from viewing or executing any moderator actions.
+                </>
+              ) : (
+                <>
+                  Restore portal access for{" "}
+                  <strong className="text-white">{statusConfirmItem?.name}</strong>? Their assigned
+                  permissions and portal privileges will resume immediately.
+                </>
+              )}
             </DialogDescription>
           </DialogHeader>
-          <DialogFooter>
+          <DialogFooter className="mt-4 flex gap-2 justify-end">
             <Button
-              className="bg-white hover:bg-gray-50 text-gray-900 border border-gray-300 dark:bg-gray-800 dark:hover:bg-gray-700 dark:text-gray-100 dark:border-gray-600"
-              onClick={() => setIsDialogOpen(false)}
-              disabled={isDeleting}
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setStatusConfirmItem(null)}
+              disabled={updatingStatus}
+              className="bg-slate-800 hover:bg-slate-700 text-slate-200 border-zinc-700 text-xs"
             >
               Cancel
             </Button>
             <Button
-              className="bg-red-600 hover:bg-red-700 text-white border-red-600 hover:border-red-700 font-medium min-w-[80px]"
-              onClick={confirmDelete}
-              disabled={isDeleting}
+              type="button"
+              size="sm"
+              onClick={executeStatusChange}
+              disabled={updatingStatus}
+              className={cn(
+                "text-xs font-semibold text-white",
+                statusConfirmItem?.targetStatus === "suspended"
+                  ? "bg-rose-600 hover:bg-rose-700"
+                  : "bg-emerald-600 hover:bg-emerald-700"
+              )}
             >
-              {isDeleting ? (
-                <div className="flex items-center gap-2">
-                  <span className="h-4 w-4 border-2 border-white/50 border-t-white rounded-full animate-spin" />
-                  <span>Deleting...</span>
+              {updatingStatus ? (
+                <div className="flex items-center gap-1.5">
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  <span>Updating...</span>
                 </div>
+              ) : statusConfirmItem?.targetStatus === "suspended" ? (
+                "Revoke Access"
               ) : (
-                'Delete'
+                "Restore Access"
               )}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Mobile Floating Action Button (FAB) for Quick Admin Moderator Actions */}
+      {/* ── DELETE CONFIRMATION MODAL ── */}
+      <Dialog open={Boolean(deleteItem)} onOpenChange={(open) => !open && setDeleteItem(null)}>
+        <DialogContent className="bg-slate-900 border-zinc-800 text-slate-100 max-w-md">
+          <DialogHeader>
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-xl bg-rose-500/10 text-rose-400 border border-rose-500/30">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <DialogTitle className="text-base font-bold text-white">Delete Moderator</DialogTitle>
+            </div>
+            <DialogDescription className="text-xs text-slate-400 pt-2">
+              Are you sure you want to permanently delete{" "}
+              <strong className="text-white">{deleteItem?.name}</strong>? This action will remove
+              all permissions, assignments, and account records. This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="mt-4 flex gap-2 justify-end">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setDeleteItem(null)}
+              disabled={isDeleting}
+              className="bg-slate-800 hover:bg-slate-700 text-slate-200 border-zinc-700 text-xs"
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              onClick={executeDelete}
+              disabled={isDeleting}
+              className="bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold"
+            >
+              {isDeleting ? (
+                <div className="flex items-center gap-1.5">
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  <span>Deleting...</span>
+                </div>
+              ) : (
+                "Delete Moderator"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Mobile Floating Action Button (FAB) */}
       <MobileActionFAB
-        ariaLabel="Moderator management actions"
+        ariaLabel="Moderator control hub actions"
         actions={[
           {
             label: "Add New Moderator",
             icon: Plus,
             href: "/admin/moderators/add",
-            color: "bg-blue-600 text-white",
+            color: "bg-pink-600 text-white",
           },
           {
-            label: "Export Moderators",
+            label: "Export Directory",
             icon: Download,
             onClick: handleExportModerators,
             color: "bg-emerald-600 text-white",

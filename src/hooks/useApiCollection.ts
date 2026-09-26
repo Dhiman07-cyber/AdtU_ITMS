@@ -40,7 +40,7 @@ const API_ROUTE_MAP: Record<string, { path: string; normalize: ResponseNormalize
         normalize: (raw) => Array.isArray(raw) ? raw : raw.drivers ?? [],
     },
     students: {
-        path: '/api/students',
+        path: '/api/students?format=paginated',
         normalize: (raw) => Array.isArray(raw) ? raw : raw.students ?? [],
     },
     routes: {
@@ -79,6 +79,7 @@ export interface UseApiCollectionResult<T> {
     fetchNextPage: () => Promise<void>;
     refresh: () => Promise<void>;
     hasMore: boolean;
+    totalCount: number;
     totalFetched: number;
     isAutoRefreshing: boolean;
     setAutoRefresh: (enabled: boolean) => void;
@@ -161,6 +162,7 @@ export function useApiCollection<T = Record<string, any>>(
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<Error | null>(null);
     const [hasMore, setHasMore] = useState(false);
+    const [totalCount, setTotalCount] = useState<number>(0);
     const [autoRefresh, setAutoRefresh] = useState(initialAutoRefresh);
 
     const offsetRef = useRef(0);
@@ -225,6 +227,16 @@ export function useApiCollection<T = Record<string, any>>(
 
             const raw = await res.json();
             const allData: T[] = routeConfig.normalize(raw) as T[];
+
+            // Extract total count
+            const xTotalCount = res.headers.get('X-Total-Count');
+            if (raw && typeof raw.total === 'number') {
+                setTotalCount(raw.total);
+            } else if (xTotalCount !== null) {
+                setTotalCount(parseInt(xTotalCount, 10) || 0);
+            } else {
+                setTotalCount(allData.length);
+            }
 
             // Determine if more items are available
             const xHasMore = res.headers.get('X-Has-More');
@@ -298,6 +310,13 @@ export function useApiCollection<T = Record<string, any>>(
             const raw = await res.json();
             const nextBatch: T[] = routeConfig.normalize(raw) as T[];
 
+            const xTotalCount = res.headers.get('X-Total-Count');
+            if (raw && typeof raw.total === 'number') {
+                setTotalCount(raw.total);
+            } else if (xTotalCount !== null) {
+                setTotalCount(parseInt(xTotalCount, 10) || 0);
+            }
+
             const xHasMore = res.headers.get('X-Has-More');
             const calculatedHasMore = xHasMore !== null
                 ? xHasMore === 'true'
@@ -359,6 +378,7 @@ export function useApiCollection<T = Record<string, any>>(
         fetchNextPage,
         refresh,
         hasMore,
+        totalCount,
         totalFetched: data.length,
         isAutoRefreshing: autoRefresh && isVisible && isOnline,
         setAutoRefresh,

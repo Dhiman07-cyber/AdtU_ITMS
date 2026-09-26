@@ -124,7 +124,6 @@ export default function ModeratorApplicationsPage() {
 
   const [error, setError] = useState("");
   const [activeSection, setActiveSection] = useState<'applications' | 'upcoming' | 'renewals'>('applications');
-  const [currentTime, setCurrentTime] = useState(new Date());
   const [approving, setApproving] = useState<string | null>(null);
   const [rejecting, setRejecting] = useState<string | null>(null);
   const [showRejectDialog, setShowRejectDialog] = useState(false);
@@ -242,6 +241,29 @@ export default function ModeratorApplicationsPage() {
     }
   };
 
+  /** O(1) inverted index mapping normalized stop names to route IDs */
+  const stopToRouteIdsMap = useMemo(() => {
+    const map = new Map<string, string[]>();
+    routes.forEach((route: any) => {
+      const routeId = route.routeId || route.id;
+      if (!routeId) return;
+      const route_stops = route.stops || [];
+      route_stops.forEach((stop: any) => {
+        const rsId = (stop.stop_name || stop.id || stop.name || '').toLowerCase().trim();
+        const rsName = (stop.name || stop.stop_name || '').toLowerCase().trim();
+        if (rsId) {
+          if (!map.has(rsId)) map.set(rsId, []);
+          if (!map.get(rsId)!.includes(routeId)) map.get(rsId)!.push(routeId);
+        }
+        if (rsName && rsName !== rsId) {
+          if (!map.has(rsName)) map.set(rsName, []);
+          if (!map.get(rsName)!.includes(routeId)) map.get(rsName)!.push(routeId);
+        }
+      });
+    });
+    return map;
+  }, [routes]);
+
   /** Open the alternative-bus picker for a Case 2 application. */
   const openAlternativePicker = (item: any) => {
     const studentShift = (item.formData?.shift || 'Morning').toLowerCase();
@@ -263,20 +285,9 @@ export default function ModeratorApplicationsPage() {
         }
       : { id: appBusId, busNumber: `Bus-${appBusId}`, capacity: 55, shift: 'both' };
 
-    // Alternative buses (re-use the getCapacityStatus logic to find them)
-    const matchingRouteIds: string[] = [];
-    routes.forEach((route: any) => {
-      const route_stops = route.stops || [];
-      const hasStop = route_stops.some((stop: any) => {
-        const rsId = (stop.stop_name || stop.id || stop.name || '').toLowerCase().trim();
-        const rsName = (stop.name || stop.stop_name || '').toLowerCase().trim();
-        const normStopId = stop_name.toLowerCase().trim();
-        const normStopName = stop_name.toLowerCase().trim();
-        return rsId === normStopId || rsName === normStopName ||
-          rsName === normStopId || rsId === normStopName;
-      });
-      if (hasStop) matchingRouteIds.push(route.routeId || route.id);
-    });
+    // Alternative buses (O(1) inverted index lookup)
+    const normStopName = stop_name.toLowerCase().trim();
+    const matchingRouteIds = stopToRouteIdsMap.get(normStopName) || [];
 
     const alternatives: AlternativeBusData[] = buses
       .filter((b: any) => {
@@ -334,14 +345,6 @@ export default function ModeratorApplicationsPage() {
   // Filter & Search States
   const [searchQuery, setSearchQuery] = useState("");
   const [shiftFilter, setShiftFilter] = useState<string[]>([]);
-
-  // Update current time every second for countdown
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setCurrentTime(new Date());
-    }, 1000);
-    return () => clearInterval(timer);
-  }, []);
 
   // Removed verification codes cleanup effect
 
@@ -463,23 +466,8 @@ export default function ModeratorApplicationsPage() {
 
     // Bus is full - check if alternatives exist for this stop
     // Find all buses that serve this stop (via routes) and have capacity
-    const normalizedStopId = (stop_name || '').toLowerCase().trim();
     const normalizedStopName = (stop_name || '').toLowerCase().trim();
-
-    // Find routes that have this stop
-    const matchingRouteIds: string[] = [];
-    routes.forEach((route: any) => {
-      const route_stops = route.stops || [];
-      const hasStop = route_stops.some((stop: any) => {
-        const routeStopId = (stop.stop_name || stop.id || stop.name || '').toLowerCase().trim();
-        const routeStopName = (stop.name || stop.stop_name || '').toLowerCase().trim();
-        return routeStopId === normalizedStopId || routeStopName === normalizedStopName ||
-          routeStopName === normalizedStopId || routeStopId === normalizedStopName;
-      });
-      if (hasStop) {
-        matchingRouteIds.push(route.routeId || route.id);
-      }
-    });
+    const matchingRouteIds = stopToRouteIdsMap.get(normalizedStopName) || [];
 
     // Find alternative buses (on matching routes, with capacity, compatible with shift)
     const alternativeBuses = buses.filter((bus: any) => {
@@ -1079,7 +1067,7 @@ export default function ModeratorApplicationsPage() {
             // Derived upcoming lifecycle status (no stored state): the frozen
             // eligibleApproval date alone decides waiting vs eligible.
             const upcomingStatus = isUpcoming
-              ? getUpcomingStatus(item, currentTime)
+              ? getUpcomingStatus(item)
               : null;
             const isEligibleNow = upcomingStatus === 'eligible_for_approval';
             const key = isApplication ? item.applicationId : item.codeId;
