@@ -453,62 +453,54 @@ const finalSessionEndYear = ((student as any).sessionEndYear && (student as any)
       }
 
       if (targetBusId) {
-        const { data: capResult, error: capError } = await db.rpc('bus_increment_capacity', {
+        // ── ATOMIC: capacity check + increment + identity activation in one DB transaction ──
+        // Previously this was two separate RPCs (bus_increment_capacity → identity_activate_student)
+        // with a code-level compensating decrement on failure. A process crash between the two
+        // would permanently increment bus capacity with no student enrolled (phantom seat leak).
+        // identity_activate_student_with_capacity fuses both into a single plpgsql transaction,
+        // matching the pattern already used by approve_renewal_with_seat for the renewal path.
+        const { data: atomicResult, error: atomicError } = await db.rpc('identity_activate_student_with_capacity', {
           p_bus_id: targetBusId,
           p_shift: studentShift,
+          p_uid: app.applicant_uid,
+          p_email: app.email || app.applicant_email,
+          p_full_name: app.form_data?.fullName || null,
+          p_student_data: studentData,
         });
 
-        if (capError) {
-          console.error('Failed to increment bus capacity for fresh application:', capError);
-          throw new Error(`Bus capacity check failed: ${capError.message || capError.code}`);
+        if (atomicError) {
+          console.error('identity_activate_student_with_capacity RPC error:', atomicError);
+          throw new Error(`Student activation with capacity failed: ${atomicError.message || atomicError.code}`);
         }
 
-        if (capResult && capResult.error) {
-          console.error('Bus capacity check returned error:', capResult.error);
-          throw new Error(capResult.error);
+        if (!atomicResult?.success) {
+          console.error('identity_activate_student_with_capacity returned failure:', atomicResult?.error);
+          throw new Error(atomicResult?.error || 'Student activation with capacity failed');
         }
-      }
+      } else {
+        // No bus assigned (e.g. walk-in or bus-less application) — activate identity only.
+        const { data: identityResult, error: identityError } = await db.rpc('identity_activate_student', {
+          p_uid: app.applicant_uid,
+          p_email: app.email || app.applicant_email,
+          p_full_name: app.form_data?.fullName || null,
+          p_student_data: studentData,
+        });
 
-      const { data: identityResult, error: identityError } = await db.rpc('identity_activate_student', {
-        p_uid: app.applicant_uid,
-        p_email: app.email || app.applicant_email,
-        p_full_name: app.form_data?.fullName || null,
-        p_student_data: studentData,
-      });
-
-      if (identityError) {
-        if (targetBusId) {
-          try {
-            await db.rpc('bus_decrement_capacity', {
-              p_bus_id: targetBusId,
-              p_shift: studentShift,
-            });
-          } catch (err) {
-            console.error('Failed to compensate bus capacity increment:', err);
-          }
+        if (identityError) {
+          console.error('identity_activate_student RPC error:', identityError);
+          throw new Error(`Identity activation failed: ${identityError.message || identityError.code}`);
         }
-        console.error('identity_activate_student RPC error:', identityError);
-        throw new Error(`Identity activation failed: ${identityError.message || identityError.code}`);
-      }
 
-      if (!identityResult?.success) {
-        if (targetBusId) {
-          try {
-            await db.rpc('bus_decrement_capacity', {
-              p_bus_id: targetBusId,
-              p_shift: studentShift,
-            });
-          } catch (err) {
-            console.error('Failed to compensate bus capacity increment:', err);
-          }
+        if (!identityResult?.success) {
+          throw new Error('Identity activation failed');
         }
-        throw new Error('Identity activation failed');
       }
 
       // Identity now owns this user — the transient unauth_users row is
       // superseded. Best-effort delete (45-day TTL cron is the fallback).
       await deleteUnauthUser(app.applicant_uid).catch(() => {});
     }
+
 
     // ── Step 2: Finalize application — atomic commit ────────────────
     // C3: For renewals, student update + idempotency marker + application
