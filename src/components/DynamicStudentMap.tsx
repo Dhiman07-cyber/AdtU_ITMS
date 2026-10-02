@@ -32,18 +32,20 @@ interface BusLocation {
   timestamp: number;
 }
 
+// FIX (A-03): Interface corrected to match the actual waiting_flags table schema.
+// Previous: lat/lng/accuracy/timestamp do not exist — those are GPS telemetry columns
+//           from driver_location_updates, not from waiting_flags.
+// Actual schema: stop_lat, stop_lng, created_at (set at flag creation from stop config).
 interface WaitingFlag {
   id: string;
   student_uid: string;
   student_name: string;
   bus_id: string;
-  lat: number;
-  lng: number;
-  accuracy?: number;
+  stop_lat: number | null;
+  stop_lng: number | null;
   message: string;
   status: string;
   created_at: string;
-  timestamp: number;
 }
 
 interface DynamicStudentMapProps {
@@ -96,13 +98,16 @@ function DynamicStudentMap({
     // Other Students' Waiting Flags
     if (journeyActive) {
       waitingFlags.forEach((flag) => {
-        list.push({
-          id: flag.id,
-          lat: flag.lat,
-          lng: flag.lng,
-          kind: 'waiting' as const,
-          label: flag.student_uid === currentUser?.uid ? 'Me (Waiting)' : flag.student_name,
-        });
+        // Only render a marker if the stop has coordinates (stop_lat/stop_lng are nullable)
+        if (flag.stop_lat != null && flag.stop_lng != null) {
+          list.push({
+            id: flag.id,
+            lat: flag.stop_lat,
+            lng: flag.stop_lng,
+            kind: 'waiting' as const,
+            label: flag.student_uid === currentUser?.uid ? 'Me (Waiting)' : flag.student_name,
+          });
+        }
       });
     }
     
@@ -239,9 +244,11 @@ function DynamicStudentMap({
 
         // Get current waiting flags (optional - table might not exist)
         try {
+          // FIX (A-03): Corrected column names — waiting_flags uses stop_lat/stop_lng/created_at,
+          // not lat/lng/accuracy/timestamp (those columns do not exist in the schema).
           const { data: flagsData, error: flagsError } = await supabase
             .from('waiting_flags')
-            .select('id, student_uid, student_name, bus_id, lat, lng, accuracy, message, status, created_at, timestamp')
+            .select('id, student_uid, student_name, bus_id, stop_lat, stop_lng, message, status, created_at')
             .eq('bus_id', busId)
             .eq('status', 'waiting');
 

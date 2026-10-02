@@ -171,8 +171,25 @@ function connectGpsRedis(state: GpsRedisState): void {
   sock.on('connect', () => {
     clearTimeout(timeout);
     if (gen !== state.generation) return;
-    if (state.password) sock.write(encodeCmd(['AUTH', state.password]));
-    state.ready = true;
+    sock.setKeepAlive(true, 30000);
+    if (state.password) {
+      // Must consume AUTH reply before marking state.ready = true
+      // Prevents +OK reply from desynchronizing subsequent command responses (GPS-01)
+      state.pending.push({
+        resolve: (val) => {
+          if (val === 'OK') {
+            state.ready = true;
+          } else {
+            console.warn('[gps-redis] AUTH failed:', val);
+            state.ready = false;
+            sock.destroy(new Error('GPS Redis AUTH failed'));
+          }
+        },
+      });
+      sock.write(encodeCmd(['AUTH', state.password]));
+    } else {
+      state.ready = true;
+    }
     state.socket = sock;
   });
 
@@ -239,7 +256,22 @@ function sendCommand(state: GpsRedisState, args: string[]): Promise<string | nul
       resolve(null);
       return;
     }
-    state.pending.push({ resolve });
+    // Per-command timeout: prevents hanging promises under half-open TCP connections (GPS-02)
+    const entry = {
+      resolve: (val: string | null) => {
+        clearTimeout(cmdTimer);
+        resolve(val);
+      },
+    };
+    const cmdTimer = setTimeout(() => {
+      const idx = state.pending.indexOf(entry);
+      if (idx !== -1) {
+        state.pending.splice(idx, 1);
+      }
+      resolve(null);
+    }, 2000);
+
+    state.pending.push(entry);
     state.socket.write(encodeCmd(args));
   });
 }
@@ -304,6 +336,14 @@ if curLat ~= nil and curLng ~= nil then
 
   if dist > maxJump then
     return 'jump'
+  end
+
+  -- Duplicate timestamp check: identical ts with significant relocation (>50m) is rejected
+  if curTs ~= nil and newTs > 0 and newTs == curTs then
+    if dist > 50 then
+      return 'duplicate'
+    end
+    return 'ok'
   end
 
   if curTs ~= nil and newTs > 0 then
@@ -469,7 +509,7 @@ export async function atomicGpsGuardAndUpdate(
       ]);
 
       if (result === 'ok' || result === 'stale_raw' || result === 'jump'
-          || result === 'speed' || result === 'out_of_order') {
+          || result === 'speed' || result === 'out_of_order' || result === 'duplicate') {
         return result as GpsGuardResult;
       }
       // Unexpected result — log and evaluate fallback policy below

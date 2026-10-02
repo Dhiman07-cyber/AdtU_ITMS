@@ -36,7 +36,7 @@ export async function checkActiveTrip(driverId: string, busId: string, tripId: s
 
   const { data: activeTrip, error } = await supabase
     .from('active_trips')
-    .select('trip_id, route_id, driver_id, status')
+    .select('trip_id, route_id, driver_id, status, expires_at')
     .eq('bus_id', busId)
     .eq('driver_id', driverId)
     .eq('status', 'active')
@@ -49,6 +49,11 @@ export async function checkActiveTrip(driverId: string, busId: string, tripId: s
       if (firstKey) negativeLockCache.delete(firstKey);
     }
     return { valid: false, reason: 'No active trip lock found for this driver/bus' };
+  }
+
+  if (activeTrip.expires_at && new Date(activeTrip.expires_at).getTime() <= now) {
+    negativeLockCache.set(cacheKey, now + NEGATIVE_CACHE_TTL_MS);
+    return { valid: false, reason: 'Active trip lock has expired' };
   }
 
   if (tripId && activeTrip.trip_id !== tripId) {
