@@ -300,13 +300,13 @@ test.describe('Real-Browser GPS Forensic Simulation & Fleet Map Audit', () => {
     console.log('[ADMIN-PAGE] Navigating to /admin/fleet-map');
     await adminPage.goto(`${APP_URL}/admin/fleet-map`, { waitUntil: 'domcontentloaded' });
 
-    // Wait for map container and directory to mount
-    await adminPage.getByText('Fleet Directory').waitFor({ timeout: 20000 });
+    // Wait for map container and active buses panel to mount
+    await adminPage.getByRole('heading', { name: 'Active Buses' }).waitFor({ timeout: 20000 });
 
     // Check directory text for active bus
     const pageContent = await adminPage.content();
-    expect(pageContent).toContain('Fleet Directory');
-    expect(pageContent).toContain('Bus');
-    console.log('[ADMIN-FLEET-MAP] Verified Fleet Directory and Live Fleet Map elements are loaded.');
+    expect(pageContent).toContain('Active Buses');
+    expect(pageContent).toContain('Live Bus Tracking');
+    console.log('[ADMIN-FLEET-MAP] Verified Active Buses and Live Fleet Map elements are loaded.');
   });
 });

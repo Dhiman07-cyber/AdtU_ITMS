@@ -27,12 +27,15 @@ interface HealthTarget {
 
 const TARGETS: HealthTarget[] = [
   { name: 'Next.js API Health', url: 'http://localhost:3000/api/health', expectedStatus: 200, critical: true },
-  { name: 'WS Liveness Probe', url: 'http://localhost:9090/health/live', expectedStatus: 200, critical: true },
-  { name: 'WS Readiness Probe', url: 'http://localhost:9090/health/ready', expectedStatus: 200, critical: true },
-  { name: 'WS Metrics Endpoint', url: 'http://localhost:9090/metrics', expectedStatus: 200, critical: true },
-  { name: 'Prometheus', url: 'http://localhost:9090', expectedStatus: 200, critical: false },
+  { name: 'WS1 Liveness Probe', url: 'http://localhost:3001/health/live', expectedStatus: 200, critical: true },
+  { name: 'WS1 Readiness Probe', url: 'http://localhost:3001/health/ready', expectedStatus: 200, critical: true },
+  { name: 'WS1 Metrics Endpoint', url: 'http://localhost:3001/metrics', expectedStatus: 200, critical: true },
+  { name: 'WS2 Liveness Probe', url: 'http://localhost:3003/health/live', expectedStatus: 200, critical: true },
+  { name: 'WS2 Readiness Probe', url: 'http://localhost:3003/health/ready', expectedStatus: 200, critical: true },
+  { name: 'WS2 Metrics Endpoint', url: 'http://localhost:3003/metrics', expectedStatus: 200, critical: true },
+  { name: 'Prometheus', url: 'http://localhost:9090/-/healthy', expectedStatus: 200, critical: false },
   { name: 'Grafana API Health', url: 'http://localhost:3002/api/health', expectedStatus: 200, critical: false },
-  { name: 'Alertmanager', url: 'http://localhost:9093', expectedStatus: 200, critical: false },
+  { name: 'Alertmanager', url: 'http://localhost:9093/-/healthy', expectedStatus: 200, critical: false },
 ];
 
 interface CheckResult {

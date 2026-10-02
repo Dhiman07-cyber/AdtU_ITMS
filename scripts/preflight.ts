@@ -156,9 +156,9 @@ async function main() {
 
   // Application health endpoints (optional during bare pre-flight — warn only)
   await checkHttpEndpoint('Next.js Health', 'http://localhost:3000/api/health', 'warning');
-  await checkHttpEndpoint('WS Server Liveness', 'http://localhost:9090/health/live', 'warning');
-  await checkHttpEndpoint('WS Server Readiness', 'http://localhost:9090/health/ready', 'warning');
-  await checkHttpEndpoint('Prometheus', 'http://localhost:9090', 'warning', 200);
+  await checkHttpEndpoint('WS Server Liveness', 'http://localhost:3001/health/live', 'warning');
+  await checkHttpEndpoint('WS Server Readiness', 'http://localhost:3001/health/ready', 'warning');
+  await checkHttpEndpoint('Prometheus', 'http://localhost:9090/-/healthy', 'warning', 200);
   await checkHttpEndpoint('Grafana', 'http://localhost:3002/api/health', 'warning');
 
   // Redis port check

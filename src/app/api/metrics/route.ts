@@ -1,14 +1,37 @@
 /**
  * Prometheus Metrics API Route (`/api/metrics`)
  * Exports all registered runtime and infrastructure metrics in standard Prometheus text format.
+ *
+ * SECURITY: Restricted to admin users OR requests from internal network IPs.
+ * This endpoint leaks internal system telemetry (heap, Redis, GPS rates) and must
+ * not be publicly accessible.
  */
 
-import { NextResponse } from 'next/server';
+import { verifyApiAuth } from '@/lib/security/api-auth';
+import { getClientIp } from '@/lib/security/api-security';
+import { NextRequest, NextResponse } from 'next/server';
 import { metricsRegistry } from '@/lib/observability/metrics';
 import { nodeRuntimeCollector } from '@/lib/observability/infrastructure/node';
 import * as net from 'net';
+import crypto from 'crypto';
 
 export const dynamic = 'force-dynamic';
+
+function isInternalIp(ip: string): boolean {
+  if (!ip || typeof ip !== 'string') return false;
+  const cleanIp = ip.replace(/^::ffff:/, '').trim();
+  if (cleanIp === '127.0.0.1' || cleanIp === '::1' || cleanIp.startsWith('127.')) return true;
+  if (cleanIp.startsWith('10.')) return true;
+  if (cleanIp.startsWith('192.168.')) return true;
+  const parts = cleanIp.split('.');
+  if (parts.length === 4 && parts[0] === '172') {
+    const secondOctet = parseInt(parts[1], 10);
+    if (!isNaN(secondOctet) && secondOctet >= 16 && secondOctet <= 31) {
+      return true;
+    }
+  }
+  return false;
+}
 
 async function probeRedis(): Promise<{ usedMemory: number; totalCommands: number } | null> {
   const redisUrl = process.env.REDIS_URL || 'redis://redis:6379';
@@ -59,7 +82,39 @@ async function probeRedis(): Promise<{ usedMemory: number; totalCommands: number
   });
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  // Allow: (1) Bearer token matching METRICS_SECRET / AM_WEBHOOK_SECRET,
+  //        (2) Verified internal network RFC1918 IP,
+  //        (3) Authenticated admin user.
+  let isAuthorized = false;
+
+  const authHeader = request.headers.get('authorization') || '';
+  const metricsSecret = process.env.METRICS_SECRET || process.env.AM_WEBHOOK_SECRET;
+  if (metricsSecret && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.slice(7).trim();
+    if (
+      token.length === metricsSecret.length &&
+      crypto.timingSafeEqual(Buffer.from(token), Buffer.from(metricsSecret))
+    ) {
+      isAuthorized = true;
+    }
+  }
+
+  if (!isAuthorized) {
+    const clientIp = getClientIp(request);
+    if (isInternalIp(clientIp)) {
+      isAuthorized = true;
+    } else {
+      const auth = await verifyApiAuth(request, ['admin']);
+      if (!auth.authenticated) {
+        return new NextResponse('# Unauthorized: admin authentication or valid metrics secret required', {
+          status: 401,
+          headers: { 'Content-Type': 'text/plain' },
+        });
+      }
+    }
+  }
+
   try {
     // Trigger on-demand collection of Node.js process metrics
     nodeRuntimeCollector.collect();

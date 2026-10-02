@@ -20,14 +20,20 @@ receivers:
     webhook_configs:
       - url: 'http://nextjs:3000/api/admin/alerts'
         send_resolved: true
+        http_config:
+          bearer_token: '${AM_WEBHOOK_SECRET}'
   - name: 'p0-critical-receiver'
     webhook_configs:
       - url: 'http://nextjs:3000/api/admin/alerts'
         send_resolved: true
+        http_config:
+          bearer_token: '${AM_WEBHOOK_SECRET}'
   - name: 'p1-urgent-receiver'
     webhook_configs:
       - url: 'http://nextjs:3000/api/admin/alerts'
         send_resolved: true
+        http_config:
+          bearer_token: '${AM_WEBHOOK_SECRET}'
 
 inhibit_rules:
   - source_match:

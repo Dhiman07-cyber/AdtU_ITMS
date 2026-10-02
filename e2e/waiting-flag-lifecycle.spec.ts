@@ -210,4 +210,122 @@ test.describe('waiting flag lifecycle', () => {
     // is that the system doesn't crash and the flag doesn't link to a wrong trip.
     expect(true).toBe(true);
   });
+
+  test.describe('Waiting Flag Trust & Abuse Invariants', () => {
+    test('Student assigned to a DIFFERENT bus is rejected (403 Forbidden)', async () => {
+      const personas = loadPersonas();
+      if (!personas || !personas.drivers.length || personas.students.length < 2) {
+        throw new Error('Staging personas missing');
+      }
+
+      const dp = personas.drivers[0];
+      const busId = dp.busId!;
+      const routeId = dp.routeId!;
+      const otherSp = personas.students.find(s => s.busId !== busId) || personas.students[1];
+      const otherStudentToken = await mintIdToken(otherSp.uid);
+
+      const res = await apiCall('POST', '/api/student/waiting-flag', otherStudentToken, {
+        busId,
+        routeId,
+        stop_name: 'Paltan Bazaar',
+        lat: 26.1445,
+        lng: 91.7362,
+      });
+
+      expect(res.status).toBe(403);
+      expect(res.json?.error || '').toMatch(/Forbidden.*not assigned/i);
+    });
+
+    test('Concurrency / Spam Race: 5 concurrent requests from same student result in at most 1 active flag', async () => {
+      const personas = loadPersonas();
+      if (!personas || !personas.drivers.length || !personas.students.length) throw new Error('Staging personas missing');
+
+      const dp = personas.drivers[0];
+      const busId = dp.busId!;
+      const routeId = dp.routeId!;
+      const sp = personas.students.find(s => s.busId === busId) || personas.students[0];
+      const studentToken = await mintIdToken(sp.uid);
+
+      // Clean prior flags
+      await supabase().from('waiting_flags').delete().eq('student_uid', sp.uid);
+
+      const promises = Array.from({ length: 5 }).map((_, idx) =>
+        apiCall('POST', '/api/student/waiting-flag', studentToken, {
+          busId,
+          routeId,
+          stop_name: 'Ulubari',
+          lat: 26.1512,
+          lng: 91.7485,
+          message: `Spam attempt ${idx}`,
+        })
+      );
+
+      const results = await Promise.all(promises);
+      const successes = results.filter(r => r.status === 200);
+      const conflicts = results.filter(r => r.status === 409);
+
+      console.log(`Concurrent spam results: 200 OK: ${successes.length}, 409 Conflict: ${conflicts.length}`);
+      expect(successes.length).toBe(1);
+      expect(conflicts.length).toBe(4);
+
+      // Verify in database: exactly 1 row in waiting_flags for this student
+      const { data: dbFlags } = await supabase()
+        .from('waiting_flags')
+        .select('id')
+        .eq('student_uid', sp.uid)
+        .in('status', ['raised', 'acknowledged']);
+
+      expect(dbFlags).toHaveLength(1);
+
+      // Clean up
+      await supabase().from('waiting_flags').delete().eq('student_uid', sp.uid);
+    });
+
+    test('Student can cancel active waiting flag', async () => {
+      const personas = loadPersonas();
+      if (!personas || !personas.drivers.length || !personas.students.length) throw new Error('Staging personas missing');
+
+      const dp = personas.drivers[0];
+      const busId = dp.busId!;
+      const routeId = dp.routeId!;
+      const sp = personas.students.find(s => s.busId === busId) || personas.students[0];
+      const studentToken = await mintIdToken(sp.uid);
+
+      // Clean prior flag
+      await supabase().from('waiting_flags').delete().eq('student_uid', sp.uid);
+
+      // Create a flag
+      const createRes = await apiCall('POST', '/api/student/waiting-flag', studentToken, {
+        busId,
+        routeId,
+        stop_name: 'Cancellation Test Stop',
+        lat: 26.1445,
+        lng: 91.7362,
+        message: 'Flag to cancel',
+      });
+      expect(createRes.status).toBe(200);
+      const flagId = createRes.json?.flagId || createRes.json?.flag?.id;
+      expect(flagId).toBeTruthy();
+
+      // Cancel the flag
+      const res = await apiCall('DELETE', '/api/student/waiting-flag', studentToken, {
+        flagId,
+        busId,
+      });
+      expect(res.status).toBe(200);
+
+      // Verify status changed to cancelled in database
+      const { data: updated } = await supabase()
+        .from('waiting_flags')
+        .select('status')
+        .eq('id', flagId)
+        .maybeSingle();
+
+      expect(updated?.status).toBe('cancelled');
+
+      // Cleanup
+      await supabase().from('waiting_flags').delete().eq('id', flagId);
+    });
+  });
 });
+

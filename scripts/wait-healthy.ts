@@ -29,8 +29,10 @@ interface Target {
 
 const TARGETS: Target[] = [
   { name: 'Next.js API', url: 'http://localhost:3000/api/health', expectedStatus: 200 },
-  { name: 'WS Liveness', url: 'http://localhost:9090/health/live', expectedStatus: 200 },
-  { name: 'WS Readiness', url: 'http://localhost:9090/health/ready', expectedStatus: 200 },
+  { name: 'WS1 Liveness', url: 'http://localhost:3001/health/live', expectedStatus: 200 },
+  { name: 'WS1 Readiness', url: 'http://localhost:3001/health/ready', expectedStatus: 200 },
+  { name: 'WS2 Liveness', url: 'http://localhost:3003/health/live', expectedStatus: 200 },
+  { name: 'WS2 Readiness', url: 'http://localhost:3003/health/ready', expectedStatus: 200 },
 ];
 
 function check(target: Target): Promise<boolean> {
