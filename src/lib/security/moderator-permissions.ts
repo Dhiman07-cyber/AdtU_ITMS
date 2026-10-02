@@ -53,6 +53,34 @@ export function invalidateModeratorPermissionCache(uid: string): void {
   permissionCache.delete(uid);
 }
 
+/**
+ * Returns true iff the moderator exists in moderator_profiles with status='active'.
+ * Uses the same 60-second in-process cache as getModeratorPermissions — no extra
+ * DB round-trip when the cache is warm (the common path for requests within 60s of
+ * the previous moderator API call).
+ *
+ * Used by withSecurity (RBAC-11) to gate suspended/inactive moderators on ALL
+ * moderator-accessible routes, not just those that call requireModeratorPermission.
+ */
+export async function isModeratorActive(uid: string): Promise<boolean> {
+  const perms = await getModeratorPermissions(uid);
+  // If the moderator is suspended/inactive, getModeratorPermissions returns
+  // ZERO_MODERATOR_PERMISSIONS whose every leaf value is false.  An active
+  // moderator with all permissions stripped would also return all-false, so we
+  // check the DB result directly here by re-querying (still cache-backed).
+  const cached = permissionCache.get(uid);
+  if (cached) {
+    // We already fetched; the cache entry's permissions pointer is either
+    // the ZERO constant (suspended) or a mergeWithDefaults result (active).
+    // Compare by checking the cached field used to distinguish them.
+    return perms !== ZERO_MODERATOR_PERMISSIONS;
+  }
+  // Cache miss after getModeratorPermissions — can't happen in practice, but
+  // be safe: treat as active only if getModeratorById returns active status.
+  const moderator = await getModeratorById(uid);
+  return Boolean(moderator && (!moderator.status || moderator.status === 'active'));
+}
+
 export async function requireAdminPermission(
   auth: SecurityAuth,
   requestId?: string

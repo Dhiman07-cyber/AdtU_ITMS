@@ -287,7 +287,7 @@ export const POST = withSecurity<ReassignStudentsBody>(
             let auditWritten = false;
             for (let attempt = 1; attempt <= 3; attempt++) {
                 try {
-                    await supabase.from('reassignment_logs').insert([{
+                    const { error: insertErr } = await supabase.from('reassignment_logs').insert([{
                         operation_id: operationId,
                         type: 'student_reassignment',
                         actor_id: currentUserUid,
@@ -297,6 +297,7 @@ export const POST = withSecurity<ReassignStudentsBody>(
                         changes: changes,
                         meta: { studentCount: effectiveAssignments.length, sourceBusId, targetBuses, busLoadChanges: Object.fromEntries(busLoadChanges), idempotencyKey: opId || null },
                     }]);
+                    if (insertErr) throw insertErr;
                     auditWritten = true;
                     break;
                 } catch (retryErr) {

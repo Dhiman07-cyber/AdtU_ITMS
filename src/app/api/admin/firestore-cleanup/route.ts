@@ -81,7 +81,7 @@ export const POST = withSecurity(
         });
     },
     {
-        requiredRoles: ['admin', 'moderator'],
+        requiredRoles: ['admin'],
         schema: FirestoreCleanupSchema,
         rateLimit: RateLimits.CREATE,
         allowBodyToken: true
@@ -118,7 +118,7 @@ export const GET = withSecurity(
         });
     },
     {
-        requiredRoles: ['admin', 'moderator'],
+        requiredRoles: ['admin'],
         schema: EmptySchema,
         rateLimit: RateLimits.READ
     }

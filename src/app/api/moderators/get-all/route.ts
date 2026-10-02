@@ -14,7 +14,10 @@ export async function GET(request: NextRequest) {
         const hasValidData = data.email && (data.name || data.fullName);
         const isActive = hasValidData && (!data.status || data.status === 'active');
         const permissions = data.permissions;
-        const canAppearInList = !permissions || permissions.canAppearInModeratorList !== false;
+        const canAppearInList =
+          !permissions ||
+          (permissions.applications?.canAppearInModeratorList !== false &&
+            permissions.canAppearInModeratorList !== false);
         return isActive && canAppearInList;
       })
       .map((data: any) => ({

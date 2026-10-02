@@ -1,4 +1,4 @@
-﻿import { getDriversByStatus } from '@/domains/identity';
+import { getDriversByStatus } from '@/domains/identity';
 import { withSecurity } from '@/lib/security/api-security';
 import { RateLimits } from '@/lib/security/rate-limiter';
 import { EmptySchema } from '@/lib/security/validation-schemas';
@@ -6,6 +6,12 @@ import { NextResponse } from 'next/server';
 
 export const GET = withSecurity(
     async (request, { auth, requestId }) => {
+        if (auth.role === 'moderator') {
+            const { requireModeratorPermission } = await import('@/lib/security/moderator-permissions');
+            const permError = await requireModeratorPermission(auth, 'drivers', 'canView');
+            if (permError) return permError;
+        }
+
         const driverRows = await getDriversByStatus('active');
 
         const drivers = driverRows

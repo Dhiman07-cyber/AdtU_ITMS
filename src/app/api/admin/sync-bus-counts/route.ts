@@ -93,7 +93,7 @@ export const POST = withSecurity(
         });
     },
     {
-        requiredRoles: ['admin', 'moderator'],
+        requiredRoles: ['admin'],
         schema: EmptySchema,
         rateLimit: RateLimits.CREATE,
         allowBodyToken: true

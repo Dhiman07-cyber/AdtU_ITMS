@@ -1,9 +1,11 @@
+import { createAuditEvent } from '@/domains/audit';
 import { decrementBusCapacity,incrementBusCapacity } from '@/domains/fleet';
 import { getStudentById,updateStudent } from '@/domains/identity';
 import { wasSeatReleased } from '@/lib/config/capacity-flags';
 import { getDeadlineConfig } from '@/lib/deadline-config-service';
 import { CapacityFullError } from '@/lib/errors/sentinel-errors';
 import { withSecurity } from '@/lib/security/api-security';
+import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
 import { RateLimits } from '@/lib/security/rate-limiter';
 import { invalidateCachedRole } from '@/lib/security/role-cache';
 import { safeErrorMessage } from '@/lib/security/safe-error';
@@ -35,6 +37,9 @@ export const POST = withSecurity(
         ];
 
         if (auth.role === 'moderator') {
+            const permissionDenied = await requireModeratorPermission(auth, 'students', 'canEdit');
+            if (permissionDenied) return permissionDenied;
+
             const attemptedSensitiveFields = SENSITIVE_FIELDS.filter(f => f in updateData);
             if (attemptedSensitiveFields.length > 0) {
                 return NextResponse.json({
@@ -123,6 +128,20 @@ export const POST = withSecurity(
             }
 
             invalidateCachedRole(uid);
+
+            void createAuditEvent({
+                action: 'student_updated',
+                actor_id: auth.uid,
+                actor_name: auth.name || auth.email || 'Staff',
+                actor_role: auth.role,
+                target_type: 'student',
+                target_id: uid,
+                target_name: currentData.name || currentData.fullName || uid,
+                category: 'system',
+                summary: `Student ${uid} profile updated by ${auth.role}`,
+                severity: 'low',
+                metadata: { updatedFields: Object.keys(updateData) }
+            });
 
             return NextResponse.json({ success: true, message: 'Student updated successfully' });
         } catch (error: any) {

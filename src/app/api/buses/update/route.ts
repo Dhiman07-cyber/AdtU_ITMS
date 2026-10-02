@@ -2,6 +2,7 @@ import { getBusById,updateBus } from '@/domains/fleet';
 import { getUserById } from '@/domains/identity';
 import * as routeService from '@/domains/route';
 import { adminAuth } from '@/lib/firebase-admin';
+import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import { headers } from 'next/headers';
 import { NextResponse } from 'next/server';
@@ -21,6 +22,13 @@ export async function PUT(request: Request) {
         if (!user || !['admin', 'moderator'].includes(user.role)) {
             return NextResponse.json({ success: false, error: 'Forbidden' }, { status: 403 });
         }
+
+        const permissionDenied = await requireModeratorPermission(
+            { uid: user.id || decodedToken.uid, role: user.role } as any,
+            'buses',
+            'canEdit'
+        );
+        if (permissionDenied) return permissionDenied;
 
         const body = await request.json();
         const { busId, busNumber, color, capacity, driverUID, routeId, shift, load, status } = body;

@@ -62,6 +62,13 @@ if (typeof setInterval !== 'undefined' && !(globalThis as any).__roleCacheRedisB
     (globalThis as any).__roleCacheRedisBridgeStarted = true;
     initRoleCacheRedis((uid: string) => {
         _roleCache.delete(uid);
+        try {
+            // Also invalidate fine-grained moderator permissions and active-status cache across nodes
+            const { invalidateModeratorPermissionCache } = require('./moderator-permissions');
+            invalidateModeratorPermissionCache(uid);
+        } catch {
+            // best-effort
+        }
     });
 }
 

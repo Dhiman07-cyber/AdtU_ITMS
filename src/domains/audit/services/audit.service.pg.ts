@@ -54,6 +54,8 @@ const VALID_CATEGORIES = [
   'additions',
   'refinements',
   'system',
+  'payment',
+  'payments',
 ] as const;
 
 const VALID_SEVERITIES = ['low', 'medium', 'high'] as const;

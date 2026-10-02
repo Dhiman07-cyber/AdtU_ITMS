@@ -14,7 +14,10 @@ export async function GET(request: NextRequest) {
     const moderators: any[] = [];
     for (const data of moderatorRows) {
       const permissions = (data as any).permissions;
-      const canAppearInList = !permissions || permissions.canAppearInModeratorList !== false;
+      const canAppearInList =
+        !permissions ||
+        (permissions.applications?.canAppearInModeratorList !== false &&
+          permissions.canAppearInModeratorList !== false);
 
       if (canAppearInList) {
         moderators.push({

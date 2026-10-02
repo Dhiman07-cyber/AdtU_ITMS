@@ -1,5 +1,6 @@
 import { createBus,getAllBuses,getBusesByRouteId } from '@/domains/fleet/services/fleet.service';
 import { verifyApiAuth } from '@/lib/security/api-auth';
+import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
 import { applyRateLimit,createRateLimitId,RateLimits } from '@/lib/security/rate-limiter';
 import { handleApiError } from '@/lib/security/safe-error';
 import { NextRequest,NextResponse } from 'next/server';
@@ -35,6 +36,9 @@ export async function POST(request: NextRequest) {
   try {
     const auth = await verifyApiAuth(request, ['admin', 'moderator']);
     if (!auth.authenticated) return auth.response;
+
+    const permissionDenied = await requireModeratorPermission(auth, 'buses', 'canAdd');
+    if (permissionDenied) return permissionDenied;
 
     const rl = await applyRateLimit(createRateLimitId(auth.uid, 'buses-create'), RateLimits.CREATE);
     if (!rl.allowed) {

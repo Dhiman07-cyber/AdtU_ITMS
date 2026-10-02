@@ -2,6 +2,7 @@ import { createBus,getBusById } from '@/domains/fleet';
 import { getUserById } from '@/domains/identity';
 import * as routeService from '@/domains/route';
 import { adminAuth } from '@/lib/firebase-admin';
+import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
 import { headers } from 'next/headers';
 import { NextResponse } from 'next/server';
 
@@ -27,6 +28,13 @@ export async function POST(request: Request) {
         { status: 403 }
       );
     }
+
+    const permissionDenied = await requireModeratorPermission(
+      { uid: user.id || decodedToken.uid, role: user.role } as any,
+      'buses',
+      'canAdd'
+    );
+    if (permissionDenied) return permissionDenied;
 
     // Parse request body
     const busData = await request.json();

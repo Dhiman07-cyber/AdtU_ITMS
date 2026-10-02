@@ -49,7 +49,7 @@ export async function GET(request?: Request) {
             checks['supabase'] = { status: 'degraded', message: 'Client not initialized' };
         } else {
             const t0 = Date.now();
-            const { error } = await supabase.from('realtime_driver_locations').select('id').limit(1);
+            const { error } = await supabase.from('bus_locations').select('id').limit(1);
             const latency_ms = Date.now() - t0;
             if (error && !error.message.includes('Results contain 0 rows')) {
                 checks['supabase'] = { status: 'degraded', latency_ms, message: error.message || 'Database connectivity issue' };

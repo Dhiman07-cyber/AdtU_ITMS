@@ -30,6 +30,7 @@
  */
 
 import { adminAuth } from '@/lib/firebase-admin';
+import { isModeratorActive } from '@/lib/security/moderator-permissions';
 import { applyRateLimit,createRateLimitId,RateLimits } from '@/lib/security/rate-limiter';
 import { resolveUserRole } from '@/lib/security/role-cache';
 import { validateInput } from '@/lib/security/validation-schemas';
@@ -363,6 +364,23 @@ export function withSecurity<T = any>(
                         { success: false, error: 'Insufficient permissions', requestId },
                         { status: 403 }
                     );
+                }
+
+                // ── 3a. Suspended-moderator gate (RBAC-11) ──────────────────
+                // users.role stays 'moderator' after suspension, so the check above
+                // cannot distinguish an active from a suspended moderator.
+                // getModeratorPermissions already queries moderator_profiles.status
+                // and returns ZERO_MODERATOR_PERMISSIONS for non-active accounts;
+                // we reuse that 60-second cached result here at zero extra DB cost.
+                if (auth.role === 'moderator' && auth.uid) {
+                    const active = await isModeratorActive(auth.uid);
+                    if (!active) {
+                        console.warn(`[${requestId}] Suspended/inactive moderator blocked: ${auth.uid.substring(0,8)}... on ${url}`);
+                        return NextResponse.json(
+                            { success: false, error: 'Account suspended or inactive', requestId },
+                            { status: 403 }
+                        );
+                    }
                 }
             }
 

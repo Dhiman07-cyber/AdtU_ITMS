@@ -51,16 +51,6 @@ export async function POST(request: NextRequest) {
 
     const userId = authResult.userId;
 
-    const existingPgAdmin = await getAdminById(userId);
-    if (existingPgAdmin) {
-      return NextResponse.json({
-        success: true,
-        message: 'Admin document already exists',
-        adminId: userId,
-        data: existingPgAdmin,
-      });
-    }
-
     const userData = await getUserById(userId);
     if (!userData) {
       return NextResponse.json({
@@ -74,6 +64,16 @@ export async function POST(request: NextRequest) {
         error: `User role is "${userData.role}", not "admin". Only admin users can have admin documents.`,
         userId,
       }, { status: 403 });
+    }
+
+    const existingPgAdmin = await getAdminById(userId);
+    if (existingPgAdmin) {
+      return NextResponse.json({
+        success: true,
+        message: 'Admin document already exists',
+        adminId: userId,
+        data: existingPgAdmin,
+      });
     }
 
     const now = new Date().toISOString();

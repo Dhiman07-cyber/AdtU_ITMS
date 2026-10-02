@@ -35,26 +35,31 @@ export function invalidateActiveConfigCache(): void {
   activeConfigCache = null;
 }
 
+export function setActiveConfigForTesting(config: DeadlineConfig): void {
+  activeConfigCache = { data: config, expiresAt: Date.now() + CACHE_TTL_MS };
+}
+
 export async function findActiveConfig(): Promise<DeadlineConfig> {
   if (activeConfigCache && Date.now() < activeConfigCache.expiresAt) {
     return activeConfigCache.data;
   }
 
-  if (!adminDb) {
-    throw new Error('Firebase Admin SDK is not initialized. Please try again later.');
+  let firestoreData: Record<string, any> = {};
+  if (adminDb) {
+    try {
+      const doc = await adminDb.collection(SETTINGS_COLLECTION).doc(DEADLINE_DOC_ID).get();
+      if (doc.exists) {
+        firestoreData = (doc.data() as Record<string, any>) || {};
+      }
+    } catch (err: any) {
+      console.warn('⚠️ [calendar] Failed to fetch settings/deadline from Firestore, using default:', err.message);
+    }
   }
 
-  const doc = await adminDb.collection(SETTINGS_COLLECTION).doc(DEADLINE_DOC_ID).get();
-  if (!doc.exists) {
-    throw new Error('Deadline configuration not found in Firestore (settings/deadline). Please configure deadline settings and try again later.');
-  }
-  const firestoreData = doc.data() as Record<string, any>;
-  if (!firestoreData.academicSessionStart || typeof firestoreData.academicSessionStart.month !== 'number') {
-    throw new Error('Academic session start is not configured in Firestore deadline settings. Please try again later.');
-  }
-
-  const startMonth = firestoreData.academicSessionStart.month;
-  const startDay = firestoreData.academicSessionStart.day || 1;
+  const startMonth = typeof firestoreData.academicSessionStart?.month === 'number'
+    ? firestoreData.academicSessionStart.month
+    : 6; // July default (0-indexed)
+  const startDay = firestoreData.academicSessionStart?.day || 1;
   const currentYear = new Date().getFullYear();
   const lifecycle = deriveAcademicLifecycle(startMonth, startDay, currentYear);
 

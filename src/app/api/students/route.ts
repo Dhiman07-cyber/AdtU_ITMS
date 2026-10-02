@@ -5,6 +5,7 @@ import {
 import { verifyApiAuth } from '@/lib/security/api-auth';
 import { applyRateLimit,createRateLimitId,RateLimits } from '@/lib/security/rate-limiter';
 import { handleApiError } from '@/lib/security/safe-error';
+import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import { NextRequest,NextResponse } from 'next/server';
 
@@ -18,6 +19,14 @@ export async function GET(request: NextRequest) {
   try {
     const auth = await verifyApiAuth(request, ['admin', 'moderator', 'driver']);
     if (!auth.authenticated) return auth.response;
+
+    // FIX-04a (RBAC-01): Enforce moderator permission gate for admin/mod paths.
+    // Drivers are excluded because they only access their own bus's student list
+    // (filtered below), which is operationally required for trip management.
+    if (auth.role === 'admin' || auth.role === 'moderator') {
+      const permDenied = await requireModeratorPermission(auth, 'students', 'canView');
+      if (permDenied) return permDenied;
+    }
 
     const rl = await applyRateLimit(createRateLimitId(auth.uid, 'students-list'), RateLimits.READ);
     if (!rl.allowed) {

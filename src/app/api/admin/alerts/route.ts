@@ -48,13 +48,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       console.error("[alerts-webhook] REJECTED: AM_WEBHOOK_SECRET is not configured in production. Failing closed.");
       return NextResponse.json({ error: "Webhook authentication unconfigured" }, { status: 500 });
     }
-  } else {
-    const incoming = request.headers.get("X-Alertmanager-Token") || "";
+    const authHeader = request.headers.get("authorization") || "";
+    const bearer = authHeader.startsWith("Bearer ") ? authHeader.substring(7) : "";
+    const incoming = request.headers.get("X-Alertmanager-Token") || bearer || "";
     const hmacKey = "alertmanager-webhook-key";
     const expectedHash = crypto.createHmac("sha256", hmacKey).update(configuredSecret).digest();
     const actualHash = crypto.createHmac("sha256", hmacKey).update(incoming).digest();
     if (!crypto.timingSafeEqual(expectedHash, actualHash)) {
-      console.warn("[alerts-webhook] Rejected: missing or invalid X-Alertmanager-Token");
+      console.warn("[alerts-webhook] Rejected: missing or invalid webhook authentication token");
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
   }

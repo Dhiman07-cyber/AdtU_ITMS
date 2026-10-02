@@ -24,7 +24,7 @@ export const GET = withSecurity(
         });
     },
     {
-        requiredRoles: ['admin', 'moderator'],
+        requiredRoles: ['admin'],
         schema: BusFeeQuerySchema,
         rateLimit: RateLimits.READ
     }
@@ -69,7 +69,7 @@ export const POST = withSecurity(
         });
     },
     {
-        requiredRoles: ['admin', 'moderator'],
+        requiredRoles: ['admin'],
         schema: BusFeeUpdateSchema,
         rateLimit: RateLimits.CREATE,
         allowBodyToken: true
