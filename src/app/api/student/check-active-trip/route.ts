@@ -34,9 +34,10 @@ export const POST = withSecurity(
 
       const supabase = getSupabaseServer();
 
+      const now = new Date().toISOString();
       // Parallelize Supabase active trip check and bus metadata fetch
       const [tripRes, busRes] = await Promise.all([
-        supabase.from('active_trips').select('trip_id, bus_id, driver_id, route_id, shift, status, start_time, end_time, last_heartbeat').eq('bus_id', busId).eq('status', 'active').maybeSingle(),
+        supabase.from('active_trips').select('trip_id, bus_id, driver_id, route_id, shift, status, start_time, end_time, last_heartbeat').eq('bus_id', busId).eq('status', 'active').gt('expires_at', now).maybeSingle(),
         supabase.from('buses').select('status').eq('id', busId).maybeSingle(),
       ]);
 

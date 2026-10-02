@@ -1,18 +1,20 @@
 import { verifyCronAuth } from '@/lib/security/cron-auth';
 import { upsertMarker } from '@/domains/admin';
-import { createAuditEvent,SYSTEM_ACTOR,type AuditEventInsert } from '@/domains/audit';
-import { getStudentById,getStudentsByStatuses,updateStudent } from '@/domains/identity';
+import { createAuditEvent, SYSTEM_ACTOR, type AuditEventInsert } from '@/domains/audit';
+import { getStudentById, getStudentsByStatusesPaged, updateStudent } from '@/domains/identity';
 import * as Notification from '@/domains/notification';
 import { deleteUserAndData } from '@/lib/cleanup-helpers';
-import { isSeatReleaseAtSoftBlockEnabled,wasSeatReleased } from '@/lib/config/capacity-flags';
+import { isSeatReleaseAtSoftBlockEnabled, wasSeatReleased } from '@/lib/config/capacity-flags';
 import { getDeadlineConfig } from '@/lib/deadline-config-service';
 import { adminReconcileBusLoads } from '@/lib/services/admin-reconcile-bus-loads';
 import { getCurrentSessionStartYear } from '@/lib/services/session-activation.service';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import { computeBlockDatesFromValidUntil } from '@/lib/utils/deadline-computation';
-import { shouldBlockAccessFromStoredDates,shouldHardDeleteFromStoredDates } from '@/lib/utils/renewal-utils';
+import { shouldBlockAccessFromStoredDates, shouldHardDeleteFromStoredDates } from '@/lib/utils/renewal-utils';
 import { v2 as cloudinary } from 'cloudinary';
-import { NextRequest,NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+
+export const maxDuration = 300;
 
 // Configure Cloudinary
 if (process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME) {
@@ -32,12 +34,18 @@ if (process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME) {
  * 
  * - Soft Blocks students who have passed the soft block date.
  * - Hard Deletes students who have passed the hard delete date.
+ * - Keyset paginated with a 240s time budget to safely handle populations up to 10,000+ (CRON-04).
  */
 export async function GET(request: NextRequest) {
     try {
         if (!verifyCronAuth(request)) {
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
         }
+
+        const cronStartTime = Date.now();
+        // Time budget: 240 seconds (leaving 60s of maxDuration=300 for upcoming apps pass, reconciliation, audit log)
+        const MAX_STUDENTS_TIME_MS = 240_000;
+        const PAGE_SIZE = 100;
 
         // Load deadline config dynamically from Firestore
         const config = await getDeadlineConfig() as any;
@@ -50,20 +58,50 @@ export async function GET(request: NextRequest) {
         console.log(`   Config: SoftBlock=${softBlockStr}, HardDelete=${hardDeleteStr}`);
         console.log(`   Using PRE-STORED softBlock/hardBlock dates from student documents`);
 
-        // 2. Query target students from PostgreSQL (canonical source) via Domain
+        // 2. Query target students from PostgreSQL (canonical source) via Domain using Keyset Pagination (CRON-04)
         const results = {
             totalChecked: 0,
             softBlocked: 0,
             hardDeleted: 0,
             blockDatesAdded: 0,
+            pagesProcessed: 0,
+            truncated: false,
+            lastProcessedUid: null as string | null,
             errors: [] as string[]
         };
 
-        const students = await getStudentsByStatuses(['active', 'soft_blocked', 'pending_deletion']);
-        results.totalChecked = students.length;
+        let lastUid: string | undefined = undefined;
+        let hasMore = true;
 
-        for (const studentData of students) {
-            const uid = studentData.uid;
+        while (hasMore) {
+            // Guard against approaching function timeout
+            if (Date.now() - cronStartTime > MAX_STUDENTS_TIME_MS) {
+                console.warn(`⏳ Time budget reached (${Date.now() - cronStartTime}ms). Halting student pagination loop.`);
+                results.truncated = true;
+                break;
+            }
+
+            const page = await getStudentsByStatusesPaged(
+                ['active', 'soft_blocked', 'pending_deletion'],
+                { limit: PAGE_SIZE, lastUid }
+            );
+
+            if (!page.students || page.students.length === 0) {
+                break;
+            }
+
+            results.pagesProcessed++;
+
+            for (const studentData of page.students) {
+                results.totalChecked++;
+                const uid = studentData.uid;
+                results.lastProcessedUid = uid;
+
+                if (Date.now() - cronStartTime > MAX_STUDENTS_TIME_MS) {
+                    console.warn(`⏳ Time budget reached during student processing. Halting student loop.`);
+                    results.truncated = true;
+                    break;
+                }
 
             try {
                 // Parse validUntil
@@ -128,11 +166,32 @@ export async function GET(request: NextRequest) {
                 const needsHardDelete = shouldHardDeleteFromStoredDates(studentCheckData, null, config);
                 // --- HARD DELETE EXECUTION ---
                 if (needsHardDelete) {
+                    // CRON-02 Re-read fresh student state from PG to prevent destroying a newly renewed or reactivated student
+                    const freshStudent = await getStudentById(uid);
+                    if (!freshStudent) {
+                        console.warn(`🛡️ Student ${uid} no longer exists in database. Skipping hard delete.`);
+                        continue;
+                    }
+                    const freshValidUntil = freshStudent.validUntil ? (typeof freshStudent.validUntil === 'string' ? freshStudent.validUntil : new Date(freshStudent.validUntil).toISOString()) : null;
+                    const freshCheckData = {
+                        softBlock: freshStudent.softBlock || softBlockStr,
+                        hardBlock: freshStudent.hardBlock || hardBlockStr,
+                        validUntil: freshValidUntil,
+                        lastRenewalDate: freshStudent.lastRenewalDate ? String(freshStudent.lastRenewalDate) : lastRenewalDateStr,
+                        status: freshStudent.status || studentData.status,
+                        sessionEndYear: freshStudent.sessionEndYear || studentData.sessionEndYear
+                    };
+                    const freshNeedsHardDelete = shouldHardDeleteFromStoredDates(freshCheckData, null, config);
+                    if (!freshNeedsHardDelete || freshStudent.status === 'active') {
+                        console.warn(`🛡️ SAFETY ABORT (CRON-02): Student ${uid} state changed to ${freshStudent.status} or renewed (${freshValidUntil}). Skipping deletion.`);
+                        continue;
+                    }
+
                     // SAFETY CHECK: Log before deletion
                     console.log(`🗑️ HARD DELETE triggered for ${uid.substring(0,8)}...`);
                     console.log(`   hardBlock date: ${hardBlockStr}`);
-                    console.log(`   validUntil: ${validUntilStr}`);
-                    console.log(`   status: ${studentData.status}`);
+                    console.log(`   validUntil: ${freshValidUntil}`);
+                    console.log(`   status: ${freshStudent.status}`);
                     
                     // SAFETY CHECK: Verify student is actually expired (Fail-closed on missing or malformed timestamp)
                     const today = new Date();
@@ -297,10 +356,18 @@ export async function GET(request: NextRequest) {
                     }
                 }
 
-            } catch (err: any) {
-                console.error(`❌ Error processing student ${uid}:`, err);
-                results.errors.push(`Error processing student ${uid}`);
+                } catch (err: any) {
+                    console.error(`❌ Error processing student ${uid}:`, err);
+                    results.errors.push(`Error processing student ${uid}`);
+                }
             }
+
+            if (results.truncated) {
+                break;
+            }
+
+            lastUid = page.nextLastUid;
+            hasMore = page.hasMore && Boolean(lastUid);
         }
 
         // ── UPCOMING (future-session) APPLICATIONS PASS ──────────────────────

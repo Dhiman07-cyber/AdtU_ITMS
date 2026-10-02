@@ -97,6 +97,7 @@ export async function POST(request: Request) {
       .eq('driver_id', driverUid)
       .eq('bus_id', flag.bus_id)
       .eq('status', 'active')
+      .gt('expires_at', new Date().toISOString())
       .maybeSingle();
 
     const driverIsAuthorized = activeTrip !== null;

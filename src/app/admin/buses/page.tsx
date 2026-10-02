@@ -228,24 +228,25 @@ export default function BusesPage() {
       const currentDate = new Date();
       const dateStr = currentDate.toISOString().split('T')[0].replace(/-/g, '-');
 
-      // Fetch all buses directly from Supabase PostgreSQL table 'buses'
-      const { data: rawBuses, error: busesError } = await supabase
-        .from('buses')
-        .select('id, bus_number, model, year, capacity, route_id, route_name, status, current_members, morning_load, evening_load')
-        .order('bus_number', { ascending: true });
+      const token = await currentUser?.getIdToken();
+      const authHeaders = token ? { Authorization: `Bearer ${token}` } : {};
 
-      if (busesError) throw busesError;
+      const [busesRes, routesRes, driversRes] = await Promise.all([
+        fetch('/api/buses', { headers: authHeaders }),
+        fetch('/api/routes', { headers: authHeaders }),
+        fetch('/api/drivers', { headers: authHeaders }),
+      ]);
 
-      // Fetch routes and drivers for name lookup
-      const { data: rawRoutes } = await supabase.from('routes').select('id, route_name, route_number, stops');
-      const { data: rawDrivers } = await supabase.from('driver_profiles').select('uid, full_name, name');
+      const rawBuses = busesRes.ok ? (await busesRes.json()).buses || [] : [];
+      const rawRoutes = routesRes.ok ? await routesRes.json() : [];
+      const rawDrivers = driversRes.ok ? (await driversRes.json()).drivers || [] : [];
 
-      const routeMap = new Map((rawRoutes || []).map((r: any) => [r.id, r]));
-      const driverMap = new Map((rawDrivers || []).map((d: any) => [d.uid, d.full_name || d.name]));
+      const routeMap = new Map<string, any>((rawRoutes || []).map((r: any) => [r.id || r.routeId, r]));
+      const driverMap = new Map<string, any>((rawDrivers || []).map((d: any) => [d.uid || d.id, d.full_name || d.name]));
 
       const busesData = (rawBuses || []).map((bus: any, index: number) => {
-        const routeObj = routeMap.get(bus.route_id);
-        const routeName = routeObj?.route_name || routeObj?.route_number || 'Not Assigned';
+        const routeObj: any = routeMap.get(bus.route_id || bus.routeId);
+        const routeName = routeObj?.route_name || routeObj?.routeName || routeObj?.route_number || routeObj?.routeNumber || 'Not Assigned';
 
         let stops = 'N/A';
         if (routeObj && routeObj.stops) {

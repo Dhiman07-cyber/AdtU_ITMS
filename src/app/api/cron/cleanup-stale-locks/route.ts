@@ -2,7 +2,14 @@
  * Stale Lock Cleanup Worker
  *
  * Cron job endpoint that cleans up stale locks automatically.
- * Should be called every minute via Vercel Cron.
+ * Cron job endpoint that cleans up stale locks automatically.
+ *
+ * CURRENT SCHEDULE (vercel.json): `0 4 * * *` — once daily at 04:00 UTC.
+ * DESIGN INTENT: This should run every minute (`* * * * *`) to promptly release
+ * stale active_trips locks. At daily frequency, stale trips (e.g., from crashed
+ * devices) may persist up to 24 hours, causing GPS/tracking to appear active for
+ * terminated trips. Update vercel.json to fix this before production.
+ * Ref: FIX-12 (A-16).
  *
  * D9: Fully migrated to PostgreSQL. No Firestore usage.
  * The cleanup_stale_locks RPC handles all lock cleanup in PostgreSQL.

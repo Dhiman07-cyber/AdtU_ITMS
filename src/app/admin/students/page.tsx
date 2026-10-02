@@ -434,21 +434,23 @@ export default function AdminStudentsHub() {
     try {
       const dateStr = new Date().toISOString().split("T")[0];
 
-      const { data: rawData, error: studentsError } = await supabase
-        .from("student_profiles")
-        .select(
-          "uid, full_name, email, phone, faculty, enrollment_id, bus_id, shift, session_start_year, session_end_year, session_duration, status"
-        )
-        .order("full_name", { ascending: true });
+      const token = await currentUser?.getIdToken();
+      const authHeaders = token ? { Authorization: `Bearer ${token}` } : {};
 
-      if (studentsError) throw studentsError;
+      const [studentsRes, busesRes] = await Promise.all([
+        fetch("/api/students?limit=5000", { headers: authHeaders }),
+        fetch("/api/buses", { headers: authHeaders }),
+      ]);
 
-      const { data: rawBuses } = await supabase
-        .from("buses")
-        .select("id, bus_number, registration_number");
+      if (!studentsRes.ok) throw new Error("Failed to fetch students for export");
+      const studentsJson = await studentsRes.json();
+      const rawData = studentsJson.students || [];
+
+      const busesJson = busesRes.ok ? await busesRes.json() : { buses: [] };
+      const rawBuses = busesJson.buses || [];
 
       const busMap = new Map(
-        (rawBuses || []).map((b: any) => [b.id, b.bus_number || b.registration_number])
+        (rawBuses || []).map((b: any) => [b.id || b.busId, b.bus_number || b.busNumber || b.registration_number])
       );
 
       const exportData = (rawData || []).map((student: any, index: number) => {

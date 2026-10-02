@@ -23,7 +23,9 @@ export async function GET(request: Request) {
     const supabase = getSupabaseServer();
 
     // Call database RPC cleanup function (uses native SQL end_time < NOW() - INTERVAL '1 year')
-    const { data: deletedCount, error } = await supabase.rpc('cleanup_old_trip_history');
+    const { data: deletedCount, error } = await supabase.rpc('cleanup_old_trip_history', {
+      retention_days: 365,
+    });
 
     if (error) {
       console.error('Error in monthly driver_trip_history cleanup:', error);

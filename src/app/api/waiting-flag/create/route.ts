@@ -51,6 +51,7 @@ export const POST = withSecurity(
           .select('trip_id')
           .eq('bus_id', busId)
           .eq('status', 'active')
+          .gt('expires_at', new Date().toISOString())
           .maybeSingle(),
         supabase
           .from('waiting_flags')

@@ -23,7 +23,7 @@ export const POST = withSecurity(
         // 1. Fetch waiting flag and driver active trip in parallel
         const [flagRes, tripRes] = await Promise.all([
             supabase.from('waiting_flags').select('id, bus_id, status, student_uid').eq('id', flagId).single(),
-            supabase.from('active_trips').select('trip_id, bus_id').eq('driver_id', driverUid).eq('status', 'active').maybeSingle(),
+            supabase.from('active_trips').select('trip_id, bus_id').eq('driver_id', driverUid).eq('status', 'active').gt('expires_at', new Date().toISOString()).maybeSingle(),
         ]);
 
         const flagData = flagRes.data;

@@ -63,6 +63,7 @@ import { MobileActionFAB } from '@/components/layout/MobileActionFAB';
 import { useRouter } from 'next/navigation';
 import { useMemo,useState } from "react";
 // Migrated: Server-side API → PostgreSQL (no Firestore client reads)
+import { useAuth } from '@/contexts/auth-context';
 import { useTheme } from '@/components/theme-provider';
 import { invalidateCollectionCache,useApiCollection } from '@/hooks/useApiCollection';
 import { useEventDrivenRefresh } from '@/hooks/useEventDrivenRefresh';
@@ -193,6 +194,7 @@ export default function RoutesPage() {
   const router = useRouter();
   const { addToast } = useToast();
   const { theme } = useTheme();
+  const { currentUser } = useAuth();
 
   // Server-side API reads from PostgreSQL — no Firestore client reads
   const { data: routesData, loading: loadingRoutes, refresh: refreshRoutesData } = useApiCollection('routes', {
@@ -314,18 +316,16 @@ export default function RoutesPage() {
       const currentDate = new Date();
       const dateStr = currentDate.toISOString().split('T')[0].replace(/-/g, '-');
 
-      // Fetch all routes directly from Supabase PostgreSQL table 'routes'
-      const { data: rawRoutes, error: routesError } = await supabase
-        .from('routes')
-        .select('id, route_name, route_number, stops, start_location, total_stops, status')
-        .order('route_name', { ascending: true });
+      const token = await currentUser?.getIdToken();
+      const authHeaders = token ? { Authorization: `Bearer ${token}` } : {};
 
-      if (routesError) throw routesError;
+      const [routesRes, busesRes] = await Promise.all([
+        fetch('/api/routes', { headers: authHeaders }),
+        fetch('/api/buses', { headers: authHeaders }),
+      ]);
 
-      // Fetch buses to resolve assigned buses per route
-      const { data: rawBuses } = await supabase
-        .from('buses')
-        .select('id, bus_number, route_id');
+      const rawRoutes = routesRes.ok ? await routesRes.json() : [];
+      const rawBuses = busesRes.ok ? (await busesRes.json()).buses || [] : [];
 
       const busRouteMap = new Map<string, string[]>();
       (rawBuses || []).forEach((b: any) => {

@@ -108,7 +108,7 @@ export const GET = withSecurity(
             busId ? getBusById(busId) : Promise.resolve(null),
             routeId ? routeService.getById(routeId) : Promise.resolve(null),
             busId ? getDriversByBusId(busId) : Promise.resolve([]),
-            busId ? supabase.from('active_trips').select('trip_id, status, start_time, last_heartbeat, shift').eq('bus_id', busId).eq('status', 'active').maybeSingle() : Promise.resolve(null),
+            busId ? supabase.from('active_trips').select('trip_id, status, start_time, last_heartbeat, shift').eq('bus_id', busId).eq('status', 'active').gt('expires_at', new Date().toISOString()).maybeSingle() : Promise.resolve(null),
             supabase.from('waiting_flags').select('id, student_uid, bus_id, status, trip_id, stop_name, created_at').eq('student_uid', uid).in('status', ['raised', 'acknowledged', 'waiting']).limit(1)
         ]);
 
