@@ -31,7 +31,11 @@ export type PaymentFrontendStatus =
  * This is what actually gets persisted — completely separate from
  * PaymentFrontendStatus.
  */
-export type PaymentDatabaseStatus = 'Pending' | 'Completed' | 'Failed';
+// FIX-07 (A-14): Added 'Rejected' — payments-supabase.ts writes 'Rejected' when
+// an application is rejected (rejectApplicationPayment), but the type previously
+// only included 'Failed'. This mismatch broke type safety and any status-equality
+// check that expected 'Failed' to match a rejected payment record.
+export type PaymentDatabaseStatus = 'Pending' | 'Completed' | 'Failed' | 'Rejected';
 
 /**
  * Canonical session/localStorage status.

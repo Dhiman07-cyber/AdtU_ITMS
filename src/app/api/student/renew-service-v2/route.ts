@@ -91,10 +91,35 @@ export const POST = withSecurity<RenewServiceBody>(
             paidAt: paidAt || '',
             paymentMode: 'offline',
             phoneNumber: (student as any).phone || '',
+            // FIX-10 (APP-01): Pass the correct session_start_year for the renewal.
+            //
+            // The unique index is: (applicant_uid, session_start_year) WHERE state NOT IN
+            // ('rejected', 'cancelled', 'expired'). Without a sessionStartYear, submitFinal
+            // defaults to 0 — every renewal from the same student collides on (uid, 0) the
+            // moment a previous renewal reaches 'approved' state.
+            //
+            // WHY sessionEndYear, not sessionStartYear:
+            //   A renewal extends service into the NEXT academic period. The student's current
+            //   session ends at sessionEndYear (e.g. 2025). The renewal starts from 2025 and
+            //   covers durationYears (e.g. 1 year → ends 2026). Subsequent renewals would
+            //   start from 2026, 2027, etc. Each is a distinct (uid, year) pair — no collision.
+            //
+            //   Using sessionStartYear (e.g. 2024) would collide with the still-active fresh
+            //   application that has (uid, 2024) in the approved state.
+            busId: student.busId || '',
+            routeId: student.routeId || '',
+            stop_name: student.stop_name || '',
+            shift: student.shift || 'Morning',
+            sessionStartYear: (student as any).sessionEndYear
+              || ((student as any).sessionStartYear ? (student as any).sessionStartYear + durationYears : new Date().getFullYear()),
           },
           {
             applicationId,
             applicationType: 'renewal',
+            busId: student.busId || '',
+            routeId: student.routeId || '',
+            stop_name: student.stop_name || '',
+            shift: student.shift || 'Morning',
           }
         );
       } catch (err: any) {

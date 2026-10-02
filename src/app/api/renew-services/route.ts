@@ -68,6 +68,14 @@ export async function POST(request: NextRequest) {
     // Fetch deadline configuration
     const config = await getDeadlineConfig();
 
+    const contentLength = Number(request.headers.get('content-length') || 0);
+    if (contentLength > 262144) {
+      return NextResponse.json(
+        { success: false, error: 'Payload too large (max 256KB)' },
+        { status: 413 }
+      );
+    }
+
     const body = await request.json();
     const { renewals, paymentMode, transactionId } = body;
     const actorUid = decodedToken.uid; // Always use authenticated token UID instead of untrusted body parameter
@@ -101,9 +109,18 @@ export async function POST(request: NextRequest) {
     }
 
     if (transactionId && paymentMode === 'manual') {
+      // PARTIAL FIX (APP-02): The original code queried `payment_ledger`, a table that
+      // does not exist in the schema — causing a silent DB error on every call.
+      // Changed to `payments` (the actual payments table, which does exist), so the
+      // query runs without error. However, the bulk renewal flow does not yet INSERT
+      // a payments record with payment_id='manual_${transactionId}', so this guard
+      // is effectively a no-op for now — it will always find no match.
+      // The per-student duplicate guard (line ~160) via pendingRenewalApp is the
+      // operational safety net. A full fix requires inserting via processed_payments_acquire
+      // RPC after successful batch completion.
       const { data: existingTx } = await supabase
-        .from('payment_ledger')
-        .select('payment_id')
+        .from('payments')
+        .select('id')
         .eq('payment_id', `manual_${transactionId}`)
         .maybeSingle();
 

@@ -19,7 +19,7 @@ import { getById as getApplicationById } from '@/domains/application';
 import { createAuditEvent } from '@/domains/audit';
 import { getUsersByRole } from '@/domains/identity';
 import * as Notification from '@/domains/notification';
-import { applyPaymentValidity,getByEnrollmentId as getStudentByEnrollmentId,getByUid as getStudentByUid } from '@/domains/student';
+import { applyPaymentValidity, getByEnrollmentId as getStudentByEnrollmentId, getByUid as getStudentByUid, SeatReclaimRequiredError } from '@/domains/student';
 import { getDeadlineConfig } from '@/lib/deadline-config-service';
 import { paymentsSupabaseService,type PaymentRecord } from '@/lib/services/payments-supabase';
 import { ensureReceiptSignature } from '@/lib/services/receipt.service';
@@ -179,7 +179,7 @@ export async function processCapturedPayment(paymentDetails: {
                     const deadlineConfig = await getDeadlineConfig();
                     const newValidUntil = calculateValidUntilDate(baseYear, durationYears, deadlineConfig);
                     const { submitFinal } = await import('@/domains/application');
-                    await submitFinal(
+                    const healSubmitRes = await submitFinal(
                         studentUid,
                         studentEmail || '',
                         {
@@ -196,12 +196,27 @@ export async function processCapturedPayment(paymentDetails: {
                             paymentStatus: 'paid',
                             requestedValidUntil: newValidUntil.toISOString(),
                             phoneNumber: studentPhone,
+                            shift: studentData?.shift || 'Morning',
+                            busId: studentData?.busId || '',
+                            routeId: studentData?.routeId || '',
+                            stop_name: studentData?.stop_name || studentData?.stopName || '',
+                            sessionStartYear: studentData?.sessionEndYear || baseYear,
+                            sessionEndYear: (studentData?.sessionEndYear || baseYear) + durationYears,
                         },
                         {
                             applicationId,
                             applicationType: 'renewal',
+                            shift: studentData?.shift || 'Morning',
+                            busId: studentData?.busId || '',
+                            routeId: studentData?.routeId || '',
+                            stop_name: studentData?.stop_name || studentData?.stopName || '',
+                            sessionStartYear: studentData?.sessionEndYear || baseYear,
+                            sessionEndYear: (studentData?.sessionEndYear || baseYear) + durationYears,
                         }
                     );
+                    if (healSubmitRes && !healSubmitRes.success) {
+                        console.warn(`[PAYMENT_TRACE] submitFinal self-heal returned failure for renewal ${applicationId}:`, healSubmitRes.error);
+                    }
                     return { status: 'success' };
                 } catch (healError: any) {
                     console.error(`[PAYMENT_TRACE] Self-heal failed for payment ${paymentId}:`, healError);
@@ -375,12 +390,12 @@ export async function processCapturedPayment(paymentDetails: {
             const existingRequest = await getApplicationById(applicationId);
             if (!existingRequest) {
                 const { submitFinal } = await import('@/domains/application');
-                await submitFinal(
+                const renewalSubmitRes = await submitFinal(
                     studentUid,
                     studentEmail || '',
                     {
                         studentId: studentUid,
-                        enrollmentId: enrollmentId || transactionRecord?.studentId || '',
+                        enrollmentId: enrollmentId || transactionRecord?.studentId || studentData?.enrollmentId || '',
                         studentName: actualStudentName,
                         studentEmail,
                         studentPhone,
@@ -392,12 +407,27 @@ export async function processCapturedPayment(paymentDetails: {
                         paymentStatus: 'paid',
                         requestedValidUntil: newValidUntil.toISOString(),
                         phoneNumber: studentPhone,
+                        shift: studentData?.shift || 'Morning',
+                        busId: studentData?.busId || '',
+                        routeId: studentData?.routeId || '',
+                        stop_name: studentData?.stop_name || studentData?.stopName || '',
+                        sessionStartYear: studentData?.sessionEndYear || baseYear,
+                        sessionEndYear: (studentData?.sessionEndYear || baseYear) + durationYears,
                     },
                     {
                         applicationId,
                         applicationType: 'renewal',
+                        shift: studentData?.shift || 'Morning',
+                        busId: studentData?.busId || '',
+                        routeId: studentData?.routeId || '',
+                        stop_name: studentData?.stop_name || studentData?.stopName || '',
+                        sessionStartYear: studentData?.sessionEndYear || baseYear,
+                        sessionEndYear: (studentData?.sessionEndYear || baseYear) + durationYears,
                     }
                 );
+                if (renewalSubmitRes && !renewalSubmitRes.success) {
+                    console.warn(`[PAYMENT_TRACE] submitFinal renewal returned failure for ${applicationId}:`, renewalSubmitRes.error);
+                }
 
                 // Send notification to staff
                 try {
@@ -611,6 +641,19 @@ export async function approveOfflinePayment(
             throw new Error('Cannot manually approve online payments');
         }
 
+        // LC-01 GUARD: Check if student seat was released during soft-block.
+        // If seat was released, offline payment approval cannot reactivate the student without
+        // reclaiming a bus seat — must go through Renewal Approval (approve_renewal_with_seat).
+        if (payment.student_uid) {
+            const student = await getStudentByUid(payment.student_uid);
+            if (student && (student as any).seatReleasedAt) {
+                return {
+                    success: false,
+                    error: `Student ${payment.student_uid} seat was released during soft-block. Payment cannot be approved directly without seat allocation. Please process via Renewal Approval (approve_renewal_with_seat).`
+                };
+            }
+        }
+
         // ATOMIC: Update payment status in Supabase (WHERE status='Pending')
         const updateSuccess = await paymentsSupabaseService.updatePaymentStatus(
             request.paymentId,
@@ -655,6 +698,9 @@ export async function approveOfflinePayment(
                     break;
                 } catch (studentErr: any) {
                     console.error(`❌ Attempt ${attempt}/3: Failed to update student ${completedPayment.student_uid.substring(0,8)}... validity:`, studentErr.message);
+                    if (studentErr instanceof SeatReclaimRequiredError || studentErr?.name === 'SeatReclaimRequiredError') {
+                        break;
+                    }
                     if (attempt < 3) {
                         await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
                     }
