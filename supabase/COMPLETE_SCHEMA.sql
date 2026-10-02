@@ -35,7 +35,7 @@ BEGIN
   NEW.updated_at = NOW();
   RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SET search_path = public;
 
 CREATE OR REPLACE FUNCTION trg_set_updated_at()
 RETURNS TRIGGER AS $$
@@ -43,7 +43,7 @@ BEGIN
     NEW.updated_at = NOW();
     RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SET search_path = public;
 
 CREATE OR REPLACE FUNCTION update_payments_updated_at()
 RETURNS TRIGGER AS $$
@@ -51,7 +51,7 @@ BEGIN
   NEW.updated_at = NOW();
   RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SET search_path = public;
 
 CREATE OR REPLACE FUNCTION update_reassignment_logs_updated_at()
 RETURNS TRIGGER AS $$
@@ -59,7 +59,7 @@ BEGIN
   NEW.updated_at = NOW();
   RETURN NEW;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SET search_path = public;
 
 -- Authorization helper used inside RLS policies
 CREATE OR REPLACE FUNCTION public.user_has_role(p_uid TEXT, p_role TEXT)
@@ -176,7 +176,7 @@ CREATE TABLE IF NOT EXISTS buses (
     capacity        INTEGER NOT NULL CHECK (capacity > 0),
     morning_load    INTEGER NOT NULL DEFAULT 0 CHECK (morning_load >= 0),
     evening_load    INTEGER NOT NULL DEFAULT 0 CHECK (evening_load >= 0),
-    current_members INTEGER NOT NULL DEFAULT 0,
+    current_members INTEGER NOT NULL DEFAULT 0 CHECK (current_members >= 0),
     model           TEXT,
     year            INTEGER,
     route_id        TEXT,
@@ -419,17 +419,27 @@ CREATE TABLE IF NOT EXISTS driver_location_updates (
 
 -- ── 3.7 SRE, Security & Notification Domain ───────────────────────────────────
 
-CREATE TABLE IF NOT EXISTS audit_events (
-    id          TEXT PRIMARY KEY,
-    event_type  TEXT NOT NULL,
+CREATE TABLE IF NOT EXISTS public.audit_events (
+    id          TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+    action      TEXT NOT NULL,
+    category    TEXT NOT NULL,
+    severity    TEXT NOT NULL DEFAULT 'low',
+    summary     TEXT,
     actor_id    TEXT NOT NULL,
-    actor_email TEXT,
-    actor_role  TEXT,
-    ip_address  TEXT,
-    user_agent  TEXT,
-    details     JSONB NOT NULL DEFAULT '{}',
+    actor_name  TEXT,
+    actor_role  TEXT NOT NULL DEFAULT 'system',
+    target_type TEXT,
+    target_id   TEXT,
+    target_name TEXT,
+    metadata    JSONB NOT NULL DEFAULT '{}',
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE INDEX IF NOT EXISTS idx_audit_events_created_at ON public.audit_events (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_events_category ON public.audit_events (category, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_events_actor ON public.audit_events (actor_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_events_target ON public.audit_events (target_type, target_id);
+CREATE INDEX IF NOT EXISTS idx_audit_events_metadata_opid ON public.audit_events ((metadata->>'operationId')) WHERE (metadata->>'operationId') IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS public.device_sessions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -498,7 +508,7 @@ CREATE TABLE IF NOT EXISTS notifications (
 -- =============================================================================
 -- 4. VIEWS
 -- =============================================================================
-CREATE OR REPLACE VIEW public.bus_stop_counts_view AS
+CREATE OR REPLACE VIEW public.bus_stop_counts_view WITH (security_invoker = true) AS
 SELECT 
     b.id as bus_id,
     b.bus_number,
@@ -556,11 +566,15 @@ CREATE INDEX IF NOT EXISTS idx_student_profiles_route_id ON student_profiles(rou
 CREATE INDEX IF NOT EXISTS idx_student_profiles_status ON student_profiles(status);
 CREATE INDEX IF NOT EXISTS idx_student_profiles_shift ON student_profiles(shift);
 CREATE INDEX IF NOT EXISTS idx_student_profiles_enrollment_id ON student_profiles(enrollment_id);
+CREATE INDEX IF NOT EXISTS idx_student_profiles_status_uid ON student_profiles(status, uid);
+CREATE INDEX IF NOT EXISTS idx_student_profiles_uid_status ON student_profiles(uid, status);
+CREATE INDEX IF NOT EXISTS idx_student_profiles_seat_released ON student_profiles(bus_id, status) WHERE seat_released_at IS NULL;
 
 CREATE INDEX IF NOT EXISTS idx_driver_profiles_status ON driver_profiles(status);
 CREATE INDEX IF NOT EXISTS idx_driver_profiles_is_reserved ON driver_profiles(is_reserved);
 
 CREATE INDEX IF NOT EXISTS idx_applications_applicant_uid ON applications(applicant_uid);
+CREATE INDEX IF NOT EXISTS idx_applications_applicant_state ON applications(applicant_uid, state);
 CREATE INDEX IF NOT EXISTS idx_applications_state ON applications(state);
 CREATE INDEX IF NOT EXISTS idx_applications_state_type ON applications(state, application_type);
 CREATE INDEX IF NOT EXISTS idx_applications_bus_id ON applications(bus_id);
@@ -573,6 +587,7 @@ CREATE INDEX IF NOT EXISTS idx_processed_payments_expires_at ON processed_paymen
 CREATE INDEX IF NOT EXISTS idx_processed_payments_order_id ON processed_payments(order_id);
 
 CREATE INDEX IF NOT EXISTS idx_payments_student_uid ON payments(student_uid);
+CREATE INDEX IF NOT EXISTS idx_payments_student_status ON payments(student_uid, status);
 CREATE INDEX IF NOT EXISTS idx_payments_payment_id ON payments(payment_id);
 CREATE INDEX IF NOT EXISTS idx_payments_order_id ON payments(order_id);
 CREATE INDEX IF NOT EXISTS idx_payments_razorpay_payment_id ON payments(razorpay_payment_id);
@@ -741,7 +756,145 @@ BEGIN
 END;
 $$;
 
+-- ── identity_activate_student_with_capacity ──────────────────────────────────
+-- Atomically:
+--   1. Acquires a FOR UPDATE row lock on the bus.
+--   2. Checks that the shift load has not reached capacity (fail-fast, same
+--      guard as bus_increment_capacity).
+--   3. Increments morning_load or evening_load (+ current_members).
+--   4. Upserts the user row and student_profiles row via identity_activate_student.
+--
+-- All four operations happen inside one plpgsql function call, which Supabase
+-- executes inside a single implicit transaction.  A process crash between steps
+-- 3 and 4 cannot produce a phantom seat increment without a matching student
+-- row, because Postgres rolls back the entire function on any unhandled
+-- exception.
+--
+-- Previously the approval path called bus_increment_capacity → identity_activate_student
+-- as two separate RPC calls from application-layer code.  A crash between the
+-- two would permanently increment bus capacity with no enrolled student.
+--
+-- Parameters mirror identity_activate_student, with p_bus_id and p_shift added
+-- to identify which bus counter to increment.  p_enforce_capacity controls
+-- whether the capacity guard is applied (default: true; admin over-fill: false).
+--
+CREATE OR REPLACE FUNCTION public.identity_activate_student_with_capacity(
+    p_bus_id   TEXT,
+    p_shift    TEXT,
+    p_uid      TEXT,
+    p_email    TEXT,
+    p_full_name TEXT,
+    p_student_data JSONB DEFAULT '{}'::jsonb,
+    p_enforce_capacity BOOLEAN DEFAULT true
+)
+RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+    v_normalized    TEXT := LOWER(TRIM(COALESCE(p_shift, 'Morning')));
+    v_bus           RECORD;
+    v_existing_student RECORD;
+    v_new_morning   INTEGER;
+    v_new_evening   INTEGER;
+    v_target_load   INTEGER;
+    v_capacity      INTEGER;
+    v_activate_result JSONB;
+BEGIN
+    -- ── 1. Validate shift ───────────────────────────────────────────────────
+    IF v_normalized NOT IN ('morning', 'evening') THEN
+        RETURN jsonb_build_object(
+            'success', false,
+            'error', 'Invalid shift: ' || COALESCE(p_shift, 'NULL') || ' (must be Morning or Evening)'
+        );
+    END IF;
+
+    -- ── 2. Lock student row FOR UPDATE first to establish consistent global lock hierarchy: STUDENT -> BUS ──
+    -- This guarantees no 40P01 deadlocks against approve_renewal_with_seat, delete_student_cascade_v1,
+    -- or reassign_students_atomically, all of which acquire locks in STUDENT -> BUS order.
+    SELECT bus_id, shift, status, seat_released_at
+    INTO v_existing_student
+    FROM student_profiles
+    WHERE uid = p_uid
+    FOR UPDATE;
+
+    -- ── 3. Lock bus row + capacity check (FOR UPDATE prevents concurrent race) ──
+    SELECT id, capacity, morning_load, evening_load
+    INTO v_bus
+    FROM buses
+    WHERE id = p_bus_id OR bus_number = p_bus_id
+    FOR UPDATE
+    LIMIT 1;
+
+    IF NOT FOUND THEN
+        RETURN jsonb_build_object('success', false, 'error', 'Bus ' || p_bus_id || ' not found');
+    END IF;
+
+    v_target_load := CASE WHEN v_normalized = 'morning' THEN v_bus.morning_load ELSE v_bus.evening_load END;
+    v_capacity    := COALESCE(v_bus.capacity, 0);
+
+    -- ── 4. Check if student already holds an active seat on this bus for this shift (idempotent retry guard) ──
+    IF v_existing_student.status = 'active'
+       AND v_existing_student.seat_released_at IS NULL
+       AND (v_existing_student.bus_id = v_bus.id OR v_existing_student.bus_id = p_bus_id)
+       AND LOWER(TRIM(COALESCE(v_existing_student.shift, 'Morning'))) = v_normalized THEN
+        -- Student already holds this seat; do not double-increment bus load
+        v_new_morning := v_bus.morning_load;
+        v_new_evening := v_bus.evening_load;
+    ELSE
+        IF p_enforce_capacity AND v_target_load >= v_capacity THEN
+            RETURN jsonb_build_object(
+                'success', false,
+                'error', 'Bus ' || p_bus_id || ' is at full capacity for ' || v_normalized
+                         || ' shift (' || v_target_load || '/' || v_capacity || ')'
+            );
+        END IF;
+
+        -- ── 3. Increment bus load ───────────────────────────────────────────────
+        v_new_morning := v_bus.morning_load + CASE WHEN v_normalized = 'morning' THEN 1 ELSE 0 END;
+        v_new_evening := v_bus.evening_load + CASE WHEN v_normalized = 'evening' THEN 1 ELSE 0 END;
+
+        UPDATE buses
+        SET morning_load   = v_new_morning,
+            evening_load   = v_new_evening,
+            current_members = v_new_morning + v_new_evening,
+            updated_at     = NOW()
+        WHERE id = v_bus.id;
+    END IF;
+
+    -- ── 4. Activate student identity (users + student_profiles upsert) ──────
+    -- Re-use identity_activate_student to avoid duplicating the upsert logic.
+    -- Any exception here will roll back the bus increment above (same transaction).
+    SELECT public.identity_activate_student(p_uid, p_email, p_full_name, p_student_data)
+    INTO v_activate_result;
+
+    IF NOT (v_activate_result->>'success')::boolean THEN
+        -- Surface the identity-activation failure; the transaction rolls back.
+        RAISE EXCEPTION 'identity_activate_student failed: %', v_activate_result->>'error';
+    END IF;
+
+    -- Ensure seat_released_at is explicitly cleared upon capacity allocation and activation
+    UPDATE student_profiles
+    SET seat_released_at = NULL, updated_at = NOW()
+    WHERE uid = p_uid;
+
+    RETURN jsonb_build_object(
+        'success',          true,
+        'uid',              p_uid,
+        'busId',            v_bus.id,
+        'shift',            p_shift,
+        'morningLoad',      v_new_morning,
+        'eveningLoad',      v_new_evening,
+        'currentMembers',   v_new_morning + v_new_evening,
+        'already_activated', (v_activate_result->>'already_activated')::boolean
+    );
+END;
+$$;
+
+-- Grant: service role only (matches identity_activate_student pattern)
+REVOKE EXECUTE ON FUNCTION public.identity_activate_student_with_capacity(TEXT, TEXT, TEXT, TEXT, TEXT, JSONB, BOOLEAN) FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION public.identity_activate_student_with_capacity(TEXT, TEXT, TEXT, TEXT, TEXT, JSONB, BOOLEAN) FROM authenticated;
+REVOKE EXECUTE ON FUNCTION public.identity_activate_student_with_capacity(TEXT, TEXT, TEXT, TEXT, TEXT, JSONB, BOOLEAN) FROM anon;
+
 -- ── 4.2 Application RPCs ────────────────────────────────────────────────────
+
 
 CREATE OR REPLACE FUNCTION validate_application_for_approval(
     p_application_id TEXT, p_approver_uid TEXT, p_lease_minutes INTEGER DEFAULT 5
@@ -894,40 +1047,61 @@ BEGIN
 END;
 $$;
 
-CREATE OR REPLACE FUNCTION transition_application_state(
-    p_application_id TEXT, p_new_state TEXT, p_actor_uid TEXT, p_additional_data JSONB DEFAULT '{}'::jsonb
+DROP FUNCTION IF EXISTS public.transition_application_state(TEXT, TEXT, TEXT, JSONB);
+CREATE OR REPLACE FUNCTION public.transition_application_state(
+    p_application_id TEXT,
+    p_new_state      TEXT,
+    p_actor_uid      TEXT,
+    p_actor_role     TEXT DEFAULT NULL,
+    p_reason         TEXT DEFAULT NULL
 )
 RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE
     v_app RECORD;
-    v_valid_transitions JSONB := '{
-        "draft": ["awaiting_verification"],
-        "awaiting_verification": ["verified"],
-        "verified": ["submitted"],
-        "submitted": ["verified_upcoming", "rejected"],
-        "verified_upcoming": ["pending_seat_allocation", "rejected"],
-        "pending_seat_allocation": ["rejected"]
-    }'::jsonb;
     v_valid_from TEXT[];
 BEGIN
-    SELECT * INTO v_app FROM applications WHERE application_id = p_application_id;
-    IF v_app IS NULL THEN
+    SELECT state, applicant_uid, form_data INTO v_app FROM applications WHERE application_id = p_application_id FOR UPDATE;
+    IF NOT FOUND THEN
         RETURN jsonb_build_object('success', false, 'error', 'Application not found', 'status', 404);
     END IF;
-    v_valid_from := ARRAY(SELECT jsonb_array_elements_text(v_valid_transitions->v_app.state));
+
+    -- Define valid transition matrix
+    v_valid_from := CASE p_new_state
+        WHEN 'awaiting_verification' THEN ARRAY['draft']
+        WHEN 'verified'             THEN ARRAY['awaiting_verification']
+        WHEN 'submitted'            THEN ARRAY['verified']
+        WHEN 'approved'             THEN ARRAY['submitted', 'pending_seat_allocation']
+        WHEN 'rejected'             THEN ARRAY['awaiting_verification', 'verified', 'submitted', 'pending_seat_allocation']
+        WHEN 'verified_upcoming'    THEN ARRAY['verified']
+        WHEN 'pending_seat_allocation' THEN ARRAY['submitted', 'verified_upcoming']
+        WHEN 'expired'              THEN ARRAY['verified_upcoming', 'pending_seat_allocation', 'submitted']
+        ELSE ARRAY[]::TEXT[]
+    END;
+
     IF NOT (p_new_state = ANY(v_valid_from)) THEN
         RETURN jsonb_build_object('success', false, 'error', format('Invalid transition: %s to %s', v_app.state, p_new_state), 'status', 400);
     END IF;
+
+    -- IDOR prevention: submitting a verified application requires the actor to be the applicant
+    IF p_new_state = 'submitted' AND v_app.applicant_uid IS NOT NULL AND v_app.applicant_uid <> p_actor_uid THEN
+        RETURN jsonb_build_object('success', false, 'error', 'Unauthorized: applicant UID does not match actor', 'status', 403);
+    END IF;
+
     UPDATE applications SET
         state = p_new_state, updated_at = NOW(),
         state_history = COALESCE(state_history, '[]'::jsonb) || jsonb_build_object('state', p_new_state, 'timestamp', NOW()::text, 'actor', p_actor_uid),
-        verified_upcoming_at = CASE WHEN p_new_state = 'verified_upcoming' THEN NOW() ELSE verified_upcoming_at END,
-        verified_upcoming_by = CASE WHEN p_new_state = 'verified_upcoming' THEN (p_additional_data->>'verified_upcoming_by') ELSE verified_upcoming_by END,
-        verified_upcoming_by_id = CASE WHEN p_new_state = 'verified_upcoming' THEN p_actor_uid ELSE verified_upcoming_by_id END,
-        pending_seat_allocation_at = CASE WHEN p_new_state = 'pending_seat_allocation' THEN NOW() ELSE pending_seat_allocation_at END,
         submitted_at = CASE WHEN p_new_state = 'submitted' THEN NOW() ELSE submitted_at END,
-        submitted_by = CASE WHEN p_new_state = 'submitted' THEN p_actor_uid ELSE submitted_by END
+        submitted_by = CASE WHEN p_new_state = 'submitted' THEN p_actor_uid ELSE submitted_by END,
+        verified_at  = CASE WHEN p_new_state = 'verified' THEN NOW() ELSE verified_at END,
+        verified_by  = CASE WHEN p_new_state = 'verified' THEN p_actor_uid ELSE verified_by END,
+        verified_by_id = CASE WHEN p_new_state = 'verified' THEN p_actor_uid ELSE verified_by_id END,
+        approved_at  = CASE WHEN p_new_state = 'approved' THEN NOW() ELSE approved_at END,
+        approved_by  = CASE WHEN p_new_state = 'approved' THEN p_actor_uid ELSE approved_by END,
+        approved_by_id = CASE WHEN p_new_state = 'approved' THEN p_actor_uid ELSE approved_by_id END,
+        expired_at   = CASE WHEN p_new_state = 'expired' THEN NOW() ELSE expired_at END,
+        expiry_reason = CASE WHEN p_new_state = 'expired' THEN COALESCE(p_reason, 'Automated expiration') ELSE expiry_reason END
     WHERE application_id = p_application_id;
+
     RETURN jsonb_build_object('success', true, 'application_id', p_application_id, 'new_state', p_new_state);
 END;
 $$;
@@ -1346,17 +1520,17 @@ BEGIN
 END;
 $$;
 
-CREATE OR REPLACE FUNCTION cleanup_old_trip_history(retention_days INTEGER DEFAULT 90)
+CREATE OR REPLACE FUNCTION cleanup_old_trip_history(retention_days INTEGER DEFAULT 365)
 RETURNS INTEGER AS $$
 DECLARE
   deleted_count INTEGER;
 BEGIN
   DELETE FROM public.driver_trip_history
-  WHERE created_at < NOW() - (retention_days || ' days')::INTERVAL;
+  WHERE COALESCE(end_time, created_at) < NOW() - (retention_days || ' days')::INTERVAL;
   GET DIAGNOSTICS deleted_count = ROW_COUNT;
   RETURN deleted_count;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
 CREATE OR REPLACE FUNCTION cleanup_stale_device_sessions()
 RETURNS INTEGER AS $$
@@ -1370,7 +1544,7 @@ BEGIN
   GET DIAGNOSTICS deleted_count = ROW_COUNT;
   RETURN deleted_count;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
 CREATE OR REPLACE FUNCTION expire_waiting_flags()
 RETURNS VOID AS $$
@@ -1378,10 +1552,10 @@ BEGIN
   UPDATE waiting_flags
   SET status = 'expired'
   WHERE status = 'raised'
-    AND expires_at IS NOT NULL
-    AND expires_at < NOW();
+     AND expires_at IS NOT NULL
+     AND expires_at < NOW();
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
 CREATE OR REPLACE FUNCTION get_stale_locks(p_threshold_seconds INTEGER DEFAULT 300)
 RETURNS TABLE (
@@ -1403,7 +1577,7 @@ BEGIN
   WHERE t.status = 'active'
     AND t.last_heartbeat < NOW() - (p_threshold_seconds || ' seconds')::INTERVAL;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
 CREATE OR REPLACE FUNCTION get_reassignment_logs(
   p_limit INTEGER DEFAULT 50,
@@ -1461,7 +1635,7 @@ BEGIN
   LIMIT p_limit
   OFFSET p_offset;
 END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
 
 -- =============================================================================
@@ -1826,9 +2000,51 @@ DECLARE
     v_applications_deleted   INTEGER := 0;
     v_student_deleted        INTEGER := 0;
     v_user_deleted           INTEGER := 0;
+    v_student_bus_id         TEXT;
+    v_student_shift          TEXT;
+    v_student_seat_released  TIMESTAMPTZ;
+    v_student_status         TEXT;
+    v_student_valid_until    TIMESTAMPTZ;
 BEGIN
     IF p_student_uid IS NULL OR p_student_uid = '' THEN
         RETURN jsonb_build_object('success', false, 'error', 'p_student_uid is required');
+    END IF;
+
+    -- 1. Acquire row lock FOR UPDATE first to serialize against concurrent renewal transactions (CRON-02)
+    SELECT bus_id, shift, seat_released_at, status, valid_until
+    INTO v_student_bus_id, v_student_shift, v_student_seat_released, v_student_status, v_student_valid_until
+    FROM public.student_profiles 
+    WHERE uid = p_student_uid 
+    FOR UPDATE;
+
+    IF NOT FOUND THEN
+        RETURN jsonb_build_object('success', true, 'already_deleted', true);
+    END IF;
+
+    -- 2. Concurrency guard (CRON-02): Check the authoritative locked row state.
+    -- If a renewal committed immediately before or during this RPC, abort to prevent account destruction.
+    IF v_student_status = 'active' AND (v_student_valid_until IS NULL OR v_student_valid_until > NOW()) THEN
+        RETURN jsonb_build_object('success', false, 'error', 'ACTIVE_STUDENT_ABORT_DELETE');
+    END IF;
+
+    -- 3. Also check if an active renewal application exists under row lock
+    IF EXISTS (
+        SELECT 1 FROM public.applications 
+        WHERE applicant_uid = p_student_uid 
+          AND application_type IN ('renewal', 'renewal_after_soft_block')
+          AND state IN ('approved', 'submitted', 'verified')
+    ) THEN
+        RETURN jsonb_build_object('success', false, 'error', 'ACTIVE_RENEWAL_APP_ABORT_DELETE');
+    END IF;
+
+    -- 4. Decrement bus capacity atomically if student held an unreleased seat (CRON-05)
+    IF v_student_bus_id IS NOT NULL AND v_student_seat_released IS NULL THEN
+        UPDATE public.buses
+        SET morning_load   = GREATEST(0, morning_load - CASE WHEN LOWER(TRIM(COALESCE(v_student_shift, 'Morning'))) = 'morning' THEN 1 ELSE 0 END),
+            evening_load   = GREATEST(0, evening_load - CASE WHEN LOWER(TRIM(COALESCE(v_student_shift, 'Morning'))) = 'evening' THEN 1 ELSE 0 END),
+            current_members = GREATEST(0, current_members - 1),
+            updated_at     = NOW()
+        WHERE id = v_student_bus_id OR bus_number = v_student_bus_id;
     END IF;
 
     -- 1. Notifications (recipient or sender)
@@ -2147,14 +2363,15 @@ BEGIN
             route_id        = COALESCE(v_target_route_id, route_id),
             shift           = INITCAP(v_new_shift),
             stop_name       = v_stop_name,
+            seat_released_at = NULL,
             updated_at      = NOW()
         WHERE uid = v_student_id;
 
         v_processed := v_processed + 1;
     END LOOP;
 
-    -- Recalculate bus load counts for all affected buses to ensure 100% precision (single pass)
-    FOR v_to_bus_id IN SELECT DISTINCT unnest(v_affected_buses) LOOP
+    -- Recalculate bus load counts for all affected buses in deterministic ascending order (prevents multi-bus deadlocks)
+    FOR v_to_bus_id IN SELECT DISTINCT x FROM unnest(v_affected_buses) AS x ORDER BY x ASC LOOP
         UPDATE buses b SET
             (morning_load, evening_load, current_members, updated_at) = (
                 SELECT 
@@ -2163,7 +2380,9 @@ BEGIN
                     COUNT(*),
                     NOW()
                 FROM student_profiles sp
-                WHERE (sp.bus_id = b.id OR sp.bus_id = b.bus_number) AND sp.status = 'active'
+                WHERE (sp.bus_id = b.id OR sp.bus_id = b.bus_number)
+                  AND sp.seat_released_at IS NULL
+                  AND sp.status IN ('active', 'soft_blocked', 'pending_deletion')
             )
         WHERE b.id = v_to_bus_id OR b.bus_number = v_to_bus_id;
     END LOOP;
@@ -2315,6 +2534,7 @@ BEGIN
                 route_id = COALESCE(v_target_route_id, CASE WHEN v_before ? 'routeId' THEN v_before->>'routeId' WHEN v_before ? 'route_id' THEN v_before->>'route_id' ELSE route_id END),
                 shift = CASE WHEN v_before ? 'shift' THEN INITCAP(v_before->>'shift') ELSE shift END,
                 stop_name = CASE WHEN v_before ? 'stopName' THEN v_before->>'stopName' WHEN v_before ? 'stop_name' THEN v_before->>'stop_name' ELSE stop_name END,
+                seat_released_at = NULL,
                 updated_at = NOW()
             WHERE uid = v_doc_id;
             
@@ -2327,8 +2547,8 @@ BEGIN
         END IF;
     END LOOP;
 
-    -- 4. Recalculate bus load counts for all affected buses (single pass)
-    FOR v_bus_id_item IN SELECT DISTINCT unnest(v_affected_buses) LOOP
+    -- 4. Recalculate bus load counts for all affected buses in deterministic order
+    FOR v_bus_id_item IN SELECT DISTINCT x FROM unnest(v_affected_buses) AS x ORDER BY x ASC LOOP
         UPDATE buses b SET
             (morning_load, evening_load, current_members, updated_at) = (
                 SELECT 
@@ -2337,7 +2557,9 @@ BEGIN
                     COUNT(*),
                     NOW()
                 FROM student_profiles sp
-                WHERE (sp.bus_id = b.id OR sp.bus_id = b.bus_number) AND sp.status = 'active'
+                WHERE (sp.bus_id = b.id OR sp.bus_id = b.bus_number)
+                  AND sp.seat_released_at IS NULL
+                  AND sp.status IN ('active', 'soft_blocked', 'pending_deletion')
             )
         WHERE b.id = v_bus_id_item OR b.bus_number = v_bus_id_item;
     END LOOP;
@@ -2506,6 +2728,17 @@ CREATE POLICY "driver_trip_history_insert_service" ON public.driver_trip_history
 DROP POLICY IF EXISTS "driver_trip_history_delete_service" ON public.driver_trip_history;
 CREATE POLICY "driver_trip_history_delete_service" ON public.driver_trip_history FOR DELETE TO service_role USING (true);
 
+DROP POLICY IF EXISTS "driver_location_updates_service_role" ON public.driver_location_updates;
+CREATE POLICY "driver_location_updates_service_role" ON public.driver_location_updates FOR ALL TO service_role USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "driver_location_updates_insert_own" ON public.driver_location_updates;
+CREATE POLICY "driver_location_updates_insert_own" ON public.driver_location_updates FOR INSERT TO authenticated
+WITH CHECK (driver_id = auth.uid()::text);
+
+DROP POLICY IF EXISTS "driver_location_updates_select" ON public.driver_location_updates;
+CREATE POLICY "driver_location_updates_select" ON public.driver_location_updates FOR SELECT TO authenticated
+USING (driver_id = auth.uid()::text OR user_has_role(auth.uid()::text, 'admin') OR user_has_role(auth.uid()::text, 'moderator'));
+
 -- ── 8.6 SRE & Security Policies ───────────────────────────────────────────────
 
 DROP POLICY IF EXISTS "device_sessions_select_own" ON public.device_sessions;
@@ -2557,7 +2790,8 @@ DECLARE
     tbls TEXT[] := ARRAY[
         'users', 'student_profiles', 'driver_profiles', 'moderator_profiles',
         'admin_profiles', 'unauth_users', 'buses', 'temporary_assignments',
-        'routes', 'applications', 'notifications', 'audit_events', 'processed_operations'
+        'routes', 'applications', 'notifications', 'audit_events', 'processed_operations',
+        'driver_location_updates', 'processed_payments'
     ];
 BEGIN
     FOREACH tbl IN ARRAY tbls LOOP
@@ -2605,8 +2839,22 @@ BEGIN
         'activate_session_batch',
         'soft_block_student_with_seat_release',
         'identity_activate_student',
-        'mark_fcm_notification_sent',
-        'user_has_role'
+        'identity_activate_student_with_capacity',
+        'transition_application_state',
+        'cleanup_old_trip_history',
+        'cleanup_stale_device_sessions',
+        'expire_waiting_flags',
+        'cleanup_stale_locks_pg',
+        'get_stale_locks',
+        'get_reassignment_logs',
+        'processed_payments_acquire',
+        'processed_payments_release',
+        'processed_payments_cleanup',
+        'bus_check_capacity',
+        'check_bus_lock',
+        'get_student_profile_counts',
+        'get_application_counts',
+        'mark_fcm_notification_sent'
       )
   ) LOOP
     EXECUTE format('REVOKE ALL ON FUNCTION %s FROM PUBLIC', r.proc_name);
@@ -2615,11 +2863,9 @@ BEGIN
   END LOOP;
 END $$;
 
--- Read-only inspection and analytics functions: grant to authenticated & service_role
-GRANT EXECUTE ON FUNCTION public.bus_check_capacity(TEXT, TEXT) TO authenticated, service_role;
-GRANT EXECUTE ON FUNCTION public.check_bus_lock(TEXT) TO authenticated, service_role;
-GRANT EXECUTE ON FUNCTION public.get_student_profile_counts() TO authenticated, service_role;
-GRANT EXECUTE ON FUNCTION public.get_application_counts() TO authenticated, service_role;
+-- Authorization helper used inside RLS policies: grant to authenticated and service_role
+REVOKE ALL ON FUNCTION public.user_has_role(TEXT, TEXT) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.user_has_role(TEXT, TEXT) TO authenticated, service_role;
 
 -- =============================================================================
 -- 10. REALTIME PUBLICATION SETUP
