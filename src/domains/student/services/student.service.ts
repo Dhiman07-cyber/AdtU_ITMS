@@ -41,6 +41,21 @@ export async function getByEnrollmentId(enrollmentId: string): Promise<Student |
   return studentRepository.findByEnrollmentId(enrollmentId);
 }
 
+export class SeatReclaimRequiredError extends Error {
+  public readonly seatReleasedAt: string;
+  public readonly studentUid: string;
+
+  constructor(studentUid: string, seatReleasedAt: string) {
+    super(
+      `Student ${studentUid} seat was released at soft-block (seatReleasedAt=${seatReleasedAt}). ` +
+      `Reactivation requires renewal approval with seat allocation (approve_renewal_with_seat).`
+    );
+    this.name = 'SeatReclaimRequiredError';
+    this.studentUid = studentUid;
+    this.seatReleasedAt = seatReleasedAt;
+  }
+}
+
 /**
  * Apply payment validity to a student profile.
  * Encapsulates the business rule: older payment cannot overwrite newer validity.
@@ -56,6 +71,26 @@ export async function applyPaymentValidity(
 ): Promise<boolean> {
   const student = await getByUid(studentUid);
   if (!student) return false;
+
+  // LC-01 GUARD: If the student's seat was released during a soft-block
+  // (SEAT_RELEASE_AT_SOFT_BLOCK=true path), reactivating via a simple status
+  // update would make the student active and entitled while the bus load counter
+  // remains decremented.  The reconciler (occupiesSeat, admin-reconcile-bus-loads.ts:69)
+  // also excludes seat-released students, so the under-count would be cemented
+  // by the next integrity sweep → over-allocation.
+  //
+  // The correct reactivation for a seat-released student is through the renewal
+  // approval flow (approve_renewal_with_seat RPC), which atomically reclaims
+  // capacity and clears the seatReleasedAt marker in one DB transaction.
+  if ((student as any).seatReleasedAt) {
+    console.error(
+      `[applyPaymentValidity] Refused to reactivate ${studentUid}: seat was released ` +
+      `(seatReleasedAt=${(student as any).seatReleasedAt}).  ` +
+      `Use the renewal approval path (approve_renewal_with_seat) to atomically ` +
+      `reclaim the bus seat and restore the student to active.`
+    );
+    throw new SeatReclaimRequiredError(studentUid, String((student as any).seatReleasedAt));
+  }
 
   const newValidUntil = payment.valid_until ? new Date(payment.valid_until) : null;
   const existingValidUntil = (student as any).validUntil
@@ -94,6 +129,7 @@ export async function applyPaymentValidity(
   } as any);
   return true;
 }
+
 
 export async function update(id: string, data: Partial<Student>): Promise<void> {
   await studentRepository.update(id, data);

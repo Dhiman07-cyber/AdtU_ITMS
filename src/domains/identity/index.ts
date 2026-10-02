@@ -22,6 +22,7 @@ export {
 	getStudentById,getStudentsByIds,getStudentsByBusIds,
 	getStudentsByRouteIds,getStudentsByShift,getStudentsByStatus,
 	getStudentsByStatuses,
+	getStudentsByStatusesPaged,
 	// Unauth Users
 	getUnauthUserById,getUserByEmail,
 	// Users

@@ -6,6 +6,7 @@ export {
 	getProfile,
 	getTransportEntitlement,
 	hasTransportEntitlement,remove,
+	SeatReclaimRequiredError,
 	unassignRoute,update
 } from './services/student.service';
 export type { Student } from './services/student.service';

@@ -32,6 +32,7 @@ import {
 	pgFindStudentsByShift,
 	pgFindStudentsByStatus,
 	pgFindStudentsByStatuses,
+	pgFindStudentsByStatusesPaged,
 	pgFindUnauthUserById,
 	pgFindUserByEmail,
 	pgFindUserById,
@@ -120,6 +121,13 @@ export async function findStudentsByStatus(status: string): Promise<Record<strin
 
 export async function findStudentsByStatuses(statuses: string[]): Promise<Record<string, any>[]> {
   return pgFindStudentsByStatuses(statuses);
+}
+
+export async function findStudentsByStatusesPaged(
+  statuses: string[],
+  options: { limit?: number; lastUid?: string } = {}
+): Promise<{ students: Record<string, any>[]; hasMore: boolean; nextLastUid?: string }> {
+  return pgFindStudentsByStatusesPaged(statuses, options);
 }
 
 export async function findSeatOccupyingStudents(): Promise<Record<string, any>[]> {

@@ -35,6 +35,7 @@ import {
 	findStudentsByShift as repoFindStudentsByShift,
 	findStudentsByStatus as repoFindStudentsByStatus,
 	findStudentsByStatuses as repoFindStudentsByStatuses,
+	findStudentsByStatusesPaged as repoFindStudentsByStatusesPaged,
 	findUnauthUserById as repoFindUnauthUserById,
 	findUserByEmail as repoFindUserByEmail,
 	findUserById as repoFindUserById,
@@ -118,6 +119,13 @@ export async function getStudentsByStatus(status: string): Promise<Record<string
 
 export async function getStudentsByStatuses(statuses: string[]): Promise<Record<string, any>[]> {
   return repoFindStudentsByStatuses(statuses);
+}
+
+export async function getStudentsByStatusesPaged(
+  statuses: string[],
+  options: { limit?: number; lastUid?: string } = {}
+): Promise<{ students: Record<string, any>[]; hasMore: boolean; nextLastUid?: string }> {
+  return repoFindStudentsByStatusesPaged(statuses, options);
 }
 
 export async function getSeatOccupyingStudents(): Promise<Record<string, any>[]> {

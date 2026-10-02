@@ -483,6 +483,42 @@ export async function pgFindByStatuses(statuses: string[]): Promise<Student[]> {
   return (data || []).map(pgRowToStudent);
 }
 
+export interface PagedStudentsResult {
+  students: Student[];
+  hasMore: boolean;
+  nextLastUid?: string;
+}
+
+/**
+ * Keyset-paginated retrieval of students by statuses.
+ * Avoids PostgREST default max-rows limit (1000) and memory blowups on 10,000+ populations.
+ */
+export async function pgFindByStatusesPaged(
+  statuses: string[],
+  options: { limit?: number; lastUid?: string } = {}
+): Promise<PagedStudentsResult> {
+  if (statuses.length === 0) return { students: [], hasMore: false };
+  const limit = options?.limit || 200;
+  const db = getSupabaseServer();
+  let query = db
+    .from('student_profiles')
+    .select(PG_STUDENT_COLUMNS)
+    .in('status', statuses)
+    .order('uid', { ascending: true })
+    .limit(limit);
+
+  if (options.lastUid) {
+    query = query.gt('uid', options.lastUid);
+  }
+
+  const { data, error } = await query;
+  if (error) throw new Error(`StudentRepository (PG) findByStatusesPaged failed: ${error.message}`);
+  const students = (data || []).map(pgRowToStudent);
+  const hasMore = students.length === limit;
+  const nextLastUid = students.length > 0 ? students[students.length - 1].uid : undefined;
+  return { students, hasMore, nextLastUid };
+}
+
 /**
  * Find students who currently occupy a seat (for capacity sync).
  * Returns a lightweight projection — not a full Student object.

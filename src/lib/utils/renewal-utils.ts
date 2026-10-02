@@ -105,7 +105,10 @@ function shouldBlockAccess(
 
   const validDate = new Date(validUntil);
   let sessionEndYear = validDate.getUTCFullYear();
-  if (simulationConfig?.enabled && (simulationConfig.syncSessionWithSimulatedDate || true)) {
+  // FIX-08 (A-15): Removed `|| true` — this was making syncSessionWithSimulatedDate
+  // unconditionally truthy whenever simulationConfig.enabled was set, meaning the
+  // admin UI's "Sync Session Year" toggle had zero effect.
+  if (simulationConfig?.enabled && simulationConfig.syncSessionWithSimulatedDate) {
     sessionEndYear = simulationConfig.customYear;
   }
 

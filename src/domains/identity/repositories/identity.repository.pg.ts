@@ -461,6 +461,14 @@ export async function pgFindStudentsByStatuses(statuses: string[]): Promise<Reco
   return studentRepo.pgFindByStatuses(statuses);
 }
 
+/** Keyset-paginated lookup of students by multiple statuses */
+export async function pgFindStudentsByStatusesPaged(
+  statuses: string[],
+  options: { limit?: number; lastUid?: string } = {}
+): Promise<{ students: Record<string, any>[]; hasMore: boolean; nextLastUid?: string }> {
+  return studentRepo.pgFindByStatusesPaged(statuses, options);
+}
+
 /** Find all students occupying a seat (for capacity synchronization) */
 export async function pgFindSeatOccupyingStudents(): Promise<Record<string, any>[]> {
   return studentRepo.pgFindSeatOccupying();
@@ -553,6 +561,7 @@ export async function pgFindDriversByBusId(busId: string): Promise<Record<string
     .select('driver_id')
     .eq('bus_id', busId)
     .eq('status', 'active')
+    .gt('expires_at', new Date().toISOString())
     .maybeSingle();
 
   if (!activeTrip?.driver_id) return [];

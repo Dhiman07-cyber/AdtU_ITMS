@@ -152,10 +152,9 @@ export async function adminReconcileBusLoads(options: ReconcileOptions = {}): Pr
       try {
         // Correct in PostgreSQL
         await updateBus(busId, {
-          // currentMembers removed: current_members is now GENERATED ALWAYS AS (morning_load + evening_load) STORED.
-          // PostgreSQL enforces the invariant atomically. Only the source columns need to be corrected.
           morningLoad: after.morningCount,
           eveningLoad: after.eveningCount,
+          currentMembers: after.currentMembers,
         });
 
         corrected = true;
