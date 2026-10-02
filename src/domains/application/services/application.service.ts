@@ -134,6 +134,14 @@ export async function submit(
   applicationId: string,
   uid: string
 ): Promise<{ success: boolean; error?: string; status?: number }> {
+  const existing = await repository.findByApplicationId(applicationId);
+  if (!existing) {
+    return { success: false, error: 'Application not found', status: 404 };
+  }
+  if (existing.applicantUid && existing.applicantUid !== uid) {
+    return { success: false, error: 'Unauthorized: applicant UID does not match actor', status: 403 };
+  }
+
   const db = getSupabaseServer();
 
   const { data: result, error } = await db.rpc('transition_application_state', {
@@ -402,7 +410,9 @@ const finalSessionEndYear = ((student as any).sessionEndYear && (student as any)
 
       let studentDataForRenewalRpc: Record<string, any> | null = null;
 
-      if (app.application_type === 'renewal_after_soft_block' && seatWasReleased && renewalBusId) {
+      // FIX (APP-04): If student's seat was released during soft-block, ANY renewal
+      // must atomically reclaim capacity on the bus and clear seat_released_at.
+      if (isRenewal && seatWasReleased && renewalBusId) {
         // Atomic RPC: capacity check + increment + student update + app finalize
         const { data: rpcResult, error: rpcError } = await db.rpc('approve_renewal_with_seat', {
           p_application_id: applicationId,
@@ -809,9 +819,19 @@ async function postCommitApprovalSideEffects(
 
   // Payment (online: idempotent via upsertPayment; offline: session-level duplicate check via createPayment)
   // H2: All payment operations go through Payment domain public API — no internal implementation leakage.
-  const amount = Number(app.amount_paid || app.form_data?.paymentInfo?.amountPaid || 0);
+  const amount = Number(
+    app.amount_paid ||
+    app.form_data?.paymentInfo?.amountPaid ||
+    app.form_data?.totalFee ||
+    app.form_data?.amount ||
+    0
+  );
   if (amount > 0) {
-    const paymentMode = app.payment_mode || app.form_data?.paymentInfo?.paymentMode;
+    const paymentMode =
+      app.payment_mode ||
+      app.form_data?.paymentInfo?.paymentMode ||
+      app.form_data?.paymentMode ||
+      'offline';
     const studentIdVal = app.form_data?.enrollmentId || app.enrollment_id || app.enrollmentId || studentData.enrollmentId;
     const studentNameVal = app.form_data?.fullName || app.full_name || studentData.fullName;
 
@@ -819,7 +839,7 @@ async function postCommitApprovalSideEffects(
       tasks.push(
         import('@/domains/payment').then(({ upsertApprovalPayment }) =>
           upsertApprovalPayment({
-            paymentId: app.form_data?.paymentInfo?.razorpayPaymentId || app.payment_id || `pay_${Date.now()}`,
+            paymentId: app.payment_id || app.form_data?.paymentInfo?.razorpayPaymentId || `pay_${Date.now()}`,
             studentId: studentIdVal,
             studentUid: app.applicant_uid,
             studentName: studentNameVal,
@@ -832,7 +852,7 @@ async function postCommitApprovalSideEffects(
             validUntil: studentData.validUntil
               ? new Date(studentData.validUntil)
               : new Date(Date.UTC(studentData.sessionEndYear || (new Date().getFullYear() + 1), 5, 30, 23, 59, 59, 999)),
-            razorpayPaymentId: app.form_data?.paymentInfo?.razorpayPaymentId,
+            razorpayPaymentId: app.form_data?.paymentInfo?.razorpayPaymentId || app.payment_id,
             razorpayOrderId: app.form_data?.paymentInfo?.razorpayOrderId,
             approvedAt: new Date(),
           })
@@ -850,11 +870,11 @@ async function postCommitApprovalSideEffects(
             sessionStartYear: studentData.sessionStartYear,
             sessionEndYear: studentData.sessionEndYear,
             validUntil: studentData.validUntil || new Date(Date.UTC(studentData.sessionEndYear || (new Date().getFullYear() + 1), 5, 30, 23, 59, 59, 999)).toISOString(),
-            transactionId: app.form_data?.paymentInfo?.paymentReference || '',
-            paidAt: app.form_data?.paymentInfo?.paidAt
-              ? new Date(app.form_data.paymentInfo.paidAt)
+            transactionId: app.form_data?.paymentInfo?.paymentReference || app.form_data?.transactionId || '',
+            paidAt: app.form_data?.paymentInfo?.paidAt || app.form_data?.paidAt
+              ? new Date(app.form_data?.paymentInfo?.paidAt || app.form_data?.paidAt)
               : new Date(),
-            receipt: app.form_data?.paymentInfo?.paymentEvidenceUrl || '',
+            receipt: app.form_data?.paymentInfo?.paymentEvidenceUrl || app.form_data?.receiptImageUrl || '',
             approverUserId: approverData.uid,
             approverName: approverData.name,
             approverEmpId: '',

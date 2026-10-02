@@ -1,29 +1,33 @@
 import { getAllPaginated } from '@/domains/application';
-import { adminAuth } from '@/lib/firebase-admin';
-import { resolveUserRole } from '@/lib/security/role-cache';
-import { NextRequest,NextResponse } from 'next/server';
+import { verifyApiAuth } from '@/lib/security/api-auth';
+import { applyRateLimit, createRateLimitId, RateLimits } from '@/lib/security/rate-limiter';
+import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
+import { NextRequest, NextResponse } from 'next/server';
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
 
 export async function GET(request: NextRequest) {
   try {
-    const token = request.headers.get('Authorization')?.replace('Bearer ', '');
-    if (!token) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    const auth = await verifyApiAuth(request, ['admin', 'moderator']);
+    if (!auth.authenticated) return auth.response;
 
-    const decodedToken = await adminAuth.verifyIdToken(token);
-    const uid = decodedToken.uid;
+    // FIX-04c (RBAC-03): Enforce moderator permission gate for application list.
+    const permDenied = await requireModeratorPermission(auth, 'applications', 'canView');
+    if (permDenied) return permDenied;
 
-    const userRole = await resolveUserRole(uid);
-    if (userRole.role !== 'admin' && userRole.role !== 'moderator') {
-      return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 });
+    const rl = await applyRateLimit(createRateLimitId(auth.uid, 'applications-all'), RateLimits.READ);
+    if (!rl.allowed) {
+      return NextResponse.json({ error: 'Too many requests' }, { status: 429, headers: rl.headers });
     }
 
     const { searchParams } = new URL(request.url);
-    const limit = Math.min(parseInt(searchParams.get('limit') || String(DEFAULT_LIMIT), 10), MAX_LIMIT);
-    const offset = parseInt(searchParams.get('offset') || '0', 10);
+    // FIX (API-11): Guard against NaN from non-numeric query params to prevent
+    // passing NaN to the DB query's LIMIT/OFFSET, which can cause a 500 or unbounded read.
+    const rawLimit = parseInt(searchParams.get('limit') || String(DEFAULT_LIMIT), 10);
+    const rawOffset = parseInt(searchParams.get('offset') || '0', 10);
+    const limit = Number.isNaN(rawLimit) ? DEFAULT_LIMIT : Math.min(rawLimit, MAX_LIMIT);
+    const offset = Number.isNaN(rawOffset) ? 0 : rawOffset;
 
     const applications = await getAllPaginated(limit, offset);
     const hasMore = applications.length === limit;
@@ -32,6 +36,7 @@ export async function GET(request: NextRequest) {
       { applications, hasMore },
       {
         headers: {
+          ...Object.fromEntries(new Headers(rl.headers || {})),
           'X-Has-More': String(hasMore),
           'X-Page-Offset': String(offset),
           'X-Page-Limit': String(limit),

@@ -23,6 +23,13 @@ export async function GET(
       return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 });
     }
 
+    if (userRole.role === 'moderator') {
+      const { requireModeratorPermission } = await import('@/lib/security/moderator-permissions');
+      const authObj = { uid, email: decodedToken.email || '', role: 'moderator', name: userRole.name || '' };
+      const permError = await requireModeratorPermission(authObj, 'applications', 'canView');
+      if (permError) return permError;
+    }
+
     // Await params before accessing its properties (Next.js 15 requirement)
     const { id: studentUid } = await params;
 

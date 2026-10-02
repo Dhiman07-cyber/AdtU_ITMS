@@ -1,6 +1,6 @@
-import { submit } from '@/domains/application';
+import { getById, submit } from '@/domains/application';
 import { adminAuth } from '@/lib/firebase-admin';
-import { NextRequest,NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
 export async function POST(request: NextRequest) {
   try {
@@ -19,8 +19,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid application ID' }, { status: 400 });
     }
 
-    if (!applicationId) {
-      return NextResponse.json({ error: 'Application ID required' }, { status: 400 });
+    // FIX-01 (IDOR-01): Verify the authenticated user owns this application.
+    // Without this check, any authenticated user can force-submit another
+    // student's verified application by supplying their applicationId.
+    // The transition_application_state RPC accepts any application_id without
+    // comparing it to p_actor_uid; ownership must be enforced at the HTTP layer.
+    const existingApp = await getById(applicationId);
+    if (!existingApp) {
+      return NextResponse.json({ error: 'Application not found' }, { status: 404 });
+    }
+    if (existingApp.applicantUid !== uid) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
     const result = await submit(applicationId, uid);
@@ -42,3 +51,4 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+
