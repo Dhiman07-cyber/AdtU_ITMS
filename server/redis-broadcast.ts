@@ -109,6 +109,7 @@ export async function initRedisBroadcastRelay(
     const busId = (envelope.payload.busId as string) || busIdMatch?.[1];
 
     if (envelope.event === 'bus_location_update' && busId) {
+      metricsService.inc('gpsAccepted');
       onLocationUpdate(busId, envelope.payload);
     } else if (envelope.event === 'trip_ended' && busId) {
       onTripEnded?.(busId);

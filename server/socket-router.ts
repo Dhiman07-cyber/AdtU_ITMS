@@ -128,6 +128,17 @@ handle('subscribe', (ws, session, payload) => {
         logger.warn('subscribe_unauthorized', { uid: session.uid, role: session.role, channel, sessionBusId: session.busId, channelBusId });
         return;
       }
+    } else {
+      // FIX-02 (WS-01): Default-deny for all non-bus-prefixed channels.
+      // A student_${uid} private channel is ONLY accessible to the owning socket.
+      // Any other unrecognized channel pattern is denied outright.
+      const privateStudentChannel = `student_${session.uid}`;
+      if (channel !== privateStudentChannel) {
+        send(ws, { type: 'error', message: 'Not authorized to subscribe to this channel' });
+        metricsService.inc('errors');
+        logger.warn('subscribe_unauthorized_channel_pattern', { uid: session.uid, role: session.role, channel });
+        return;
+      }
     }
   }
 
@@ -177,10 +188,25 @@ handle('presence', async (ws, session, payload) => {
     if (session.role === 'student') {
       const { data } = await supabase
         .from('student_profiles')
-        .select('bus_id')
+        // Enforce canonical entitlement: status must be active AND not past soft_block / valid_until boundary
+        .select('bus_id, status, soft_block, valid_until')
         .eq('uid', session.uid)
         .maybeSingle();
-      if (data?.bus_id === claimedBusId) authorized = true;
+      if (data?.bus_id === claimedBusId) {
+        const st = data.status || 'active';
+        if (st === 'active') {
+          const now = new Date();
+          let pastBoundary = false;
+          if (data.soft_block) {
+            pastBoundary = new Date(data.soft_block) <= now;
+          } else if (data.valid_until) {
+            pastBoundary = new Date(data.valid_until) <= now;
+          }
+          if (!pastBoundary) {
+            authorized = true;
+          }
+        }
+      }
     } else if (session.role === 'driver') {
       const { data: trip } = await supabase
         .from('active_trips')
@@ -251,9 +277,16 @@ handle('location_update', (ws, session, payload) => {
     return;
   }
 
-  // Auto-bind busId to session on first location update if not already bound via presence message
-  if (!session.busId && claimedBusId) {
-    sessionManager.setBusId(session.socketId, claimedBusId);
+  // FIX-03 (WS-02/A-01): Removed the auto-bind that allowed a driver to skip
+  // the authenticated `presence` handshake and bind any arbitrary busId to their
+  // session by sending location_update{busId:'BUS-X'}. The subscribe handler
+  // relies on session.busId for bus-channel authorization; auto-binding without
+  // DB validation bypasses the ownership check and enables cross-bus PII leakage.
+  // Drivers MUST send a `presence` message first (which validates ownership via PG).
+  if (!session.busId) {
+    send(ws, { type: 'error', message: 'location_update requires an active presence. Send a presence message with your busId first.' });
+    metricsService.inc('gpsRejected');
+    return;
   }
 
   if (claimedBusId && session.busId && claimedBusId !== session.busId) {
@@ -275,7 +308,10 @@ handle('location_update', (ws, session, payload) => {
   // The authoritative path is now the HTTP API which emits via Redis.
   // We no longer broadcast or cache from this handler to prevent duplicate packets.
   // We just increment the metric to track if any legacy clients are still sending this.
-  metricsService.inc('gpsAccepted');
+  // FIX-09 (A-12): This handler is DEPRECATED. Frames that arrive here are dropped
+  // (no broadcast, no persistence). Incrementing 'gpsAccepted' was misleading;
+  // 'gpsLegacyDropped' correctly reflects that these packets are discarded.
+  metricsService.inc('gpsLegacyDropped');
 });
 
 handle('broadcast', (ws, session, payload) => {

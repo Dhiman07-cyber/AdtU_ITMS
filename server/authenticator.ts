@@ -74,6 +74,14 @@ export function invalidateTokenAuthCache(uid?: string): void {
   }
 }
 
+/**
+ * Test helper to seed tokenAuthCache in non-production environments.
+ */
+export function setCachedAuthForTesting(token: string, authResult: AuthResult, ttlMs = 90000): void {
+  if (process.env.NODE_ENV === 'production') return;
+  tokenAuthCache.set(token, { result: authResult, expiresAt: Date.now() + ttlMs });
+}
+
 export async function authenticateSocket(request: IncomingMessage): Promise<AuthResult> {
   const token = extractToken(request);
   if (!token) return { authenticated: false, error: 'Missing or invalid token' };

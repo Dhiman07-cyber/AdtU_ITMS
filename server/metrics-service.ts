@@ -53,7 +53,7 @@ export type MetricKey =
   | 'slowHandlers' | 'queueDropped'
   | 'heartbeatTimeouts' | 'reconnectsHandled'
   // GPS pipeline
-  | 'gpsAccepted' | 'gpsRejected'
+  | 'gpsAccepted' | 'gpsRejected' | 'gpsLegacyDropped'
   // Trip lifecycle
   | 'tripsStarted' | 'tripsEnded' | 'heartbeatsSent'
   // Notifications
@@ -71,7 +71,7 @@ export class MetricsService {
     rateLimitBlocks: 0, invalidMessages: 0, payloadTooLarge: 0, replayDetected: 0,
     slowHandlers: 0, queueDropped: 0,
     heartbeatTimeouts: 0, reconnectsHandled: 0,
-    gpsAccepted: 0, gpsRejected: 0,
+    gpsAccepted: 0, gpsRejected: 0, gpsLegacyDropped: 0,
     tripsStarted: 0, tripsEnded: 0, heartbeatsSent: 0,
     notificationsSent: 0, notificationsFailed: 0, notificationsDeduplicated: 0,
     redisPubSubMessages: 0, waitingFlagsCreated: 0, waitingFlagsCancelled: 0,

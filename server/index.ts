@@ -55,6 +55,20 @@ async function main() {
       res.end(JSON.stringify(status));
       return;
     }
+    if (rawUrl === '/metrics') {
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.writeHead(200);
+      res.end(metricsService.prometheus());
+      return;
+    }
+    if (rawUrl === '/metrics/json') {
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.writeHead(200);
+      res.end(JSON.stringify(metricsService.snapshot()));
+      return;
+    }
   });
   wsServer.start(server);
 

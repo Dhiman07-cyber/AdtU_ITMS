@@ -70,7 +70,7 @@ const mockSupabaseFrom = vi.fn((table: string) => {
 
       if (table === 'student_profiles' && uid === 'student-1') {
         const busId = busAuthMap['student-1'] ?? null;
-        return { data: busId ? { bus_id: busId } : null, error: null };
+        return { data: busId ? { bus_id: busId, status: 'active' } : null, error: null };
       }
       if (table === 'active_trips' && uid === 'driver-1') {
         const busId = busAuthMap['driver-1'] ?? null;
@@ -274,7 +274,7 @@ describe('WS server — location pipeline', () => {
     student.ws.send(JSON.stringify({ type: 'subscribe', channel: 'bus_location_b2' }));
     await student.next(); // subscribed ack
 
-    const before = metricsService.get('gpsAccepted');
+    const before = metricsService.get('gpsLegacyDropped');
     driver.ws.send(JSON.stringify({
       type: 'location_update',
       busId: 'b2',
@@ -288,8 +288,8 @@ describe('WS server — location pipeline', () => {
 
     // Cross-node relay should NOT be called
     expect(mockPublish).not.toHaveBeenCalled();
-    // Metric is still incremented for legacy tracking
-    expect(metricsService.get('gpsAccepted')).toBe(before + 1);
+    // Metric is incremented for dropped legacy frames
+    expect(metricsService.get('gpsLegacyDropped')).toBe(before + 1);
 
     driver.ws.close();
     student.ws.close();
