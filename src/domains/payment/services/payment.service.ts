@@ -1,16 +1,12 @@
 /**
- * D5 PaymentService — public service contract per PHASE2.2/2.4.
+ * PaymentService
  *
  * Responsibilities: payment creation (online/offline), capture processing,
  * approval/rejection, idempotency, history/lookup.
  *
- * ponytail: delegates entirely to existing production logic in
- * src/lib/payment/payment.service.ts (business logic) and
- * paymentRepository (Postgres persistence, via ../repositories) — zero
- * behavior change. Razorpay gateway calls (order creation, signature
- * verification) stay internal to this module, not part of the domain's
- * public capability surface — callers get payment *outcomes*, not gateway
- * plumbing.
+ * Delegates to payment business logic and PostgreSQL repository.
+ * Gateway calls (order creation, signature verification) remain internal to
+ * this module, exposing business outcomes to external callers.
  */
 import {
 	approveOfflinePayment,

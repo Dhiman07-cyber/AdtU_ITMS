@@ -133,7 +133,7 @@ const Navbar = React.memo(function Navbar({ onMenuToggle, isSidebarOpen = false 
               { label: 'My Pass', href: '/student/bus-pass', icon: QrCode, color: 'text-purple-500' },
             ]
           : []),
-        { label: 'Renew Service', href: '/student/renew-services', icon: RefreshCcw, color: 'text-orange-500' },
+        { label: 'Renew Service', href: '/student/renew', icon: RefreshCcw, color: 'text-orange-500' },
         { label: 'Notifications', href: '/student/notifications', icon: Bell, color: 'text-red-500' },
       ];
     }

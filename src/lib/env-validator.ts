@@ -54,7 +54,10 @@ export const ENV_CATALOG: EnvClassification[] = [
     { name: 'DOCUMENT_PRIVATE_KEY', category: 'secret', lifecycle: 'runtime', required: true, description: 'Document RSA Private Key' },
     { name: 'DOCUMENT_PUBLIC_KEY', category: 'secret', lifecycle: 'runtime', required: true, description: 'Document RSA Public Key' },
     { name: 'WS_PRIVILEGED_TOKEN', category: 'secret', lifecycle: 'runtime', required: true, description: 'WebSocket Internal System Broadcast Token' },
+    { name: 'ALLOWED_ORIGINS', category: 'private', lifecycle: 'runtime', required: false, description: 'Comma-separated list of allowed CORS and WebSocket origins' },
+    { name: 'METRICS_SECRET', category: 'secret', lifecycle: 'runtime', required: false, description: 'Bearer token for Prometheus /api/metrics endpoint' },
     { name: 'AM_WEBHOOK_SECRET', category: 'secret', lifecycle: 'runtime', required: false, description: 'Alertmanager webhook shared secret (X-Alertmanager-Token header)' },
+    { name: 'REDIS_URL', category: 'secret', lifecycle: 'runtime', required: false, description: 'Redis connection URI for clustering, cross-node relay, and GPS deduplication' },
     { name: 'REDIS_PASSWORD', category: 'secret', lifecycle: 'runtime', required: false, description: 'Redis AUTH password (required in production when --requirepass is set)' },
     { name: 'GF_ADMIN_PASSWORD', category: 'secret', lifecycle: 'runtime', required: false, description: 'Grafana admin password — must be explicitly set in production (no default)' },
 ];

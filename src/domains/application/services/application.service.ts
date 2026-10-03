@@ -1,5 +1,5 @@
 /**
- * D4/D8 ApplicationService — public service contract per PHASE2.2/2.4.
+ * ApplicationService
  *
  * Responsibilities: application workflow orchestration, CRUD, approval,
  * rejection, submission, review.

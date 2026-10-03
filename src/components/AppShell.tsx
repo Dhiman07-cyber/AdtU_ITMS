@@ -77,7 +77,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   // Determine if we're on full-height workspace pages (no footer required)
   const isFleetMapPage = pathname === '/admin/fleet-map' || pathname === '/moderator/fleet-map' || pathname?.startsWith('/admin/fleet-map') || pathname?.startsWith('/moderator/fleet-map');
   const isVerificationPage = pathname === '/admin/verification' || pathname === '/moderator/verification' || pathname?.startsWith('/admin/verification') || pathname?.startsWith('/moderator/verification');
-  const isWorkspaceHubPage = pathname?.startsWith('/admin/smart-allocation') || pathname?.startsWith('/admin/driver-assignment') || pathname?.startsWith('/admin/route-allocation') || pathname === '/admin/moderators';
+  const isWorkspaceHubPage = pathname?.startsWith('/admin/smart-allocation') || pathname === '/admin/moderators';
 
   // Show navbar/footer based on specific page logic
   // Update: Hide footer on /apply/form, terms, privacy, fleet-map, verification, and full-height workspace routes

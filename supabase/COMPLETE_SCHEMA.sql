@@ -392,7 +392,7 @@ CREATE TABLE IF NOT EXISTS public.driver_trip_history (
   driver_id TEXT NOT NULL,
   route_id TEXT NOT NULL,
   shift TEXT NOT NULL,
-  status TEXT NOT NULL,
+  status TEXT NOT NULL CONSTRAINT driver_trip_history_status_check CHECK (status = ANY (ARRAY['completed'::text, 'cancelled'::text, 'terminated_early'::text])),
   start_time TIMESTAMPTZ NOT NULL,
   end_time TIMESTAMPTZ NOT NULL,
   duration_seconds INTEGER,
@@ -400,7 +400,7 @@ CREATE TABLE IF NOT EXISTS public.driver_trip_history (
   average_speed_kmh DOUBLE PRECISION,
   max_speed_kmh DOUBLE PRECISION,
   stop_events JSONB DEFAULT '[]',
-  ended_reason TEXT DEFAULT 'completed',
+  ended_reason TEXT DEFAULT 'completed' CONSTRAINT driver_trip_history_ended_reason_check CHECK (ended_reason = ANY (ARRAY['completed'::text, 'completed_stale'::text, 'cancelled'::text, 'force_ended'::text, 'short_trip'::text])),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -1483,6 +1483,8 @@ DECLARE
   v_trip    RECORD;
   v_now     TIMESTAMPTZ := NOW();
   v_dur_sec INTEGER;
+  v_status  TEXT := 'completed';
+  v_reason  TEXT := 'completed';
 BEGIN
   SELECT trip_id, bus_id, driver_id, route_id, shift, start_time
     INTO v_trip
@@ -1503,8 +1505,10 @@ BEGIN
   DELETE FROM active_trips WHERE trip_id = v_trip.trip_id;
   DELETE FROM bus_locations WHERE bus_id = p_bus_id;
 
-  IF v_dur_sec < p_min_duration_seconds THEN
-    RETURN jsonb_build_object('success', true, 'tripId', p_trip_id, 'alreadyEnded', false, 'shortTripDiscarded', true);
+  -- Represent short trips as terminated_early / short_trip rather than deleting historical fact
+  IF p_min_duration_seconds > 0 AND v_dur_sec < p_min_duration_seconds THEN
+    v_status := 'terminated_early';
+    v_reason := 'short_trip';
   END IF;
 
   INSERT INTO driver_trip_history (
@@ -1512,11 +1516,17 @@ BEGIN
     status, ended_reason, start_time, end_time, duration_seconds
   ) VALUES (
     v_trip.trip_id, v_trip.bus_id, v_trip.driver_id, v_trip.route_id, v_trip.shift,
-    'completed', 'completed', v_trip.start_time, v_now, v_dur_sec
+    v_status, v_reason, v_trip.start_time, v_now, v_dur_sec
   )
   ON CONFLICT (trip_id) DO NOTHING;
 
-  RETURN jsonb_build_object('success', true, 'tripId', p_trip_id, 'alreadyEnded', false);
+  RETURN jsonb_build_object(
+    'success', true,
+    'tripId', p_trip_id,
+    'alreadyEnded', false,
+    'status', v_status,
+    'ended_reason', v_reason
+  );
 END;
 $$;
 

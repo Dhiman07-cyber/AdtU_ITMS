@@ -10,24 +10,26 @@
  */
 
 import { getUsersByRole } from '@/domains/identity';
-import { Resend,type Attachment } from 'resend';
+import { Resend, type Attachment } from 'resend';
+import nodemailer, { type Transporter } from 'nodemailer';
 
 // Environment variables
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL;
+const GMAIL_PASS = process.env.GMAIL_PASS;
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const EMAIL_FROM = process.env.EMAIL_FROM || process.env.RESEND_FROM_EMAIL;
 const EMAIL_REPLY_TO = process.env.EMAIL_REPLY_TO || 'noreply@adtu.ac.in';
 
 let resendClient: Resend | null = null;
+let gmailTransporter: Transporter | null = null;
 
-// Check if email is configured
+// Check if any email provider is configured (Resend or Gmail SMTP)
 const isEmailConfigured = (): boolean => {
-  return !!(RESEND_API_KEY && EMAIL_FROM);
+  return !!((RESEND_API_KEY && EMAIL_FROM) || (ADMIN_EMAIL && GMAIL_PASS));
 };
 
 const getResendClient = () => {
-  if (!isEmailConfigured()) {
-    console.warn('Email provider configuration missing. Email service will use fallback.');
+  if (!RESEND_API_KEY || !EMAIL_FROM) {
     return null;
   }
 
@@ -38,16 +40,34 @@ const getResendClient = () => {
   return resendClient;
 };
 
+const getGmailTransporter = () => {
+  if (!ADMIN_EMAIL || !GMAIL_PASS) {
+    return null;
+  }
+
+  if (!gmailTransporter) {
+    gmailTransporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: ADMIN_EMAIL,
+        pass: GMAIL_PASS,
+      },
+    });
+  }
+
+  return gmailTransporter;
+};
+
 // Fallback email sending method (logs to console in development)
 const sendEmailFallback = async (options: {
   to: string[];
   subject: string;
   html: string;
 }) => {
-  console.log('[EMAIL SERVICE] Email provider missing. Email would be sent.');
+  console.log('[EMAIL SERVICE] No active email provider configured (neither Resend nor Gmail SMTP). Email logged to console.');
   console.log('   Recipient count:', options.to.length);
   console.log('   Subject:', options.subject);
-  console.log('   To enable emails, set RESEND_API_KEY and EMAIL_FROM in the server environment.');
+  console.log('   To enable real emails, configure RESEND_API_KEY or GMAIL_PASS in environment.');
   return { success: true, fallback: true };
 };
 
@@ -58,34 +78,64 @@ const sendEmail = async (options: {
   attachments?: Attachment[];
 }): Promise<{ success: boolean; error?: string; messageId?: string }> => {
   const recipients = Array.isArray(options.to) ? options.to : [options.to];
-  const client = getResendClient();
 
-  if (!client || !EMAIL_FROM) {
-    return sendEmailFallback({
-      to: recipients,
-      subject: options.subject,
-      html: options.html,
-    });
-  }
+  // 1. Primary Strategy: Resend API
+  const resend = getResendClient();
+  if (resend && EMAIL_FROM) {
+    try {
+      const { data, error } = await resend.emails.send({
+        from: EMAIL_FROM,
+        to: options.to,
+        replyTo: EMAIL_REPLY_TO,
+        subject: options.subject,
+        html: options.html,
+        attachments: options.attachments,
+      });
 
-  try {
-    const { data, error } = await client.emails.send({
-      from: EMAIL_FROM,
-      to: options.to,
-      replyTo: EMAIL_REPLY_TO,
-      subject: options.subject,
-      html: options.html,
-      attachments: options.attachments,
-    });
-
-    if (error) {
-      return { success: false, error: error.message || 'Email provider rejected the request' };
+      if (error) {
+        console.warn('[EMAIL SERVICE] Resend rejected send request, attempting Gmail SMTP fallback:', error.message);
+      } else {
+        return { success: true, messageId: data?.id };
+      }
+    } catch (resendErr: any) {
+      console.warn('[EMAIL SERVICE] Resend threw an error, attempting Gmail SMTP fallback:', resendErr?.message);
     }
-
-    return { success: true, messageId: data?.id };
-  } catch (error: any) {
-    return { success: false, error: error.message || 'Failed to send email' };
   }
+
+  // 2. Secondary Strategy: Gmail SMTP Fallback
+  const gmail = getGmailTransporter();
+  if (gmail) {
+    try {
+      const mailOptions: any = {
+        from: EMAIL_FROM || ADMIN_EMAIL,
+        to: Array.isArray(options.to) ? options.to.join(', ') : options.to,
+        replyTo: EMAIL_REPLY_TO || ADMIN_EMAIL,
+        subject: options.subject,
+        html: options.html,
+      };
+
+      if (options.attachments && options.attachments.length > 0) {
+        mailOptions.attachments = options.attachments.map(att => ({
+          filename: att.filename || undefined,
+          content: att.content,
+          path: att.path,
+        }));
+      }
+
+      const info = await gmail.sendMail(mailOptions);
+      return { success: true, messageId: info.messageId };
+    } catch (smtpErr: any) {
+      console.error('[EMAIL SERVICE] Gmail SMTP failed to send:', smtpErr);
+      return { success: false, error: smtpErr?.message || 'Gmail SMTP failed to send email' };
+    }
+  }
+
+  // 3. Tertiary Fallback: Development console logger
+  return sendEmailFallback({
+    to: recipients,
+    subject: options.subject,
+    html: options.html,
+  });
 };
 
 export interface StudentAddedEmailData {
@@ -577,7 +627,7 @@ function generateApplicationRejectedEmailHtml(data: ApplicationRejectedEmailData
           </p>
 
           <div style="text-align:center;">
-            <a href="${process.env.NEXT_PUBLIC_APP_URL || 'https://adtu-bus-services.vercel.app'}/apply" style="background:#dc2626;color:#ffffff;padding:14px 28px;text-decoration:none;border-radius:8px;font-weight:700;font-size:14px;display:inline-block;box-shadow:0 4px 6px rgba(220,38,38,0.2);">RE-APPLY NOW</a>
+            <a href="${(process.env.NEXT_PUBLIC_APP_URL || '').replace(/\/+$/, '')}/apply" style="background:#dc2626;color:#ffffff;padding:14px 28px;text-decoration:none;border-radius:8px;font-weight:700;font-size:14px;display:inline-block;box-shadow:0 4px 6px rgba(220,38,38,0.2);">RE-APPLY NOW</a>
           </div>
           
           <div style="margin-top:40px;padding-top:25px;border-top:1px solid #e2e8f0;font-size:13px;color:#64748b;">
@@ -658,7 +708,7 @@ function generateApplicationApprovedEmailHtml(data: ApplicationApprovedEmailData
           </div>
 
           <div style="text-align:center;">
-            <a href="${process.env.NEXT_PUBLIC_APP_URL || 'https://adtu-bus-services.vercel.app'}/student" style="background:#10b981;color:#ffffff;padding:16px 32px;text-decoration:none;border-radius:12px;font-weight:700;font-size:15px;display:inline-block;box-shadow:0 4px 10px rgba(16,185,129,0.3);">VIEW DIGITAL BUS PASS</a>
+            <a href="${(process.env.NEXT_PUBLIC_APP_URL || '').replace(/\/+$/, '')}/student" style="background:#10b981;color:#ffffff;padding:16px 32px;text-decoration:none;border-radius:12px;font-weight:700;font-size:15px;display:inline-block;box-shadow:0 4px 10px rgba(16,185,129,0.3);">VIEW DIGITAL BUS PASS</a>
           </div>
           
           <div style="margin-top:40px;padding-top:25px;border-top:1px solid #f1f5f9;font-size:13px;color:#64748b;">

@@ -519,18 +519,21 @@ export async function atomicGpsGuardAndUpdate(
   }
 
   // Multi-instance Production Invariant:
-  // If Redis is configured in production, do NOT silently fall back to process-local memLast,
-  // as independent Next.js nodes would accept interleaved GPS packets bypassing jump/replay protection.
+  // In production, if Redis is unavailable or unconfigured, FAIL CLOSED.
+  // Independent Next.js serverless instances must not accept interleaved GPS packets bypassing jump/replay protection.
   const isProd = process.env.NODE_ENV === 'production';
   const hasRedisConfig = Boolean(process.env.REDIS_URL);
-  const allowLocalFallback = process.env.ALLOW_INSECURE_LOCAL_GPS_FALLBACK === 'true';
 
-  if (isProd && hasRedisConfig && !allowLocalFallback) {
+  if (isProd) {
+    if (!hasRedisConfig) {
+      console.error('[gps-redis] FAIL-CLOSED: REDIS_URL is not configured in production. Rejecting GPS update to protect spatial invariants across instances.');
+      return 'redis_unavailable';
+    }
     console.error('[gps-redis] FAIL-CLOSED: Redis coordination unavailable in production. Rejecting GPS update to protect spatial invariants.');
     return 'redis_unavailable';
   }
 
-  // Non-production / local single-instance fallback
+  // Non-production (development / test) fallback: allow local in-memory fallback
   return memoryGuard(busId, newLat, newLng, newTs, newRawTs);
 }
 

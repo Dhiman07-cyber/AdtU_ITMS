@@ -1,12 +1,11 @@
 /**
- * D7 RouteService — public service contract per PHASE2.2/2.4.
+ * RouteService
  *
  * Responsibilities: route/stop lookup, CRUD. BusRouteAssignment lifecycle
- * (net-route-assignment-service.ts) is out of scope here per domain
- * boundary — this service covers route/stop master data only.
+ * is managed by net-route-assignment-service.ts; this service covers
+ * route and stop master data.
  *
- * ponytail: delegates entirely to existing production logic in
- * src/lib/dataService.ts — zero behavior change.
+ * Delegates to routeRepository and production dataService methods.
  */
 import type { Route } from '../repositories/route.repository';
 import * as routeRepository from '../repositories/route.repository';

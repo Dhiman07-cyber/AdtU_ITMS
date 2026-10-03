@@ -1,4 +1,4 @@
-import { defineConfig } from 'vitest/config';
+import { defineConfig, configDefaults } from 'vitest/config';
 import path from 'path';
 
 export default defineConfig({
@@ -7,6 +7,6 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
     environment: 'node',
-    exclude: ['e2e/**', 'node_modules/**', '.kilo/**'],
+    exclude: [...configDefaults.exclude, 'e2e/**', '.kilo/**', 'tests/**'],
   },
 });

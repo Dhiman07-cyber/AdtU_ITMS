@@ -1,12 +1,8 @@
 /**
- * D2 CalendarService — public service contract per PHASE2.2/2.4.
+ * CalendarService
  *
- * Responsibilities: read/update the academic calendar config, derive
- * per-student lifecycle dates (AcademicSession) from it.
- *
- * ponytail: computation logic is the existing, battle-tested
- * deriveAcademicLifecycle from src/lib/utils/deadline-computation.ts —
- * relocated by reference, not reimplemented.
+ * Responsibilities: read/update academic calendar config, derive
+ * per-student lifecycle dates (AcademicSession).
  */
 import type { DeadlineConfig } from '@/lib/types/deadline-config';
 import { deriveAcademicLifecycle,type DerivedLifecycle } from '@/lib/utils/deadline-computation';

@@ -111,10 +111,14 @@ export const POST = withSecurity<CreateOrderBody>(
 export async function OPTIONS(request: NextRequest) {
     const origin = request.headers.get('origin') || '';
 
-    // SECURITY: Define allowed origins
+    // SECURITY: Define allowed origins from environment
+    const explicitOrigins = (process.env.ALLOWED_ORIGINS || '')
+        .split(',')
+        .map(s => s.trim())
+        .filter(Boolean);
     const allowedOrigins: string[] = [
-        'https://adtu-itms.vercel.app',
         process.env.NEXT_PUBLIC_APP_URL || '',
+        ...explicitOrigins,
     ].filter(Boolean);
 
     // Check if origin is allowed (includes Vercel preview deployments)

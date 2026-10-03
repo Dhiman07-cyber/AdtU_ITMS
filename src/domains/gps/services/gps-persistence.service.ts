@@ -1,25 +1,37 @@
 import { getSupabaseServer } from '@/lib/supabase-server';
 
-// Negative cache only (to mitigate brute-force/unauthorized flood without risking stale positive state)
-// Positive trip validity is ALWAYS verified directly against authoritative PostgreSQL active_trips,
-// guaranteeing that the microsecond end_trip_atomically commits in the database, ALL nodes reject subsequent GPS updates.
+// Negative and short positive cache to mitigate PostgREST query flood while ensuring
+// trips ending via trip-orchestrator immediately purge cache via invalidateActiveTripCache().
 const negativeLockCache = new Map<string, number>();
 const NEGATIVE_CACHE_TTL_MS = 2_000; // 2 seconds
 
+interface PositiveTripLock {
+  tripId: string;
+  expiresAtMs: number;
+  cachedUntilMs: number;
+}
+const positiveLockCache = new Map<string, PositiveTripLock>();
+const POSITIVE_CACHE_TTL_MS = 6_000; // 6 seconds: absorbs 3 GPS pings at 2s cadence
+
 export function invalidateActiveTripCache(busId?: string, driverId?: string): void {
-  if (busId && driverId) {
-    negativeLockCache.delete(`${driverId}:${busId}`);
-    negativeLockCache.delete(`${busId}:${driverId}`);
-  } else if (busId || driverId) {
-    const target = busId || driverId;
-    for (const key of negativeLockCache.keys()) {
-      if (key.includes(target!)) {
-        negativeLockCache.delete(key);
+  const purgeKeys = (map: Map<string, any>) => {
+    if (busId && driverId) {
+      map.delete(`${driverId}:${busId}`);
+      map.delete(`${busId}:${driverId}`);
+    } else if (busId || driverId) {
+      const target = busId || driverId;
+      for (const key of map.keys()) {
+        if (key.includes(target!)) {
+          map.delete(key);
+        }
       }
+    } else {
+      map.clear();
     }
-  } else {
-    negativeLockCache.clear();
-  }
+  };
+
+  purgeKeys(negativeLockCache);
+  purgeKeys(positiveLockCache);
 }
 
 export async function checkActiveTrip(driverId: string, busId: string, tripId: string): Promise<{ valid: boolean; reason?: string }> {
@@ -30,6 +42,20 @@ export async function checkActiveTrip(driverId: string, busId: string, tripId: s
   const negativeUntil = negativeLockCache.get(cacheKey);
   if (negativeUntil && (now < negativeUntil)) {
     return { valid: false, reason: 'No active trip lock found for this driver/bus' };
+  }
+
+  // Check positive cache (absorbs 66% of high-frequency GPS query load during steady-state driving)
+  const positiveEntry = positiveLockCache.get(cacheKey);
+  if (positiveEntry && now < positiveEntry.cachedUntilMs) {
+    if (positiveEntry.expiresAtMs <= now) {
+      positiveLockCache.delete(cacheKey);
+      negativeLockCache.set(cacheKey, now + NEGATIVE_CACHE_TTL_MS);
+      return { valid: false, reason: 'Active trip lock has expired' };
+    }
+    if (tripId && positiveEntry.tripId !== tripId) {
+      return { valid: false, reason: 'Trip mismatch for location update' };
+    }
+    return { valid: true };
   }
 
   const supabase = getSupabaseServer();
@@ -43,6 +69,7 @@ export async function checkActiveTrip(driverId: string, busId: string, tripId: s
     .maybeSingle();
 
   if (error || !activeTrip) {
+    positiveLockCache.delete(cacheKey);
     negativeLockCache.set(cacheKey, now + NEGATIVE_CACHE_TTL_MS);
     if (negativeLockCache.size > 5000) {
       const firstKey = negativeLockCache.keys().next().value;
@@ -51,7 +78,9 @@ export async function checkActiveTrip(driverId: string, busId: string, tripId: s
     return { valid: false, reason: 'No active trip lock found for this driver/bus' };
   }
 
-  if (activeTrip.expires_at && new Date(activeTrip.expires_at).getTime() <= now) {
+  const expiresAtMs = activeTrip.expires_at ? new Date(activeTrip.expires_at).getTime() : now + 600_000;
+  if (expiresAtMs <= now) {
+    positiveLockCache.delete(cacheKey);
     negativeLockCache.set(cacheKey, now + NEGATIVE_CACHE_TTL_MS);
     return { valid: false, reason: 'Active trip lock has expired' };
   }
@@ -61,8 +90,17 @@ export async function checkActiveTrip(driverId: string, busId: string, tripId: s
   }
 
   // Active trip confirmed from authoritative PostgreSQL.
-  // Clear any stale negative cache entry.
+  // Clear any stale negative cache entry and populate short-lived positive cache.
   negativeLockCache.delete(cacheKey);
+  positiveLockCache.set(cacheKey, {
+    tripId: activeTrip.trip_id,
+    expiresAtMs,
+    cachedUntilMs: now + POSITIVE_CACHE_TTL_MS,
+  });
+  if (positiveLockCache.size > 5000) {
+    const firstKey = positiveLockCache.keys().next().value;
+    if (firstKey) positiveLockCache.delete(firstKey);
+  }
 
   return { valid: true };
 }

@@ -1,14 +1,12 @@
 /**
- * D3 StudentService — public service contract per PHASE2.2/2.4.
+ * StudentService
  *
  * Responsibilities: student lookup, profile, CRUD, transport entitlement
  * (lifecycle status derivation).
  *
- * ponytail: delegates entirely to PostgreSQL persistence
- * (student.repository.pg.ts) — zero behavior change from caller perspective.
+ * Delegates to PostgreSQL persistence (student.repository.pg.ts).
  * Approval/rejection/renewal/reassignment stay in dataService and the
- * D4 Application flow; this service does not touch them (they're D4's
- * job per the frozen domain boundary, not D3's).
+ * Application flow; this service covers student domain operations.
  */
 import { getDeadlineConfig } from '@/lib/deadline-config-service';
 import { getTransportEntitlement,hasTransportEntitlement } from '@/lib/entitlement/transport-entitlement';

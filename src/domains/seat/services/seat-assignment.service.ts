@@ -1,16 +1,8 @@
 /**
- * D8 SeatAssignmentService — public service contract per PHASE2.2/2.4.
+ * SeatAssignmentService
  *
  * Responsibilities: seat capacity, shift-scoped availability, reassignment
- * + rollback, allocation ranking. No master data (Bus/Route/Driver — D6/D7),
- * no payments, no applications, no trips.
- *
- * ponytail: delegates entirely to existing production logic
- * (busCapacityService.ts, reassignment-service.ts's ReassignmentService,
- * allocation-ranker.ts's AllocationRanker) — zero behavior change, zero
- * transaction centralization (explicitly out of scope this phase per
- * product-owner decision — the 13 existing capacity call sites are
- * untouched).
+ * + rollback, allocation ranking. Master data resides in fleet/route services.
  *
  * Implementation details (ReassignmentService, AllocationRanker,
  * reassignmentLogs, alertBusFull) are internal to the seat domain.

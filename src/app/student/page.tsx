@@ -329,7 +329,7 @@ export default function StudentDashboard() {
                     </Button>
                   </Link>
                 ) : (
-                  <Link href="/student/renew-services" className="w-full lg:w-auto mt-2 lg:mt-0">
+                  <Link href="/student/renew" className="w-full lg:w-auto mt-2 lg:mt-0">
                     <Button className="w-full sm:w-auto group relative overflow-hidden bg-gradient-to-r from-amber-500 via-orange-600 to-red-500 hover:from-amber-600 hover:via-orange-700 hover:to-red-600 text-white font-semibold shadow-lg transform hover:-translate-y-0.5 transition-all duration-300 h-10 md:h-11 text-xs md:text-sm">
                       <span className="relative flex items-center justify-center">
                         <RefreshCcw className="h-3.5 w-3.5 md:h-4 md:w-4 mr-1.5 md:mr-2" />
@@ -360,7 +360,7 @@ export default function StudentDashboard() {
                     Renew now to restore access to Track Bus and other services. After you pay, your renewal is reviewed and approved by an administrator — access is restored once it&apos;s approved.
                   </p>
                   <div className="flex flex-col sm:flex-row gap-3">
-                    <Link href="/student/renew-services" className="flex-1">
+                    <Link href="/student/renew" className="flex-1">
                       <Button className="w-full bg-gradient-to-r from-red-600 to-orange-600 hover:from-red-700 hover:to-orange-700 text-white font-semibold shadow-lg" size="lg">
                         <RefreshCcw className="mr-2 h-5 w-5" />
                         Renew Service Now
@@ -403,7 +403,7 @@ export default function StudentDashboard() {
                     }`}>
                     Renew early to avoid service interruption. Online renewal available with instant activation after admin approval.
                   </p>
-                  <Link href="/student/renew-services">
+                  <Link href="/student/renew">
                     <Button className={`font-semibold shadow-lg ${daysUntilExpiry <= 7
                       ? 'bg-gradient-to-r from-red-600 to-orange-600 hover:from-red-700 hover:to-orange-700'
                       : 'bg-gradient-to-r from-yellow-600 to-amber-600 hover:from-yellow-700 hover:to-amber-700'
@@ -980,7 +980,7 @@ export default function StudentDashboard() {
                           </p>
                         </div>
                       </div>
-                      <Link href="/student/renew-services">
+                      <Link href="/student/renew">
                         <Button className="group w-full relative overflow-hidden font-semibold shadow-lg" size="sm" variant={daysUntilExpiry <= 7 ? 'destructive' : 'default'}>
                           <span className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/20 to-white/0 translate-x-[-200%] group-hover:translate-x-[200%] transition-transform duration-700" />
                           <span className="relative flex items-center justify-center">
@@ -1222,7 +1222,7 @@ export default function StudentDashboard() {
             </Link>
 
             {/* Renew Services Card - Conditional Styling Based on Expiry */}
-            <Link href="/student/renew-services" className="block group h-full">
+            <Link href="/student/renew" className="block group h-full">
               <div className={`relative overflow-hidden rounded-lg md:rounded-xl cursor-pointer h-full transition-all duration-500 ease-out hover:scale-[1.03] hover:-translate-y-1 active:scale-[0.98] shadow-lg hover:shadow-2xl ${isExpired || (daysUntilExpiry !== null && daysUntilExpiry <= 7)
                 ? 'ring-2 ring-red-400 ring-offset-1 dark:ring-offset-gray-900'
                 : daysUntilExpiry !== null && daysUntilExpiry <= 30

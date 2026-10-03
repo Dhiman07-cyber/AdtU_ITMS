@@ -23,11 +23,13 @@ import { NextRequest, NextResponse } from 'next/server';
  * This is a first line of defense; individual API routes have their own limits.
  */
 const ipRequestCounts = new Map<string, { count: number; resetTime: number }>();
-const IP_RATE_LIMIT = 300;        // max requests per window
-const IP_RATE_WINDOW_MS = 60_000; // 1 minute window
-const IP_CACHE_MAX = 50_000;      // prevent unbounded memory growth
+const IP_RATE_LIMIT_ANONYMOUS = 600;       // max requests per window for unauthenticated IP (10 req/s)
+const IP_RATE_LIMIT_AUTHENTICATED = 6000;  // max requests per window for campus NAT with authenticated users (100 req/s)
+const IP_RATE_WINDOW_MS = 60_000;          // 1 minute window
+const IP_CACHE_MAX = 50_000;               // prevent unbounded memory growth
 
-function checkGlobalRateLimit(ip: string): { allowed: boolean; remaining: number } {
+function checkGlobalRateLimit(ip: string, isAuthenticated: boolean = false): { allowed: boolean; remaining: number; limit: number } {
+    const limit = isAuthenticated ? IP_RATE_LIMIT_AUTHENTICATED : IP_RATE_LIMIT_ANONYMOUS;
     const now = Date.now();
 
     // Bounded eviction when at capacity: scan up to 1500 front entries instead of all 50,000
@@ -51,15 +53,15 @@ function checkGlobalRateLimit(ip: string): { allowed: boolean; remaining: number
     const entry = ipRequestCounts.get(ip);
     if (!entry || now > entry.resetTime) {
         ipRequestCounts.set(ip, { count: 1, resetTime: now + IP_RATE_WINDOW_MS });
-        return { allowed: true, remaining: IP_RATE_LIMIT - 1 };
+        return { allowed: true, remaining: limit - 1, limit };
     }
 
     entry.count++;
-    if (entry.count > IP_RATE_LIMIT) {
-        return { allowed: false, remaining: 0 };
+    if (entry.count > limit) {
+        return { allowed: false, remaining: 0, limit };
     }
 
-    return { allowed: true, remaining: IP_RATE_LIMIT - entry.count };
+    return { allowed: true, remaining: limit - entry.count, limit };
 }
 
 // ============================================================================
@@ -89,7 +91,6 @@ const PUBLIC_API_ROUTES = [
     '/api/auth/google',
     '/api/landing-video',
     '/api/get-rules-content',
-    '/api/get-bus-fee',
     '/api/faculties',
     '/api/settings/privacy-config',
     '/api/settings/terms-config',
@@ -209,32 +210,33 @@ function isCronRoute(pathname: string): boolean {
 }
 
 /**
- * Extract the allowed origins for CSRF checks
+ * Validate allowed origins for CSRF checks strictly from environment configuration
  */
-const STATIC_ALLOWED_ORIGINS: Set<string> = (() => {
-    const origins = [
-        process.env.NEXT_PUBLIC_APP_URL || '',
-        'https://adtu-itms.vercel.app',
-    ].filter(Boolean);
+export function isOriginAllowed(origin: string): boolean {
+    if (!origin) return false;
 
-    if (process.env.NODE_ENV === 'development') {
-        origins.push('http://localhost:3000', 'http://127.0.0.1:3000');
-    }
+    // Configured primary application URL
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL;
+    if (appUrl && origin === appUrl) return true;
 
+    // Explicitly configured allowed origins (comma-separated in ALLOWED_ORIGINS)
     const explicit = (process.env.ALLOWED_ORIGINS || '')
         .split(',')
         .map(s => s.trim())
         .filter(Boolean);
+    if (explicit.includes(origin)) return true;
 
-    return new Set([...origins, ...explicit]);
-})();
-
-export function isOriginAllowed(origin: string): boolean {
-    if (STATIC_ALLOWED_ORIGINS.has(origin)) return true;
+    // Platform-managed preview domains (Vercel)
     if (process.env.VERCEL_URL && origin === `https://${process.env.VERCEL_URL}`) return true;
     if (process.env.VERCEL_PROJECT_PRODUCTION_URL && origin === `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`) return true;
-    if (process.env.NODE_ENV === 'development' && origin.startsWith('http://localhost:')) return true;
-    if (process.env.NODE_ENV === 'development' && origin.includes('.devtunnels.ms')) return true;
+
+    // Local development loopback origins
+    if (process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test') {
+        if (origin === 'http://localhost:3000' || origin === 'http://127.0.0.1:3000') return true;
+        if (origin.startsWith('http://localhost:')) return true;
+        if (origin.includes('.devtunnels.ms')) return true;
+    }
+
     return false;
 }
 
@@ -331,12 +333,20 @@ export async function proxy(request: NextRequest) {
         process.env.LOAD_TEST_SECRET &&
         request.headers.get('x-load-test-bypass') === process.env.LOAD_TEST_SECRET;
 
-    const rateLimit = checkGlobalRateLimit(clientIp);
+    const hasAuthToken = Boolean(
+        request.cookies.get('session')?.value ||
+        request.cookies.get('token')?.value ||
+        request.headers.get('authorization')?.startsWith('Bearer ') ||
+        request.headers.get('x-device-id') ||
+        request.headers.get('x-internal-token')
+    );
+
+    const rateLimit = checkGlobalRateLimit(clientIp, hasAuthToken);
     if (!isLoadTestBypass && !rateLimit.allowed) {
-        console.warn(`[PROXY] Rate limit exceeded for IP ${clientIp} on ${pathname}`);
+        console.warn(`[PROXY] Rate limit exceeded for IP ${clientIp} on ${pathname} (auth: ${hasAuthToken})`);
         return jsonError('Too many requests', 429, {
             'Retry-After': '60',
-            'X-RateLimit-Limit': String(IP_RATE_LIMIT),
+            'X-RateLimit-Limit': String(rateLimit.limit),
             'X-RateLimit-Remaining': '0',
         });
     }

@@ -67,6 +67,56 @@ interface WaitingFlag {
   ackByDriverUid?: string;
 }
 
+interface QueuedGpsPoint {
+  tripId: string;
+  busId: string;
+  routeId: string;
+  lat: number;
+  lng: number;
+  accuracy?: number;
+  speed?: number;
+  heading?: number;
+  timestamp: string;
+  createdAtMs: number;
+}
+
+const OFFLINE_QUEUE_KEY = 'itms_driver_offline_gps_queue';
+const MAX_OFFLINE_QUEUE_POINTS = 50;
+const OFFLINE_POINT_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+function getOfflineQueue(activeTripId?: string | null): QueuedGpsPoint[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(OFFLINE_QUEUE_KEY);
+    if (!raw) return [];
+    const list: QueuedGpsPoint[] = JSON.parse(raw);
+    const now = Date.now();
+    return list.filter(p => (now - p.createdAtMs <= OFFLINE_POINT_TTL_MS) && (!activeTripId || p.tripId === activeTripId));
+  } catch {
+    return [];
+  }
+}
+
+function enqueueOfflinePoint(point: QueuedGpsPoint) {
+  if (typeof window === 'undefined') return;
+  try {
+    const queue = getOfflineQueue(point.tripId);
+    queue.push(point);
+    while (queue.length > MAX_OFFLINE_QUEUE_POINTS) {
+      queue.shift();
+    }
+    localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(queue));
+  } catch (err) {
+    console.warn('[OfflineGPS] Failed to buffer to localStorage:', err);
+  }
+}
+
+function clearOfflineQueue() {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.removeItem(OFFLINE_QUEUE_KEY);
+  } catch {}
+}
 
 export default function DriverLiveTrackingPage() {
   const { currentUser, userData, loading: authLoading } = useAuth();
@@ -830,13 +880,13 @@ export default function DriverLiveTrackingPage() {
           }
         });
 
-      // Start heartbeat every 1 minute to keep session alive
+      // Start heartbeat every 10 seconds to keep session alive within 30s timeout
       deviceSessionHeartbeatRef.current = setInterval(async () => {
         const success = await heartbeatDeviceSession(currentUser.uid, 'driver_location_share');
         if (!success) {
           console.warn('⚠️ Device session heartbeat failed');
         }
-      }, 60000);
+      }, 10000);
     } else {
       // Trip ended - release session
       if (deviceSessionHeartbeatRef.current) {
@@ -1071,6 +1121,66 @@ export default function DriverLiveTrackingPage() {
     };
   }, [tripActive]);
 
+  const isFlushingRef = useRef(false);
+
+  // Flushes queued offline points in FIFO order upon network recovery
+  const flushOfflineQueue = useCallback(async (activeTripId: string | null) => {
+    if (!activeTripId || isFlushingRef.current || !currentUser) return;
+    const queue = getOfflineQueue(activeTripId);
+    if (queue.length === 0) return;
+
+    isFlushingRef.current = true;
+    try {
+      const idToken = await currentUser.getIdToken();
+      const deviceId = currentDeviceId.current || getOrCreateDeviceId();
+      const remaining: QueuedGpsPoint[] = [];
+
+      for (let i = 0; i < queue.length; i++) {
+        const item = queue[i];
+        try {
+          const res = await fetch("/api/location/update", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${idToken}`,
+              "x-device-id": deviceId,
+            },
+            body: JSON.stringify({
+              idToken,
+              deviceId,
+              busId: item.busId,
+              routeId: item.routeId,
+              lat: item.lat,
+              lng: item.lng,
+              accuracy: item.accuracy,
+              speed: item.speed,
+              heading: item.heading,
+              timestamp: item.timestamp,
+              tripId: item.tripId,
+              isFallback: false,
+            }),
+          });
+          if (!res.ok && res.status >= 500) {
+            remaining.push(...queue.slice(i));
+            break;
+          }
+        } catch {
+          remaining.push(...queue.slice(i));
+          break;
+        }
+      }
+      if (typeof window !== 'undefined') {
+        if (remaining.length > 0) {
+          localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(remaining));
+        } else {
+          localStorage.removeItem(OFFLINE_QUEUE_KEY);
+        }
+      }
+    } finally {
+      isFlushingRef.current = false;
+    }
+  }, [currentUser]);
+
   // Stable across renders (empty deps): reads the latest inputs from broadcastInputsRef so the
   // broadcast interval never needs to be recreated to pick up new GPS positions.
   const broadcastLocation = useCallback(async () => {
@@ -1087,6 +1197,7 @@ export default function DriverLiveTrackingPage() {
     const resolvedBus = busData?.busId || busData?.id || selectedBusId;
     const currentHeading = (currentLocation as any).heading ?? 0;
     const currentIsoTimestamp = new Date().toISOString();
+    const currentRouteId = routeData?.routeId || routeData?.id || busData?.route_id || 'unassigned';
 
     // Authoritative HTTP path for GPS pipeline, DB breadcrumbs, and PostgreSQL heartbeat
     // (Bypassing direct WS location stream to prevent unvalidated duplicate broadcasts)
@@ -1104,7 +1215,7 @@ export default function DriverLiveTrackingPage() {
           idToken,
           deviceId,
           busId: resolvedBus,
-          routeId: routeData?.routeId || routeData?.id || busData?.route_id || 'unassigned',
+          routeId: currentRouteId,
           lat: currentLocation.lat,
           lng: currentLocation.lng,
           accuracy: accuracy,
@@ -1120,11 +1231,28 @@ export default function DriverLiveTrackingPage() {
 
       if (!response.ok) {
         console.warn("⚠️ Location update failed:", response.status);
+      } else if (tripId) {
+        // Success: flush any previously buffered offline points
+        flushOfflineQueue(tripId);
       }
     } catch (error) {
-      console.error("❌ Error broadcasting location:", error);
+      console.warn("⚠️ Error broadcasting location (buffering offline):", error);
+      if (tripId) {
+        enqueueOfflinePoint({
+          tripId,
+          busId: resolvedBus,
+          routeId: currentRouteId,
+          lat: currentLocation.lat,
+          lng: currentLocation.lng,
+          accuracy,
+          speed,
+          heading: currentHeading,
+          timestamp: currentIsoTimestamp,
+          createdAtMs: Date.now(),
+        });
+      }
     }
-  }, [selectedBusId]);
+  }, [selectedBusId, flushOfflineQueue]);
 
   // Comprehensive Mobile App Resume & Lock/Unlock Auto-Recovery
   useEffect(() => {
@@ -1336,6 +1464,7 @@ export default function DriverLiveTrackingPage() {
     try {
       setLoading(true);
       stopLocationTracking();
+      clearOfflineQueue();
 
       const idToken = await currentUser.getIdToken();
       console.log("🏁 Ending trip with data:", {

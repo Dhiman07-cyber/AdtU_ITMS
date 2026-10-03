@@ -27,7 +27,7 @@ export default function StudentLayout({ children }: StudentLayoutProps) {
           { href: "/student/bus-pass", icon: QrCode, label: "Bus Pass" },
         ]
       : []),
-    { href: "/student/renew-services", icon: RefreshCcw, label: "Renewal" },
+    { href: "/student/renew", icon: RefreshCcw, label: "Renewal" },
     { href: "/student/profile", icon: User, label: "Profile" },
   ];
 

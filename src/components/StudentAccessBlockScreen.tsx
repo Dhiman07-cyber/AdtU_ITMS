@@ -240,7 +240,7 @@ export default function StudentAccessBlockScreen({
                 After you pay (online or offline), your renewal is reviewed and approved by an administrator. Transport access — tracking, bus pass, and trip access — is restored once your renewal is approved.
               </p>
               <Button
-                onClick={() => router.push('/student/renew-services')}
+                onClick={() => router.push('/student/renew')}
                 className="w-full bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white shadow-lg"
                 size="lg"
               >

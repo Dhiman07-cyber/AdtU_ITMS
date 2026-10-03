@@ -18,8 +18,12 @@ export async function GET(req: NextRequest) {
     }
 
     return NextResponse.json({
+      success: true,
       amount: busFeeAmount,
-      fees: busFeeAmount
+      fees: busFeeAmount,
+      data: {
+        amount: busFeeAmount
+      }
     });
   } catch (error: any) {
     console.error('Error fetching bus fees:', error);

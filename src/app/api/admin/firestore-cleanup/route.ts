@@ -35,19 +35,6 @@ export const POST = withSecurity(
             
             if (error) console.error('Error cleaning active_trips:', error);
             results.activeTripsDeleted = count || 0;
-
-            // Also clean legacy Firestore trip_sessions
-            try {
-                const oldTripsSnapshot = await adminDb.collection('trip_sessions').where('endedAt', '<', cutoffDate).limit(400).get();
-                if (oldTripsSnapshot.size > 0) {
-                    const batch = adminDb.batch();
-                    oldTripsSnapshot.docs.forEach(doc => batch.delete(doc.ref));
-                    await batch.commit();
-                    results.firestoreTripSessionsDeleted = oldTripsSnapshot.size;
-                }
-            } catch (fsError) {
-                console.warn('Firestore trip_sessions cleanup non-critical error:', fsError);
-            }
         }
 
         // 2. Clean Reassignment / Audit Logs

@@ -17,9 +17,11 @@ export const GET = withSecurity(
     async (request, { auth }) => {
         // Phase 3 — students may only see live trip status while they own transport
         // access. Staff (driver/admin/moderator) are exempt from this gate.
+        let studentRecord: Record<string, any> | null = null;
         if (auth.role === 'student') {
             const gate = await requireTransportEntitlement(auth.uid);
             if (!gate.ok) return (gate as any).response;
+            studentRecord = gate.student;
         }
 
         // Extract busId from URL parameters for GET request
@@ -35,10 +37,20 @@ export const GET = withSecurity(
         }
 
         // Resolve student profile once — reused for both the bus-assignment security
-        // check and the shift-compatibility check below. Avoids duplicate DB call.
+        // check and the shift-compatibility check below.
+        // PERF: Reuses the student record already loaded by requireTransportEntitlement()
+        // to eliminate an unnecessary second PostgREST query to student_profiles.
         let studentProfile: { busId?: string | null; shift?: string | null } | null = null;
         if (auth.role === 'student') {
-            studentProfile = await getStudentProfileAndShift(auth.uid);
+            if (studentRecord) {
+                const { normalizeShift } = await import('@/lib/utils/shift-utils');
+                studentProfile = {
+                    busId: studentRecord.busId || studentRecord.bus_id || null,
+                    shift: normalizeShift(studentRecord.shift),
+                };
+            } else {
+                studentProfile = await getStudentProfileAndShift(auth.uid);
+            }
             const studentBusId = studentProfile.busId;
             if (studentBusId && studentBusId !== busId && studentBusId !== busId.replace('bus_', '') && `bus_${studentBusId}` !== busId) {
                 return NextResponse.json({

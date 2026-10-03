@@ -108,7 +108,7 @@ export default function StudentRenewalPage() {
   useEffect(() => {
     const fetchBusFee = async () => {
       try {
-        const response = await fetch('/api/get-bus-fee');
+        const response = await fetch('/api/settings/bus-fees');
         if (response.ok) {
           const result = await response.json();
           if (result.success && result.data?.amount) {

@@ -1,13 +1,9 @@
 /**
- * D11 Admin Service
+ * Admin Service
  *
- * Orchestration only — no business logic ownership. Wraps existing
- * admin-specific services for email notifications, bus load reconciliation,
- * integrity detection, and session activation orchestration.
- *
- * ponytail: each underlying service is the canonical implementation —
- * wrapped by reference, not reimplemented. Assignment and reassignment
- * orchestration delegates to their respective domain modules.
+ * Orchestration only — wraps admin-specific operations for email notifications,
+ * bus load reconciliation, integrity detection, and session activation orchestration.
+ * Assignment and reassignment orchestration delegates to their respective domain modules.
  */
 import {
 	sendApplicationApprovedNotification,

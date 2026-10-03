@@ -182,8 +182,13 @@ function getAllowedOriginHosts(): Set<string> {
     if (appUrl) {
         try { hosts.add(new URL(appUrl).host); } catch {}
     }
-    hosts.add('adtu-itms.vercel.app');
-    if (process.env.NODE_ENV === 'development') {
+    if (process.env.VERCEL_URL) {
+        try { hosts.add(new URL(`https://${process.env.VERCEL_URL}`).host); } catch {}
+    }
+    if (process.env.VERCEL_PROJECT_PRODUCTION_URL) {
+        try { hosts.add(new URL(`https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`).host); } catch {}
+    }
+    if (process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test') {
         hosts.add('localhost:3000');
         hosts.add('127.0.0.1:3000');
     }
@@ -204,18 +209,14 @@ export function isOriginAllowed(origin: string): boolean {
         const host = parsed.host;
         const hostname = parsed.hostname;
 
-        // In development, allow localhost/127.0.0.1 on any port and dev tunnels
-        if (process.env.NODE_ENV === 'development') {
+        // In development / test, allow localhost/127.0.0.1 on any port and dev tunnels
+        if (process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test') {
             if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') return true;
             if (hostname.endsWith('.devtunnels.ms') || hostname.endsWith('.ngrok-free.app')) return true;
         }
 
-        if (!cachedAllowedHosts) {
-            cachedAllowedHosts = getAllowedOriginHosts();
-        }
-
-        if (cachedAllowedHosts.has(host) || cachedAllowedHosts.has(hostname)) return true;
-        if (hostname.endsWith('.vercel.app') || hostname.endsWith('.adtu.in')) return true;
+        const allowedHosts = getAllowedOriginHosts();
+        if (allowedHosts.has(host) || allowedHosts.has(hostname)) return true;
 
         return false;
     } catch {

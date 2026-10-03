@@ -24,8 +24,16 @@ describe('Master Security Boundaries & Invariant Suite', () => {
       expect(isOriginAllowed('https://google.com')).toBe(false);
     });
 
-    it('allows trusted production and localhost origins', () => {
-      expect(isOriginAllowed('https://adtu-itms.vercel.app')).toBe(true);
+    it('allows configured production and localhost origins', () => {
+      const original = process.env.NEXT_PUBLIC_APP_URL;
+      process.env.NEXT_PUBLIC_APP_URL = 'https://itms.university.edu';
+      expect(isOriginAllowed('https://itms.university.edu')).toBe(true);
+      expect(isOriginAllowed('http://localhost:3000')).toBe(true);
+      if (original) {
+        process.env.NEXT_PUBLIC_APP_URL = original;
+      } else {
+        delete process.env.NEXT_PUBLIC_APP_URL;
+      }
     });
 
     it('validateOrigin blocks state-changing requests with missing Origin and Referer when unauthenticated (SEC-01/02)', () => {
@@ -132,7 +140,6 @@ describe('Master Security Boundaries & Invariant Suite', () => {
     afterEach(() => {
       (process.env as any).NODE_ENV = originalEnv;
       process.env.REDIS_URL = originalRedisUrl;
-      delete process.env.ALLOW_INSECURE_LOCAL_GPS_FALLBACK;
       const g = globalThis as any;
       if (g.__gpsRedis) {
         if (g.__gpsRedis.reconnectTimer) {
@@ -149,7 +156,6 @@ describe('Master Security Boundaries & Invariant Suite', () => {
     it('fails closed and returns redis_unavailable in production when Redis is unreachable', async () => {
       (process.env as any).NODE_ENV = 'production';
       process.env.REDIS_URL = 'redis://invalid-nonexistent-redis-host:6379';
-      delete process.env.ALLOW_INSECURE_LOCAL_GPS_FALLBACK;
 
       const result = await atomicGpsGuardAndUpdate('BUS_TEST_FAILCLOSED', 26.1, 91.8, Date.now(), Date.now());
       expect(result).toBe('redis_unavailable');

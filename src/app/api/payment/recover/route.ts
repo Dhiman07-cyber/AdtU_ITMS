@@ -341,8 +341,11 @@ export const GET = withSecurity(
 );
 
 export async function OPTIONS(request: Request) {
-    const origin = request.headers.get('origin') || '';
-    const allowedOrigins = ['https://adtu-itms.vercel.app', process.env.NEXT_PUBLIC_APP_URL || ''].filter(Boolean);
+    const explicitOrigins = (process.env.ALLOWED_ORIGINS || '')
+        .split(',')
+        .map(s => s.trim())
+        .filter(Boolean);
+    const allowedOrigins = [process.env.NEXT_PUBLIC_APP_URL || '', ...explicitOrigins].filter(Boolean);
     const isVercelPreview = /^https:\/\/.*\.vercel\.app$/.test(origin);
     const isLocalhost = process.env.NODE_ENV === 'development' && (origin === 'http://localhost:3000' || origin === 'http://127.0.0.1:3000');
     const isAllowed = allowedOrigins.includes(origin) || isVercelPreview || isLocalhost;

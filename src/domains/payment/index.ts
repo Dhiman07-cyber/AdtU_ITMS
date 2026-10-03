@@ -26,9 +26,9 @@
 //
 // FIRESTORE FROZEN COLLECTIONS:
 //
-// ponytail: Razorpay gateway helpers (order creation, signature verification)
-// and the raw Postgres repository are implementation details, not exposed
-// here — only payment business outcomes are.
+// Razorpay gateway helpers (order creation, signature verification)
+// and the raw Postgres repository are internal implementation details.
+// Only payment business outcomes and operations are exported here.
 export {
 	approveOfflinePayment,createOfflinePaymentAtApproval,createOnlinePayment,getAll,getById,getByStudent,getDetails,getPending,isProcessed,processCapturedPayment,rejectApplicationPayment,rejectOfflinePayment,
 	upsertApprovalPayment

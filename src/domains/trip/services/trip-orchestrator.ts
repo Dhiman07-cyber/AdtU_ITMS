@@ -206,22 +206,23 @@ export async function endTrip(params: EndTripParams): Promise<EndTripOutput> {
     return { success: true, reason: 'No active trip found' };
   }
 
-  // Enforce 10-minute minimum duration rule:
+  // Short-trip classification rule:
   // If driver accidentally started and immediately ended trip (<10 minutes),
-  // do NOT save to driver_trip_history and delete the accidental trip row.
-  const IS_ACCIDENTAL_SHORT_TRIP = tripDurationMinutes > 0 && tripDurationMinutes < 10;
+  // record in driver_trip_history with status: 'terminated_early' and reason: 'short_trip'.
+  const IS_SHORT_TRIP = tripDurationMinutes > 0 && tripDurationMinutes < 10;
 
-  if (IS_ACCIDENTAL_SHORT_TRIP) {
-    appLogger.info('trip', 'short_duration_discarded', {
+  if (IS_SHORT_TRIP) {
+    appLogger.info('trip', 'short_duration_classified', {
       ...logCtx,
       tripId: activeTripId,
       durationMinutes: Math.round(tripDurationMinutes * 10) / 10,
-      reason: 'Trip duration < 10 minutes — discarded from history',
+      classification: 'terminated_early (short_trip)',
+      reason: 'Trip duration < 10 minutes — recorded as terminated_early in history',
     });
   }
 
   // 1. Authoritative state transition FIRST — no side effects until this succeeds.
-  // Sub-10-minute ("accidental") trips are discarded from driver_trip_history
+  // Sub-10-minute trips are classified as terminated_early in driver_trip_history
   // inside the RPC; cleanup + broadcast below still run so clients converge.
   const endResult = await tripLockService.endTrip(activeTripId, params.driverId, params.busId, 600);
 

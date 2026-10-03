@@ -126,7 +126,7 @@ export async function fetchDashboardRawData(): Promise<DashboardRawData> {
     supabase.from('driver_profiles').select('*', { count: 'exact', head: true }),
     getAllBuses(),
     routeService.getAll(),
-    adminDb.collection('feedbacks').where('createdAt', '>=', sevenDaysAgo).count().get().catch(() => ({ data: () => ({ count: 0 }) })),
+    adminDb.collection('feedback').where('created_at', '>=', sevenDaysAgo.toISOString()).count().get().catch(() => ({ data: () => ({ count: 0 }) })),
     supabase.from('active_trips').select('id, trip_id, bus_id, route_id, driver_id, driver_uid, status, start_time, started_at').eq('status', 'active'),
     supabase.from('payments').select('amount, method').or('status.eq.Completed,status.eq.completed'),
     adminDb.collection('settings').doc('config').get(),

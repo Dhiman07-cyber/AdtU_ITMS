@@ -1,14 +1,12 @@
 /**
- * D6 FleetService — public service contract per PHASE2.2/2.4.
+ * FleetService
  *
  * Responsibilities: bus lookup/CRUD, driver lookup/CRUD (master-data only).
  *
- * Bus/driver *assignment* lifecycle (DriverAssignment, BusRouteAssignment)
- * remains in src/lib/services/assignment-service.ts per the frozen domain
- * boundary. This service covers master-data only.
+ * Bus/driver assignment lifecycle remains in src/lib/services/assignment-service.ts.
+ * This service covers master-data only.
  *
- * Delegates entirely to fleet.repository → fleet.repository.pg → PostgreSQL.
- * Zero Firestore reads/writes.
+ * Delegates to fleet.repository → fleet.repository.pg → PostgreSQL.
  */
 import type { Bus,Driver } from '@/lib/types';
 import * as fleetRepository from '../repositories/fleet.repository';

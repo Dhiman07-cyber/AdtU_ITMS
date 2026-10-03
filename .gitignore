@@ -26,8 +26,9 @@ RULES.md
 *.env
 .env.docker
 
-# Vercel
+# Vercel & Render Project Metadata
 .vercel
+.render
 Master Prompts
 
 # Security - Never commit these

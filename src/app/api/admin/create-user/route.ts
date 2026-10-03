@@ -212,13 +212,13 @@ export const POST = withSecurity<CreateUserBody>(
                 }
             }
 
-            // Phase 2 — Atomic student creation + capacity allocation (single transaction).
+            // Atomic student creation + capacity allocation (single transaction).
             //   Admin-create intentionally preserves over-fill capability (no capacity
             //   gate). Capacity is incremented only when the student did not already
             //   exist, so a double-submit (same uid) can never double-allocate a seat.
             const studentBusId = studentDoc.busId;
 
-            // ponytail: idempotency check MUST happen BEFORE createStudent, not after.
+            // Idempotency check MUST happen BEFORE createStudent, not after.
             // If we create first and then check, alreadyExisted is always true and
             // capacity is never incremented — a silent data-integrity bug.
             const existingStudent = await getStudentById(uid);

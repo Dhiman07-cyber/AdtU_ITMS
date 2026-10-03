@@ -1,0 +1,28 @@
+services:
+  - type: web
+    name: itms-websocket-server
+    runtime: docker
+    dockerfilePath: ./server/Dockerfile
+    dockerContext: .
+    healthCheckPath: /health/live
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: WS_PORT
+        value: 3001
+      - key: HEALTH_PORT
+        value: 9090
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: FIREBASE_PROJECT_ID
+        sync: false
+      - key: FIREBASE_CLIENT_EMAIL
+        sync: false
+      - key: FIREBASE_PRIVATE_KEY
+        sync: false
+      - key: WS_PRIVILEGED_TOKEN
+        sync: false
+      - key: REDIS_URL
+        sync: false

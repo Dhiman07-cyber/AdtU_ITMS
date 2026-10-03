@@ -1,12 +1,9 @@
 /**
- * D13 AnalyticsService — public service contract per PHASE2.2/2.4.
+ * AnalyticsService
  *
  * Responsibilities: platform analytics (GA4), payment analytics,
- * dashboard aggregation, operational statistics. ALL computation,
- * aggregation, and formatting lives here — never in the repository.
- *
- * ponytail: delegates data retrieval to analyticsRepository (raw data only),
- * performs all business computation internally — zero behavior change.
+ * dashboard aggregation, operational statistics. All computation,
+ * aggregation, and formatting lives here.
  */
 import * as analyticsRepository from '../repositories/analytics.repository';
 

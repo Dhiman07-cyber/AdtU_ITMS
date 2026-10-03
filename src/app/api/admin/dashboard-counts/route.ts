@@ -53,7 +53,7 @@ export const GET = withSecurity(
         safeQuery(supabase.from('driver_profiles').select('*', { count: 'exact', head: true }), fallbackCount),
         safeQuery(getAllBuses(), []),
         safeQuery(routeService.getAll(), []),
-        adminDb ? safeQuery(adminDb.collection('feedbacks').where('createdAt', '>=', sevenDaysAgo).count().get().then(snap => ({ data: () => ({ count: snap.data().count }) })), { data: () => ({ count: 0 }) }) : Promise.resolve({ data: () => ({ count: 0 }) }),
+        adminDb ? safeQuery(adminDb.collection('feedback').where('created_at', '>=', sevenDaysAgo.toISOString()).count().get().then(snap => ({ data: () => ({ count: snap.data().count }) })), { data: () => ({ count: 0 }) }) : Promise.resolve({ data: () => ({ count: 0 }) }),
         safeQuery(supabase.from('active_trips').select('trip_id, bus_id, route_id, driver_id, start_time').eq('status', 'active').gt('expires_at', new Date().toISOString()), fallbackList),
         safeQuery(supabase.from('payments').select('amount, payment_method, method'), fallbackList),
         safeQuery(getSystemConfig(), null),

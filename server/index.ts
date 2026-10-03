@@ -88,6 +88,15 @@ async function main() {
         logger.warn('redis_broadcast_relay_init_failed', { error: (err as Error).message });
       });
     } else {
+      const isProd = process.env.NODE_ENV === 'production';
+      const isMultiInstance = process.env.WS_CLUSTER === 'true' || process.env.MULTI_INSTANCE === 'true';
+
+      if (isProd && isMultiInstance) {
+        logger.error('redis_mandatory_for_multi_instance_production', {
+          error: 'Multi-instance WebSocket deployment requires Redis for cross-node synchronization. Startup refused.',
+        });
+        process.exit(1);
+      }
       logger.info('redis_not_configured_running_single_node');
     }
   });
