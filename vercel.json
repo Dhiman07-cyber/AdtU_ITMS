@@ -14,7 +14,7 @@
     },
     {
       "path": "/api/cron/cleanup-stale-locks",
-      "schedule": "*/5 * * * *"
+      "schedule": "0 4 * * *"
     },
     {
       "path": "/api/cron/cleanup-trip-history",
