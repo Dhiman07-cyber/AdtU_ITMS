@@ -1,12 +1,43 @@
 # ADTU ITMS — Canonical System Invariant Ledger
 
-This document establishes the permanent, non-negotiable architectural, security, and business invariants governing the ADTU ITMS production platform. Every invariant is designated with a permanent identifier (`INV-*`) that must be preserved across engineering cycles.
+**Document ID:** `ITMS-INV-LEDGER-2026-V2`  
+**Standard:** Level 0 Global Production Engineering Rule & Level 1 ITMS Constitution  
+**Authority:** Master Architecture, Transaction Integrity & Security Charter  
+**Status:** CANONICAL & PERMANENTLY ACTIVE  
 
 ---
 
-## 1. Authentication & Identity Invariants
+## 1. Executive Summary
 
-### `INV-AUTH-001`: Authentication Boundary
+This document establishes the permanent, non-negotiable architectural, security, spatial, and business invariants governing the **Assam down town University Intelligent Transport Management System (ADTU ITMS)** production platform. 
+
+Every invariant is designated with a permanent identifier (`INV-*`) that must be preserved across all engineering lifecycles. No code refactoring, performance optimization, or UI redesign may violate, weaken, or bypass any invariant defined herein.
+
+```text
+                                  ADTU ITMS INVARIANT PYRAMID
+                                 ┌───────────────────────────┐
+                                 │     Financial Ledger      │  INV-PAY-* (Double-Entry, Idempotency)
+                                 │       & Entitlement       │
+                                 ├───────────────────────────┤
+                                 │    Spatial & Telematics   │  INV-GPS-*, INV-TRIP-* (Monotonicity,
+                                 │         Integrity         │  1 Active Trip Lock, Proof Dwell)
+                                 ├───────────────────────────┤
+                                 │    Realtime & Network     │  INV-WS-* (Handshake Auth, Redis
+                                 │        Concurrency        │  Role Eviction, Backpressure)
+                                 ├───────────────────────────┤
+                                 │   Identity, Session &     │  INV-AUTH-*, INV-CAP-* (Anti-IDOR,
+                                 │    Capacity Governance    │  Single Device, Row Locks)
+                                 ├───────────────────────────┤
+                                 │     Database Engine &     │  INV-DB-*, INV-INFRA-*, INV-CRYPTO-*
+                                 │   Cryptographic Defense   │  (RLS, AES-256-GCM, Proxy Perimeter)
+                                 └───────────────────────────┘
+```
+
+---
+
+## 2. Authentication & Identity Invariants
+
+### `INV-AUTH-001`: Cryptographic Authentication Boundary
 * **Statement:** Unauthenticated requests cannot execute protected operations under any circumstances.
 * **Authoritative Boundary:** Firebase Authentication ID token verification via `verifyToken()` (Admin SDK) and server-side route wrapper `withSecurity()` (`src/lib/security/api-security.ts`).
 * **Enforcement Mechanics:** Handshake/request headers must supply `Authorization: Bearer <token>`. Absence, expiration, or cryptographic tampering terminates execution before domain handlers run.
@@ -16,7 +47,11 @@ This document establishes the permanent, non-negotiable architectural, security,
 * **Statement:** User A cannot read or mutate User B's protected resources unless an explicit privileged administrative role (`admin`, `moderator`) authorizes cross-user execution.
 * **Scope:** Student profiles, renewal applications, payment records, driver assignments, device sessions, push tokens, and audit trails.
 * **Enforcement Mechanics:** Because server routes use Supabase `service_role` (which intentionally bypasses Postgres RLS), ownership checks MUST be explicitly executed in application route code:
-  `if (auth.role !== 'admin' && auth.uid !== targetUid) throw new ForbiddenError()`
+  ```typescript
+  if (auth.role !== 'admin' && auth.role !== 'moderator' && auth.uid !== targetUid) {
+    throw new ForbiddenError('Access to foreign resource is prohibited');
+  }
+  ```
 * **Verification Proof:** Unit & integration tests in `src/domains/student/__tests__/student.service.test.ts` and `src/app/api/students/__tests__/pagination.test.ts`.
 
 ### `INV-AUTH-003`: Role Revocation & Active WS Eviction
@@ -36,6 +71,7 @@ This document establishes the permanent, non-negotiable architectural, security,
   - Active session on Device A rejects Device B requests with `403` and error code `ANOTHER_DEVICE_ACTIVE`.
   - Missing device identifier while an active session exists is strictly rejected.
   - Expired sessions (>30s without heartbeat) allow takeover.
+  - Network timeouts during validation fail closed (`failClosed: true`).
 * **Verification Proof:** Route handlers in `src/app/api/location/update/route.ts` and `src/app/api/driver/update-location/route.ts`, plus unit suite in `src/lib/security/__tests__/security-boundaries-master.test.ts`.
 
 ### `INV-AUTH-005`: CSRF & Origin Validation
@@ -44,7 +80,7 @@ This document establishes the permanent, non-negotiable architectural, security,
 * **Enforcement Mechanics:**
   - State-changing browser requests must provide a verified `Origin` or `Referer` matching allowlisted production domains or localhost.
   - Requests missing `Origin`/`Referer` are strictly rejected unless accompanied by an `Authorization: Bearer <token>` header (non-browser API/mobile client).
-  - Wildcard subdomain parsing is prevented; exact host matches are enforced.
+  - Wildcard subdomain parsing is prevented; exact host matches are enforced (`adtu-bus.vercel.app`, `adtu-bus-xq.vercel.app`).
 * **Verification Proof:** `src/lib/security/__tests__/security-boundaries-master.test.ts` (`SEC-01`, `SEC-02`, `SEC-03`).
 
 ### `INV-AUTH-006`: Trusted Client IP Resolution
@@ -55,14 +91,14 @@ This document establishes the permanent, non-negotiable architectural, security,
   - When reaching Next.js through NGINX, `X-Real-IP` is unconditionally authoritative.
 * **Verification Proof:** Unit tests in `src/lib/security/__tests__/security-boundaries-master.test.ts`.
 
-### `INV-AUTH-007`: Bootstrap Protection
+### `INV-AUTH-007`: Bootstrap Account Creation Protection
 * **Statement:** First-admin and system initialization endpoints are timing-safe, rate-limited, fail-closed on DB uncertainty, and permanently disabled once an administrator exists.
 * **Authoritative Boundary:** `/api/create-first-admin` + PostgreSQL `users` count check.
-* **Enforcement Mechanics:** Strict IP rate limiting (3 req/hour), environment secret verification, fail-closed database query.
+* **Enforcement Mechanics:** Strict IP rate limiting (3 req/hour), constant-time comparison via `crypto.timingSafeEqual`, fail-closed database query (`DATABASE_UNAVAILABLE`).
 
 ---
 
-## 2. Real-Time & WebSocket Invariants
+## 3. Real-Time & WebSocket Invariants
 
 ### `INV-WS-001`: Authentication Before Privileged Processing
 * **Statement:** No client WebSocket message (subscribe, presence, trip commands) can be processed before successful authentication.
@@ -104,11 +140,11 @@ This document establishes the permanent, non-negotiable architectural, security,
 
 ---
 
-## 3. Trip Lifecycle Invariants
+## 4. Trip Lifecycle Invariants
 
-### `INV-TRIP-001`: Exactly One Active Trip per Bus/Driver
-* **Statement:** A bus and driver combination can have at most one active trip at any instant.
-* **Authoritative Boundary:** PostgreSQL table `active_trips` with unique constraint `UNIQUE (bus_id)` and atomic RPC `acquire_trip_lock`.
+### `INV-TRIP-001`: Three-Way Mutual Exclusion (One Active Trip)
+* **Statement:** In `active_trips`, a vehicle (`bus_id`), driver (`driver_id`), and route (`route_id`) may participate in at most ONE active trip simultaneously. Concurrent trip starts must be rejected by PostgreSQL constraints and distributed Redis locks.
+* **Authoritative Boundary:** PostgreSQL table `active_trips` with `UNIQUE (bus_id)` and atomic RPC `acquire_trip_lock`.
 * **Enforcement Mechanics:** Driver attempt to start a concurrent trip returns `409 Conflict`.
 * **Verification Proof:** `src/domains/trip/__tests__/concurrency.test.ts`.
 
@@ -127,7 +163,7 @@ This document establishes the permanent, non-negotiable architectural, security,
 
 ---
 
-## 4. GPS & Ingestion Invariants
+## 5. GPS & Ingestion Invariants
 
 ### `INV-GPS-001`: Device & Role Authentication
 * **Statement:** GPS ingestion is strictly restricted to authenticated drivers possessing an active trip and valid device session.
@@ -136,8 +172,8 @@ This document establishes the permanent, non-negotiable architectural, security,
 * **Statement:** Out-of-order GPS packets (older timestamp arriving after newer timestamp) are rejected and cannot overwrite live location state.
 * **Authoritative Boundary:** `gps-redis-guard.ts` atomic Redis Lua script comparing millisecond timestamps.
 
-### `INV-GPS-003`: Impossible Movement Rejection
-* **Statement:** Packets with impossible velocity (>120 km/h) or geographic teleportation (>1.5 km jump within 5 seconds) are rejected.
+### `INV-GPS-003`: Physical Feasibility & Bounding Box Sanity
+* **Statement:** Packets with impossible velocity (>120 km/h) or geographic teleportation (>1.5 km jump within 5 seconds) or falling outside the regional bounding box (25.0°N–28.5°N, 89.5°E–96.5°E) are strictly rejected.
 * **Authoritative Boundary:** `src/domains/gps/services/gps-pipeline.service.ts`.
 
 ### `INV-GPS-004`: Distributed Multi-Node Redis Coordination
@@ -154,7 +190,7 @@ This document establishes the permanent, non-negotiable architectural, security,
 
 ---
 
-## 5. Payment & Financial Invariants
+## 6. Payment & Financial Invariants
 
 ### `INV-PAY-001`: Payment Identity & Amount Binding
 * **Statement:** A payment transaction must be cryptographically bound to its trusted order, student, and exact currency amount before ledger commitment.
@@ -163,13 +199,13 @@ This document establishes the permanent, non-negotiable architectural, security,
 ### `INV-PAY-002`: Provider Event Idempotency
 * **Statement:** Repeated processing of the same provider payment ID (webhook retries, client verify-payment collisions) produces zero duplicate business effects.
 * **Authoritative Boundary:** PostgreSQL `payments.payment_id` unique constraint + `paymentsSupabaseService.createPayment()` CAS logic.
-* **Verification Proof:** `src/lib/payment/__tests__/` and `docs/06-evidence-and-verification/ITMS_CONCURRENCY_EVIDENCE.md`.
+* **Verification Proof:** `src/lib/payment/__tests__/` and `docs/06-evidence-and-verification/02-verification-battery-and-concurrency.md`.
 
 ### `INV-PAY-003`: Concurrent Distinct Payments for Same Renewal
 * **Statement:** Two distinct payment transactions executed concurrently for the same student academic session cannot allocate duplicate seats or double-renew validity.
 * **Authoritative Boundary:** Partial unique index `idx_applications_active_student_session` ON `applications(applicant_uid, session_start_year)` WHERE `state NOT IN ('rejected', 'cancelled', 'expired')`.
 
-### `INV-PAY-004`: processed_payments Architecture Alignment
+### `INV-PAY-004`: Processed Payments Architecture Alignment
 * **Statement:** Database tables and RPCs declared for idempotency must accurately reflect runtime application dependencies without phantom layers.
 * **Resolution:** PostgreSQL `payments(payment_id UNIQUE)` and `applications(applicant_uid, session_start_year UNIQUE)` provide the authoritative idempotency gate in production.
 
@@ -182,18 +218,18 @@ This document establishes the permanent, non-negotiable architectural, security,
 
 ---
 
-## 6. Capacity & Allocation Invariants
+## 7. Capacity & Allocation Invariants
 
 ### `INV-CAP-001`: Occupied Seats Never Exceed Capacity
 * **Statement:** For every bus and shift, `occupied_seats <= capacity` at all times.
 * **Authoritative Boundary:** PostgreSQL CHECK constraints and transactional locking in `bus_increment_capacity` and `approve_renewal_with_seat`.
-* **Verification Proof:** `docs/06-evidence-and-verification/ITMS_CONCURRENCY_EVIDENCE.md`.
+* **Verification Proof:** `docs/06-evidence-and-verification/02-verification-battery-and-concurrency.md`.
 
 ### `INV-CAP-002`: Authoritative Capacity RPC
 * **Statement:** Client and API route pre-checks are strictly advisory. The database RPC transaction (`bus_increment_capacity`) executes the authoritative seat check with row-level locks (`FOR UPDATE`).
 
 ### `INV-CAP-003`: Atomic Student Reassignment
-* **Statement:** Reassigning students across buses is all-or-nothing, locks both buses in deterministic order to prevent deadlocks, and verifies available seats.
+* **Statement:** Reassigning students across buses is all-or-nothing, locks both buses in deterministic order (`id ASC`) to prevent deadlocks, and verifies available seats.
 * **Authoritative Boundary:** PostgreSQL RPC `reassign_students_atomically(JSONB)`.
 
 ### `INV-CAP-004`: Rollback Safety
@@ -205,7 +241,7 @@ This document establishes the permanent, non-negotiable architectural, security,
 
 ---
 
-## 7. Database & Schema Invariants
+## 8. Database & Schema Invariants
 
 ### `INV-DB-001`: Schema Reproducibility
 * **Statement:** A clean database built from `COMPLETE_SCHEMA.sql` must produce the identical table structure, indexes, and constraints as the cumulative migration chain.
@@ -222,7 +258,7 @@ This document establishes the permanent, non-negotiable architectural, security,
 
 ---
 
-## 8. Cron & Scheduled Execution Invariants
+## 9. Cron & Scheduled Execution Invariants
 
 ### `INV-CRON-001`: Cron Endpoint Authentication
 * **Statement:** Scheduled cron routes (`/api/cron/*`) can only be executed by requests supplying the authoritative `CRON_SECRET` in the `Authorization: Bearer <secret>` header.
@@ -237,7 +273,7 @@ This document establishes the permanent, non-negotiable architectural, security,
 
 ---
 
-## 9. Notification Invariants
+## 10. Notification Invariants
 
 ### `INV-NOTIF-001`: Recipient Authorization
 * **Statement:** Notifications and FCM messages are dispatched exclusively to the intended user's registered device tokens.
@@ -253,10 +289,10 @@ This document establishes the permanent, non-negotiable architectural, security,
 
 ---
 
-## 10. Cryptographic Invariants
+## 11. Cryptographic Invariants
 
 ### `INV-CRYPTO-001`: Strong Token Generation
-* **Statement:** Bus pass QR codes and payment reference tokens use authenticated encryption (`AES-256-GCM` with 128-bit authentication tags and unique IVs).
+* **Statement:** Bus pass QR codes and payment reference tokens use authenticated encryption (`AES-256-GCM` with 128-bit authentication tags and unique IVs) or HMAC-SHA256 digests.
 * **Authoritative Boundary:** `src/lib/security/encryption.service.ts`.
 
 ### `INV-CRYPTO-002`: Legacy Token Policy
@@ -267,13 +303,13 @@ This document establishes the permanent, non-negotiable architectural, security,
 
 ---
 
-## 11. Infrastructure & Deployment Invariants
+## 12. Infrastructure & Deployment Invariants
 
 ### `INV-INFRA-001`: Trusted Proxy Boundary
 * **Statement:** Forwarding headers are only trusted from the controlled NGINX proxy boundary.
 
 ### `INV-INFRA-002`: Zero Direct Exposure of Internal Services
-* **Statement:** Internal application services (Next.js port 3000, WS ports 3001/3003, Redis port 6379, Prometheus port 9090, Grafana port 3002) are bound strictly to `127.0.0.1` or internal Docker networks. Only ports 80 and 443 on NGINX are exposed publicly.
+* **Statement:** Internal application services (Next.js port 3000, WS port 3001, Redis port 6379, Prometheus port 9090, Grafana port 3002) are bound strictly to `127.0.0.1` or internal Docker networks. Only ports 80 and 443 on NGINX are exposed publicly.
 * **Authoritative Boundary:** `docker-compose.prod.yml` network and port mappings.
 
 ### `INV-INFRA-003`: Redis Authentication

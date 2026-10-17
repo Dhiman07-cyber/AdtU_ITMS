@@ -43,15 +43,15 @@ All critical invariants flow from this operational spine:
                           │                              │
                           ▼                              ▼
              ┌─────────────────────────┐    ┌─────────────────────────┐
-             │ Next.js App Router Node │    │ Clustered WS Cluster    │
-             │   (Port 3000, Node 20)  │    │  WS1 (:3001), WS2 (:3003)│
+             │ Next.js App Router Node │    │ Realtime WebSocket Node │
+             │   (Port 3000, Node 20)  │    │      (ws1 on :3001)     │
              └────────────┬────────────┘    └────────────┬────────────┘
                           │                              │
                           ├──────────────┬───────────────┤
                           ▼              ▼               ▼
                  ┌────────────────┐┌───────────┐┌────────────────┐
-                 │  PostgreSQL 15 ││  Redis 7  ││ Firebase Auth  │
-                 │   (Supabase)   ││  Pub/Sub  ││  & Admin SDK   │
+                 │  PostgreSQL    ││  Redis 7  ││ Firebase Auth  │
+                 │   (Supabase)   ││Coordination││  & Admin SDK   │
                  └────────────────┘└───────────┘└────────────────┘
 ```
 
@@ -59,14 +59,13 @@ All critical invariants flow from this operational spine:
 1. **Next.js Web & API Server (Port 3000):**
    - App Router handling user identity, student admissions, driver assignments, fleet management, and offline/online payment processing.
    - Guarded by `withSecurity` middleware providing JWT decoding, RBAC validation, and fail-closed error formatting.
-2. **Clustered WebSocket Nodes (WS1 on :3001, WS2 on :3003):**
-   - Clustered socket servers providing sub-100ms real-time bus location delivery, waiting flag alerts, and emergency notifications.
-   - Connected via Redis Pub/Sub relay (`bus_location_events` and `driver_channel`).
+2. **Realtime WebSocket Server (ws1 on :3001):**
+   - Dedicated socket runtime providing sub-50ms real-time bus location delivery, waiting flag alerts, and lifecycle notifications.
+   - Serves immediate location snapshots from in-process memory and broadcasts directly to subscribed student and driver sockets.
 3. **Redis 7 (Port 6379):**
-   - Message broker for cross-node WebSocket relay.
-   - L1 in-memory cache for live GPS snapshots (`bus_location:{busId}`).
-   - Distributed driver session cache (`driver_session:{driverUid}`).
-   - Atomic rate limiting and monotonic GPS timestamp sequencing via Lua scripts.
+   - Atomic multi-instance GPS validation guard via Lua scripts (monotonic timestamps, replay protection, speed and spatial jump caps).
+   - Cross-process security role invalidation coordination (`itms:roles:invalidate`).
+   - Distributed device session cache.
 4. **PostgreSQL 15 (Supabase):**
    - Authoritative relational data store with ACID row-locking RPCs, foreign keys with `ON DELETE CASCADE`, and check constraints.
 
@@ -179,7 +178,7 @@ All critical invariants are guaranteed by PostgreSQL constraints and ACID RPCs i
 | RPC Function | Signature | Authoritative Actions & Invariant Guarantees |
 | :--- | :--- | :--- |
 | `acquire_trip_lock` | `(p_bus_id, p_driver_id, p_trip_id, p_ttl_seconds)` | 1. Auto-cleans expired trips (`cleanup_stale_trips`).<br>2. Verifies driver is active and bus is available.<br>3. Inserts row into `active_trips` with 3-way uniqueness.<br>4. Rejects concurrent attempts with error code `TRIP_ALREADY_ACTIVE`. |
-| `release_trip_lock` | `(p_trip_id, p_driver_id, p_end_time)` | 1. Locks and deletes row in `active_trips`.<br>2. Deletes active tracking points in `bus_locations`.<br>3. Cancels unresolved waiting flags (`raised`, `acknowledged`).<br>4. Inserts completed trip record into `trips` history. |
+| `release_trip_lock` | `(p_trip_id, p_driver_id, p_end_time)` | 1. Locks and deletes row in `active_trips`.<br>2. Clears ephemeral tracking state in Redis (`gps:last:{busId}`).<br>3. Cancels unresolved waiting flags (`raised`, `acknowledged`).<br>4. Inserts completed trip record into `trips` history. |
 | `cleanup_stale_trips` | `()` | 1. Scans `active_trips` where `expires_at < now()`.<br>2. Deletes expired active trips and cancels dangling waiting flags.<br>3. Archives expired records to `trips` with `status = 'interrupted'`. |
 | `bus_increment_capacity` | `(p_bus_id, p_shift)` | 1. Locks target bus row (`SELECT ... FOR UPDATE`).<br>2. Evaluates `morning_load < capacity` (or evening).<br>3. Increments load by 1. Aborts with `CAPACITY_FULL` if full. |
 | `bus_decrement_capacity` | `(p_bus_id, p_shift)` | 1. Locks target bus row (`SELECT ... FOR UPDATE`).<br>2. Decrements load by 1, clamping at minimum 0. |
@@ -203,12 +202,12 @@ All critical invariants are guaranteed by PostgreSQL constraints and ACID RPCs i
    - The browser tracking view utilizes `decideLocationPacket` (`location-packet-guard.ts`).
    - Packets with `timestamp <= lastRenderedTimestamp` are dropped immediately to prevent out-of-order jitter.
 4. **GPS Ingress Validation:**
-   - Evaluated at `/api/location/update`:
-     - Bounding Box: Latitude `[25.5, 26.8]`, Longitude `[91.2, 92.5]`.
-     - Max Speed: `<= 120 km/h`.
-     - Accuracy: `<= 50m`.
-     - Monotonic sequence: No stale packets older than 15s.
-     - Single-Device Check: In-memory/Redis driver session cache prevents dual-device transmission.
+   - Evaluated at `/api/location/update` (`src/domains/gps/services/gps-pipeline.service.ts`):
+     - Regional Bounding Box: Latitude `[25.0, 28.5]`, Longitude `[89.5, 96.5]` (Assam & Northeast transit corridor).
+     - Max Speed Cap: `<= 200 km/h` (with telemetry warnings triggered at >120 km/h).
+     - Horizontal Accuracy Threshold: `<= 150m` (tolerates urban and canopy GPS degradation while filtering major triangulation glitches).
+     - Monotonic sequence: No stale packets older than 5000ms skew tolerance in Redis Lua guard.
+     - Single-Device Check: `public.device_sessions` table ensures single active driver device.
 
 ---
 

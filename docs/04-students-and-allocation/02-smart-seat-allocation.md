@@ -170,3 +170,40 @@ To eliminate route duplication and streamline administrative navigation:
 - Navigating to `/admin/driver-assignment` automatically issues a Next.js server-side redirect to `/admin/smart-allocation?tab=drivers`.
 - Navigating to `/admin/route-allocation` automatically issues a Next.js server-side redirect to `/admin/smart-allocation?tab=buses`.
 - Deep-linking via query parameters (`?tab=students`, `?tab=drivers`, `?tab=buses`) ensures external links and bookmarks seamlessly activate the corresponding operational view.
+
+---
+
+## 6. High-Capacity Keyset Pagination Scaling past PostgREST 1,000-Row Truncation (`CAP-001`)
+
+### 6.1 The 1,000-Row Truncation Vulnerability
+By default, hosted Supabase / PostgREST instances enforce a strict `max-rows = 1000` ceiling on all unpaginated queries. 
+- When the student population grows to 1,000–2,000 commuters, an unpaginated query such as `supabase.from('students').select('*')` silently truncates at row 1,000.
+- As a consequence, capacity recalculations, bus headcount synchronizations, and roster exports would silently ignore all students after index 1,000, corrupting seat allocations.
+
+### 6.2 Production Solution: Cursor/Keyset Pagination
+In `src/domains/student/repositories/student.repository.pg.ts` (lines 531–568), all seat calculation and student retrieval sweeps implement **deterministic keyset pagination** ordered by `created_at` and `id`:
+```typescript
+// Keyset pagination guarantees complete scanning of 2,000+ commuters
+let lastCreatedAt: string | null = null;
+let lastId: string | null = null;
+let hasMore = true;
+const PAGE_SIZE = 1000;
+
+while (hasMore) {
+  let query = db.from('students')
+    .select('id, bus_id, shift, status, created_at')
+    .order('created_at', { ascending: true })
+    .order('id', { ascending: true })
+    .limit(PAGE_SIZE);
+
+  if (lastCreatedAt && lastId) {
+    query = query.or(`created_at.gt.${lastCreatedAt},and(created_at.eq.${lastCreatedAt},id.gt.${lastId})`);
+  }
+  const { data, error } = await query;
+  if (!data || data.length < PAGE_SIZE) hasMore = false;
+  // Accumulate batch and advance cursor
+  ...
+}
+```
+This guarantees that student lists scaling to 2,000–10,000 commuters are completely and accurately evaluated without silent truncation.
+

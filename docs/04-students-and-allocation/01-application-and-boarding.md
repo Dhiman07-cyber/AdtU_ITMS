@@ -158,3 +158,67 @@ Physical boarding verification occurs directly on the driver's mobile console (`
    - When a student boards, `/api/driver/mark-boarded` updates the student's waiting flag status to `boarded` for driver roll-call accountability.
    - **Crucial Invariant:** Physical boarding **does NOT check or decrement capacity at the vehicle door**. Vehicle enrollment limits are enforced exclusively during the administrative admission/renewal stage, ensuring boarding operations remain rapid and frictionless.
 4. **Grace Period Warning:** If a student's pass is within its renewal grace window (prior to soft block), the scanner alerts the driver with a visual yellow warning while permitting entry.
+
+---
+
+## 5. Comprehensive Low-Level Design (LLD) Breakdown & Justifications
+
+### 5.1 `bus_increment_capacity` & `approve_application` RPCs (Atomic Onboarding)
+- **Concrete Architectural Role**: Authoritative enrollment engine. Acquires a row lock on the target vehicle (`buses` table), checks available seats on the requested shift (`morning_load` or `evening_load`), increments load counter, provisions student identity in `public.users` and `student_profiles`, and finalizes approval.
+- **Failure Analysis ("Why the System Fails Without It")**:
+  - In high-volume admission windows, multiple moderators process applications concurrently.
+  - Without PostgreSQL `FOR UPDATE` row locking on `buses`, two moderators reading remaining capacity simultaneously both see 1 seat available and approve both applicants, causing vehicle oversubscription.
+  - Overcrowded university buses violate regional road safety regulations and lead to student unrest.
+- **State Taxonomy & Invariants Enforced**:
+  - *Transactional State* (`applications`, `buses`, `student_profiles`).
+  - *Seat & Capacity Non-Overbooking Guarantee*.
+- **Production Code Implementation**:
+  ```sql
+  -- File: supabase/COMPLETE_SCHEMA.sql (RPC bus_increment_capacity)
+  CREATE OR REPLACE FUNCTION bus_increment_capacity(p_bus_id TEXT, p_shift TEXT)
+  RETURNS JSONB AS $$
+  DECLARE v_bus RECORD;
+  BEGIN
+    SELECT capacity, morning_load, evening_load INTO v_bus
+    FROM buses WHERE id = p_bus_id FOR UPDATE;
+
+    IF p_shift = 'Morning' AND v_bus.morning_load >= v_bus.capacity THEN
+      RETURN jsonb_build_object('success', false, 'error', 'CAPACITY_FULL');
+    END IF;
+    IF p_shift = 'Evening' AND v_bus.evening_load >= v_bus.capacity THEN
+      RETURN jsonb_build_object('success', false, 'error', 'CAPACITY_FULL');
+    END IF;
+
+    UPDATE buses
+    SET morning_load = CASE WHEN p_shift = 'Morning' THEN morning_load + 1 ELSE morning_load END,
+        evening_load = CASE WHEN p_shift = 'Evening' THEN evening_load + 1 ELSE evening_load END
+    WHERE id = p_bus_id;
+
+    RETURN jsonb_build_object('success', true);
+  END;
+  $$ LANGUAGE plpgsql;
+  ```
+- **Optimization, Complexity Minimization & Anti-Overhead Rationale**:
+  - *Single Transaction Guarantee*: If identity creation or profile insertion fails, the bus load increment rolls back automatically, preventing ghost allocations.
+
+---
+
+### 5.2 Dynamic Cryptographic QR Contract (`src/domains/trip/qr-contract.ts`)
+- **Concrete Architectural Role**: Digital transit boarding pass. Generates an encrypted HMAC-SHA256 payload containing student ID, bus ID, and expiration date, validated locally by the driver's phone camera.
+- **Failure Analysis ("Why the System Fails Without It")**:
+  - Cell reception along rural corridors in Kamrup/Panikhaiti frequently drops to zero bars.
+  - If the driver scanner required an online database query to verify every student pass, boarding would completely halt in cellular dead zones, stranding students.
+  - The HMAC-SHA256 signature enables **100% offline mathematical validation** on the driver's device.
+- **State Taxonomy & Invariants Enforced**:
+  - *Cryptographic Transit Proof*.
+- **Production Code Implementation**:
+  ```typescript
+  // File: src/domains/trip/qr-contract.ts
+  export function verifyQrSignature(payload: string, signature: string, secret: string): boolean {
+    const expected = crypto.createHmac('sha256', secret).update(payload).digest('hex');
+    return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
+  }
+  ```
+- **Optimization, Complexity Minimization & Anti-Overhead Rationale**:
+  - *`timingSafeEqual` Defense*: Timing-safe buffer comparison protects against cryptographic timing attacks when verifying student transit passes.
+

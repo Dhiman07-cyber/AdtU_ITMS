@@ -8,40 +8,57 @@ This repository powers real-time fleet tracking, student bus pass issuance, digi
 
 ## 🧭 Developer Onboarding: Where Should I Start?
 
-If you are a new engineer or contributor joining the project, read through the system architecture in this recommended order:
+If you are a new engineer, contributor, or academic evaluator reviewing the project, read through the system architecture in this recommended order:
 
 ```
-  1. System Architecture Overview (This README)
-       │
+  1. Foundational Motivation & Systems Architecture ─► docs/00/README.md
+       │                                              (Origin story, 2000-commuter sizing, VPS audit, LLD)
        ▼
-  2. Identity & Authentication ────────► docs/03-identity-and-access/01-auth-architecture.md
-       │                                 (Firebase Auth + PostgreSQL dual model, Edge proxy)
+  2. Identity & Authentication ──────────────────────► docs/03-identity-and-access/01-auth-architecture.md
+       │                                              (Firebase Auth + PostgreSQL dual model, Edge proxy)
        ▼
-  3. Trip Core Data Flow ──────────────► docs/01-trip-lifecycle/01-architecture-and-dataflow.md
-       │                                 (End-to-end trip start, GPS broadcast, and student delivery)
+  3. Trip Core Data Flow ────────────────────────────► docs/01-trip-lifecycle/01-architecture-and-dataflow.md
+       │                                              (End-to-end trip start, GPS broadcast, and student delivery)
        ▼
-  4. GPS Telemetry Pipeline ───────────► docs/01-trip-lifecycle/04-gps-pipeline.md
-       │                                 (Bounds checking, jump detection, throttling, packet guards)
+  4. GPS Telemetry Pipeline ─────────────────────────► docs/01-trip-lifecycle/04-gps-pipeline.md
+       │                                              (Bounds checking, jump detection, throttling, packet guards)
        ▼
-  5. WebSocket Cluster ────────────────► docs/01-trip-lifecycle/03-websocket-cluster.md
-       │                                 (Wire protocol, session restoration, presence handshakes)
+  5. WebSocket Cluster ──────────────────────────────► docs/01-trip-lifecycle/03-websocket-cluster.md
+       │                                              (Wire protocol, session restoration, presence handshakes)
        ▼
-  6. Redis Pub/Sub Relay ──────────────► docs/01-trip-lifecycle/02-redis-pubsub.md
-       │                                 (Cross-node message broadcast and echo suppression)
+  6. Redis Pub/Sub Relay ────────────────────────────► docs/01-trip-lifecycle/02-redis-pubsub.md
+       │                                              (Cross-node message broadcast and echo suppression)
        ▼
-  7. Distributed Locks & Cleanup ──────► docs/01-trip-lifecycle/05-state-machine-and-cleanup.md
-       │                                 (PostgreSQL RPCs, atomicity, and active trip locks)
+  7. Distributed Locks & Cleanup ────────────────────► docs/01-trip-lifecycle/05-state-machine-and-cleanup.md
+       │                                              (PostgreSQL RPCs, atomicity, and active trip locks)
        ▼
-  8. Payments & Pass Renewals ─────────► docs/02-payments-and-subscriptions/01-razorpay-lifecycle.md
-       │                                 (Razorpay webhook verification and immutable ledger)
+  8. Payments & Pass Renewals ───────────────────────► docs/02-payments-and-subscriptions/01-razorpay-lifecycle.md
+       │                                              (Razorpay webhook verification and immutable ledger)
        ▼
-  9. Observability & Operations ───────► docs/05-operations-and-observability/01-telemetry-and-metrics.md
-                                         (Prometheus scrape jobs, custom itms_* metrics, and runbooks)
+  9. Observability & Operations ─────────────────────► docs/05-operations-and-observability/01-telemetry-and-metrics.md
+                                                      (Prometheus scrape jobs, custom itms_* metrics, and runbooks)
 ```
 
 ---
 
+## 🎨 Interactive System Architecture Visualizations (Archify)
+
+The project includes interactive, browser-explorable architecture and lifecycle diagrams generated via **Archify**:
+- 🌐 **[Interactive Enterprise System Architecture Diagram](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/00/artifacts/adtu-itms-architecture.html)**: Explorable component topology, cloud/security boundaries, and real-time data flows.
+- 🔄 **[Interactive Trip Lifecycle & State Machine Diagram](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/00/artifacts/adtu-itms-trip-lifecycle.html)**: State transitions, stop dwell proofs, and deadlock recovery paths.
+
+---
+
 ## 📚 Complete Documentation Index
+
+### [00. Foundational Motivation, Capacity & VPS Engineering](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/00%20-%20Master%20Index%20&%20Reading%20Roadmap/)
+- **[00. Foundational Master Roadmap](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/00%20-%20Master%20Index%20&%20Reading%20Roadmap/README.md)**: Executive overview and navigation guide for senior evaluators.
+- **[01. Origin Story, Commuter Reality & Problem Statement](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/00%20-%20Master%20Index%20&%20Reading%20Roadmap/01-origin-and-problem-statement.md)**: Real-world AdtU commuter experience, morning anxiety, skipping breakfast, driver distractions, unofficial WhatsApp blind spots, ₹50k-₹65k annual fees, counter queues, and student-driver disputes.
+- **[02. System Scope, Personas & Capacity Sizing](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/00%20-%20Master%20Index%20&%20Reading%20Roadmap/02-scope-user-base-and-capacity-analysis.md)**: 5 core stakeholder personas, 2,000-commuter capacity sizing, morning rush (07:15–09:15 AM) traffic models, WebSocket fan-out mathematics, and bandwidth calculations.
+- **[03. Infrastructure Audit, Cloud Bottlenecks & VPS Cost Engineering](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/00%20-%20Master%20Index%20&%20Reading%20Roadmap/03-infrastructure-audit-and-vps-cost-engineering.md)**: Forensic breakdown of Vercel + Render + Supabase Free Tier fatal boundaries (200 conns, 2M msgs/month, 1-week inactivity pause) vs co-located Docker Compose VPS (Hetzner CPX31 at ₹1,250/month).
+- **[04. Complete System Components, LLD & Justification](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/00%20-%20Master%20Index%20&%20Reading%20Roadmap/04-complete-system-components-and-justification.md)**: Exhaustive Low-Level Design (LLD) justifying every directory, service, and API across all 15 business domains with code snippets and failure scenarios.
+- **[05. Master Faculty Defense & Architectural Verification Manual](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/00%20-%20Master%20Index%20&%20Reading%20Roadmap/05-faculty-defense-and-architectural-validation.md)**: Rigorous technical defense for the 40-year veteran reviewer covering ACID vs BASE, distributed lock leasing, CAP theorem, and answers to 12 tough examination questions.
+- **[06. Integration Seams, Platform Unification & Synthesis](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/00%20-%20Master%20Index%20&%20Reading%20Roadmap/06-integration-seams-and-unification-roadmap.md)**: Resolving the developer's perception of system fragmentation through the 4 unifying architectural glues (Identity Spine, Redis Relay, PostgreSQL RPCs, and E2E Test Battery).
 
 ### [01. Trip Lifecycle (The Core Domain)](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/01-trip-lifecycle/)
 - **[01. Architecture & End-to-End Data Flow](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/01-trip-lifecycle/01-architecture-and-dataflow.md)**: Conceptual walkthrough of how trips operate across drivers, students, API gateways, and WebSockets without code snippet clutter.
@@ -69,20 +86,11 @@ If you are a new engineer or contributor joining the project, read through the s
 - **[02. Operational Incident Runbooks](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/05-operations-and-observability/02-incident-runbooks.md)**: Step-by-step procedures for handling stranded driver locks, Redis partitions, ghost map pins, and scheduled maintenance toggles.
 
 ### [06. Evidence & Verification](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/06-evidence-and-verification/)
-- **[Production Readiness Gate](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/06-evidence-and-verification/ITMS_PRODUCTION_GATE.md)**: Master release gate auditing P0/P1 invariants, security perimeters, and deployment requirements.
-- **[System Invariant Ledger](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/06-evidence-and-verification/ITMS_SYSTEM_INVARIANTS.md)**: Canonical register of all 26 mandatory architectural, security, and business invariants.
-- **[Next.js 16 Performance & Security Forensic Report](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/06-evidence-and-verification/NEXT16_PERFORMANCE_SECURITY_FORENSIC_REPORT.md)**: Master report covering Server Component LCP, DAL in-memory caching, API parallelization, and SELECT * elimination.
-- **[Concurrency & Financial Integrity Evidence](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/06-evidence-and-verification/ITMS_CONCURRENCY_EVIDENCE.md)**: Empirical stress evidence, atomic RPC verification, and payment idempotency CAS proofs.
-- **[Master Performance Change Ledger](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/06-evidence-and-verification/ITMS_PERFORMANCE_CHANGE_LEDGER.md)**: Full-stack change log tracking all UI, loader, telemetry, DAL caching, and database projection optimizations.
-- **[Test Evidence & Multi-Tier Matrix](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/06-evidence-and-verification/ITMS_TEST_EVIDENCE_MATRIX.md)**: Multi-tier mapping across all 48 test files, 314 automated tests, and 224 compiled routes.
-- **[Failure Injection & Resilience Matrix](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/06-evidence-and-verification/ITMS_FAILURE_MATRIX.md)**: Failure mode analysis, split-brain scenarios, and recovery behaviors across Redis, Postgres, and WebSockets.
-- **[Findings Ledger](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/06-evidence-and-verification/ITMS_FINDINGS_LEDGER.md)**: Master tracker for all security, correctness, and performance findings (FND-001 through FND-017).
-- **[Verification Runbook](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/06-evidence-and-verification/ITMS_VERIFICATION_RUNBOOK.md)**: Operational step-by-step procedures for running test batteries, builds, and multi-node clusters.
-- **[Golden Verification Battery](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/06-evidence-and-verification/ITMS_GOLDEN_VERIFICATION_BATTERY.md)**: Verification scenarios G01 through G29 proving all system invariants.
-- **[Performance Page Inventory](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/06-evidence-and-verification/PERFORMANCE_PAGE_INVENTORY.md)**: Loading UX, skeletons, and data fetching profiles across all 19 application routes.
-- **[Security Decision Log](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/06-evidence-and-verification/SECURITY_DECISION_LOG.md)**: Architectural security decisions (CSRF, XFF sanitization, WS wire auth, device session fail-closed).
-- **[Schema Reproducibility Report](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/06-evidence-and-verification/SCHEMA_REPRODUCIBILITY_REPORT.md)**: PostgreSQL schema audit, migration idempotency, RPC parameter alignment, and RLS policy verification.
-- **[Bus Marker Route Alignment Final Report](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/06-evidence-and-verification/ADTU_ITMS_BUS_MARKER_ROUTE_ALIGNMENT_FINAL_REPORT.md)**: Bus marker route alignment, interpolation, and GPS pipeline report.
+- **[00. Directory Master Index & Roadmap](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/06-evidence-and-verification/README.md)**: Executive overview and navigation guide across all empirical evidence files.
+- **[01. Canonical System Invariant Ledger](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/06-evidence-and-verification/01-system-invariants-ledger.md)**: Permanent register of all 45 architectural, security, and business invariants across 11 core subsystems (`INV-AUTH`, `INV-WS`, `INV-TRIP`, `INV-GPS`, `INV-PAY`, `INV-CAP`).
+- **[02. Multi-Tier Verification Battery, Concurrency Proofs & Production Gate](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/06-evidence-and-verification/02-verification-battery-and-concurrency.md)**: 48 test suites (314 tests passing, exit code 0), Golden Test Battery (G01–G29), ACID row-lock concurrency proofs (`bus_increment_capacity`, `reassign_students_atomically`), executable verification runbook, and production release gate.
+- **[03. Frontend Performance, Next.js 16 App Router & Responsive Layout Matrix](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/06-evidence-and-verification/03-frontend-performance-and-responsive-matrix.md)**: Server Component LCP overhaul (70% faster First Paint), 3.5s bounded UX loading architecture, full-pipeline speed telemetry, continuous fluid layout engine (`clamp()`), and master breakpoint matrix across 12 viewports.
+- **[04. Security Decisions, Findings Ledger & Schema Reproducibility](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/06-evidence-and-verification/04-security-decisions-and-findings-ledger.md)**: Formal security decisions (SEC-DEC-01 to 12), canonical findings ledger (FND-001 to 17 remediated), `SECURITY DEFINER` isolated search path hardening, and clean-slate database schema reconstruction proof.
 
 ### [07. GPS & Location Integrity](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/07-gps-and-location-integrity/)
 - **[GPS Forensic Audit & Verification Report](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/07-gps-and-location-integrity/ADTU_ITMS_GPS_FORENSIC_AUDIT_FINAL_REPORT.md)**: Master audit report certifying Source-to-Screen pipeline, answers to Sir's 10 questions with measured distributions, real-browser Playwright simulation, route deviation hysteresis, and hardware transition readiness.
@@ -93,9 +101,17 @@ If you are a new engineer or contributor joining the project, read through the s
 - **[02. Bus Fees, Pricing Engine & Financial Verification](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/08-admin-system-configuration/02-bus-fees-and-pricing.md)**: Server-authoritative fee storage, versioned adjustment history, automated announcement broadcasts, Razorpay checkout calculations, and offline challan verification.
 - **[03. System Settings, SRE Controls & Audit Logging](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/08-admin-system-configuration/03-system-settings-and-maintenance.md)**: Global system settings, public landing config, UI presentation stripping, data retention crons, in-memory caching with TTL, and immutable forensic audit logging.
 
-### [09. Canonical Verification Suites](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/verification/)
-- **[Master System Specification](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/verification/ITMS_SYSTEM_SPECIFICATION.md)**: System overview, trip-first operational spine, open seating rules, container topology, and state lifecycle.
-- **[Master Failure & Resilience Matrix](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/verification/ITMS_FAILURE_AND_RESILIENCE_MATRIX.md)**: Failure mode analysis, recovery actions, and verification results across Redis, PostgreSQL, and WebSocket clusters.
+### [09. Canonical Verification Suites](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/09-system-verification/)
+- **[Master System Specification](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/09-system-verification/ITMS_SYSTEM_SPECIFICATION.md)**: System overview, trip-first operational spine, open seating rules, container topology, and state lifecycle.
+- **[Master Failure & Resilience Matrix](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/09-system-verification/ITMS_FAILURE_AND_RESILIENCE_MATRIX.md)**: Failure mode analysis, recovery actions, and verification results across Redis, PostgreSQL, and WebSocket clusters.
+
+### [10. Performance & Security Architecture](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/10-performance-and-security/)
+- **[00. Directory Master Index & Roadmap](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/10-performance-and-security/README.md)**: Executive overview, performance benchmarks, and security verification roadmap.
+- **[01. Rendering Architecture & Route Inventory](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/10-performance-and-security/01-rendering-architecture-and-route-inventory.md)**: Complete audit of all 224 compiled routes: Server Components vs Client Components, hydration costs, and component responsibilities.
+- **[02. Component Overhead & Dead-Weight Elimination](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/10-performance-and-security/02-component-overhead-and-dead-weight-elimination.md)**: Component resource consumption analysis, safe dead-weight elimination (Motion, Lenis on mobile, dual toasts, Recharts, exporters) without affecting consistency.
+- **[03. Multi-Tier Caching Architecture & Data Lifecycle](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/10-performance-and-security/03-caching-mechanisms-and-data-lifecycle.md)**: Full 6-tier caching architecture (React 19 compiler, in-memory domain TTLs, Redis 7 Pub/Sub, HTTP keepalives, Turbopack, and image optimization).
+- **[04. Frontend Performance & Core Web Vitals Benchmarks](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/10-performance-and-security/04-frontend-performance-and-cwv-benchmarks.md)**: Core Web Vitals audit (LCP 0.8s, CLS 0.02, INP <50ms, TTIS ≤3.5s), velocity telemetry restoration, and container-query layout engine.
+- **[05. Full-Stack Security & Fail-Closed Boundaries](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/10-performance-and-security/05-full-stack-security-and-fail-closed-boundaries.md)**: OWASP ASVS compliance: Edge proxy CSRF, timing-safe crypto, single-device driver locks, Redis fail-closed GPS ingress, and PostgreSQL 16 RLS.
 
 ---
 

@@ -13,7 +13,7 @@
 
 ## 1. Executive Summary
 
-A comprehensive forensic audit and executable verification of the ADTU ITMS GPS and location processing pipeline was conducted across all architectural layers: Driver Browser Geolocation API acquisition, Next.js HTTP ingestion (`/api/location/update`), multi-instance atomic Redis guards (`gps-redis-guard.ts`), PostgreSQL persistent storage (`bus_locations`, `active_trips`), multi-node WebSocket fanout (`socket-router.ts`), student map consumption (`GuwahatiMap` with MapLibre GL), Waiting-Flag integrity (`/api/student/waiting-flag`), and Admin/Moderator fleet surveillance.
+A comprehensive forensic audit and executable verification of the ADTU ITMS GPS and location processing pipeline was conducted across all architectural layers: Driver Browser Geolocation API acquisition, Next.js HTTP ingestion (`/api/location/update`), multi-instance atomic Redis guards (`gps-redis-guard.ts`), PostgreSQL persistent storage (`active_trips`), multi-node WebSocket fanout (`socket-router.ts`), student map consumption (`GuwahatiMap` with MapLibre GL), Waiting-Flag integrity (`/api/student/waiting-flag`), and Admin/Moderator fleet surveillance.
 
 ### Key Audit Findings & Verdicts
 
@@ -71,7 +71,7 @@ The authoritative location pipeline flows across 10 distinct architectural bound
   │
   ├─ 8. Storage & Persistence (`src/app/api/location/update/route.ts`):
   │     - Heartbeat to `active_trips` (throttled to 1 write / 20s): updates `last_heartbeat` and extends `expires_at` by 600s
-  │     - Breadcrumb to `bus_locations` (throttled to 1 write / 30s): persists latest known fix for cold-start fallback
+  │     - Ephemeral position broadcast via Redis & WebSocket (WS1): zero writes to PostgreSQL
   │
   ├─ 9. Real-Time Distribution (`src/domains/realtime/event-emitter.ts`):
   │     - `emitEvent('bus_location_' + busId, 'bus_location_update', payload)`
@@ -94,7 +94,7 @@ The authoritative location pipeline flows across 10 distinct architectural bound
 
 ### Q1. What GPS accuracy does the driver phone actually report?
 * **Critical Scope Distinction (Pipeline Verification vs Physical Hardware Measurement):**
-  - **What Was Empirically Proven in this Audit:** The software ingestion and processing pipeline correctly accepts `coords.accuracy` from the browser Geolocation API, enforces the 150m boundary cap, stores it in PostgreSQL `bus_locations.accuracy`, and broadcasts it over WebSockets. Controlled Playwright emulation verified that packets with simulated accuracy of 8m–11m are accepted, while packets exceeding 150m (or negative values) are deterministically rejected with HTTP 400.
+  - **What Was Empirically Proven in this Audit:** The software ingestion and processing pipeline correctly accepts `coords.accuracy` from the browser Geolocation API, enforces the 150m boundary cap, validates it atomically in Redis, and broadcasts it over WebSockets. Controlled Playwright emulation verified that packets with simulated accuracy of 8m–11m are accepted, while packets exceeding 150m (or negative values) are deterministically rejected with HTTP 400.
   - **What Remains Unmeasured:** The actual physical GNSS accuracy distribution on physical Android/iOS smartphone hardware held by Assam down town University drivers on real Guwahati transit routes (e.g. GS Road, Khanapara, Narengi) has **not** been field-measured in this audit. Physical receiver performance under dense cloud cover, urban canopy, or bus dashboard placement remains an open measurement task.
 * **Controlled Simulation Benchmark Distribution:** Under controlled Playwright simulation across the canonical Guwahati route fixture:
   - Low-Noise Profile (Simulated Open Sky): Min 3.0m, P25 3.5m, P50 4.1m, P75 4.8m, P90 5.2m, P99 5.8m, Max 6.0m (Mean 4.2m, StdDev 0.8m)
@@ -106,7 +106,7 @@ The authoritative location pipeline flows across 10 distinct architectural bound
   - Browser Callback: **YES.** `coords.accuracy` is acquired from `GeolocationPosition.coords.accuracy`.
   - Client Payload: **YES.** Serialized into HTTP POST JSON body `{ lat, lng, accuracy, speed, heading, timestamp, busId, tripId }`.
   - Ingestion Validation: **YES.** Evaluated against `MAX_ACCURACY_METERS = 150`. If `accuracy > 150`, HTTP 400 is returned with `GPS accuracy exceeds threshold (150m)`.
-  - Database Persistence: **YES.** Upserted into PostgreSQL `bus_locations.accuracy` (nullable float).
+  - Database Persistence: **NO (EPHEMERAL).** High-frequency telemetry fixes are kept ephemeral in Redis and broadcast via WebSockets; zero writes to PostgreSQL.
   - WebSocket Broadcast: **YES.** Included in `bus_location_update` payload broadcast to subscribers.
   - Student Client Hook: **YES.** Received in `useBusLocation.ts` as `location.accuracy`.
   - Map Display: **NO (DROPPED).** In `GuwahatiBusMap.tsx`, `accuracy` is accepted as a prop but omitted when forwarding `busPosition` to `GuwahatiMap.tsx`. `GuwahatiMap` renders a fixed-radius CSS ping ring rather than an uncertainty circle sized in ground meters.
@@ -254,9 +254,9 @@ While the request-integrity layer is mathematically sound against race condition
 ### Architecture Implemented & Verified
 
 ```
-[ POSTGRESQL ]
-  ├── active_trips (filter status = 'active' AND expires_at > now())
-  ├── bus_locations (lat, lng, speed, heading, accuracy, timestamp)
+[ STORAGE & STATE ]
+  ├── active_trips (PostgreSQL filter status = 'active' AND expires_at > now())
+  ├── Redis & WS In-Memory Telemetry (lat, lng, speed, heading, accuracy, timestamp)
   ├── buses (bus_number, registration_number, capacity)
   └── routes (route_name, stops)
          │

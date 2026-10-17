@@ -17,7 +17,7 @@ An exhaustive forensic audit confirmed that this wandering was **not** caused by
 
 ### Key Architectural Guarantee
 To solve this without compromising data integrity, we designed and implemented an **in-memory, client-side display alignment engine** that strictly adheres to the following foundational invariants:
-1. **Zero Mutation of Authoritative GPS Truth:** Server-side ingest, WebSocket distribution, PostgreSQL `bus_locations`, and Redis pub/sub continue to process and store **100% raw, unaltered physical coordinates**. Snapping occurs **only** on the browser client during marker rendering.
+1. **Zero Mutation of Authoritative GPS Truth:** Server-side ingest, WebSocket distribution, and Redis pub/sub continue to process and broadcast **100% raw, unaltered physical coordinates**. Snapping occurs **only** on the browser client during marker rendering.
 2. **Anti-Fabrication & Detour Preservation:** Snapping is strictly prohibited during genuine route diversions. When $\ge 3$ consecutive GPS points deviate $> 25\text{m}$ from the corridor, the engine switches to `OFF_ROUTE_CONFIRMED` mode and displays the raw physical coordinates without snapping.
 3. **Extreme Algorithmic Efficiency:** The entire projection engine is written in pure TypeScript using equirectangular vector math and spatial bounding boxes. It runs **only once per GPS update (0.5 Hz / 2s)**, completely decoupled from the 60fps requestAnimationFrame (RAF) rendering loop.
    - **Measured 1-Bus P95:** **0.039 ms** (Budget: $\le 2.0\text{ ms}$ — **98% under budget**)
@@ -90,11 +90,8 @@ SELECT id, route_name, total_stops, status, stops, buses FROM routes LIMIT 5;
 ```
 **Forensic Proof:** The PostgreSQL `routes.stops` column contains **only semantic stop names and sequence IDs**. No geographic coordinates, waypoints, or road polylines exist in the database.
 
-### 3.2 `bus_locations` Table Verification
-```sql
-SELECT bus_id, trip_id, lat, lng, accuracy, speed, heading, timestamp FROM bus_locations;
-```
-**Forensic Proof:** The authoritative location table stores pure physical measurements (`lat`, `lng`, `accuracy`, `speed`, `heading`). There are **zero** pre-snapped fields, confirming that the database remains the immutable source of raw physical truth.
+### 3.2 In-Flight Telemetry Verification
+The authoritative live telemetry pipeline stores pure physical measurements (`lat`, `lng`, `accuracy`, `speed`, `heading`) in the Redis atomic guard and transmits them directly over WebSockets. There are **zero** pre-snapped fields, confirming that the pipeline remains the immutable source of raw physical truth.
 
 ---
 

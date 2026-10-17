@@ -112,3 +112,51 @@ Students paying through bank challan, NEFT/RTGS, or university cash counters sub
    - Authorized reviewer cross-checks uploaded receipt against the university bank statement.
    - On approval, creates a `payments` row with `payment_mode = 'offline'`, `verified_by = approverUid`, and `status = 'verified'`.
    - If payment is rejected, the student is notified with the reason and prompted to re-upload.
+
+---
+
+## 5. Comprehensive Low-Level Design (LLD) Breakdown & Justifications
+
+### 5.1 `getCurrentBusFee` & Server-Authoritative Pricing
+- **Concrete Architectural Role**: Authoritative price calculation engine. Resolves the current session bus fee from database configuration with **zero hardcoded fallback values**, throwing an explicit exception if configuration is missing.
+- **Failure Analysis ("Why the System Fails Without It")**:
+  - If the application allows client-side checkout payloads to specify `{ amount: 8000 }`, a student with basic web browser DevTools can tamper with the request to submit `{ amount: 1 }` or `{ amount: 0 }`, paying ₹1 for an annual ₹8,000 bus pass.
+  - If a system uses a hardcoded fallback (`amount || 5000`), when the university updates tuition fees to ₹8,500 and a database timeout occurs, the system silently charges the outdated ₹5,000 rate, leaking university revenue.
+- **State Taxonomy & Invariants Enforced**:
+  - *Durable Authoritative State* (`settings/config`).
+  - *Double-Entry Financial & Entitlement Integrity (Invariant 5)*.
+- **Production Code Implementation**:
+  ```typescript
+  // File: src/lib/pricing/bus-fee.service.ts
+  export async function getCurrentBusFee(): Promise<BusFeeData> {
+    const config = await getSystemConfig();
+    if (!config?.busFee || typeof config.busFee.amount !== 'number' || config.busFee.amount <= 0) {
+      throw new Error('Authoritative bus fee configuration missing or invalid. Refusing transaction.');
+    }
+    return config.busFee;
+  }
+  ```
+- **Optimization, Complexity Minimization & Anti-Overhead Rationale**:
+  - *Fail-Closed Architecture*: Financial transactions fail immediately if pricing integrity cannot be verified with 100% certainty.
+
+---
+
+### 5.2 Versioned Fee Revision (`POST /api/settings/bus-fees`)
+- **Concrete Architectural Role**: Administrative price adjustment engine. Enforces admin-only authorization, monotonically bumps the pricing version counter, caps rate history to 3 entries to prevent document bloat, and broadcasts university-wide notifications.
+- **Failure Analysis ("Why the System Fails Without It")**:
+  - If tuition fees change while students have checkout orders in-flight, orders created under Version 2 could settle at Version 3 rates, causing chargeback disputes.
+  - Tracking explicit pricing versions guarantees orders settle at the exact rate in effect when the order was initialized.
+- **State Taxonomy & Invariants Enforced**:
+  - *Durable Authoritative & Audit State*.
+- **Production Code Implementation**:
+  ```typescript
+  // File: src/app/api/settings/bus-fees/route.ts
+  const newVersion = (currentConfig.busFee?.version || 0) + 1;
+  const history = [
+    ...(currentConfig.busFee?.history || []),
+    { amount: currentConfig.busFee.amount, updatedAt: new Date().toISOString(), updatedBy: auth.uid, version: currentConfig.busFee.version }
+  ].slice(-3); // Capped at 3 to prevent unbounded document bloat
+  ```
+- **Optimization, Complexity Minimization & Anti-Overhead Rationale**:
+  - *History Capping*: Slicing to the 3 most recent revisions preserves necessary audit context while preventing document size from exceeding Firestore and JSONB serialization budgets.
+
