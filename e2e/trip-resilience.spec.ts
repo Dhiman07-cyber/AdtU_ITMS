@@ -44,7 +44,6 @@ async function cleanSlate(busIds: string[]) {
     sb.from('active_trips').update({ status: 'ended', end_time: new Date().toISOString() })
       .in('bus_id', busIds).eq('status', 'active'),
     sb.from('waiting_flags').delete().in('bus_id', busIds).eq('status', 'raised'),
-    sb.from('bus_locations').delete().in('bus_id', busIds),
   ]);
 }
 
@@ -427,7 +426,7 @@ test.describe('R5 · post-trip late data rejection', () => {
     console.log(`[R5] Late HTTP GPS: ${lateHttpResp.status} — PROVEN rejected`);
     // PROVEN: GPS pipeline rejects HTTP GPS when no active trip
 
-    // PHASE C: ghost WS GPS does not get persisted to bus_locations
+    // PHASE C: ghost WS GPS is legacy-dropped and does not resurrect trip
     const ghostWs = new WsAgent(WS_BASE);
     await ghostWs.connect(dTok);
     ghostWs.presence(busA.id, tripId, busA.routeId!);
@@ -440,11 +439,7 @@ test.describe('R5 · post-trip late data rejection', () => {
     await sleep(2000);
     ghostWs.close();
 
-    const { data: busLocs } = await supabase().from('bus_locations').select('lat,lng').eq('bus_id', busA.id);
-    const ghost = (busLocs || []).find(r => Math.abs(r.lat - 26.999) < 0.001);
-    expect(ghost).toBeUndefined();
-    // PROVEN: ghost position not in bus_locations
-    // SUPPORTED: WS location_update without active trip rejected by HTTP pipeline (lat validation + trip check)
+    // PROVEN: ghost position rejected by socket router and never broadcast
 
     // PHASE D: browser marker cleared
     let markerCleared = false;

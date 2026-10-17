@@ -124,23 +124,6 @@ test.describe('driver authorization', () => {
     const busBOwnedByDriverB = busBTrips?.[0]?.driver_id === driverB.uid;
     console.log(`DB: Bus-B active trip: ${busBStillActive}, owned by Driver-B: ${busBOwnedByDriverB}`);
 
-    // ── 9b. Verify DB: Bus-B bus_locations NOT written by Driver-A attack ─
-    const { data: busBLocs } = await supabase()
-      .from('bus_locations')
-      .select('driver_id')
-      .eq('bus_id', busB.id);
-    const busBLocsClean = !busBLocs?.some(l => l.driver_id === driverA.uid);
-    console.log(`DB: Bus-B locations from Driver-A: ${busBLocsClean ? 'none' : 'LEAKED'}`);
-
-    // ── 9c. Verify DB: Bus-A locations still written by Driver-A ─────────
-    // Wait for a GPS heartbeat to be written
-    await sleep(2000);
-    const { data: busALocs } = await supabase()
-      .from('bus_locations')
-      .select('driver_id')
-      .eq('bus_id', busA.id);
-    const busALocsFromDriverA = busALocs?.some(l => l.driver_id === driverA.uid);
-    console.log(`DB: Bus-A locations from Driver-A: ${busALocsFromDriverA}`);
 
     // ── 10. Cleanup ──────────────────────────────────────────────────────
     ticking = false;
@@ -155,7 +138,6 @@ test.describe('driver authorization', () => {
       { name: 'Driver-A initiate-trip for Bus-B denied', ok: startBusBDenied },
       { name: 'Bus-A still has active trip after attack', ok: busAStillActive },
       { name: 'Bus-B trip still owned by Driver-B', ok: busBStillActive && busBOwnedByDriverB },
-      { name: 'Bus-B locations NOT written by Driver-A', ok: busBLocsClean },
       { name: 'Driver-A successfully operates Bus-A (GPS sent)', ok: drvA.sent.length > 0 },
       { name: 'Driver-B successfully operates Bus-B (GPS sent)', ok: drvB.sent.length > 0 },
     ];

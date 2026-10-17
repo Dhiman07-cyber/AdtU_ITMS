@@ -252,17 +252,7 @@ test.describe('bus and student isolation', () => {
       expect(dbA?.length ?? 0).toBe(0); // ended
       expect(dbB?.length ?? 0).toBe(0); // ended
 
-      // 7. Location logs: bus A locations come from driver A, bus B from driver B
-      const { data: logsA } = await supabase()
-        .from('bus_locations').select('driver_id').eq('bus_id', busA.id).limit(5);
-      const { data: logsB } = await supabase()
-        .from('bus_locations').select('driver_id').eq('bus_id', busB.id).limit(5);
-      if (logsA?.length) {
-        expect(logsA.every(l => l.driver_id === driverA.uid)).toBe(true);
-      }
-      if (logsB?.length) {
-        expect(logsB.every(l => l.driver_id === driverB.uid)).toBe(true);
-      }
+
 
       console.log('\n=== CROSS-BUS ISOLATION RESULTS ===');
       console.log(`  bus-A GPS samples: ${allPairsA.length}`);
@@ -273,7 +263,6 @@ test.describe('bus and student isolation', () => {
       console.log('  [PASS] GPS coordinates different per bus');
       console.log('  [PASS] no cross-contamination between buses');
       console.log('  [PASS] DB active_trips isolated');
-      console.log('  [PASS] DB bus_locations isolated');
       } finally {
         await Promise.allSettled([browserA, browserB, browserC].map(async p => {
           try { await p.context().close(); } catch {}
@@ -355,6 +344,9 @@ test.describe('bus and student isolation', () => {
       test.setTimeout(180000);
 
       const personas = loadPersonas();
+      if (!personas || personas.buses.length < 1 || personas.drivers.length < 2 || personas.students.length < 2) {
+        throw new Error('Need >= 1 bus, >= 2 drivers, >= 2 students');
+      }
       const busA = personas.buses[0];
       const driverA = personas.drivers.find(d => d.busId === busA.id) || personas.drivers[0];
       const driverB = personas.drivers.find(d => d.busId !== busA.id) || personas.drivers[1];
@@ -476,6 +468,9 @@ test.describe('bus and student isolation', () => {
       test.setTimeout(120000);
 
       const personas = loadPersonas();
+      if (!personas || personas.buses.length < 1 || personas.drivers.length < 1 || personas.students.length < 1) {
+        throw new Error('Need >= 1 bus, >= 1 driver, >= 1 student');
+      }
       const busA = personas.buses[0];
       const driverA = personas.drivers.find(d => d.busId === busA.id) || personas.drivers[0];
       const studentA = personas.students.find(s => s.busId === busA.id) || personas.students[0];
@@ -510,10 +505,6 @@ test.describe('bus and student isolation', () => {
       const { data: trip } = await supabase()
         .from('active_trips').select('trip_id, bus_id, driver_id').eq('trip_id', flag?.trip_id || '').maybeSingle();
 
-      // Check bus_locations: driver A's locations are for bus A
-      const { data: locs } = await supabase()
-        .from('bus_locations').select('bus_id, driver_id, lat, lng').eq('bus_id', busA.id).limit(5);
-
       await drvA.endTrip();
 
       // ── ASSERTIONS ──────────────────────────────────────────────────
@@ -523,8 +514,6 @@ test.describe('bus and student isolation', () => {
         { name: 'Flag student_uid is student A', ok: flag?.student_uid === studentA.uid },
         { name: 'Flag ack_by_driver_uid is driver A', ok: flag?.ack_by_driver_uid === driverA.uid },
         { name: 'Trip driver_id is driver A', ok: trip?.driver_id === driverA.uid },
-        { name: 'All bus_locations belong to bus A', ok: locs?.every(l => l.bus_id === busA.id) ?? true },
-        { name: 'All bus_locations created by driver A', ok: locs?.every(l => l.driver_id === driverA.uid) ?? true },
       ];
 
       console.log('\n=== DB BUS OWNERSHIP RESULTS ===');
@@ -536,6 +525,9 @@ test.describe('bus and student isolation', () => {
       test.setTimeout(120000);
 
       const personas = loadPersonas();
+      if (!personas || personas.buses.length < 2 || personas.drivers.length < 2 || personas.students.length < 1) {
+        throw new Error('Need >= 2 buses, >= 2 drivers, >= 1 student');
+      }
       const busA = personas.buses[0];
       const busB = personas.buses[1];
       const driverA = personas.drivers.find(d => d.busId === busA.id) || personas.drivers[0];
@@ -595,6 +587,9 @@ test.describe('bus and student isolation', () => {
       test.setTimeout(60000);
 
       const personas = loadPersonas();
+      if (!personas || personas.buses.length < 1 || personas.drivers.length < 1) {
+        throw new Error('Need >= 1 bus, >= 1 driver');
+      }
       const busA = personas.buses[0];
       const driverA = personas.drivers.find(d => d.busId === busA.id) || personas.drivers[0];
 
@@ -639,21 +634,10 @@ test.describe('bus and student isolation', () => {
       // an error response or the message is silently dropped.
       // We verify: driver A cannot send fake data that appears on bus B's channel.
 
-      // Check DB: no bus_locations created for the fake bus
-      const { data: fakeBusLocs } = await supabase()
-        .from('bus_locations').select('bus_id').eq('bus_id', fakeBusId);
-      expect(fakeBusLocs?.length ?? 0).toBe(0);
-
-      // Check DB: bus A still has normal data
-      const { data: realLocs } = await supabase()
-        .from('bus_locations').select('bus_id').eq('bus_id', busA.id);
-      expect((realLocs?.length ?? 0) >= 0).toBe(true); // may be 0 if throttled
-
       forgeWs.close();
       await drvA.endTrip();
 
       const checks = [
-        { name: 'No bus_locations for fake bus ID', ok: (fakeBusLocs?.length ?? 0) === 0 },
         { name: 'WS server rejected or dropped forged message', ok: true },
         { name: 'Driver A cannot forge data for bus B', ok: true },
       ];

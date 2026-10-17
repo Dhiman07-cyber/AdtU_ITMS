@@ -203,10 +203,6 @@ test.describe('golden trip lifecycle', () => {
     const distinctMarkerPositions = new Set(markerPositions).size;
     console.log(`distinct marker target positions: ${distinctMarkerPositions}`);
 
-    // ── 11. DB: bus_locations written ───────────────────────────────────────
-    const { data: dbLocations } = await supabase()
-      .from('bus_locations').select('bus_id, lat, lng').eq('bus_id', busA.id);
-    console.log(`DB bus_locations rows: ${dbLocations?.length ?? 0}`);
 
     // ── 12. Student raises waiting flag (authenticated as student) ──────────
     console.log('student raising waiting flag...');

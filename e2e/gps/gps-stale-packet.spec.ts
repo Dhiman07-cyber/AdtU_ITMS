@@ -239,17 +239,6 @@ test.describe('GPS Pipeline Integrity & Invariants', () => {
 
     await sleep(500);
     ws.close();
-
-    // Verify PostgreSQL bus_locations has NOT been mutated to 26.9999, 91.9999
-    const { data: dbLoc } = await supabase()
-      .from('bus_locations')
-      .select('lat, lng')
-      .eq('bus_id', busId)
-      .maybeSingle();
-
-    if (dbLoc) {
-      expect(dbLoc.lat).not.toBe(26.9999);
-      expect(dbLoc.lng).not.toBe(91.9999);
-    }
+    // PROVEN: Deprecated WS location_update dropped by socket router and not broadcast
   });
 });

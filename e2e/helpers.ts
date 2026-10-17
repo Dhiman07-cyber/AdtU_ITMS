@@ -22,15 +22,6 @@ export async function dbActiveTrips(busIds: string[]): Promise<{ trip_id: string
   return data ?? [];
 }
 
-export async function dbBusLocations(busIds: string[]): Promise<{ bus_id: string; lat: number; lng: number; updated_at: string }[]> {
-  const { data, error } = await supabase()
-    .from('bus_locations')
-    .select('bus_id, lat, lng, updated_at')
-    .in('bus_id', busIds);
-  if (error) throw new Error(`dbBusLocations: ${error.message}`);
-  return data ?? [];
-}
-
 export async function dbWaitingFlags(busIds: string[], status?: string): Promise<any[]> {
   let q = supabase().from('waiting_flags').select('*').in('bus_id', busIds);
   if (status) q = q.eq('status', status);
@@ -42,11 +33,6 @@ export async function dbWaitingFlags(busIds: string[], status?: string): Promise
 export async function dbAssertNoActiveTrips(busIds: string[]): Promise<void> {
   const trips = await dbActiveTrips(busIds);
   expect(trips).toHaveLength(0);
-}
-
-export async function dbAssertNoBusLocations(busIds: string[]): Promise<void> {
-  const locs = await dbBusLocations(busIds);
-  expect(locs).toHaveLength(0);
 }
 
 // ── Auth helpers ───────────────────────────────────────────────────────────
