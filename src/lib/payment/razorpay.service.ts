@@ -36,26 +36,34 @@ export interface PaymentVerification {
 
 // Initialize Razorpay with dynamic import to avoid client-side issues
 let razorpayInstance: any = null;
+let razorpayInitPromise: Promise<any> | null = null;
 
 /**
  * Initialize Razorpay instance (server-side only)
  */
 export async function initializeRazorpay() {
-  if (!razorpayInstance) {
-    const Razorpay = (await import('razorpay')).default;
-    const keyId = process.env.RAZORPAY_KEY_ID;
-    const keySecret = process.env.RAZORPAY_KEY_SECRET;
-    
-    if (!keyId || !keySecret) {
-      throw new Error('Razorpay credentials are not configured in environment variables');
-    }
+  if (razorpayInstance) return razorpayInstance;
+  if (!razorpayInitPromise) {
+    razorpayInitPromise = (async () => {
+      const Razorpay = (await import('razorpay')).default;
+      const keyId = process.env.RAZORPAY_KEY_ID;
+      const keySecret = process.env.RAZORPAY_KEY_SECRET;
+      
+      if (!keyId || !keySecret) {
+        throw new Error('Razorpay credentials are not configured in environment variables');
+      }
 
-    razorpayInstance = new Razorpay({
-      key_id: keyId,
-      key_secret: keySecret,
+      razorpayInstance = new Razorpay({
+        key_id: keyId,
+        key_secret: keySecret,
+      });
+      return razorpayInstance;
+    })().catch((err) => {
+      razorpayInitPromise = null;
+      throw err;
     });
   }
-  return razorpayInstance;
+  return razorpayInitPromise;
 }
 
 /**
@@ -187,7 +195,12 @@ export async function fetchPaymentDetails(paymentId: string) {
     const payment = await razorpay.payments.fetch(paymentId);
     return payment;
   } catch (error: any) {
-    throw new Error('Failed to fetch payment details');
+    const message = error?.error?.description || error?.message || 'Failed to fetch payment details';
+    const err: any = new Error(message);
+    err.statusCode = error?.statusCode || error?.status || 500;
+    err.code = error?.error?.code || error?.code;
+    err.originalError = error;
+    throw err;
   }
 }
 
@@ -201,7 +214,12 @@ export async function fetchOrderDetails(orderId: string) {
     const order = await razorpay.orders.fetch(orderId);
     return order;
   } catch (error: any) {
-    throw new Error('Failed to fetch order details');
+    const message = error?.error?.description || error?.message || 'Failed to fetch order details';
+    const err: any = new Error(message);
+    err.statusCode = error?.statusCode || error?.status || 500;
+    err.code = error?.error?.code || error?.code;
+    err.originalError = error;
+    throw err;
   }
 }
 
@@ -215,7 +233,12 @@ export async function fetchOrderPayments(orderId: string) {
     const payments = await razorpay.orders.fetchPayments(orderId);
     return payments;
   } catch (error: any) {
-    throw new Error('Failed to fetch order payments');
+    const message = error?.error?.description || error?.message || 'Failed to fetch order payments';
+    const err: any = new Error(message);
+    err.statusCode = error?.statusCode || error?.status || 500;
+    err.code = error?.error?.code || error?.code;
+    err.originalError = error;
+    throw err;
   }
 }
 

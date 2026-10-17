@@ -1,7 +1,7 @@
 import { getByApplicantUid } from '@/domains/application';
 import { isPaymentProcessed, processCapturedPayment } from '@/lib/payment/payment.service';
 import { fetchOrderDetails, fetchOrderPayments, fetchPaymentDetails } from '@/lib/payment/razorpay.service';
-import { withSecurity } from '@/lib/security/api-security';
+import { isOriginAllowed, withSecurity } from '@/lib/security/api-security';
 import { RateLimits } from '@/lib/security/rate-limiter';
 import { paymentsSupabaseService } from '@/lib/services/payments-supabase';
 import { NextResponse } from 'next/server';
@@ -281,6 +281,35 @@ export const GET = withSecurity(
                         throw new Error(completion.error || 'Completion handler failed');
                     }
 
+                    if (completion.status === 'already_paid_for_session') {
+                        return NextResponse.json({
+                            success: true,
+                            duplicatePayment: true,
+                            status: 'duplicate_pending_refund',
+                            message: `Payment received and recorded (Reference: ${resolvedPaymentId}). An existing active payment already covers this academic session. This transaction has been flagged in the university ledger for refund review.`
+                        });
+                    }
+
+                    if (completion.status === 'captured_pending_review') {
+                        return NextResponse.json({
+                            success: true,
+                            pendingReview: true,
+                            status: 'captured_pending_review',
+                            message: `Payment received and recorded (Reference: ${resolvedPaymentId}). Academic session details could not be automatically established. This transaction has been queued for administrative review and attribution.`
+                        });
+                    }
+
+                    const rawPurpose = String(notes.type || notes.purpose || '');
+                    const isRenewal = !rawPurpose.toLowerCase().includes('registration') && rawPurpose.toLowerCase() !== 'new_registration';
+                    if (isRenewal) {
+                        return NextResponse.json({
+                            success: true,
+                            pendingApproval: true,
+                            status: 'pending_approval',
+                            message: 'Payment received. Your renewal is now awaiting approval — transport access will be restored once an administrator approves it.'
+                        });
+                    }
+
                     return NextResponse.json({
                         success: true,
                         status: 'success',
@@ -341,22 +370,17 @@ export const GET = withSecurity(
 );
 
 export async function OPTIONS(request: Request) {
-    const explicitOrigins = (process.env.ALLOWED_ORIGINS || '')
-        .split(',')
-        .map(s => s.trim())
-        .filter(Boolean);
-    const allowedOrigins = [process.env.NEXT_PUBLIC_APP_URL || '', ...explicitOrigins].filter(Boolean);
-    const isVercelPreview = /^https:\/\/.*\.vercel\.app$/.test(origin);
-    const isLocalhost = process.env.NODE_ENV === 'development' && (origin === 'http://localhost:3000' || origin === 'http://127.0.0.1:3000');
-    const isAllowed = allowedOrigins.includes(origin) || isVercelPreview || isLocalhost;
+    const origin = request.headers.get('origin') || '';
+    const isAllowed = isOriginAllowed(origin);
 
     return new NextResponse(null, {
-        status: 200,
-        headers: {
-            'Access-Control-Allow-Origin': isAllowed ? origin : (allowedOrigins[0] || ''),
+        status: isAllowed ? 204 : 403,
+        headers: isAllowed ? {
+            'Access-Control-Allow-Origin': origin,
             'Access-Control-Allow-Methods': 'GET, OPTIONS',
             'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+            'Access-Control-Allow-Credentials': 'true',
             'Access-Control-Max-Age': '86400',
-        },
+        } : {},
     });
 }

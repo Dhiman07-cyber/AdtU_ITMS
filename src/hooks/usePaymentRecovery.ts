@@ -109,6 +109,17 @@ export function usePaymentRecovery(opts: UsePaymentRecoveryOptions) {
       return;
     }
 
+    if (frontendStatus === 'duplicate_pending_refund') {
+      setState(prev => ({
+        ...prev,
+        status: 'duplicate_pending_refund',
+        isPolling: false,
+        attemptsDone: attemptsRef.current + 1,
+        rawApiStatus: rawStatus,
+      }));
+      return;
+    }
+
     if (frontendStatus === 'failed') {
       setState(prev => ({
         ...prev,

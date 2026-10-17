@@ -26,7 +26,15 @@ export async function GET(
             );
         }
 
-        const decodedToken = await verifyToken(token);
+        let decodedToken;
+        try {
+            decodedToken = await verifyToken(token);
+        } catch {
+            return NextResponse.json(
+                { success: false, error: 'Invalid or expired authentication token' },
+                { status: 401 }
+            );
+        }
         const userId = decodedToken.uid;
 
         // Get user data via Identity domain API

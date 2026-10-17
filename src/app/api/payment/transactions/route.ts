@@ -18,7 +18,29 @@ export const GET = withSecurity(
       const year = searchParams.get('year');
       const page = parseInt(searchParams.get('page') || '1');
       const limit = parseInt(searchParams.get('limit') || '50');
-      const paymentMethod = searchParams.get('paymentMethod') as 'Online' | 'Offline' | null;
+      const paymentMethod = (searchParams.get('paymentMethod') || searchParams.get('method')) as 'Online' | 'Offline' | null;
+      const statusParam = searchParams.get('status');
+      const VALID_STATUS_MAP: Record<string, string> = {
+        completed: 'Completed',
+        pending: 'Pending',
+        rejected: 'Rejected',
+        duplicate_pending_refund: 'Duplicate_Pending_Refund',
+        captured_pending_review: 'Captured_Pending_Review',
+        refunded: 'Refunded',
+        refund_denied: 'Refund_Denied',
+      };
+
+      let statusFilter: string | undefined = undefined;
+      if (statusParam && statusParam !== 'all') {
+        const canonical = VALID_STATUS_MAP[statusParam.toLowerCase()];
+        if (!canonical) {
+          return NextResponse.json(
+            { error: `Invalid status parameter '${statusParam}'. Allowed: all, Completed, Pending, Rejected, Duplicate_Pending_Refund, Captured_Pending_Review, Refunded, Refund_Denied` },
+            { status: 400 }
+          );
+        }
+        statusFilter = canonical;
+      }
 
       // Helper to map Firestore documents to frontend-expected format
       const userCache = new Map<string, string>(); // Request-scope cache for user lookups
@@ -142,10 +164,15 @@ export const GET = withSecurity(
           return new Date().toISOString();
         };
 
+        const rawStatus = p.status || 'Completed';
+        const normalizedStatus = (rawStatus.toLowerCase() === 'duplicate_pending_refund' || rawStatus === 'Duplicate_Pending_Refund')
+          ? 'Duplicate_Pending_Refund'
+          : rawStatus;
+
         return {
           ...p,
           paymentMethod: p.method?.toLowerCase() || 'online',
-          status: p.status?.toLowerCase() || 'completed',
+          status: normalizedStatus,
           approvedBy: approvedByStr || (p.method?.toLowerCase() === 'online' ? 'System-Approved' : '-'),
           timestamp: getTimestamp(p.createdAt || p.timestamp),
           validUntil: p.validUntil ? getTimestamp(p.validUntil) : 'N/A'
@@ -220,7 +247,8 @@ export const GET = withSecurity(
             year: year ? parseInt(year) : undefined,
             studentId: studentId || undefined,
             studentUid: studentUid || undefined,
-            method: paymentMethod || undefined
+            method: paymentMethod || undefined,
+            status: statusFilter as any
           },
           page,
           limit

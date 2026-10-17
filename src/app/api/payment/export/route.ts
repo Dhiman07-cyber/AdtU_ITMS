@@ -16,8 +16,12 @@ export const GET = withSecurity(
         return NextResponse.json({ error: 'Missing startYear or endYear parameters' }, { status: 400 });
       }
 
-      const startYear = parseInt(startYearStr);
-      const endYear = parseInt(endYearStr);
+      const startYear = parseInt(startYearStr, 10);
+      const endYear = parseInt(endYearStr, 10);
+
+      if (Number.isNaN(startYear) || Number.isNaN(endYear) || startYear < 2000 || endYear <= startYear || endYear > 2100) {
+        return NextResponse.json({ error: 'Invalid startYear or endYear parameters' }, { status: 400 });
+      }
 
       // Fetch dynamic deadline config
       const config = await getDeadlineConfig();

@@ -37,6 +37,8 @@ export const GET = withSecurity(
                 totalRevenue: stats.totalRevenue,
                 completedCount: stats.completedPayments,
                 pendingCount: stats.pendingPayments,
+                duplicateRefundCount: stats.duplicateRefundCount || 0,
+                unresolvedReviewCount: stats.unresolvedReviewCount || 0,
                 monthlyData: monthlyData
             }
         });

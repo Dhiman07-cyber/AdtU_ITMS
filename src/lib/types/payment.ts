@@ -10,7 +10,14 @@
 // ============================================================================
 
 export type PaymentMethod = 'Online' | 'Offline';
-export type PaymentStatus = 'Pending' | 'Completed' | 'Rejected';
+export type PaymentStatus =
+    | 'Pending'
+    | 'Completed'
+    | 'Rejected'
+    | 'Duplicate_Pending_Refund'
+    | 'Captured_Pending_Review'
+    | 'Refunded'
+    | 'Refund_Denied';
 
 export type ApproverType = 'SYSTEM' | 'Manual';
 export type ApproverRole = 'Moderator' | 'Admin';
@@ -387,16 +394,50 @@ export function formatApproverDisplay(approver: PaymentApprover): string {
 /**
  * Get status badge color class
  */
-export function getStatusBadgeClass(status: PaymentStatus): string {
-    switch (status) {
-        case 'Completed':
+export function getStatusBadgeClass(status: PaymentStatus | string): string {
+    const normalized = (status || '').toLowerCase();
+    switch (normalized) {
+        case 'completed':
             return 'bg-gradient-to-r from-green-500 to-emerald-600 text-white';
-        case 'Pending':
+        case 'pending':
             return 'bg-gradient-to-r from-yellow-500 to-amber-600 text-white';
-        case 'Rejected':
+        case 'rejected':
             return 'bg-gradient-to-r from-red-500 to-rose-600 text-white';
+        case 'duplicate_pending_refund':
+            return 'bg-gradient-to-r from-amber-600 to-orange-700 text-white';
+        case 'captured_pending_review':
+            return 'bg-gradient-to-r from-indigo-600 to-purple-700 text-white';
+        case 'refunded':
+            return 'bg-gradient-to-r from-slate-600 to-blue-700 text-white';
+        case 'refund_denied':
+            return 'bg-gradient-to-r from-rose-600 to-pink-700 text-white';
         default:
             return 'bg-gray-500 text-white';
+    }
+}
+
+/**
+ * Format payment status for user-facing display with accurate review messaging
+ */
+export function formatPaymentStatusDisplay(status: PaymentStatus | string): string {
+    const normalized = (status || '').toLowerCase();
+    switch (normalized) {
+        case 'completed':
+            return 'Completed';
+        case 'pending':
+            return 'Pending';
+        case 'rejected':
+            return 'Rejected';
+        case 'duplicate_pending_refund':
+            return 'Duplicate Payment — Review Required';
+        case 'captured_pending_review':
+            return 'Captured — Review Required';
+        case 'refunded':
+            return 'Refunded';
+        case 'refund_denied':
+            return 'Refund Denied';
+        default:
+            return status || 'Unknown';
     }
 }
 

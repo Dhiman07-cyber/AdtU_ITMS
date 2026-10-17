@@ -4,7 +4,7 @@ import {
     fetchPaymentDetails,
     verifyRazorpaySignature,
 } from '@/lib/payment/razorpay.service';
-import { withSecurity } from '@/lib/security/api-security';
+import { isOriginAllowed, withSecurity } from '@/lib/security/api-security';
 import { RateLimits } from '@/lib/security/rate-limiter';
 import { VerifyPaymentSchema } from '@/lib/security/validation-schemas';
 import { NextResponse } from 'next/server';
@@ -17,6 +17,7 @@ type RazorpayNotes = Record<string, string | number | boolean | null | undefined
 type RazorpayOrderDetails = {
     id?: string;
     amount: number;
+    currency?: string;
     notes?: RazorpayNotes;
 };
 
@@ -24,6 +25,7 @@ type RazorpayPaymentDetails = {
     id?: string;
     order_id?: string;
     amount?: number;
+    currency?: string;
     status?: string;
     method?: string;
 };
@@ -113,12 +115,20 @@ export const POST = withSecurity<VerifyPaymentBody>(
             );
         }
 
+        const rawOrderCurrency = orderDetails.currency;
+        const rawPaymentCurrency = paymentDetails.currency;
+
+        const isOrderCurrencyValid = typeof rawOrderCurrency === 'string' && rawOrderCurrency.trim().toUpperCase() === 'INR';
+        const isPaymentCurrencyValid = typeof rawPaymentCurrency === 'string' && rawPaymentCurrency.trim().toUpperCase() === 'INR';
+
         if (
             paymentDetails.id !== razorpay_payment_id ||
             paymentDetails.order_id !== razorpay_order_id ||
-            Number(paymentDetails.amount || 0) !== Number(orderDetails.amount || 0)
+            Number(paymentDetails.amount || 0) !== Number(orderDetails.amount || 0) ||
+            !isOrderCurrencyValid ||
+            !isPaymentCurrencyValid
         ) {
-            console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] Details mismatch: paymentDetails.id=`, paymentDetails.id, `razorpay_payment_id=`, razorpay_payment_id, `paymentDetails.order_id=`, paymentDetails.order_id, `razorpay_order_id=`, razorpay_order_id);
+            console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] Details mismatch: paymentDetails.id=`, paymentDetails.id, `razorpay_payment_id=`, razorpay_payment_id, `paymentDetails.order_id=`, paymentDetails.order_id, `razorpay_order_id=`, razorpay_order_id, `paymentCurrency=`, rawPaymentCurrency, `orderCurrency=`, rawOrderCurrency);
             return NextResponse.json(
                 { success: false, error: 'Razorpay payment details do not match the order' },
                 { status: 400 }
@@ -135,7 +145,7 @@ export const POST = withSecurity<VerifyPaymentBody>(
 
         console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] verify-payment invoking processCapturedPayment...`);
 
-        let result: { status: 'success' | 'already_processed' | 'error' | 'already_paid_for_session'; error?: string };
+        let result: { status: 'success' | 'already_processed' | 'error' | 'already_paid_for_session' | 'captured_pending_review'; error?: string };
         try {
             result = await processCapturedPayment({
                 paymentId: razorpay_payment_id,
@@ -160,6 +170,58 @@ export const POST = withSecurity<VerifyPaymentBody>(
                 { success: false, error: result.error || 'Failed to process payment' },
                 { status: 500 }
             );
+        }
+
+        if (result.status === 'already_paid_for_session') {
+            const responseBody = {
+                success: true,
+                duplicatePayment: true,
+                message: `Payment received and recorded (Reference: ${razorpay_payment_id}). An existing active payment already covers this academic session. This transaction has been flagged in the university ledger for refund review.`,
+                payment: {
+                    paymentId: razorpay_payment_id,
+                    orderId: razorpay_order_id,
+                    userId: trustedUserId,
+                    userName: trustedStudentName,
+                    purpose: trustedPurpose,
+                    amount: trustedAmount,
+                    status: 'Duplicate_Pending_Refund',
+                    method: paymentDetails.method || 'Online',
+                    capturedAt: new Date().toISOString(),
+                },
+                verification: {
+                    isValid: true,
+                    orderId: verification.orderId,
+                    paymentId: verification.paymentId,
+                },
+            };
+            console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] verify-payment API returning duplicate/refund response:`, JSON.stringify(responseBody));
+            return NextResponse.json(responseBody);
+        }
+
+        if (result.status === 'captured_pending_review') {
+            const responseBody = {
+                success: true,
+                pendingReview: true,
+                message: `Payment received and recorded in ledger (Reference: ${razorpay_payment_id}). Academic session details could not be automatically established. This transaction has been queued for administrative review and attribution.`,
+                payment: {
+                    paymentId: razorpay_payment_id,
+                    orderId: razorpay_order_id,
+                    userId: trustedUserId,
+                    userName: trustedStudentName,
+                    purpose: trustedPurpose,
+                    amount: trustedAmount,
+                    status: 'Captured_Pending_Review',
+                    method: paymentDetails.method || 'Online',
+                    capturedAt: new Date().toISOString(),
+                },
+                verification: {
+                    isValid: true,
+                    orderId: verification.orderId,
+                    paymentId: verification.paymentId,
+                },
+            };
+            console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] verify-payment API returning review response:`, JSON.stringify(responseBody));
+            return NextResponse.json(responseBody);
         }
 
         const pendingApproval = trustedPurpose === 'renewal';
@@ -198,22 +260,17 @@ export const POST = withSecurity<VerifyPaymentBody>(
 );
 
 export async function OPTIONS(request: Request) {
-    const explicitOrigins = (process.env.ALLOWED_ORIGINS || '')
-        .split(',')
-        .map(s => s.trim())
-        .filter(Boolean);
-    const allowedOrigins = [process.env.NEXT_PUBLIC_APP_URL || '', ...explicitOrigins].filter(Boolean);
-    const isVercelPreview = /^https:\/\/.*\.vercel\.app$/.test(origin);
-    const isLocalhost = process.env.NODE_ENV === 'development' && (origin === 'http://localhost:3000' || origin === 'http://127.0.0.1:3000');
-    const isAllowed = allowedOrigins.includes(origin) || isVercelPreview || isLocalhost;
+    const origin = request.headers.get('origin') ?? '';
+    const isAllowed = isOriginAllowed(origin);
 
     return new NextResponse(null, {
-        status: 200,
-        headers: {
-            'Access-Control-Allow-Origin': isAllowed ? origin : (allowedOrigins[0] || ''),
+        status: isAllowed ? 204 : 403,
+        headers: isAllowed ? {
+            'Access-Control-Allow-Origin': origin,
             'Access-Control-Allow-Methods': 'POST, OPTIONS',
             'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+            'Access-Control-Allow-Credentials': 'true',
             'Access-Control-Max-Age': '86400',
-        },
+        } : {},
     });
 }

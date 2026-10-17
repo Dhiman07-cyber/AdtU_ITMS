@@ -24,7 +24,10 @@ export type PaymentFrontendStatus =
   | 'processing'
   | 'failed'
   | 'banking_issue'
-  | 'verification_pending';
+  | 'verification_pending'
+  | 'duplicate_pending_refund'
+  | 'captured_pending_review'
+  | 'refund_denied';
 
 /**
  * Canonical database/ledger payment status (Supabase).
@@ -35,7 +38,15 @@ export type PaymentFrontendStatus =
 // an application is rejected (rejectApplicationPayment), but the type previously
 // only included 'Failed'. This mismatch broke type safety and any status-equality
 // check that expected 'Failed' to match a rejected payment record.
-export type PaymentDatabaseStatus = 'Pending' | 'Completed' | 'Failed' | 'Rejected';
+export type PaymentDatabaseStatus =
+  | 'Pending'
+  | 'Completed'
+  | 'Failed'
+  | 'Rejected'
+  | 'Duplicate_Pending_Refund'
+  | 'Captured_Pending_Review'
+  | 'Refunded'
+  | 'Refund_Denied';
 
 /**
  * Canonical session/localStorage status.
@@ -124,6 +135,15 @@ export function mapRecoverStatusToState(
     case 'success':
     case 'already_processed':
       return 'success';
+    case 'duplicate_pending_refund':
+    case 'Duplicate_Pending_Refund':
+      return 'duplicate_pending_refund';
+    case 'captured_pending_review':
+    case 'Captured_Pending_Review':
+      return 'captured_pending_review';
+    case 'refund_denied':
+    case 'Refund_Denied':
+      return 'refund_denied';
     case 'processing':
       return 'processing';
     case 'failed':
@@ -145,6 +165,30 @@ export interface PaymentStateContent {
 }
 
 export const PAYMENT_STATE_CONTENT: Record<PaymentFrontendStatus, PaymentStateContent> = {
+  captured_pending_review: {
+    title: 'Payment Recorded — Review Required',
+    lines: [
+      'Your payment was received and securely recorded in the university ledger.',
+      'Academic session details could not be automatically verified.',
+      'Our administrative staff will review and attribute this payment to your account.',
+    ],
+  },
+  duplicate_pending_refund: {
+    title: 'Duplicate Payment Recorded',
+    lines: [
+      'An existing active payment already covers this academic session.',
+      'This transaction has been securely recorded in the university ledger.',
+      'It has been flagged for manual refund review by the transport office.',
+    ],
+  },
+  refund_denied: {
+    title: 'Refund Request Denied',
+    lines: [
+      'Your payment refund request was reviewed by university finance and was not approved.',
+      'The transaction remains securely recorded in the university ledger.',
+      'Please contact the transport administrative office for detailed guidance.',
+    ],
+  },
   success: {
     title: 'Payment Received',
     lines: [

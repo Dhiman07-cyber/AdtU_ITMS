@@ -1,7 +1,8 @@
 import { getSystemConfig } from '@/domains/admin';
 import { getByUid as getStudentByUid } from '@/domains/student';
 import { createRazorpayOrder, generateReceiptId } from '@/lib/payment/razorpay.service';
-import { withSecurity } from '@/lib/security/api-security';
+import { paymentsSupabaseService } from '@/lib/services/payments-supabase';
+import { isOriginAllowed, withSecurity } from '@/lib/security/api-security';
 import { RateLimits } from '@/lib/security/rate-limiter';
 import { CreateOrderSchema } from '@/lib/security/validation-schemas';
 import { NextRequest, NextResponse } from 'next/server';
@@ -45,6 +46,40 @@ export const POST = withSecurity<CreateOrderBody>(
         const isRenewal = !!(studentData?.validUntil) || !!(studentData?.sessionEndYear);
         const orderType = isRenewal ? 'renewal' : 'new_registration';
 
+        // SECURITY: Academic session boundaries are derived or validated by trusted server-side logic.
+        // A client must NEVER be able to inject arbitrary or conflicting years into Razorpay order notes.
+        let trustedSessionStartYear: number;
+        let trustedSessionEndYear: number;
+
+        if (isRenewal) {
+            const currentSessionEnd = Number(studentData?.sessionEndYear || 0);
+            const currentYear = new Date().getUTCFullYear();
+            const existingValidUntil = studentData?.validUntil;
+            let baseYear = currentYear;
+            if (existingValidUntil && new Date(existingValidUntil) > new Date() && currentSessionEnd > 0) {
+                baseYear = currentSessionEnd;
+            } else if (currentSessionEnd > 0) {
+                baseYear = currentSessionEnd;
+            }
+            trustedSessionStartYear = baseYear;
+            trustedSessionEndYear = baseYear + trustedDurationYears;
+        } else {
+            // New registration: derive from system academic year or current calendar
+            const configAny = systemConfigResult.data as any;
+            const systemStartYear = Number(configAny?.academicYear?.startYear || configAny?.busFee?.sessionStartYear || 0);
+            const baseYear = systemStartYear > 2000 ? systemStartYear : new Date().getUTCFullYear();
+            trustedSessionStartYear = baseYear;
+            trustedSessionEndYear = baseYear + trustedDurationYears;
+        }
+
+        // If client provided conflicting session years in notes, log warning and overwrite
+        if (notes?.sessionStartYear && Number(notes.sessionStartYear) !== trustedSessionStartYear) {
+            console.warn(`[create-order] Client provided conflicting sessionStartYear (${notes.sessionStartYear} vs trusted ${trustedSessionStartYear}). Enforcing trusted server value.`);
+        }
+        if (notes?.sessionEndYear && Number(notes.sessionEndYear) !== trustedSessionEndYear) {
+            console.warn(`[create-order] Client provided conflicting sessionEndYear (${notes.sessionEndYear} vs trusted ${trustedSessionEndYear}). Enforcing trusted server value.`);
+        }
+
         // Generate unique receipt ID
         const receipt = generateReceiptId('ADTU_BUS');
 
@@ -53,6 +88,7 @@ export const POST = withSecurity<CreateOrderBody>(
         // `purpose` is set to the server-derived orderType: the client `purpose`
         // field is free-text and must never decide renewal vs registration
         // routing downstream (validity math differs per funnel).
+        // `sessionStartYear` and `sessionEndYear` are explicitly server-derived.
         const orderNotes = {
             ...notes,
             userId: trustedUserId || 'unknown',
@@ -61,6 +97,8 @@ export const POST = withSecurity<CreateOrderBody>(
             studentName: trustedStudentName,
             userName: trustedStudentName,
             durationYears: trustedDurationYears.toString(),
+            sessionStartYear: String(trustedSessionStartYear),
+            sessionEndYear: String(trustedSessionEndYear),
             purpose: orderType,
             type: orderType,
             timestamp: new Date().toISOString(),
@@ -86,6 +124,56 @@ export const POST = withSecurity<CreateOrderBody>(
             receipt: order.receipt,
         });
 
+        // DURABLE PRE-CHECKOUT PERSISTENCE: Write pending payment record to Supabase
+        // before student begins client checkout. This provides trusted server attribution
+        // and enables background reconciliation sweeps to discover captured funds even if
+        // the client session is interrupted or webhook retries lapse.
+        // INVARIANT: Fail-closed. Client MUST NOT receive a usable checkout response with
+        // order ID unless the pending ledger record has been durably persisted locally.
+        let persistedPaymentId: string | null = null;
+        try {
+            persistedPaymentId = await paymentsSupabaseService.upsertPayment({
+                paymentId: order.id,
+                studentUid: trustedUserId,
+                studentId: trustedEnrollmentId,
+                studentName: trustedStudentName,
+                amount: expectedAmount,
+                method: 'Online',
+                status: 'Pending',
+                sessionStartYear: trustedSessionStartYear,
+                sessionEndYear: trustedSessionEndYear,
+                durationYears: trustedDurationYears,
+                razorpayOrderId: order.id,
+                purpose: `Order created for ${orderType}. Awaiting checkout capture.`,
+                metadata: {
+                    order_type: orderType,
+                    receipt_id: receipt,
+                    checkout_initiated_at: new Date().toISOString(),
+                    entitlement_status: 'pending_checkout',
+                },
+            });
+        } catch (dbErr: any) {
+            console.error('[create-order] Database write failure for pending payment:', dbErr);
+            return NextResponse.json(
+                {
+                    success: false,
+                    error: 'Database service failure: Unable to initiate order registration. Please try again.',
+                },
+                { status: 500 }
+            );
+        }
+
+        if (!persistedPaymentId) {
+            console.error('[create-order] Failed to persist initial pending payment record (null returned)');
+            return NextResponse.json(
+                {
+                    success: false,
+                    error: 'Failed to record pending checkout order in financial ledger. Checkout cannot proceed.',
+                },
+                { status: 500 }
+            );
+        }
+
         return NextResponse.json({
             success: true,
             order: {
@@ -110,30 +198,16 @@ export const POST = withSecurity<CreateOrderBody>(
 // OPTIONS method for CORS - Production safe
 export async function OPTIONS(request: NextRequest) {
     const origin = request.headers.get('origin') || '';
-
-    // SECURITY: Define allowed origins from environment
-    const explicitOrigins = (process.env.ALLOWED_ORIGINS || '')
-        .split(',')
-        .map(s => s.trim())
-        .filter(Boolean);
-    const allowedOrigins: string[] = [
-        process.env.NEXT_PUBLIC_APP_URL || '',
-        ...explicitOrigins,
-    ].filter(Boolean);
-
-    // Check if origin is allowed (includes Vercel preview deployments)
-    const isVercelPreview = /^https:\/\/.*\.vercel\.app$/.test(origin);
-    const isLocalhost = process.env.NODE_ENV === 'development' &&
-        (origin === 'http://localhost:3000' || origin === 'http://127.0.0.1:3000');
-    const isAllowed = allowedOrigins.includes(origin) || isVercelPreview || isLocalhost;
+    const isAllowed = isOriginAllowed(origin);
 
     return new NextResponse(null, {
-        status: 200,
-        headers: {
-            'Access-Control-Allow-Origin': isAllowed ? origin : (allowedOrigins[0] || ''),
+        status: isAllowed ? 204 : 403,
+        headers: isAllowed ? {
+            'Access-Control-Allow-Origin': origin,
             'Access-Control-Allow-Methods': 'POST, OPTIONS',
             'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-            'Access-Control-Max-Age': '86400', // 24 hours
-        },
+            'Access-Control-Allow-Credentials': 'true',
+            'Access-Control-Max-Age': '86400',
+        } : {},
     });
 }
