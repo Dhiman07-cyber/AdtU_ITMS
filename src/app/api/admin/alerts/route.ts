@@ -41,23 +41,35 @@ interface AlertmanagerPayload {
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  // Shared-secret validation -- strictly fails closed in production (AUTH-05).
+  // Shared-secret validation — fails closed whenever AM_WEBHOOK_SECRET is configured.
+  // In production the secret MUST be configured (AUTH-05, R-01 fix).
   const configuredSecret = process.env.AM_WEBHOOK_SECRET;
-  if (!configuredSecret) {
-    if (process.env.NODE_ENV === "production") {
-      console.error("[alerts-webhook] REJECTED: AM_WEBHOOK_SECRET is not configured in production. Failing closed.");
-      return NextResponse.json({ error: "Webhook authentication unconfigured" }, { status: 500 });
-    }
+  if (configuredSecret) {
+    // Secret is configured — validate the incoming bearer/token against it.
     const authHeader = request.headers.get("authorization") || "";
     const bearer = authHeader.startsWith("Bearer ") ? authHeader.substring(7) : "";
     const incoming = request.headers.get("X-Alertmanager-Token") || bearer || "";
+    if (!incoming) {
+      console.warn("[alerts-webhook] Rejected: no authentication token provided");
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    // Use HMAC-keyed comparison to avoid length oracle via timing.
     const hmacKey = "alertmanager-webhook-key";
     const expectedHash = crypto.createHmac("sha256", hmacKey).update(configuredSecret).digest();
     const actualHash = crypto.createHmac("sha256", hmacKey).update(incoming).digest();
-    if (!crypto.timingSafeEqual(expectedHash, actualHash)) {
+    if (expectedHash.length !== actualHash.length || !crypto.timingSafeEqual(expectedHash, actualHash)) {
       console.warn("[alerts-webhook] Rejected: missing or invalid webhook authentication token");
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+  } else {
+    // No secret configured.
+    if (process.env.NODE_ENV === "production") {
+      // Fail closed in production — misconfiguration is not a permissive state.
+      console.error("[alerts-webhook] REJECTED: AM_WEBHOOK_SECRET is not configured in production. Failing closed.");
+      return NextResponse.json({ error: "Webhook authentication unconfigured" }, { status: 500 });
+    }
+    // Development only: allow without a secret (dev convenience).
+    console.warn("[alerts-webhook] WARNING: AM_WEBHOOK_SECRET not set — request accepted in development mode only.");
   }
 
   let payload: AlertmanagerPayload;

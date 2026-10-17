@@ -42,6 +42,7 @@ export interface StudentReassignmentTabRef {
   getOverloadedCount: () => number;
   setThreshold: (val: number) => void;
   threshold: number;
+  refresh?: () => Promise<void> | void;
 }
 
 export interface BusData {
@@ -502,12 +503,15 @@ export const StudentReassignmentTab = forwardRef<StudentReassignmentTabRef, Stud
         onThresholdChange?.(val);
       },
       threshold,
+      refresh: async () => {
+        await fetchBusData(true);
+      },
     }));
 
     return (
       <>
-        {/* LEFT COLUMN: BUSES RANKED BY LOAD */}
-        <div className="lg:col-span-4 flex flex-col min-w-0 h-full overflow-hidden">
+        {/* LEFT COLUMN: BUSES RANKED BY LOAD (Bus Capacity Status) */}
+        <div className="lg:col-span-4 flex flex-col min-w-0 h-auto lg:h-full min-h-[440px] max-h-[520px] sm:max-h-[560px] lg:max-h-none overflow-hidden">
           <Card className="bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 shadow-md flex-1 flex flex-col h-full overflow-hidden !p-0 !gap-0">
             <CardHeader className="p-3.5 pb-2.5 border-b border-zinc-200 dark:border-zinc-800 bg-slate-50/70 dark:bg-zinc-800/40 shrink-0 space-y-2">
               <div className="flex items-center justify-between gap-2">
@@ -704,8 +708,8 @@ export const StudentReassignmentTab = forwardRef<StudentReassignmentTabRef, Stud
         </div>
 
         {/* RIGHT COLUMN: INTEGRATED ROSTER + VERTICAL ROUTE STOPS */}
-        <div className="lg:col-span-8 flex flex-col min-w-0 h-full overflow-hidden">
-          <Card className="bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 shadow-md flex-1 flex flex-col h-full overflow-hidden !p-0 !gap-0">
+        <div className="lg:col-span-8 flex flex-col min-w-0 h-auto lg:h-full overflow-visible lg:overflow-hidden">
+          <Card className="bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 shadow-md flex-1 flex flex-col h-auto lg:h-full overflow-visible lg:overflow-hidden !p-0 !gap-0">
             {selectedBus ? (
               <>
                 <CardHeader className="p-3 pb-2.5 border-b border-zinc-200 dark:border-zinc-800 bg-slate-50/70 dark:bg-zinc-800/40 shrink-0">
@@ -765,7 +769,7 @@ export const StudentReassignmentTab = forwardRef<StudentReassignmentTabRef, Stud
                         disabled={selectedStudents.size === 0}
                         onClick={() => setShowSuggestions(true)}
                         className={cn(
-                          "h-7 px-3 text-xs gap-1 font-bold shadow-xs cursor-pointer transition-all",
+                          "hidden sm:inline-flex h-7 px-3 text-xs gap-1 font-bold shadow-xs cursor-pointer transition-all",
                           selectedStudents.size > 0
                             ? "bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white"
                             : "bg-zinc-200 dark:bg-zinc-800 text-zinc-400 cursor-not-allowed"
@@ -915,7 +919,7 @@ export const StudentReassignmentTab = forwardRef<StudentReassignmentTabRef, Stud
               </div>
 
                 {/* ── STUDENT ROSTER (SPACIOUS FULL WIDTH & HEIGHT) ── */}
-                <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+                <div className="flex-1 min-h-[380px] lg:min-h-0 flex flex-col overflow-visible lg:overflow-hidden">
                   {studentsLoading ? (
                     <div className="flex-1 flex items-center justify-center p-8">
                       <div className="text-center space-y-2">
@@ -1076,6 +1080,28 @@ export const StudentReassignmentTab = forwardRef<StudentReassignmentTabRef, Stud
             setRevertBuffer(null);
           }}
         />
+
+        {/* Mobile Reassign Action Bar - Docked alongside the plus FAB */}
+        <div className="md:hidden fixed bottom-6 left-4 right-22 z-40 pointer-events-auto">
+          <Button
+            type="button"
+            disabled={!selectedBus || selectedStudents.size === 0}
+            onClick={() => setShowSuggestions(true)}
+            className={cn(
+              "w-full h-[52px] rounded-full text-xs font-bold shadow-xl transition-all flex items-center justify-center gap-2",
+              selectedBus && selectedStudents.size > 0
+                ? "bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-700 hover:from-blue-700 hover:to-indigo-700 text-white shadow-blue-500/25 active:scale-[0.98]"
+                : "bg-slate-900/90 text-zinc-500 border border-slate-800 shadow-none cursor-not-allowed opacity-80"
+            )}
+          >
+            <ArrowRightLeft className="w-4 h-4 shrink-0" />
+            <span className="truncate">
+              {selectedStudents.size > 0
+                ? `Reassign (${selectedStudents.size} ${selectedStudents.size === 1 ? 'Student' : 'Students'})`
+                : "Select Bus & Students to Reassign"}
+            </span>
+          </Button>
+        </div>
       </>
     );
   }

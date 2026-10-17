@@ -52,10 +52,13 @@ import { formatDateDDMMYYYY } from "@/lib/utils/date-utils";
 import {
   Bus,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   Download,
   Edit,
   Eye,
   GitCompareArrows,
+  Loader2,
   Lock,
   MoreHorizontal,
   Plus,
@@ -71,7 +74,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 export default function AdminDriversHub() {
   const { currentUser, userData, loading: authLoading } = useAuth();
@@ -363,6 +366,54 @@ export default function AdminDriversHub() {
     });
   }, [drivers, searchTerm, statusFilter, assignmentFilter, experienceFilter, busById]);
 
+  // Section Pagination & Anti-Layout-Shift State
+  const PAGE_SIZE = 25;
+  const [currentPage, setCurrentPage] = useState(1);
+  const [isPaginating, setIsPaginating] = useState(false);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, statusFilter, assignmentFilter, experienceFilter]);
+
+  const totalPages = Math.max(currentPage, Math.max(1, Math.ceil(filteredDrivers.length / PAGE_SIZE)));
+  const validatedPage = Math.max(1, Math.min(currentPage, totalPages));
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
+
+  const paginatedDrivers = useMemo(() => {
+    const startIndex = (validatedPage - 1) * PAGE_SIZE;
+    const slice = filteredDrivers.slice(startIndex, startIndex + PAGE_SIZE);
+    if (slice.length === 0 && filteredDrivers.length > 0) {
+      const fallbackStart = Math.max(0, filteredDrivers.length - PAGE_SIZE);
+      return filteredDrivers.slice(fallbackStart);
+    }
+    return slice;
+  }, [filteredDrivers, validatedPage, PAGE_SIZE]);
+
+  const handleNextPage = (e?: React.MouseEvent) => {
+    e?.preventDefault();
+    if (isPaginating || validatedPage >= totalPages) return;
+    setIsPaginating(true);
+    setTimeout(() => {
+      setCurrentPage((prev) => Math.min(totalPages, prev + 1));
+      setIsPaginating(false);
+    }, 200);
+  };
+
+  const handlePrevPage = (e?: React.MouseEvent) => {
+    e?.preventDefault();
+    if (isPaginating || validatedPage <= 1) return;
+    setIsPaginating(true);
+    setTimeout(() => {
+      setCurrentPage((prev) => Math.max(1, prev - 1));
+      setIsPaginating(false);
+    }, 180);
+  };
+
   if (authLoading && !currentUser) {
     return (
       <div className="itms-admin-container space-y-6 animate-pulse">
@@ -426,67 +477,67 @@ export default function AdminDriversHub() {
         </div>
 
         {/* ── TOP 4 ROLE-SPECIFIC CONTROL CARDS (DRIVERS) ── */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-5">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5 sm:gap-3 mt-4 sm:mt-5">
           <Card className="bg-white/60 dark:bg-zinc-900/60 border border-zinc-200/80 dark:border-zinc-800/80 shadow-xs">
-            <CardContent className="p-3.5 flex items-center justify-between">
-              <div>
-                <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
+            <CardContent className="p-2.5 sm:p-3.5 flex items-center gap-2.5 sm:justify-between">
+              <div className="p-2 rounded-xl bg-indigo-500/10 text-indigo-500 border border-indigo-500/20 shrink-0 sm:order-2">
+                <Users className="w-4 h-4" />
+              </div>
+              <div className="min-w-0 flex-1 sm:order-1">
+                <p className="text-[10px] sm:text-[11px] font-medium text-muted-foreground uppercase tracking-wider truncate">
                   Total Drivers
                 </p>
-                <p className="text-xl md:text-2xl font-black text-foreground mt-0.5">
+                <p className="text-base sm:text-xl md:text-2xl font-black text-foreground mt-0.5 leading-tight">
                   {metrics.total}
                 </p>
               </div>
-              <div className="p-2.5 rounded-xl bg-indigo-500/10 text-indigo-500 border border-indigo-500/20">
-                <Users className="w-4 h-4" />
-              </div>
             </CardContent>
           </Card>
 
           <Card className="bg-white/60 dark:bg-zinc-900/60 border border-zinc-200/80 dark:border-zinc-800/80 shadow-xs">
-            <CardContent className="p-3.5 flex items-center justify-between">
-              <div>
-                <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
+            <CardContent className="p-2.5 sm:p-3.5 flex items-center gap-2.5 sm:justify-between">
+              <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 shrink-0 sm:order-2">
+                <UserCheck className="w-4 h-4" />
+              </div>
+              <div className="min-w-0 flex-1 sm:order-1">
+                <p className="text-[10px] sm:text-[11px] font-medium text-muted-foreground uppercase tracking-wider truncate">
                   Active Access
                 </p>
-                <p className="text-xl md:text-2xl font-black text-emerald-500 mt-0.5">
+                <p className="text-base sm:text-xl md:text-2xl font-black text-emerald-500 mt-0.5 leading-tight">
                   {metrics.activeCount}
                 </p>
               </div>
-              <div className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
-                <UserCheck className="w-4 h-4" />
-              </div>
             </CardContent>
           </Card>
 
           <Card className="bg-white/60 dark:bg-zinc-900/60 border border-zinc-200/80 dark:border-zinc-800/80 shadow-xs">
-            <CardContent className="p-3.5 flex items-center justify-between">
-              <div>
-                <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
+            <CardContent className="p-2.5 sm:p-3.5 flex items-center gap-2.5 sm:justify-between">
+              <div className="p-2 rounded-xl bg-rose-500/10 text-rose-500 border border-rose-500/20 shrink-0 sm:order-2">
+                <UserX className="w-4 h-4" />
+              </div>
+              <div className="min-w-0 flex-1 sm:order-1">
+                <p className="text-[10px] sm:text-[11px] font-medium text-muted-foreground uppercase tracking-wider truncate">
                   Access Suspended
                 </p>
-                <p className="text-xl md:text-2xl font-black text-rose-500 mt-0.5">
+                <p className="text-base sm:text-xl md:text-2xl font-black text-rose-500 mt-0.5 leading-tight">
                   {metrics.suspendedCount}
                 </p>
               </div>
-              <div className="p-2.5 rounded-xl bg-rose-500/10 text-rose-500 border border-rose-500/20">
-                <UserX className="w-4 h-4" />
-              </div>
             </CardContent>
           </Card>
 
           <Card className="bg-white/60 dark:bg-zinc-900/60 border border-zinc-200/80 dark:border-zinc-800/80 shadow-xs">
-            <CardContent className="p-3.5 flex items-center justify-between">
-              <div>
-                <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
+            <CardContent className="p-2.5 sm:p-3.5 flex items-center gap-2.5 sm:justify-between">
+              <div className="p-2 rounded-xl bg-purple-500/10 text-purple-500 border border-purple-500/20 shrink-0 sm:order-2">
+                <Bus className="w-4 h-4" />
+              </div>
+              <div className="min-w-0 flex-1 sm:order-1">
+                <p className="text-[10px] sm:text-[11px] font-medium text-muted-foreground uppercase tracking-wider truncate">
                   Fleet Assigned
                 </p>
-                <p className="text-xl md:text-2xl font-black text-purple-500 mt-0.5">
+                <p className="text-base sm:text-xl md:text-2xl font-black text-purple-500 mt-0.5 leading-tight">
                   {metrics.assignedCount}
                 </p>
-              </div>
-              <div className="p-2.5 rounded-xl bg-purple-500/10 text-purple-500 border border-purple-500/20">
-                <Bus className="w-4 h-4" />
               </div>
             </CardContent>
           </Card>
@@ -597,17 +648,30 @@ export default function AdminDriversHub() {
           </div>
 
           {/* ── DRIVERS TABLE ── */}
-          <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 overflow-hidden shadow-xs">
-            <div className="overflow-x-auto">
-              <Table>
+          <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 overflow-hidden shadow-xs relative">
+            {isPaginating && (
+              <div className="absolute top-0 left-0 right-0 z-20 h-1 bg-blue-500/10 dark:bg-blue-400/10 overflow-hidden">
+                <div className="animate-progress w-full h-full bg-blue-500 dark:bg-blue-400 origin-left-right" />
+              </div>
+            )}
+            <div className={cn("overflow-x-auto min-h-[520px] transition-opacity duration-200", isPaginating && "opacity-60 pointer-events-none")}>
+              <Table className="w-full table-fixed min-w-[850px]">
+                <colgroup>
+                  <col className="w-[26%]" />
+                  <col className="w-[18%]" />
+                  <col className="w-[18%]" />
+                  <col className="w-[18%]" />
+                  <col className="w-[12%]" />
+                  <col className="w-[8%]" />
+                </colgroup>
                 <TableHeader className="bg-slate-50 dark:bg-zinc-800/50">
                   <TableRow className="h-9 border-b border-zinc-200 dark:border-zinc-800">
-                    <TableHead className="text-[11px] font-bold py-2">Driver</TableHead>
-                    <TableHead className="text-[11px] font-bold py-2">Contact Details</TableHead>
-                    <TableHead className="text-[11px] font-bold py-2">Employee & License</TableHead>
-                    <TableHead className="text-[11px] font-bold py-2">Fleet Assignment</TableHead>
-                    <TableHead className="text-[11px] font-bold py-2">Portal Access</TableHead>
-                    <TableHead className="text-[11px] font-bold py-2 text-right">Actions</TableHead>
+                    <TableHead className="w-[26%] text-[11px] font-bold py-2">Driver</TableHead>
+                    <TableHead className="w-[18%] text-[11px] font-bold py-2">Contact Details</TableHead>
+                    <TableHead className="w-[18%] text-[11px] font-bold py-2">Employee & License</TableHead>
+                    <TableHead className="w-[18%] text-[11px] font-bold py-2">Fleet Assignment</TableHead>
+                    <TableHead className="w-[12%] text-[11px] font-bold py-2">Portal Access</TableHead>
+                    <TableHead className="w-[8%] text-[11px] font-bold py-2 text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -630,7 +694,7 @@ export default function AdminDriversHub() {
                       </TableCell>
                     </TableRow>
                   ) : (
-                    filteredDrivers.map((driver) => {
+                    paginatedDrivers.map((driver) => {
                       const isActive =
                         (driver.status || "active").toLowerCase() === "active";
                       const assignedBus = busById.get(driver.busId);
@@ -641,19 +705,19 @@ export default function AdminDriversHub() {
                           className="hover:bg-slate-50/60 dark:hover:bg-zinc-800/40 transition-colors border-b border-zinc-100 dark:border-zinc-800/60"
                         >
                           {/* Driver Name & Email */}
-                          <TableCell className="py-2.5">
-                            <div className="flex items-center gap-2.5">
+                          <TableCell className="py-2.5 overflow-hidden">
+                            <div className="flex items-center gap-2.5 min-w-0">
                               <Avatar
                                 src={safeImageSrc(driver.profilePhotoUrl)}
                                 name={driver.name || driver.fullName}
                                 size="sm"
                                 className="flex-shrink-0 border border-zinc-200 dark:border-zinc-700"
                               />
-                              <div className="min-w-0">
-                                <div className="text-xs font-bold text-foreground truncate max-w-[180px] sm:max-w-none">
+                              <div className="min-w-0 flex-1">
+                                <div className="text-xs font-bold text-foreground truncate">
                                   {driver.name || driver.fullName || "Unnamed Driver"}
                                 </div>
-                                <div className="text-[11px] text-muted-foreground truncate max-w-[180px] sm:max-w-none">
+                                <div className="text-[11px] text-muted-foreground truncate">
                                   {driver.email}
                                 </div>
                               </div>
@@ -661,13 +725,13 @@ export default function AdminDriversHub() {
                           </TableCell>
 
                           {/* Contact */}
-                          <TableCell className="py-2.5">
-                            <div className="space-y-0.5">
-                              <div className="text-[11px] font-medium text-foreground">
+                          <TableCell className="py-2.5 overflow-hidden">
+                            <div className="space-y-0.5 truncate">
+                              <div className="text-[11px] font-medium text-foreground truncate">
                                 Ph: {driver.phone || "N/A"}
                               </div>
                               {driver.alternatePhone && (
-                                <div className="text-[10px] text-muted-foreground">
+                                <div className="text-[10px] text-muted-foreground truncate">
                                   Alt: {driver.alternatePhone}
                                 </div>
                               )}
@@ -675,30 +739,30 @@ export default function AdminDriversHub() {
                           </TableCell>
 
                           {/* Employee ID & License */}
-                          <TableCell className="py-2.5">
-                            <div className="space-y-0.5">
-                              <div className="font-mono text-[11px] font-semibold text-foreground">
+                          <TableCell className="py-2.5 overflow-hidden">
+                            <div className="space-y-0.5 truncate">
+                              <div className="font-mono text-[11px] font-semibold text-foreground truncate">
                                 {driver.employeeId || driver.empId || "N/A"}
                               </div>
-                              <div className="text-[10px] text-muted-foreground font-mono truncate max-w-[140px]">
+                              <div className="text-[10px] text-muted-foreground font-mono truncate">
                                 Lic: {driver.licenseNumber || "N/A"}
                               </div>
                             </div>
                           </TableCell>
 
                           {/* Fleet Assignment */}
-                          <TableCell className="py-2.5">
+                          <TableCell className="py-2.5 overflow-hidden">
                             {assignedBus ? (
-                              <div className="flex items-center gap-1.5">
+                              <div className="flex items-center gap-1.5 truncate">
                                 <Badge
                                   variant="outline"
-                                  className="bg-purple-500/10 text-purple-400 border-purple-500/30 text-[10px] font-semibold px-2 py-0.5 rounded-md flex items-center gap-1"
+                                  className="bg-purple-500/10 text-purple-400 border-purple-500/30 text-[10px] font-semibold px-2 py-0.5 rounded-md flex items-center gap-1 shrink-0"
                                 >
                                   <Bus className="w-3 h-3" />
                                   <span>Bus {assignedBus.busNumber}</span>
                                 </Badge>
                                 {assignedBus.routeNumber && (
-                                  <span className="text-[10px] text-muted-foreground">
+                                  <span className="text-[10px] text-muted-foreground truncate">
                                     (R-{assignedBus.routeNumber})
                                   </span>
                                 )}
@@ -706,7 +770,7 @@ export default function AdminDriversHub() {
                             ) : (
                               <Badge
                                 variant="outline"
-                                className="bg-emerald-500/10 text-emerald-400 border-emerald-500/30 text-[10px] font-semibold px-2 py-0.5 rounded-md"
+                                className="bg-emerald-500/10 text-emerald-400 border-emerald-500/30 text-[10px] font-semibold px-2 py-0.5 rounded-md shrink-0"
                               >
                                 Reserved Fleet
                               </Badge>
@@ -714,11 +778,11 @@ export default function AdminDriversHub() {
                           </TableCell>
 
                           {/* Access Status */}
-                          <TableCell className="py-2.5">
+                          <TableCell className="py-2.5 overflow-hidden">
                             <Badge
                               variant="outline"
                               className={cn(
-                                "text-[10px] font-semibold px-2 py-0.5 rounded-full flex items-center gap-1 w-fit",
+                                "text-[10px] font-semibold px-2 py-0.5 rounded-full flex items-center gap-1 w-fit shrink-0",
                                 isActive
                                   ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
                                   : "bg-rose-500/10 text-rose-400 border-rose-500/30"
@@ -726,7 +790,7 @@ export default function AdminDriversHub() {
                             >
                               <span
                                 className={cn(
-                                  "w-1.5 h-1.5 rounded-full",
+                                  "w-1.5 h-1.5 rounded-full shrink-0",
                                   isActive
                                     ? "bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]"
                                     : "bg-rose-400"
@@ -737,7 +801,7 @@ export default function AdminDriversHub() {
                           </TableCell>
 
                           {/* Actions Menu */}
-                          <TableCell className="py-2.5 text-right">
+                          <TableCell className="py-2.5 text-right overflow-hidden">
                             <div className="flex items-center justify-end gap-1.5">
                               <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
@@ -814,6 +878,62 @@ export default function AdminDriversHub() {
                 </TableBody>
               </Table>
             </div>
+
+            {/* Pagination Footer */}
+            {filteredDrivers.length > 0 && (
+              <div className="pt-3 pb-2.5 flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-zinc-200/60 dark:border-zinc-800/60 px-4 bg-white dark:bg-zinc-900/50">
+                <div className="text-xs text-zinc-500 dark:text-zinc-400 font-mono">
+                  Showing{" "}
+                  <strong className="text-zinc-700 dark:text-zinc-200 font-semibold">
+                    {(validatedPage - 1) * PAGE_SIZE + 1}–{Math.min(validatedPage * PAGE_SIZE, filteredDrivers.length)}
+                  </strong>{" "}
+                  of{" "}
+                  <strong className="text-zinc-700 dark:text-zinc-200 font-semibold">
+                    {filteredDrivers.length}
+                  </strong>{" "}
+                  drivers
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handlePrevPage}
+                    disabled={validatedPage <= 1 || isPaginating}
+                    className="text-xs border bg-white dark:bg-zinc-800 text-foreground hover:bg-zinc-50 dark:hover:bg-zinc-700/80 rounded-lg px-3 h-8 cursor-pointer flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    <ChevronLeft className="h-3.5 w-3.5" />
+                    <span>Previous</span>
+                  </Button>
+
+                  <div className="px-2.5 py-1 rounded-md bg-zinc-100 dark:bg-zinc-800/80 text-[11px] font-medium font-mono text-zinc-700 dark:text-zinc-300 border border-zinc-200/50 dark:border-zinc-700/50">
+                    Page {validatedPage} of {totalPages}
+                  </div>
+
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleNextPage}
+                    disabled={validatedPage >= totalPages || isPaginating}
+                    className="text-xs border bg-white dark:bg-zinc-800 text-foreground hover:bg-zinc-50 dark:hover:bg-zinc-700/80 rounded-lg px-3 h-8 cursor-pointer flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {isPaginating ? (
+                      <>
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        <span>Loading...</span>
+                      </>
+                    ) : (
+                      <>
+                        <span>Next</span>
+                        <ChevronRight className="h-3.5 w-3.5" />
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>

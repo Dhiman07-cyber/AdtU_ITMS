@@ -48,6 +48,8 @@ import { supabase } from '@/lib/supabase-client';
 import { cn } from "@/lib/utils";
 import {
 	Bus as BusIcon,
+	ChevronLeft,
+	ChevronRight,
 	Download,
 	Edit,
 	Eye,
@@ -56,12 +58,13 @@ import {
 	MoreHorizontal,
 	Plus,
 	RefreshCw,
+	Route as RouteIcon,
 	Search,
 	Trash2
 } from "lucide-react";
 import { MobileActionFAB } from '@/components/layout/MobileActionFAB';
 import { useRouter } from 'next/navigation';
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 // Migrated: Server-side API → PostgreSQL (no Firestore client reads)
 import { PermissionDeniedCard } from '@/components/PermissionDeniedCard';
 import { invalidateCollectionCache,useApiCollection } from '@/hooks/useApiCollection';
@@ -186,7 +189,7 @@ export default function RoutesPage() {
     return match ? parseInt(match[1]) : 999;
   };
 
-  const filteredRoutes = routes.filter((route: any) => {
+  const filteredRoutes = useMemo(() => routes.filter((route: any) => {
     const matchesSearch =
       (route.routeName && route.routeName.toLowerCase().includes(searchTerm.toLowerCase())) ||
       (route.assignedBuses && route.assignedBuses.some((bus: any) =>
@@ -200,7 +203,54 @@ export default function RoutesPage() {
     const numA = extractRouteNumber(a.routeName || '');
     const numB = extractRouteNumber(b.routeName || '');
     return numA - numB;
-  });
+  }), [routes, searchTerm, shiftFilter]);
+
+  const PAGE_SIZE = 25;
+  const [currentPage, setCurrentPage] = useState(1);
+  const [isPaginating, setIsPaginating] = useState(false);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, shiftFilter]);
+
+  const totalPages = Math.max(currentPage, Math.max(1, Math.ceil(filteredRoutes.length / PAGE_SIZE)));
+  const validatedPage = Math.max(1, Math.min(currentPage, totalPages));
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
+
+  const paginatedRoutes = useMemo(() => {
+    const startIndex = (validatedPage - 1) * PAGE_SIZE;
+    const slice = filteredRoutes.slice(startIndex, startIndex + PAGE_SIZE);
+    if (slice.length === 0 && filteredRoutes.length > 0) {
+      const fallbackStart = Math.max(0, filteredRoutes.length - PAGE_SIZE);
+      return filteredRoutes.slice(fallbackStart);
+    }
+    return slice;
+  }, [filteredRoutes, validatedPage, PAGE_SIZE]);
+
+  const handleNextPage = (e?: React.MouseEvent) => {
+    e?.preventDefault();
+    if (isPaginating || validatedPage >= totalPages) return;
+    setIsPaginating(true);
+    setTimeout(() => {
+      setCurrentPage((prev) => Math.min(totalPages, prev + 1));
+      setIsPaginating(false);
+    }, 200);
+  };
+
+  const handlePrevPage = (e?: React.MouseEvent) => {
+    e?.preventDefault();
+    if (isPaginating || validatedPage <= 1) return;
+    setIsPaginating(true);
+    setTimeout(() => {
+      setCurrentPage((prev) => Math.max(1, prev - 1));
+      setIsPaginating(false);
+    }, 200);
+  };
 
   // Export routes data from Supabase
   const handleExportRoutes = async () => {
@@ -321,18 +371,30 @@ export default function RoutesPage() {
     <div className="itms-admin-container space-y-6">
       {/* Page Header */}
       <div className="itms-page-header-container">
-        <div className="flex items-center justify-between w-full gap-2">
-          <h1 className="text-xl sm:text-2xl md:text-3xl font-bold dark:text-white truncate leading-tight pb-1">Route Management</h1>
+        <div className="flex flex-row items-center justify-between gap-3">
+          <div className="space-y-0.5 min-w-0">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 rounded-xl bg-emerald-600/10 border border-emerald-500/20 text-emerald-500">
+                <RouteIcon className="w-6 h-6" />
+              </div>
+              <h1 className="text-xl sm:text-2xl md:text-3xl font-black text-foreground tracking-tight leading-tight">
+                Route Management Hub
+              </h1>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Manage transit paths, geofenced stop sequences, assigned fleet vehicles, and corridor coverage.
+            </p>
+          </div>
 
           {/* Desktop action toolbar */}
           <div className="hidden md:flex items-center gap-2 shrink-0">
             {canRouteAdd && (
               <Button
-                className="w-full md:w-auto cursor-pointer bg-blue-600 hover:bg-blue-700 text-white border border-blue-700 transition-all duration-200 hover:scale-105 hover:shadow-lg rounded-md px-2.5 py-1.5 text-xs h-8"
+                className="cursor-pointer bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-700 shadow-sm transition-all duration-200 hover:scale-105 hover:shadow-lg rounded-lg px-3 py-1.5 text-xs h-9 gap-1.5"
                 onClick={() => router.push('/moderator/routes/add')}
               >
-                <Plus className="mr-1.5 h-3.5 w-3.5" />
-                Add New Route
+                <Plus className="h-4 w-4" />
+                <span>Add New Route</span>
               </Button>
             )}
             <ExportButton
@@ -351,22 +413,19 @@ export default function RoutesPage() {
             </Button>
           </div>
 
-          {/* Mobile Refresh Button - exact same line as Route Management at rightmost end */}
+          {/* Mobile Refresh Button */}
           <div className="flex md:hidden items-center shrink-0">
             <Button
               size="sm"
               onClick={handleRefresh}
               disabled={isRefreshing}
-              className="h-8 px-3 bg-white dark:bg-zinc-800 hover:bg-gray-50 dark:hover:bg-zinc-700 text-gray-700 dark:text-zinc-200 hover:text-blue-600 dark:hover:text-blue-400 border border-gray-200 dark:border-zinc-700 shadow-sm rounded-lg text-xs font-semibold flex items-center gap-1.5 cursor-pointer active:scale-95 transition-all shrink-0"
+              className="h-8 px-3 bg-white dark:bg-zinc-800 hover:bg-gray-50 dark:hover:bg-zinc-700 text-gray-700 dark:text-zinc-200 hover:text-emerald-600 dark:hover:text-emerald-400 border border-gray-200 dark:border-zinc-700 shadow-sm rounded-lg text-xs font-semibold flex items-center gap-1.5 cursor-pointer active:scale-95 transition-all shrink-0"
             >
-              <RefreshCw className={cn("h-3.5 w-3.5 transition-transform duration-500", isRefreshing ? "animate-spin text-blue-600" : "group-hover:rotate-180")} />
+              <RefreshCw className={cn("h-3.5 w-3.5 transition-transform duration-500", isRefreshing ? "animate-spin text-emerald-600" : "group-hover:rotate-180")} />
               <span>Refresh</span>
             </Button>
           </div>
         </div>
-        <p className="text-muted-foreground mt-1 text-xs sm:text-sm truncate">
-          Manage all bus routes and stops
-        </p>
       </div>
 
       <Card className="bg-gray-50 dark:bg-gray-900 border-border min-h-[480px] flex flex-col">
@@ -413,119 +472,202 @@ export default function RoutesPage() {
             </div>
           </div>
           <div className="students-section md:mt-5 flex-1 flex flex-col min-h-0">
-            <div className="students-scroll-wrapper rounded-md border overflow-x-auto flex-1 flex flex-col min-h-0" role="region" aria-label="Routes list">
-              <Table>
-                <TableHeader>
-                  <TableRow className="h-10">
-                    <TableHead className="text-xs font-semibold">Route Number</TableHead>
-                    <TableHead className="text-xs font-semibold">Route</TableHead>
-                    <TableHead className="text-xs font-semibold">Stops Count</TableHead>
-                    <TableHead className="text-xs font-semibold">Buses Assigned</TableHead>
-                    <TableHead className="text-xs font-semibold">Status</TableHead>
-                    <TableHead className="text-xs font-semibold text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {isLoading && filteredRoutes.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={6} className="p-6">
-                        <TableRowLoader rows={6} />
-                      </TableCell>
+            <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 overflow-hidden shadow-xs relative flex flex-col min-h-0">
+              {/* Data Fetch / Pagination Top Progress Bar */}
+              {isPaginating && (
+                <div className="absolute top-0 left-0 right-0 z-20 h-1 bg-blue-500/10 dark:bg-blue-400/10 overflow-hidden">
+                  <div className="animate-progress w-full h-full bg-blue-500 dark:bg-blue-400 origin-left-right" />
+                </div>
+              )}
+
+              <div
+                className={cn(
+                  "overflow-x-auto min-h-[520px] flex-1 flex flex-col transition-opacity duration-200",
+                  isPaginating && "opacity-60 pointer-events-none"
+                )}
+                role="region"
+                aria-label="Routes list"
+              >
+                <Table className="w-full table-fixed min-w-[780px]">
+                  <colgroup>
+                    <col className="w-[18%]" />
+                    <col className="w-[28%]" />
+                    <col className="w-[12%]" />
+                    <col className="w-[18%]" />
+                    <col className="w-[14%]" />
+                    <col className="w-[10%]" />
+                  </colgroup>
+                  <TableHeader className="bg-slate-50 dark:bg-zinc-800/50">
+                    <TableRow className="h-9 border-b border-zinc-200 dark:border-zinc-800">
+                      <TableHead className="w-[18%] text-[11px] font-bold py-2">Route Name</TableHead>
+                      <TableHead className="w-[28%] text-[11px] font-bold py-2">Route Path</TableHead>
+                      <TableHead className="w-[12%] text-[11px] font-bold py-2">Total Stops</TableHead>
+                      <TableHead className="w-[18%] text-[11px] font-bold py-2">Assigned Buses</TableHead>
+                      <TableHead className="w-[14%] text-[11px] font-bold py-2">Status</TableHead>
+                      <TableHead className="w-[10%] text-[11px] font-bold py-2 text-right">Actions</TableHead>
                     </TableRow>
-                  ) : (
-                    filteredRoutes.map((route: any) => (
-                      <TableRow key={route.id} style={{ contentVisibility: 'auto', containIntrinsicSize: '0 52px' }}>
-                        <TableCell>
-                          <div className="flex items-center">
-                            <MapPin className="mr-2 h-4 w-4 text-muted-foreground" />
-                            <span className="font-medium text-sm">{route.routeName}</span>
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-sm">
-                          {route.stops && route.stops.length > 0
-                            ? `${route.stops[0]?.name || ''} - ADTU Campus`
-                            : 'No stops defined'}
-                        </TableCell>
-                        <TableCell className="text-sm">{route.totalStops}</TableCell>
-                        <TableCell>
-                          <div className="flex flex-col gap-1">
-                            {route.assignedBuses && route.assignedBuses.length > 0 ? (
-                              route.assignedBuses.map((bus: any) => (
-                                <div key={bus.id} className="flex items-center text-xs text-blue-400">
-                                  <BusIcon className="mr-1.5 h-3 w-3" />
-                                  <span>{bus.busNumber}</span>
-                                </div>
-                              ))
-                            ) : (
-                              <span className="text-muted-foreground text-xs italic">No buses assigned</span>
-                            )}
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          {(() => {
-                            const statusInfo = normalizeRouteStatus(route.status);
-                            const badgeVariant = statusInfo.variant === 'default' ? 'default' : statusInfo.variant as "default" | "destructive" | "outline" | "secondary";
-                            return (
-                              <Badge
-                                variant={badgeVariant}
-                                className={statusInfo.variant === 'default' ? 'bg-green-600 text-white' : ''}
-                                title={statusInfo.tooltip}
-                              >
-                                {statusInfo.label}
-                              </Badge>
-                            );
-                          })()}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" className="h-8 w-8 p-0 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700">
-                                <span className="sr-only">Open menu</span>
-                                <MoreHorizontal className="h-4 w-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="bg-gray-800 dark:bg-gray-900 border-gray-700 dark:border-gray-600 shadow-xl rounded-lg w-44">
-                              <DropdownMenuLabel className="text-white font-semibold px-2 py-1.5 text-sm">Actions</DropdownMenuLabel>
-                              <DropdownMenuSeparator className="bg-gray-600" />
-                              <DropdownMenuItem
-                                className="text-white hover:bg-gray-700 dark:hover:bg-gray-800 focus:bg-gray-700 dark:focus:bg-gray-800 px-2 py-1.5 text-sm !text-white cursor-pointer"
-                                onClick={() => router.push(`/moderator/routes/view/${route.id}`)}
-                              >
-                                <Eye className="mr-2 h-3.5 w-3.5 text-blue-400" />
-                                View Details
-                              </DropdownMenuItem>
-                              {canRouteEdit && (
-                                <DropdownMenuItem
-                                  className="text-white hover:bg-gray-700 dark:hover:bg-gray-800 focus:bg-gray-700 dark:focus:bg-gray-800 px-2 py-1.5 text-sm !text-white cursor-pointer"
-                                  onClick={() => router.push(`/moderator/routes/edit/${route.id}`)}
-                                >
-                                  <Edit className="mr-2 h-3.5 w-3.5 text-yellow-400" />
-                                  Edit Route
-                                </DropdownMenuItem>
-                              )}
-                              {canRouteDelete && (
-                                <>
-                                  <DropdownMenuSeparator className="bg-gray-600" />
-                                  <DropdownMenuItem
-                                    className="text-white hover:!bg-red-600 focus:!bg-red-600 px-2 py-1.5 text-sm !text-white cursor-pointer transition-colors"
-                                    onClick={() => handleDelete(route.id, route.routeName)}
-                                  >
-                                    <Trash2 className="mr-2 h-3.5 w-3.5" />
-                                    Delete Route
-                                  </DropdownMenuItem>
-                                </>
-                              )}
-                            </DropdownMenuContent>
-                          </DropdownMenu>
+                  </TableHeader>
+                  <TableBody>
+                    {isLoading && filteredRoutes.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={6} className="p-6">
+                          <TableRowLoader rows={6} />
                         </TableCell>
                       </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-              {!isLoading && filteredRoutes.length === 0 && (
-                <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-xs text-muted-foreground min-h-[220px]">
-                  No routes found.
+                    ) : (
+                      paginatedRoutes.map((route: any) => (
+                        <TableRow key={route.id} className="hover:bg-slate-50/60 dark:hover:bg-zinc-800/40 transition-colors border-b border-zinc-100 dark:border-zinc-800/60" style={{ contentVisibility: 'auto', containIntrinsicSize: '0 52px' }}>
+                          <TableCell className="py-2.5 overflow-hidden">
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <div className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 shrink-0">
+                                <RouteIcon className="h-4 w-4" />
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <span className="font-bold text-xs sm:text-sm text-foreground truncate block">{route.routeName}</span>
+                                <span className="text-[10px] text-muted-foreground font-mono">{route.routeNumber || `RT-${route.id?.slice(0, 4)}`}</span>
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell className="py-2.5 text-xs text-muted-foreground overflow-hidden truncate">
+                            {route.stops && route.stops.length > 0
+                              ? `${route.stops[0]?.name || ''} ➔ ADTU Campus`
+                              : 'No stops defined'}
+                          </TableCell>
+                          <TableCell className="py-2.5 overflow-hidden">
+                            <div className="flex items-center gap-1 text-xs font-semibold text-foreground">
+                              <MapPin className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                              <span>{route.totalStops || 0} stops</span>
+                            </div>
+                          </TableCell>
+                          <TableCell className="py-2.5 overflow-hidden">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              {route.assignedBuses && route.assignedBuses.length > 0 ? (
+                                route.assignedBuses.map((bus: any) => (
+                                  <span key={bus.id} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 text-[10px] font-medium shrink-0">
+                                    <BusIcon className="h-2.5 w-2.5" />
+                                    {bus.busNumber}
+                                  </span>
+                                ))
+                              ) : (
+                                <span className="text-muted-foreground text-xs italic">No buses assigned</span>
+                              )}
+                            </div>
+                          </TableCell>
+                          <TableCell className="py-2.5 overflow-hidden">
+                            {(() => {
+                              const statusInfo = normalizeRouteStatus(route.status);
+                              return (
+                                <span className={cn(
+                                  "inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold shrink-0",
+                                  statusInfo.label.toLowerCase() === 'active'
+                                    ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
+                                    : statusInfo.label.toLowerCase() === 'inactive'
+                                    ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20'
+                                    : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20'
+                                )}>
+                                  {statusInfo.label}
+                                </span>
+                              );
+                            })()}
+                          </TableCell>
+                          <TableCell className="text-right overflow-hidden">
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" className="h-8 w-8 p-0 cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800">
+                                  <span className="sr-only">Open menu</span>
+                                  <MoreHorizontal className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end" className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-xl rounded-lg w-44">
+                                <DropdownMenuLabel className="font-semibold px-2 py-1.5 text-xs text-foreground">Actions</DropdownMenuLabel>
+                                <DropdownMenuSeparator className="bg-zinc-200 dark:bg-zinc-800" />
+                                <DropdownMenuItem
+                                  className="px-2 py-1.5 text-xs cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 focus:bg-slate-100 dark:focus:bg-zinc-800"
+                                  onClick={() => router.push(`/moderator/routes/view/${route.id}`)}
+                                >
+                                  <Eye className="mr-2 h-3.5 w-3.5 text-blue-500" />
+                                  View Details
+                                </DropdownMenuItem>
+                                {canRouteEdit && (
+                                  <DropdownMenuItem
+                                    className="px-2 py-1.5 text-xs cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 focus:bg-slate-100 dark:focus:bg-zinc-800"
+                                    onClick={() => router.push(`/moderator/routes/edit/${route.id}`)}
+                                  >
+                                    <Edit className="mr-2 h-3.5 w-3.5 text-amber-500" />
+                                    Edit Route
+                                  </DropdownMenuItem>
+                                )}
+                                {canRouteDelete && (
+                                  <>
+                                    <DropdownMenuSeparator className="bg-zinc-200 dark:bg-zinc-800" />
+                                    <DropdownMenuItem
+                                      className="px-2 py-1.5 text-xs cursor-pointer text-red-600 dark:text-red-400 hover:!bg-red-500/10 focus:!bg-red-500/10"
+                                      onClick={() => handleDelete(route.id, route.routeName)}
+                                    >
+                                      <Trash2 className="mr-2 h-3.5 w-3.5 text-red-500" />
+                                      Delete Route
+                                    </DropdownMenuItem>
+                                  </>
+                                )}
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+                {!isLoading && filteredRoutes.length === 0 && (
+                  <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-xs text-muted-foreground min-h-[220px]">
+                    No routes found.
+                  </div>
+                )}
+              </div>
+
+              {/* Pagination Footer */}
+              {filteredRoutes.length > 0 && (
+                <div className="pt-3 pb-2.5 flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-zinc-200/60 dark:border-zinc-800/60 px-4 bg-white dark:bg-zinc-900/50">
+                  <div className="text-xs text-zinc-500 dark:text-zinc-400 font-mono">
+                    Showing{" "}
+                    <strong className="text-zinc-700 dark:text-zinc-200 font-semibold">
+                      {(validatedPage - 1) * PAGE_SIZE + 1}–{Math.min(validatedPage * PAGE_SIZE, filteredRoutes.length)}
+                    </strong>{" "}
+                    of{" "}
+                    <strong className="text-zinc-700 dark:text-zinc-200 font-semibold">
+                      {filteredRoutes.length}
+                    </strong>{" "}
+                    routes
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={handlePrevPage}
+                      disabled={validatedPage <= 1 || isPaginating}
+                      className="text-xs border bg-white dark:bg-zinc-800 text-foreground hover:bg-zinc-50 dark:hover:bg-zinc-700/80 rounded-lg px-3 h-8 cursor-pointer flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      <ChevronLeft className="h-3.5 w-3.5" />
+                      <span>Previous</span>
+                    </Button>
+
+                    <div className="px-2.5 py-1 rounded-md bg-zinc-100 dark:bg-zinc-800/80 text-[11px] font-medium font-mono text-zinc-700 dark:text-zinc-300 border border-zinc-200/50 dark:border-zinc-700/50">
+                      Page {validatedPage} of {totalPages}
+                    </div>
+
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={handleNextPage}
+                      disabled={validatedPage >= totalPages || isPaginating}
+                      className="text-xs border bg-white dark:bg-zinc-800 text-foreground hover:bg-zinc-50 dark:hover:bg-zinc-700/80 rounded-lg px-3 h-8 cursor-pointer flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      <span>Next</span>
+                      <ChevronRight className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
                 </div>
               )}
             </div>
@@ -567,13 +709,13 @@ export default function RoutesPage() {
             label: "Add New Route",
             icon: Plus,
             href: "/moderator/routes/add",
-            color: "bg-blue-600 text-white",
+            color: "bg-emerald-600 text-white",
           }] : []),
           {
             label: "Export Routes",
             icon: Download,
             onClick: handleExportRoutes,
-            color: "bg-emerald-600 text-white",
+            color: "bg-slate-700 text-white",
           },
         ]}
       />

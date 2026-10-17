@@ -49,6 +49,7 @@ import {
   Check,
   CheckCircle2,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   ChevronUp,
   ClipboardCheck,
@@ -249,6 +250,48 @@ export default function ModeratorManagementHub() {
       return matchesSearch && matchesStatus;
     });
   }, [moderators, searchTerm, statusFilter]);
+
+  const PAGE_SIZE = 10;
+  const [currentPage, setCurrentPage] = useState(1);
+  const [isPaginating, setIsPaginating] = useState(false);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, statusFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredModerators.length / PAGE_SIZE));
+  const validatedPage = Math.max(1, Math.min(currentPage, totalPages));
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
+
+  const paginatedModerators = useMemo(() => {
+    const startIndex = (validatedPage - 1) * PAGE_SIZE;
+    return filteredModerators.slice(startIndex, startIndex + PAGE_SIZE);
+  }, [filteredModerators, validatedPage, PAGE_SIZE]);
+
+  const handleNextPage = (e?: React.MouseEvent) => {
+    e?.preventDefault();
+    if (isPaginating || validatedPage >= totalPages) return;
+    setIsPaginating(true);
+    setTimeout(() => {
+      setCurrentPage((prev) => Math.min(totalPages, prev + 1));
+      setIsPaginating(false);
+    }, 180);
+  };
+
+  const handlePrevPage = (e?: React.MouseEvent) => {
+    e?.preventDefault();
+    if (isPaginating || validatedPage <= 1) return;
+    setIsPaginating(true);
+    setTimeout(() => {
+      setCurrentPage((prev) => Math.max(1, prev - 1));
+      setIsPaginating(false);
+    }, 180);
+  };
 
   // Keep first moderator selected if none is selected
   useEffect(() => {
@@ -566,7 +609,7 @@ export default function ModeratorManagementHub() {
   }
 
   return (
-    <div className="itms-admin-container h-[100dvh] max-h-[100dvh] !pb-3.5 flex flex-col overflow-hidden gap-3.5">
+    <div className="itms-admin-container min-h-full h-auto lg:h-[100dvh] lg:max-h-[100dvh] !pb-24 lg:!pb-3.5 flex flex-col overflow-y-auto lg:overflow-hidden gap-3.5">
       {/* ── HEADER ── */}
       <div className="itms-page-header-container !mb-0 shrink-0">
         <div className="flex flex-row items-center justify-between gap-3">
@@ -612,35 +655,17 @@ export default function ModeratorManagementHub() {
               <span>Refresh</span>
             </Button>
           </div>
-
-          {/* Mobile Refresh */}
-          <div className="flex md:hidden items-center shrink-0">
-            <Button
-              size="sm"
-              onClick={handleRefresh}
-              disabled={isRefreshing}
-              className="h-8 px-3 bg-white dark:bg-zinc-800 hover:bg-gray-50 dark:hover:bg-zinc-700 text-gray-700 dark:text-zinc-200 border border-gray-200 dark:border-zinc-700 shadow-sm rounded-lg text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
-            >
-              <RefreshCw
-                className={cn(
-                  "h-3.5 w-3.5 transition-transform duration-500",
-                  isRefreshing ? "animate-spin text-blue-600" : "group-hover:rotate-180"
-                )}
-              />
-              <span>Refresh</span>
-            </Button>
-          </div>
         </div>
       </div>
 
       {/* ── TWO-COLUMN MASTER-DETAIL WORKSPACE (LIKE SMART-ALLOCATION & FLEET-MAP) ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-stretch flex-1 min-h-0 w-full overflow-hidden">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-stretch flex-1 min-h-0 w-full overflow-visible lg:overflow-hidden">
         {/* ── LEFT COLUMN: MODERATOR SELECTION DIRECTORY (4 OF 12 COLS) ── */}
-        <div className="lg:col-span-4 flex flex-col min-w-0 h-full overflow-hidden">
+        <div className="lg:col-span-4 flex flex-col min-w-0 h-auto min-h-[380px] max-h-[500px] lg:max-h-none lg:h-full overflow-hidden">
           <Card className="bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 shadow-md flex-1 flex flex-col h-full overflow-hidden !p-0 !gap-0">
             <CardHeader className="p-3.5 pb-2.5 border-b border-zinc-200 dark:border-zinc-800 bg-slate-50/70 dark:bg-zinc-800/40 shrink-0">
               <div className="flex items-center justify-between gap-2">
-                <CardTitle className="text-xs font-bold text-foreground uppercase tracking-wider flex items-center gap-1.5">
+                <CardTitle className="text-xs sm:text-sm font-bold text-foreground flex items-center gap-1.5">
                   <Users className="w-4 h-4 text-blue-600 dark:text-blue-400" />
                   <span>Moderator Roster</span>
                 </CardTitle>
@@ -698,97 +723,156 @@ export default function ModeratorManagementHub() {
             </CardHeader>
 
             {/* Scrollable List of Moderator Cards */}
-            <div className="flex-1 overflow-y-auto no-scrollbar min-h-0 p-2.5 space-y-2">
-              {isLoading && filteredModerators.length === 0 ? (
-                <div className="p-4">
-                  <TableRowLoader rows={5} />
+            <div className="relative flex-1 overflow-hidden flex flex-col min-h-0">
+              {/* Data Fetch / Pagination Top Progress Bar */}
+              {isPaginating && (
+                <div className="absolute top-0 left-0 right-0 z-20 h-1 bg-blue-500/10 dark:bg-blue-400/10 overflow-hidden">
+                  <div className="animate-progress w-full h-full bg-blue-500 dark:bg-blue-400 origin-left-right" />
                 </div>
-              ) : filteredModerators.length === 0 ? (
-                <div className="p-8 text-center text-xs text-muted-foreground space-y-1">
-                  <ShieldAlert className="w-8 h-8 mx-auto text-muted-foreground/60" />
-                  <p className="font-semibold text-foreground">No moderators found</p>
-                  <p>Try clearing search or filters.</p>
-                </div>
-              ) : (
-                filteredModerators.map((moderator) => {
-                  const isSelected = selectedModeratorId === moderator.id;
-                  const isActive = (moderator.status || "active").toLowerCase() === "active";
-                  const { total, active } = countActivePermissions(moderator.permissions);
-                  const isFull = active === total && total > 0;
-                  const isZero = active === 0;
+              )}
 
-                  return (
-                    <div
-                      key={moderator.id}
-                      onClick={() => setSelectedModeratorId(moderator.id)}
-                      className={cn(
-                        "p-3 rounded-xl border transition-all cursor-pointer select-none text-left relative",
-                        isSelected
-                          ? "bg-blue-500/10 dark:bg-blue-950/30 border-blue-500 shadow-sm ring-1 ring-blue-500/30"
-                          : "bg-white dark:bg-zinc-800/40 border-zinc-200 dark:border-zinc-800/80 hover:bg-slate-50 dark:hover:bg-zinc-800/80"
-                      )}
-                    >
-                      <div className="flex items-center gap-3">
-                        <Avatar
-                          src={safeImageSrc(moderator.profilePhotoUrl)}
-                          name={moderator.name || moderator.fullName}
-                          size="sm"
-                          className="flex-shrink-0 border border-zinc-200 dark:border-zinc-700"
-                        />
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center justify-between gap-1">
-                            <p
-                              className={cn(
-                                "text-xs font-bold truncate",
-                                isSelected ? "text-blue-600 dark:text-blue-400" : "text-foreground"
-                              )}
-                            >
-                              {moderator.name || moderator.fullName || "Unnamed Moderator"}
+              <div
+                className={cn(
+                  "flex-1 overflow-y-auto scrollbar-thin min-h-0 p-2.5 space-y-2 transition-opacity duration-200 touch-pan-y lg:overscroll-contain overscroll-y-auto",
+                  isPaginating && "opacity-60 pointer-events-none"
+                )}
+              >
+                {isLoading && filteredModerators.length === 0 ? (
+                  <div className="p-4">
+                    <TableRowLoader rows={5} />
+                  </div>
+                ) : filteredModerators.length === 0 ? (
+                  <div className="p-8 text-center text-xs text-muted-foreground space-y-1">
+                    <ShieldAlert className="w-8 h-8 mx-auto text-muted-foreground/60" />
+                    <p className="font-semibold text-foreground">No moderators found</p>
+                    <p>Try clearing search or filters.</p>
+                  </div>
+                ) : (
+                  paginatedModerators.map((moderator) => {
+                    const isSelected = selectedModeratorId === moderator.id;
+                    const isActive = (moderator.status || "active").toLowerCase() === "active";
+                    const { total, active } = countActivePermissions(moderator.permissions);
+                    const isFull = active === total && total > 0;
+                    const isZero = active === 0;
+
+                    return (
+                      <div
+                        key={moderator.id}
+                        onClick={() => setSelectedModeratorId(moderator.id)}
+                        className={cn(
+                          "p-3 rounded-xl border transition-all cursor-pointer select-none text-left relative",
+                          isSelected
+                            ? "bg-blue-500/10 dark:bg-blue-950/30 border-blue-500 shadow-sm ring-1 ring-blue-500/30"
+                            : "bg-white dark:bg-zinc-800/40 border-zinc-200 dark:border-zinc-800/80 hover:bg-slate-50 dark:hover:bg-zinc-800/80"
+                        )}
+                      >
+                        <div className="flex items-center gap-3">
+                          <Avatar
+                            src={safeImageSrc(moderator.profilePhotoUrl)}
+                            name={moderator.name || moderator.fullName}
+                            size="sm"
+                            className="flex-shrink-0 border border-zinc-200 dark:border-zinc-700"
+                          />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center justify-between gap-1">
+                              <p
+                                className={cn(
+                                  "text-xs font-bold truncate",
+                                  isSelected ? "text-blue-600 dark:text-blue-400" : "text-foreground"
+                                )}
+                              >
+                                {moderator.name || moderator.fullName || "Unnamed Moderator"}
+                              </p>
+                              <Badge
+                                variant="outline"
+                                className={cn(
+                                  "text-[9px] font-semibold px-1.5 py-0.2 rounded-full shrink-0",
+                                  isActive
+                                    ? "bg-emerald-500/10 text-emerald-500 dark:text-emerald-400 border-emerald-500/30"
+                                    : "bg-rose-500/10 text-rose-500 dark:text-rose-400 border-rose-500/30"
+                                )}
+                              >
+                                {isActive ? "Active" : "Suspended"}
+                              </Badge>
+                            </div>
+                            <p className="text-[11px] text-muted-foreground truncate">
+                              {moderator.email}
                             </p>
-                            <Badge
-                              variant="outline"
-                              className={cn(
-                                "text-[9px] font-semibold px-1.5 py-0.2 rounded-full shrink-0",
-                                isActive
-                                  ? "bg-emerald-500/10 text-emerald-500 dark:text-emerald-400 border-emerald-500/30"
-                                  : "bg-rose-500/10 text-rose-500 dark:text-rose-400 border-rose-500/30"
-                              )}
-                            >
-                              {isActive ? "Active" : "Suspended"}
-                            </Badge>
-                          </div>
-                          <p className="text-[11px] text-muted-foreground truncate">
-                            {moderator.email}
-                          </p>
-                          <div className="flex items-center justify-between text-[10px] text-muted-foreground mt-1 pt-1 border-t border-zinc-100 dark:border-zinc-800/60 font-mono">
-                            <span>ID: {moderator.employeeId || moderator.empId || "N/A"}</span>
-                            <span
-                              className={cn(
-                                "font-semibold",
-                                isFull
-                                  ? "text-emerald-500 dark:text-emerald-400"
-                                  : isZero
-                                  ? "text-rose-500 dark:text-rose-400"
-                                  : "text-blue-500 dark:text-blue-400"
-                              )}
-                            >
-                              {active}/{total} Granted
-                            </span>
+                            <div className="flex items-center justify-between text-[10px] text-muted-foreground mt-1 pt-1 border-t border-zinc-100 dark:border-zinc-800/60 font-mono">
+                              <span>ID: {moderator.employeeId || moderator.empId || "N/A"}</span>
+                              <span
+                                className={cn(
+                                  "font-semibold",
+                                  isFull
+                                    ? "text-emerald-500 dark:text-emerald-400"
+                                    : isZero
+                                    ? "text-rose-500 dark:text-rose-400"
+                                    : "text-blue-500 dark:text-blue-400"
+                                )}
+                              >
+                                {active}/{total} Granted
+                              </span>
+                            </div>
                           </div>
                         </div>
                       </div>
+                    );
+                  })
+                )}
+              </div>
+
+              {/* Pagination Footer */}
+              {filteredModerators.length > 0 && (
+                <div className="pt-2.5 pb-2 flex items-center justify-between gap-2 border-t border-zinc-200 dark:border-zinc-800 px-3 bg-slate-50/70 dark:bg-zinc-800/40 shrink-0">
+                  <div className="text-[11px] text-zinc-500 dark:text-zinc-400 font-mono">
+                    <strong className="text-zinc-700 dark:text-zinc-200 font-semibold">
+                      {(validatedPage - 1) * PAGE_SIZE + 1}–{Math.min(validatedPage * PAGE_SIZE, filteredModerators.length)}
+                    </strong>{" "}
+                    of{" "}
+                    <strong className="text-zinc-700 dark:text-zinc-200 font-semibold">
+                      {filteredModerators.length}
+                    </strong>
+                  </div>
+
+                  <div className="flex items-center gap-1.5">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={handlePrevPage}
+                      disabled={validatedPage <= 1 || isPaginating}
+                      className="text-xs border bg-white dark:bg-zinc-800 text-foreground hover:bg-zinc-50 dark:hover:bg-zinc-700/80 rounded-lg px-2 h-7 cursor-pointer flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      <ChevronLeft className="h-3 w-3" />
+                      <span className="hidden sm:inline">Prev</span>
+                    </Button>
+
+                    <div className="px-2 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800/80 text-[10px] font-medium font-mono text-zinc-700 dark:text-zinc-300 border border-zinc-200/50 dark:border-zinc-700/50">
+                      {validatedPage}/{totalPages}
                     </div>
-                  );
-                })
+
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={handleNextPage}
+                      disabled={validatedPage >= totalPages || isPaginating}
+                      className="text-xs border bg-white dark:bg-zinc-800 text-foreground hover:bg-zinc-50 dark:hover:bg-zinc-700/80 rounded-lg px-2 h-7 cursor-pointer flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      <span className="hidden sm:inline">Next</span>
+                      <ChevronRight className="h-3 w-3" />
+                    </Button>
+                  </div>
+                </div>
               )}
             </div>
           </Card>
         </div>
 
         {/* ── RIGHT COLUMN: DIRECT AUTHORITY & PERMISSIONS COMMAND CENTER (8 OF 12 COLS) ── */}
-        <div className="lg:col-span-8 flex flex-col min-w-0 h-full overflow-hidden">
+        <div className="lg:col-span-8 flex flex-col min-w-0 h-auto lg:h-full overflow-visible lg:overflow-hidden">
           {selectedModerator ? (
-            <Card className="bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 shadow-md flex-1 flex flex-col h-full overflow-hidden !p-0 !gap-0">
+            <Card className="bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 shadow-md flex-1 flex flex-col h-auto lg:h-full overflow-visible lg:overflow-hidden !p-0 !gap-0">
               {/* Profile & Master Access Header */}
               <div className="p-3.5 border-b border-zinc-200 dark:border-zinc-800 bg-slate-50/70 dark:bg-zinc-800/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
                 <div className="flex items-center gap-3">
@@ -955,7 +1039,7 @@ export default function ModeratorManagementHub() {
               </div>
 
               {/* Scrollable Live Permissions Matrix (Direct on page!) */}
-              <div className="flex-1 overflow-y-auto no-scrollbar min-h-0 p-3 space-y-2.5">
+              <div className="flex-1 lg:overflow-y-auto overflow-visible h-auto lg:min-h-0 no-scrollbar p-3 space-y-2.5">
                 {Object.entries(PERMISSION_CATEGORIES).map(([catKey, category]) => {
                   const Icon = categoryIcons[catKey] || Shield;
                   const isExpanded = expandedCategories.has(catKey);

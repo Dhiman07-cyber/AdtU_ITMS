@@ -53,6 +53,9 @@ import {
   ArrowRightLeft,
   Bus,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  ClipboardList,
   Clock,
   Download,
   Edit,
@@ -64,6 +67,7 @@ import {
   Plus,
   QrCode,
   RefreshCw,
+  RotateCcw,
   Search,
   ShieldAlert,
   Trash2,
@@ -329,6 +333,78 @@ export default function AdminStudentsHub() {
     );
   }, [filteredStudents]);
 
+  // Section-based pagination state
+  const PAGE_SIZE = 25;
+  const [currentPage, setCurrentPage] = useState(1);
+  const [isPaginating, setIsPaginating] = useState(false);
+
+  // Reset to first section when filters or search change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, statusFilter, shiftFilter, busFilter]);
+
+  const totalPages = useMemo(() => {
+    const loadedCount = uniqueFilteredStudents.length;
+    const dbTotal = metrics.total || serverTotalStudents || 0;
+    const effectiveTotal = hasMoreStudents
+      ? Math.max(loadedCount + PAGE_SIZE, dbTotal)
+      : Math.max(loadedCount, dbTotal);
+    const calculated = Math.max(1, Math.ceil(effectiveTotal / PAGE_SIZE));
+    // Guard: totalPages must NEVER drop below currentPage while navigating
+    return Math.max(currentPage, calculated);
+  }, [uniqueFilteredStudents.length, hasMoreStudents, metrics.total, serverTotalStudents, PAGE_SIZE, currentPage]);
+
+  const validatedPage = Math.max(1, Math.min(currentPage, totalPages));
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
+
+  const paginatedStudents = useMemo(() => {
+    const startIndex = (validatedPage - 1) * PAGE_SIZE;
+    const slice = uniqueFilteredStudents.slice(startIndex, startIndex + PAGE_SIZE);
+    // Anti-flicker: if new batch is pending transition, retain last valid rows instead of collapsing to 0 rows
+    if (slice.length === 0 && uniqueFilteredStudents.length > 0) {
+      const fallbackStart = Math.max(0, uniqueFilteredStudents.length - PAGE_SIZE);
+      return uniqueFilteredStudents.slice(fallbackStart);
+    }
+    return slice;
+  }, [uniqueFilteredStudents, validatedPage, PAGE_SIZE]);
+
+  const handleNextPage = async (e?: React.MouseEvent) => {
+    e?.preventDefault();
+    if (loadingStudents || isPaginating) return;
+    if (validatedPage >= totalPages && !hasMoreStudents) return;
+
+    const targetPage = validatedPage + 1;
+    const requiredItems = (targetPage - 1) * PAGE_SIZE + 1;
+
+    setIsPaginating(true);
+    try {
+      if (uniqueFilteredStudents.length < requiredItems && hasMoreStudents) {
+        await fetchMoreStudents();
+        await new Promise((r) => setTimeout(r, 60));
+      }
+      setCurrentPage(targetPage);
+    } catch (err) {
+      console.error("Failed to fetch next section:", err);
+    } finally {
+      setTimeout(() => setIsPaginating(false), 200);
+    }
+  };
+
+  const handlePrevPage = (e?: React.MouseEvent) => {
+    e?.preventDefault();
+    if (loadingStudents || isPaginating || validatedPage <= 1) return;
+    setIsPaginating(true);
+    setTimeout(() => {
+      setCurrentPage((prev) => Math.max(1, prev - 1));
+      setIsPaginating(false);
+    }, 200);
+  };
+
   // Refresh handler
   const handleRefresh = async () => {
     setIsRefreshing(true);
@@ -563,92 +639,74 @@ export default function AdminStudentsHub() {
               <span>Refresh</span>
             </Button>
           </div>
-
-          {/* Mobile Refresh Button */}
-          <div className="flex md:hidden items-center shrink-0">
-            <Button
-              size="sm"
-              onClick={handleRefresh}
-              disabled={isRefreshing}
-              className="h-8 px-3 bg-white dark:bg-zinc-800 hover:bg-gray-50 dark:hover:bg-zinc-700 text-gray-700 dark:text-zinc-200 border border-gray-200 dark:border-zinc-700 shadow-sm rounded-lg text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
-            >
-              <RefreshCw
-                className={cn(
-                  "h-3.5 w-3.5 transition-transform duration-500",
-                  isRefreshing ? "animate-spin text-blue-600" : "group-hover:rotate-180"
-                )}
-              />
-              <span>Refresh</span>
-            </Button>
-          </div>
         </div>
 
         {/* ── TOP 4 ROLE-SPECIFIC CONTROL CARDS (STUDENTS) ── */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-5">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5 sm:gap-3 mt-4 sm:mt-5">
           {/* Card 1: Total Enrolled */}
           <Card className="bg-white/60 dark:bg-zinc-900/60 border border-zinc-200/80 dark:border-zinc-800/80 shadow-xs">
-            <CardContent className="p-3.5 flex items-center justify-between">
-              <div>
-                <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
+            <CardContent className="p-2.5 sm:p-3.5 flex items-center gap-2.5 sm:justify-between">
+              <div className="p-2 rounded-xl bg-blue-500/10 text-blue-500 border border-blue-500/20 shrink-0 sm:order-2">
+                <Users className="w-4 h-4" />
+              </div>
+              <div className="min-w-0 flex-1 sm:order-1">
+                <p className="text-[10px] sm:text-[11px] font-medium text-muted-foreground uppercase tracking-wider truncate">
                   Total Enrolled
                 </p>
-                <p className="text-xl md:text-2xl font-black text-foreground mt-0.5">
+                <p className="text-base sm:text-xl md:text-2xl font-black text-foreground mt-0.5 leading-tight">
                   {metrics.total.toLocaleString()}
                 </p>
-              </div>
-              <div className="p-2.5 rounded-xl bg-blue-500/10 text-blue-500 border border-blue-500/20">
-                <Users className="w-4 h-4" />
               </div>
             </CardContent>
           </Card>
 
           {/* Card 2: Active Access */}
           <Card className="bg-white/60 dark:bg-zinc-900/60 border border-zinc-200/80 dark:border-zinc-800/80 shadow-xs">
-            <CardContent className="p-3.5 flex items-center justify-between">
-              <div>
-                <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
+            <CardContent className="p-2.5 sm:p-3.5 flex items-center gap-2.5 sm:justify-between">
+              <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 shrink-0 sm:order-2">
+                <UserCheck className="w-4 h-4" />
+              </div>
+              <div className="min-w-0 flex-1 sm:order-1">
+                <p className="text-[10px] sm:text-[11px] font-medium text-muted-foreground uppercase tracking-wider truncate">
                   Active Access
                 </p>
-                <p className="text-xl md:text-2xl font-black text-emerald-500 mt-0.5">
+                <p className="text-base sm:text-xl md:text-2xl font-black text-emerald-500 mt-0.5 leading-tight">
                   {metrics.activeCount.toLocaleString()}
                 </p>
-              </div>
-              <div className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
-                <UserCheck className="w-4 h-4" />
               </div>
             </CardContent>
           </Card>
 
           {/* Card 3: Soft Blocked / Expired */}
           <Card className="bg-white/60 dark:bg-zinc-900/60 border border-zinc-200/80 dark:border-zinc-800/80 shadow-xs">
-            <CardContent className="p-3.5 flex items-center justify-between">
-              <div>
-                <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
+            <CardContent className="p-2.5 sm:p-3.5 flex items-center gap-2.5 sm:justify-between">
+              <div className="p-2 rounded-xl bg-amber-500/10 text-amber-500 border border-amber-500/20 shrink-0 sm:order-2">
+                <Clock className="w-4 h-4" />
+              </div>
+              <div className="min-w-0 flex-1 sm:order-1">
+                <p className="text-[10px] sm:text-[11px] font-medium text-muted-foreground uppercase tracking-wider truncate">
                   Soft Block / Expired
                 </p>
-                <p className="text-xl md:text-2xl font-black text-amber-500 mt-0.5">
+                <p className="text-base sm:text-xl md:text-2xl font-black text-amber-500 mt-0.5 leading-tight">
                   {metrics.softBlockedOrExpiredCount.toLocaleString()}
                 </p>
-              </div>
-              <div className="p-2.5 rounded-xl bg-amber-500/10 text-amber-500 border border-amber-500/20">
-                <Clock className="w-4 h-4" />
               </div>
             </CardContent>
           </Card>
 
           {/* Card 4: Access Suspended */}
           <Card className="bg-white/60 dark:bg-zinc-900/60 border border-zinc-200/80 dark:border-zinc-800/80 shadow-xs">
-            <CardContent className="p-3.5 flex items-center justify-between">
-              <div>
-                <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
+            <CardContent className="p-2.5 sm:p-3.5 flex items-center gap-2.5 sm:justify-between">
+              <div className="p-2 rounded-xl bg-rose-500/10 text-rose-500 border border-rose-500/20 shrink-0 sm:order-2">
+                <UserX className="w-4 h-4" />
+              </div>
+              <div className="min-w-0 flex-1 sm:order-1">
+                <p className="text-[10px] sm:text-[11px] font-medium text-muted-foreground uppercase tracking-wider truncate">
                   Access Suspended
                 </p>
-                <p className="text-xl md:text-2xl font-black text-rose-500 mt-0.5">
+                <p className="text-base sm:text-xl md:text-2xl font-black text-rose-500 mt-0.5 leading-tight">
                   {metrics.suspendedCount.toLocaleString()}
                 </p>
-              </div>
-              <div className="p-2.5 rounded-xl bg-rose-500/10 text-rose-500 border border-rose-500/20">
-                <UserX className="w-4 h-4" />
               </div>
             </CardContent>
           </Card>
@@ -762,18 +820,32 @@ export default function AdminStudentsHub() {
           </div>
 
           {/* ── STUDENTS TABLE ── */}
-          <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 overflow-hidden shadow-xs">
-            <div className="overflow-x-auto">
-              <Table>
+          <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 overflow-hidden shadow-xs relative">
+            {isPaginating && (
+              <div className="absolute top-0 left-0 right-0 z-20 h-1 bg-blue-500/10 dark:bg-blue-400/10 overflow-hidden">
+                <div className="animate-progress w-full h-full bg-blue-500 dark:bg-blue-400 origin-left-right" />
+              </div>
+            )}
+            <div className={cn("overflow-x-auto min-h-[540px] transition-opacity duration-200", isPaginating && "opacity-60 pointer-events-none")}>
+              <Table className="w-full table-fixed min-w-[950px]">
+                <colgroup>
+                  <col className="w-[24%]" />
+                  <col className="w-[16%]" />
+                  <col className="w-[15%]" />
+                  <col className="w-[16%]" />
+                  <col className="w-[12%]" />
+                  <col className="w-[10%]" />
+                  <col className="w-[7%]" />
+                </colgroup>
                 <TableHeader className="bg-slate-50 dark:bg-zinc-800/50">
                   <TableRow className="h-9 border-b border-zinc-200 dark:border-zinc-800">
-                    <TableHead className="text-[11px] font-bold py-2">Student</TableHead>
-                    <TableHead className="text-[11px] font-bold py-2">Contact Details</TableHead>
-                    <TableHead className="text-[11px] font-bold py-2">Enrollment & Shift</TableHead>
-                    <TableHead className="text-[11px] font-bold py-2">Assigned Bus</TableHead>
-                    <TableHead className="text-[11px] font-bold py-2">Session Period</TableHead>
-                    <TableHead className="text-[11px] font-bold py-2">Portal Access</TableHead>
-                    <TableHead className="text-[11px] font-bold py-2 text-right">Actions</TableHead>
+                    <TableHead className="w-[24%] text-[11px] font-bold py-2">Student</TableHead>
+                    <TableHead className="w-[16%] text-[11px] font-bold py-2">Contact Details</TableHead>
+                    <TableHead className="w-[15%] text-[11px] font-bold py-2">Enrollment & Shift</TableHead>
+                    <TableHead className="w-[16%] text-[11px] font-bold py-2">Assigned Bus</TableHead>
+                    <TableHead className="w-[12%] text-[11px] font-bold py-2">Session Period</TableHead>
+                    <TableHead className="w-[10%] text-[11px] font-bold py-2">Portal Access</TableHead>
+                    <TableHead className="w-[7%] text-[11px] font-bold py-2 text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -796,7 +868,7 @@ export default function AdminStudentsHub() {
                       </TableCell>
                     </TableRow>
                   ) : (
-                    uniqueFilteredStudents.map((student) => {
+                    paginatedStudents.map((student) => {
                       const currentStatus = (student.status || "active").toLowerCase();
                       const isActive = currentStatus === "active";
                       const isSoftBlocked = currentStatus === "soft_blocked";
@@ -813,19 +885,19 @@ export default function AdminStudentsHub() {
                           className="hover:bg-slate-50/60 dark:hover:bg-zinc-800/40 transition-colors border-b border-zinc-100 dark:border-zinc-800/60"
                         >
                           {/* Student Name & Email */}
-                          <TableCell className="py-2.5">
-                            <div className="flex items-center gap-2.5">
+                          <TableCell className="py-2.5 overflow-hidden">
+                            <div className="flex items-center gap-2.5 min-w-0">
                               <Avatar
                                 src={safeImageSrc(student.profilePhotoUrl || student.photoURL)}
                                 name={student.name || student.fullName}
                                 size="sm"
                                 className="flex-shrink-0 border border-zinc-200 dark:border-zinc-700"
                               />
-                              <div className="min-w-0">
-                                <div className="text-xs font-bold text-foreground truncate max-w-[170px] sm:max-w-none">
+                              <div className="min-w-0 flex-1">
+                                <div className="text-xs font-bold text-foreground truncate">
                                   {student.name || student.fullName || "Unnamed Student"}
                                 </div>
-                                <div className="text-[11px] text-muted-foreground truncate max-w-[170px] sm:max-w-none">
+                                <div className="text-[11px] text-muted-foreground truncate">
                                   {student.email || "No email"}
                                 </div>
                               </div>
@@ -833,13 +905,13 @@ export default function AdminStudentsHub() {
                           </TableCell>
 
                           {/* Contact */}
-                          <TableCell className="py-2.5">
-                            <div className="space-y-0.5">
-                              <div className="text-[11px] font-medium text-foreground">
+                          <TableCell className="py-2.5 overflow-hidden">
+                            <div className="space-y-0.5 truncate">
+                              <div className="text-[11px] font-medium text-foreground truncate">
                                 Ph: {student.phone || student.phoneNumber || "N/A"}
                               </div>
                               {(student.alternatePhone || student.altPhone) && (
-                                <div className="text-[10px] text-muted-foreground">
+                                <div className="text-[10px] text-muted-foreground truncate">
                                   Alt: {student.alternatePhone || student.altPhone}
                                 </div>
                               )}
@@ -847,9 +919,9 @@ export default function AdminStudentsHub() {
                           </TableCell>
 
                           {/* Enrollment ID & Shift */}
-                          <TableCell className="py-2.5">
-                            <div className="space-y-1">
-                              <div className="font-mono text-[11px] font-semibold text-foreground">
+                          <TableCell className="py-2.5 overflow-hidden">
+                            <div className="space-y-1 truncate">
+                              <div className="font-mono text-[11px] font-semibold text-foreground truncate">
                                 {student.enrollmentId || student.enrollment_id || student.studentId || "N/A"}
                               </div>
                               <span
@@ -866,18 +938,18 @@ export default function AdminStudentsHub() {
                           </TableCell>
 
                           {/* Assigned Bus */}
-                          <TableCell className="py-2.5">
+                          <TableCell className="py-2.5 overflow-hidden">
                             {assignedBus ? (
-                              <div className="flex items-center gap-1.5">
+                              <div className="flex items-center gap-1.5 truncate">
                                 <Badge
                                   variant="outline"
-                                  className="bg-indigo-500/10 text-indigo-500 dark:text-indigo-400 border-indigo-500/30 text-[10px] font-semibold px-2 py-0.5 rounded-md flex items-center gap-1"
+                                  className="bg-indigo-500/10 text-indigo-500 dark:text-indigo-400 border-indigo-500/30 text-[10px] font-semibold px-2 py-0.5 rounded-md flex items-center gap-1 shrink-0"
                                 >
                                   <Bus className="w-3 h-3" />
                                   <span>Bus {assignedBus.busNumber}</span>
                                 </Badge>
                                 {assignedBus.routeNumber && (
-                                  <span className="text-[10px] text-muted-foreground">
+                                  <span className="text-[10px] text-muted-foreground truncate">
                                     (R-{assignedBus.routeNumber})
                                   </span>
                                 )}
@@ -900,9 +972,9 @@ export default function AdminStudentsHub() {
                           </TableCell>
 
                           {/* Session Period */}
-                          <TableCell className="py-2.5">
-                            <div className="space-y-0.5">
-                              <div className="text-[11px] font-medium text-foreground">
+                          <TableCell className="py-2.5 overflow-hidden">
+                            <div className="space-y-0.5 truncate">
+                              <div className="text-[11px] font-medium text-foreground truncate">
                                 {student.sessionStartYear && student.sessionEndYear
                                   ? `${student.sessionStartYear}-${student.sessionEndYear}`
                                   : student.session_start_year && student.session_end_year
@@ -918,11 +990,11 @@ export default function AdminStudentsHub() {
                           </TableCell>
 
                           {/* Access Status */}
-                          <TableCell className="py-2.5">
+                          <TableCell className="py-2.5 overflow-hidden">
                             <Badge
                               variant="outline"
                               className={cn(
-                                "text-[10px] font-semibold px-2 py-0.5 rounded-full flex items-center gap-1 w-fit",
+                                "text-[10px] font-semibold px-2 py-0.5 rounded-full flex items-center gap-1 w-fit shrink-0",
                                 isActive
                                   ? "bg-emerald-500/10 text-emerald-500 dark:text-emerald-400 border-emerald-500/30"
                                   : isSoftBlocked
@@ -934,7 +1006,7 @@ export default function AdminStudentsHub() {
                             >
                               <span
                                 className={cn(
-                                  "w-1.5 h-1.5 rounded-full",
+                                  "w-1.5 h-1.5 rounded-full shrink-0",
                                   isActive
                                     ? "bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]"
                                     : isSoftBlocked
@@ -955,7 +1027,7 @@ export default function AdminStudentsHub() {
                           </TableCell>
 
                           {/* Actions Menu */}
-                          <TableCell className="py-2.5 text-right">
+                          <TableCell className="py-2.5 text-right overflow-hidden">
                             <div className="flex items-center justify-end gap-1.5">
                               <DropdownMenu>
                                 <DropdownMenuTrigger asChild>
@@ -1034,32 +1106,63 @@ export default function AdminStudentsHub() {
             </div>
           </div>
 
-          {/* Pagination / Load More Footer */}
-          {!isSearching && (
+          {/* Section-Based Pagination Footer */}
+          {!isSearching && uniqueFilteredStudents.length > 0 && (
             <div className="pt-3 pb-1 flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-zinc-200/60 dark:border-zinc-800/60 px-2">
-              <span className="text-xs text-zinc-500 dark:text-zinc-400 font-mono">
-                Showing <strong className="text-zinc-700 dark:text-zinc-200 font-semibold">{uniqueFilteredStudents.length}</strong> of{" "}
-                <strong className="text-zinc-700 dark:text-zinc-200 font-semibold">{metrics.total.toLocaleString()}</strong> students
-              </span>
+              <div className="text-xs text-zinc-500 dark:text-zinc-400 font-mono">
+                Showing{" "}
+                <strong className="text-zinc-700 dark:text-zinc-200 font-semibold">
+                  {(validatedPage - 1) * PAGE_SIZE + 1}–{Math.min(validatedPage * PAGE_SIZE, uniqueFilteredStudents.length)}
+                </strong>{" "}
+                of{" "}
+                <strong className="text-zinc-700 dark:text-zinc-200 font-semibold">
+                  {(metrics.total || serverTotalStudents || uniqueFilteredStudents.length).toLocaleString()}
+                </strong>{" "}
+                students
+              </div>
 
-              {hasMoreStudents && (
+              <div className="flex items-center gap-2">
                 <Button
+                  type="button"
                   variant="outline"
                   size="sm"
-                  onClick={() => fetchMoreStudents()}
-                  disabled={loadingStudents}
-                  className="text-xs border bg-white dark:bg-zinc-800 text-foreground hover:bg-zinc-50 dark:hover:bg-zinc-700/80 rounded-lg px-4 h-8 cursor-pointer"
+                  onClick={handlePrevPage}
+                  disabled={validatedPage <= 1 || loadingStudents || isPaginating}
+                  className="text-xs border bg-white dark:bg-zinc-800 text-foreground hover:bg-zinc-50 dark:hover:bg-zinc-700/80 rounded-lg px-3 h-8 cursor-pointer flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
                 >
-                  {loadingStudents ? (
+                  <ChevronLeft className="h-3.5 w-3.5" />
+                  <span>Previous</span>
+                </Button>
+
+                <div className="px-2.5 py-1 rounded-md bg-zinc-100 dark:bg-zinc-800/80 text-[11px] font-medium font-mono text-zinc-700 dark:text-zinc-300 border border-zinc-200/50 dark:border-zinc-700/50">
+                  Page {validatedPage} of {totalPages}
+                </div>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleNextPage}
+                  disabled={
+                    (validatedPage >= totalPages && !hasMoreStudents) ||
+                    loadingStudents ||
+                    isPaginating
+                  }
+                  className="text-xs border bg-white dark:bg-zinc-800 text-foreground hover:bg-zinc-50 dark:hover:bg-zinc-700/80 rounded-lg px-3 h-8 cursor-pointer flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  {isPaginating ? (
                     <>
-                      <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
-                      Loading next batch...
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      <span>Loading...</span>
                     </>
                   ) : (
-                    "Load More Students"
+                    <>
+                      <span>Next</span>
+                      <ChevronRight className="h-3.5 w-3.5" />
+                    </>
                   )}
                 </Button>
-              )}
+              </div>
             </div>
           )}
         </CardContent>
@@ -1205,10 +1308,16 @@ export default function AdminStudentsHub() {
             color: "bg-blue-600 text-white",
           },
           {
-            label: "Student Reassignment",
-            icon: ArrowRightLeft,
-            href: "/admin/smart-allocation",
-            color: "bg-teal-600 text-white",
+            label: "Pass Renewal",
+            icon: RotateCcw,
+            href: "/admin/renewal-service",
+            color: "bg-amber-600 text-white",
+          },
+          {
+            label: "Applications",
+            icon: ClipboardList,
+            href: "/admin/applications",
+            color: "bg-orange-600 text-white",
           },
           {
             label: "Verification",

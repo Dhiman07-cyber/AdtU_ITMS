@@ -435,7 +435,7 @@ export default function AdminApplicationDetailPage() {
         const data = await response.json();
         // Look for the most recent completed payment
         if (data.transactions && data.transactions.length > 0) {
-          const mainPayment = data.transactions.find((t: any) => t.status === 'completed') || data.transactions[0];
+          const mainPayment = data.transactions.find((t: any) => (t.status || '').toLowerCase() === 'completed') || data.transactions[0];
           setPaymentData(mainPayment);
           console.log('✅ Linked payment record found:', mainPayment.paymentId);
         }
@@ -725,6 +725,7 @@ export default function AdminApplicationDetailPage() {
       const token = await currentUser?.getIdToken();
 
       const body: any = {
+        applicationId,
         studentUid: applicationId
       };
 
@@ -807,6 +808,7 @@ export default function AdminApplicationDetailPage() {
           'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify({
+          applicationId,
           studentUid: applicationId,
           reason: rejectionReason
         })

@@ -48,6 +48,7 @@ export interface DriverReassignmentTabRef {
   exportData: () => void;
   openCommitModal: () => void;
   getStagedCount: () => number;
+  refresh?: () => Promise<void> | void;
 }
 
 interface DriverData {
@@ -676,6 +677,9 @@ export const DriverReassignmentTab = forwardRef<DriverReassignmentTabRef, Driver
       exportData: handleExport,
       openCommitModal: openConfirmModal,
       getStagedCount: () => stagedChanges.length,
+      refresh: async () => {
+        await fetchAllData();
+      },
     }));
 
     const promptNewDriver: DriverSlotInfo | null = selectedDriver
@@ -691,7 +695,7 @@ export const DriverReassignmentTab = forwardRef<DriverReassignmentTabRef, Driver
     return (
       <>
         {/* LEFT COLUMN: DRIVER ROSTER */}
-        <div className="lg:col-span-4 flex flex-col min-w-0 h-full overflow-hidden">
+        <div className="lg:col-span-4 flex flex-col min-w-0 h-auto lg:h-full min-h-[380px] max-h-[480px] sm:max-h-[520px] lg:max-h-none overflow-hidden">
           <Card className="bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 shadow-md flex-1 flex flex-col h-full overflow-hidden !p-0 !gap-0">
             <CardHeader className="p-3.5 pb-2.5 border-b border-zinc-200 dark:border-zinc-800 bg-slate-50/70 dark:bg-zinc-800/40 shrink-0 space-y-2">
               <div className="flex items-center justify-between gap-2">
@@ -846,16 +850,16 @@ export const DriverReassignmentTab = forwardRef<DriverReassignmentTabRef, Driver
         </div>
 
         {/* RIGHT COLUMN: BUS SELECTION & STAGING */}
-        <div className="lg:col-span-8 flex flex-col min-w-0 h-full overflow-hidden">
-          <Card className="bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 shadow-md flex-1 flex flex-col h-full overflow-hidden !p-0 !gap-0">
+        <div className="lg:col-span-8 flex flex-col min-w-0 h-auto lg:h-full overflow-visible lg:overflow-hidden">
+          <Card className="bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 shadow-md flex-1 flex flex-col h-auto lg:h-full overflow-visible lg:overflow-hidden !p-0 !gap-0">
             <CardHeader className="p-3.5 pb-2.5 border-b border-zinc-200 dark:border-zinc-800 bg-slate-50/70 dark:bg-zinc-800/40 shrink-0">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-                <div className="flex items-center gap-2">
-                  <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-blue-600/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
+                <div className="flex items-start sm:items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-blue-600/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 shrink-0 mt-0.5 sm:mt-0">
                     <Bus className="w-4 h-4" />
                   </div>
                   <div>
-                    <h3 className="text-xs font-bold text-foreground">
+                    <h3 className="text-xs sm:text-sm font-bold text-foreground">
                       {selectedDriver
                         ? `Assign ${selectedDriver.fullName || selectedDriver.name} to:`
                         : "Operational Fleet Buses"}
@@ -868,24 +872,24 @@ export const DriverReassignmentTab = forwardRef<DriverReassignmentTabRef, Driver
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2 shrink-0">
+                <div className="flex items-center gap-2 w-full sm:w-auto">
                   {selectedDriver && (
                     <Button
                       size="sm"
                       onClick={handleMakeReserved}
-                      className="h-7 text-xs bg-amber-600 hover:bg-amber-700 text-white font-semibold px-2.5 gap-1 shadow-xs cursor-pointer"
+                      className="h-8 sm:h-7 text-xs bg-amber-600 hover:bg-amber-700 text-white font-semibold px-2.5 gap-1 shadow-xs cursor-pointer shrink-0"
                     >
                       <ArrowRightLeft className="w-3 h-3" />
                       <span>Make Reserved</span>
                     </Button>
                   )}
-                  <div className="relative w-36 sm:w-44">
-                    <Search className="absolute left-2 top-2 h-3 w-3 text-muted-foreground" />
+                  <div className="relative flex-1 sm:w-44">
+                    <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
                     <Input
                       placeholder="Filter buses..."
                       value={busSearchTerm}
                       onChange={(e) => setBusSearchTerm(e.target.value)}
-                      className="pl-7 h-7 text-xs bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-700"
+                      className="pl-8 h-8 sm:h-7 text-xs bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-700 w-full"
                     />
                   </div>
                 </div>
@@ -1021,14 +1025,13 @@ export const DriverReassignmentTab = forwardRef<DriverReassignmentTabRef, Driver
                   </div>
                 </>
               ) : (
-                <div className="flex flex-col items-center justify-center text-center space-y-2.5 my-auto max-w-sm">
-                  <div className="w-14 h-14 rounded-2xl bg-blue-500/10 text-blue-500 flex items-center justify-center mb-1">
-                    <ArrowRightLeft className="w-7 h-7" />
+                <div className="flex-1 flex flex-col items-center justify-center text-center p-6 sm:p-8 min-h-[260px] sm:min-h-[340px] my-auto w-full">
+                  <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-blue-500/10 text-blue-500 flex items-center justify-center mb-2 shadow-xs border border-blue-500/20">
+                    <ArrowRightLeft className="w-5 h-5 sm:w-6 sm:h-6" />
                   </div>
-                  <h4 className="text-base font-bold text-foreground">Select a Driver to Assign</h4>
-                  <p className="text-xs text-muted-foreground leading-relaxed">
-                    Choose any driver from the left roster to view current route status and stage a new bus or shift
-                    assignment.
+                  <h4 className="text-sm sm:text-base font-bold text-foreground">Select a Driver to Assign</h4>
+                  <p className="text-[11px] sm:text-xs text-muted-foreground leading-relaxed max-w-xs mt-1">
+                    Choose any driver from the left roster to view current route status and stage a new bus or shift assignment.
                   </p>
                 </div>
               )}

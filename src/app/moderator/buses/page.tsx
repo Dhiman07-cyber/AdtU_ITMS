@@ -46,6 +46,8 @@ import { supabase } from '@/lib/supabase-client';
 import { cn } from "@/lib/utils";
 import {
 	Bus,
+	ChevronLeft,
+	ChevronRight,
 	Compass,
 	Download,
 	Edit,
@@ -59,7 +61,7 @@ import {
 	Users
 } from "lucide-react";
 import { useRouter } from 'next/navigation';
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 // Migrated: Server-side API → PostgreSQL (no Firestore client reads)
 import { PermissionDeniedCard } from '@/components/PermissionDeniedCard';
 import { useAuth } from '@/contexts/auth-context';
@@ -148,7 +150,7 @@ export default function BusesPage() {
   });
 
   const [searchTerm, setSearchTerm] = useState("");
-  const [colorFilter, setColorFilter] = useState("all");
+  const [routeFilter, setRouteFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [deleteItem, setDeleteItem] = useState<{ id: string; name: string } | null>(null);
@@ -171,22 +173,81 @@ export default function BusesPage() {
     return match ? match[0] : '0';
   };
 
-  // Direct derivation in render
-  const filteredBuses = buses.filter(bus => {
+  // Direct derivation in render memoized
+  const filteredBuses = useMemo(() => buses.filter(bus => {
     const matchesSearch =
       (bus.busNumber && bus.busNumber.toLowerCase().includes(searchTerm.toLowerCase())) ||
       (bus.routeName && bus.routeName.toLowerCase().includes(searchTerm.toLowerCase())) ||
       (bus.busId && bus.busId.toLowerCase().includes(searchTerm.toLowerCase()));
 
-    const matchesColor = colorFilter === "all" || (bus.color && bus.color.toLowerCase() === colorFilter.toLowerCase());
+    const assignedRoute = getRouteNameForBus(bus);
+    const matchesRoute = routeFilter === "all" || (assignedRoute && assignedRoute.toLowerCase() === routeFilter.toLowerCase());
     const matchesStatus = statusFilter === "all" || (bus.status && bus.status.toLowerCase() === statusFilter.toLowerCase());
 
-    return matchesSearch && matchesColor && matchesStatus;
+    return matchesSearch && matchesRoute && matchesStatus;
   }).sort((a, b) => {
     const numA = extractNumber(a.busId || a.id || '');
     const numB = extractNumber(b.busId || b.id || '');
     return parseInt(numA) - parseInt(numB);
-  });
+  }), [buses, searchTerm, routeFilter, statusFilter, routes]);
+
+  const uniqueRoutes = useMemo(() => {
+    const list: string[] = [];
+    buses.forEach(b => {
+      const rName = getRouteNameForBus(b);
+      if (rName && rName !== 'Not Assigned' && !list.includes(rName)) {
+        list.push(rName);
+      }
+    });
+    return list.sort();
+  }, [buses, routes]);
+
+  const PAGE_SIZE = 25;
+  const [currentPage, setCurrentPage] = useState(1);
+  const [isPaginating, setIsPaginating] = useState(false);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, routeFilter, statusFilter]);
+
+  const totalPages = Math.max(currentPage, Math.max(1, Math.ceil(filteredBuses.length / PAGE_SIZE)));
+  const validatedPage = Math.max(1, Math.min(currentPage, totalPages));
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
+
+  const paginatedBuses = useMemo(() => {
+    const startIndex = (validatedPage - 1) * PAGE_SIZE;
+    const slice = filteredBuses.slice(startIndex, startIndex + PAGE_SIZE);
+    if (slice.length === 0 && filteredBuses.length > 0) {
+      const fallbackStart = Math.max(0, filteredBuses.length - PAGE_SIZE);
+      return filteredBuses.slice(fallbackStart);
+    }
+    return slice;
+  }, [filteredBuses, validatedPage, PAGE_SIZE]);
+
+  const handleNextPage = (e?: React.MouseEvent) => {
+    e?.preventDefault();
+    if (isPaginating || validatedPage >= totalPages) return;
+    setIsPaginating(true);
+    setTimeout(() => {
+      setCurrentPage((prev) => Math.min(totalPages, prev + 1));
+      setIsPaginating(false);
+    }, 200);
+  };
+
+  const handlePrevPage = (e?: React.MouseEvent) => {
+    e?.preventDefault();
+    if (isPaginating || validatedPage <= 1) return;
+    setIsPaginating(true);
+    setTimeout(() => {
+      setCurrentPage((prev) => Math.max(1, prev - 1));
+      setIsPaginating(false);
+    }, 200);
+  };
 
   // Export buses data from Supabase
   const handleExportBuses = async () => {
@@ -367,28 +428,40 @@ export default function BusesPage() {
     <div className="itms-admin-container space-y-6">
       {/* Page Header */}
       <div className="itms-page-header-container">
-        <div className="flex items-center justify-between w-full gap-2">
-          <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-foreground truncate leading-tight pb-1">Bus Management</h1>
+        <div className="flex flex-row items-center justify-between gap-3">
+          <div className="space-y-0.5 min-w-0">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 rounded-xl bg-amber-600/10 border border-amber-500/20 text-amber-500">
+                <Bus className="w-6 h-6" />
+              </div>
+              <h1 className="text-xl sm:text-2xl md:text-3xl font-black text-foreground tracking-tight leading-tight">
+                Fleet Management Hub
+              </h1>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Manage vehicle fleet readiness, onboard capacities, operator assignments, and transit status.
+            </p>
+          </div>
 
           {/* Desktop action toolbar */}
           <div className="hidden md:flex items-center gap-2 shrink-0">
             {canBusAdd && (
               <Button
-                className="w-full md:w-auto cursor-pointer bg-blue-600 hover:bg-blue-700 text-white border border-blue-700 transition-all duration-200 hover:scale-105 hover:shadow-lg rounded-md px-2.5 py-1.5 text-xs h-8"
+                className="cursor-pointer bg-amber-600 hover:bg-amber-700 text-white border border-amber-700 shadow-sm transition-all duration-200 hover:scale-105 hover:shadow-lg rounded-lg px-3 py-1.5 text-xs h-9 gap-1.5"
                 onClick={() => router.push('/moderator/buses/add')}
               >
-                <Plus className="mr-1.5 h-3.5 w-3.5" />
-                Add New Bus
+                <Plus className="h-4 w-4" />
+                <span>Add New Bus</span>
               </Button>
             )}
             {canBusReassign && (
               <Button
-                className="w-full md:w-auto cursor-pointer bg-amber-600/90 hover:bg-amber-600 text-white border border-amber-500/30 shadow-sm transition-all duration-200 hover:scale-[1.02] hover:shadow-md rounded-lg px-2.5 py-1.5 text-xs h-8"
+                className="cursor-pointer bg-white/80 dark:bg-zinc-800/80 hover:bg-zinc-50 dark:hover:bg-zinc-700/80 text-zinc-700 dark:text-zinc-200 border border-zinc-200 dark:border-zinc-700/60 shadow-xs rounded-lg px-3 py-1.5 text-xs h-9 gap-1.5"
                 onClick={() => router.push('/moderator/route-allocation')}
                 title="Manage route reassignments for buses"
               >
-                <RouteIcon className="mr-1.5 h-3.5 w-3.5" />
-                Bus Reassignment
+                <RouteIcon className="h-4 w-4 text-emerald-500" />
+                <span>Bus Reassignment</span>
               </Button>
             )}
             <ExportButton
@@ -407,22 +480,19 @@ export default function BusesPage() {
             </Button>
           </div>
 
-          {/* Mobile Refresh Button - exact same line as Bus Management at rightmost end */}
+          {/* Mobile Refresh Button */}
           <div className="flex md:hidden items-center shrink-0">
             <Button
               size="sm"
               onClick={handleRefresh}
               disabled={isRefreshing}
-              className="h-8 px-3 bg-white dark:bg-zinc-800 hover:bg-gray-50 dark:hover:bg-zinc-700 text-gray-700 dark:text-zinc-200 hover:text-blue-600 dark:hover:text-blue-400 border border-gray-200 dark:border-zinc-700 shadow-sm rounded-lg text-xs font-semibold flex items-center gap-1.5 cursor-pointer active:scale-95 transition-all shrink-0"
+              className="h-8 px-3 bg-white dark:bg-zinc-800 hover:bg-gray-50 dark:hover:bg-zinc-700 text-gray-700 dark:text-zinc-200 hover:text-amber-600 dark:hover:text-amber-400 border border-gray-200 dark:border-zinc-700 shadow-sm rounded-lg text-xs font-semibold flex items-center gap-1.5 cursor-pointer active:scale-95 transition-all shrink-0"
             >
-              <RefreshCw className={cn("h-3.5 w-3.5 transition-transform duration-500", isRefreshing ? "animate-spin text-blue-600" : "group-hover:rotate-180")} />
+              <RefreshCw className={cn("h-3.5 w-3.5 transition-transform duration-500", isRefreshing ? "animate-spin text-amber-600" : "group-hover:rotate-180")} />
               <span>Refresh</span>
             </Button>
           </div>
         </div>
-        <p className="text-muted-foreground mt-1 text-xs sm:text-sm truncate">
-          Manage all buses in the service fleet
-        </p>
       </div>
 
       <Card className="bg-gray-50 dark:bg-gray-900 border-border min-h-[480px] flex flex-col">
@@ -443,14 +513,17 @@ export default function BusesPage() {
 
               {/* Filters - Side by side on Mobile in the same line */}
               <div className="grid grid-cols-2 gap-2 items-center w-full md:w-auto md:flex md:flex-row">
-                <Select value={colorFilter} onValueChange={setColorFilter}>
-                  <SelectTrigger className="h-9 md:h-8 text-xs w-full md:w-[140px] bg-white dark:bg-gray-800 md:bg-transparent border-gray-200 dark:border-gray-700">
-                    <SelectValue placeholder="Color" />
+                <Select value={routeFilter} onValueChange={setRouteFilter}>
+                  <SelectTrigger className="h-9 md:h-8 text-xs w-full md:w-[160px] bg-white dark:bg-gray-800 md:bg-transparent border-gray-200 dark:border-gray-700">
+                    <SelectValue placeholder="Route" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all" className="text-xs">All Colors</SelectItem>
-                    <SelectItem value="White" className="text-xs">White</SelectItem>
-                    <SelectItem value="Yellow" className="text-xs">Yellow</SelectItem>
+                    <SelectItem value="all" className="text-xs">All Routes</SelectItem>
+                    {uniqueRoutes.map(routeName => (
+                      <SelectItem key={routeName} value={routeName} className="text-xs">
+                        {routeName}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
 
@@ -466,12 +539,12 @@ export default function BusesPage() {
                   </SelectContent>
                 </Select>
 
-                {(colorFilter !== "all" || statusFilter !== "all") && (
+                {(routeFilter !== "all" || statusFilter !== "all") && (
                   <Button
                     variant="ghost"
                     size="sm"
                     onClick={() => {
-                      setColorFilter("all");
+                      setRouteFilter("all");
                       setStatusFilter("all");
                     }}
                     className="h-8 px-3 text-xs bg-red-500 hover:bg-red-600 text-white col-span-2 md:col-span-1"
@@ -483,111 +556,198 @@ export default function BusesPage() {
             </div>
           </div>
           <div className="students-section md:mt-5 flex-1 flex flex-col min-h-0">
-            <div className="students-scroll-wrapper rounded-md border overflow-x-auto flex-1 flex flex-col min-h-0" role="region" aria-label="Bus list">
-              <Table>
-                <TableHeader>
-                  <TableRow className="h-10">
-                    <TableHead className="text-xs font-semibold">Bus Number</TableHead>
-                    <TableHead className="text-xs font-semibold">Route</TableHead>
-                    <TableHead className="text-xs font-semibold">Color</TableHead>
-                    <TableHead className="text-xs font-semibold">Capacity</TableHead>
-                    <TableHead className="text-xs font-semibold">Driver</TableHead>
-                    <TableHead className="text-xs font-semibold">Status</TableHead>
-                    <TableHead className="text-xs font-semibold text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {isLoading && filteredBuses.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={7} className="p-6">
-                        <TableRowLoader rows={5} />
-                      </TableCell>
+            <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 overflow-hidden shadow-xs relative flex flex-col min-h-0">
+              {/* Data Fetch / Pagination Top Progress Bar */}
+              {isPaginating && (
+                <div className="absolute top-0 left-0 right-0 z-20 h-1 bg-blue-500/10 dark:bg-blue-400/10 overflow-hidden">
+                  <div className="animate-progress w-full h-full bg-blue-500 dark:bg-blue-400 origin-left-right" />
+                </div>
+              )}
+
+              <div
+                className={cn(
+                  "overflow-x-auto min-h-[520px] flex-1 flex flex-col transition-opacity duration-200",
+                  isPaginating && "opacity-60 pointer-events-none"
+                )}
+                role="region"
+                aria-label="Bus list"
+              >
+                <Table className="w-full table-fixed min-w-[800px]">
+                  <colgroup>
+                    <col className="w-[18%]" />
+                    <col className="w-[26%]" />
+                    <col className="w-[14%]" />
+                    <col className="w-[20%]" />
+                    <col className="w-[12%]" />
+                    <col className="w-[10%]" />
+                  </colgroup>
+                  <TableHeader className="bg-slate-50 dark:bg-zinc-800/50">
+                    <TableRow className="h-9 border-b border-zinc-200 dark:border-zinc-800">
+                      <TableHead className="w-[18%] text-[11px] font-bold py-2">Bus Number</TableHead>
+                      <TableHead className="w-[26%] text-[11px] font-bold py-2">Assigned Route</TableHead>
+                      <TableHead className="w-[14%] text-[11px] font-bold py-2">Capacity</TableHead>
+                      <TableHead className="w-[20%] text-[11px] font-bold py-2">Driver Assigned</TableHead>
+                      <TableHead className="w-[12%] text-[11px] font-bold py-2">Operational Status</TableHead>
+                      <TableHead className="w-[10%] text-[11px] font-bold py-2 text-right">Actions</TableHead>
                     </TableRow>
-                  ) : (
-                    filteredBuses.map((bus) => (
-                      <TableRow key={bus.id} style={{ contentVisibility: 'auto', containIntrinsicSize: '0 52px' }}>
-                        <TableCell>
-                          <div className="flex items-center">
-                            <Bus className="mr-2 h-4 w-4 text-muted-foreground" />
-                            <span className="font-medium text-sm">{bus.busNumber}</span>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center">
-                            <span className="font-medium text-sm">{getRouteNameForBus(bus)}</span>
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-sm">{bus.color}</TableCell>
-                        <TableCell>
-                          <div className="flex items-center text-sm">
-                            <Users className="mr-1 h-4 w-4 text-muted-foreground" />
-                            {bus.capacity}
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-sm">{getDriverNameForBus(bus)}</TableCell>
-                        <TableCell>
-                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${(bus.status === 'active' || bus.status === 'idle' || bus.status === 'enroute') ? 'bg-green-500 text-white' :
-                            (bus.status === 'inactive' || bus.status === 'expired') ? 'bg-red-500 text-white' :
-                              (bus.status === 'maintenance') ? 'bg-yellow-500 text-white' :
-                                'bg-gray-100 text-gray-800'
-                            }`}>
-                            {(() => {
-                              const status = bus.status || 'active';
-                              if (status.toLowerCase() === 'idle' || status.toLowerCase() === 'enroute') return 'Active';
-                              return status.charAt(0).toUpperCase() + status.slice(1).toLowerCase();
-                            })()}
-                          </span>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" className="h-8 w-8 p-0 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700">
-                                <span className="sr-only">Open menu</span>
-                                <MoreHorizontal className="h-4 w-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="bg-gray-800 dark:bg-gray-900 border-gray-700 dark:border-gray-600 shadow-xl rounded-lg w-44">
-                              <DropdownMenuLabel className="text-white font-semibold px-2 py-1.5 text-sm">Actions</DropdownMenuLabel>
-                              <DropdownMenuSeparator className="bg-gray-600" />
-                              <DropdownMenuItem
-                                className="text-white hover:bg-gray-700 dark:hover:bg-gray-800 focus:bg-gray-700 dark:focus:bg-gray-800 px-2 py-1.5 text-sm !text-white cursor-pointer"
-                                onClick={() => router.push(`/moderator/buses/view/${bus.id}`)}
-                              >
-                                <Eye className="mr-2 h-3.5 w-3.5 text-blue-400" />
-                                View Details
-                              </DropdownMenuItem>
-                              {canBusEdit && (
-                                <DropdownMenuItem
-                                  className="text-white hover:bg-gray-700 dark:hover:bg-gray-800 focus:bg-gray-700 dark:focus:bg-gray-800 px-2 py-1.5 text-sm !text-white cursor-pointer"
-                                  onClick={() => router.push(`/moderator/buses/edit/${bus.id}`)}
-                                >
-                                  <Edit className="mr-2 h-3.5 w-3.5 text-yellow-400" />
-                                  Edit Bus
-                                </DropdownMenuItem>
-                              )}
-                              {canBusDelete && (
-                                <>
-                                  <DropdownMenuSeparator className="bg-gray-600" />
-                                  <DropdownMenuItem
-                                    className="text-white hover:!bg-red-600 focus:!bg-red-600 px-2 py-1.5 text-sm !text-white cursor-pointer transition-colors"
-                                    onClick={() => handleDelete(bus.id, bus.busNumber)}
-                                  >
-                                    <Trash2 className="mr-2 h-3.5 w-3.5" />
-                                    Delete Bus
-                                  </DropdownMenuItem>
-                                </>
-                              )}
-                            </DropdownMenuContent>
-                          </DropdownMenu>
+                  </TableHeader>
+                  <TableBody>
+                    {isLoading && filteredBuses.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={6} className="p-6">
+                          <TableRowLoader rows={5} />
                         </TableCell>
                       </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-              {!isLoading && filteredBuses.length === 0 && (
-                <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-xs text-muted-foreground min-h-[220px]">
-                  No buses found
+                    ) : (
+                      paginatedBuses.map((bus) => (
+                        <TableRow key={bus.id} className="hover:bg-slate-50/60 dark:hover:bg-zinc-800/40 transition-colors border-b border-zinc-100 dark:border-zinc-800/60" style={{ contentVisibility: 'auto', containIntrinsicSize: '0 52px' }}>
+                          <TableCell className="py-2.5 overflow-hidden">
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <div className="p-1.5 rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 shrink-0">
+                                <Bus className="h-4 w-4" />
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <span className="font-bold text-xs sm:text-sm text-foreground truncate block">{bus.busNumber}</span>
+                                <span className="text-[10px] text-muted-foreground font-mono">{bus.model || 'Standard Coach'}</span>
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell className="py-2.5 overflow-hidden">
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <RouteIcon className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                              <span className="font-medium text-xs truncate">{getRouteNameForBus(bus)}</span>
+                            </div>
+                          </TableCell>
+                          <TableCell className="py-2.5 overflow-hidden">
+                            <div className="flex items-center gap-1 text-xs font-semibold text-foreground">
+                              <Users className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                              <span>{bus.capacity || 50} seats</span>
+                            </div>
+                          </TableCell>
+                          <TableCell className="py-2.5 overflow-hidden text-xs">
+                            <span className={cn(
+                              "font-medium truncate block",
+                              getDriverNameForBus(bus) === 'Not Assigned' ? "text-muted-foreground italic" : "text-foreground"
+                            )}>
+                              {getDriverNameForBus(bus)}
+                            </span>
+                          </TableCell>
+                          <TableCell className="py-2.5 overflow-hidden">
+                            <span className={cn(
+                              "inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold shrink-0",
+                              (bus.status === 'active' || bus.status === 'idle' || bus.status === 'enroute')
+                                ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
+                                : (bus.status === 'inactive' || bus.status === 'expired')
+                                ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20'
+                                : (bus.status === 'maintenance')
+                                ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20'
+                                : 'bg-zinc-500/10 text-zinc-600 dark:text-zinc-400 border border-zinc-500/20'
+                            )}>
+                              {(() => {
+                                const status = bus.status || 'active';
+                                if (status.toLowerCase() === 'idle' || status.toLowerCase() === 'enroute') return 'Active';
+                                return status.charAt(0).toUpperCase() + status.slice(1).toLowerCase();
+                              })()}
+                            </span>
+                          </TableCell>
+                          <TableCell className="text-right overflow-hidden">
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" className="h-8 w-8 p-0 cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800">
+                                  <span className="sr-only">Open menu</span>
+                                  <MoreHorizontal className="h-4 w-4" />
+                                </Button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end" className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-xl rounded-lg w-44">
+                                <DropdownMenuLabel className="font-semibold px-2 py-1.5 text-xs text-foreground">Actions</DropdownMenuLabel>
+                                <DropdownMenuSeparator className="bg-zinc-200 dark:bg-zinc-800" />
+                                <DropdownMenuItem
+                                  className="px-2 py-1.5 text-xs cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 focus:bg-slate-100 dark:focus:bg-zinc-800"
+                                  onClick={() => router.push(`/moderator/buses/view/${bus.id}`)}
+                                >
+                                  <Eye className="mr-2 h-3.5 w-3.5 text-blue-500" />
+                                  View Details
+                                </DropdownMenuItem>
+                                {canBusEdit && (
+                                  <DropdownMenuItem
+                                    className="px-2 py-1.5 text-xs cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 focus:bg-slate-100 dark:focus:bg-zinc-800"
+                                    onClick={() => router.push(`/moderator/buses/edit/${bus.id}`)}
+                                  >
+                                    <Edit className="mr-2 h-3.5 w-3.5 text-amber-500" />
+                                    Edit Bus
+                                  </DropdownMenuItem>
+                                )}
+                                {canBusDelete && (
+                                  <>
+                                    <DropdownMenuSeparator className="bg-zinc-200 dark:bg-zinc-800" />
+                                    <DropdownMenuItem
+                                      className="px-2 py-1.5 text-xs cursor-pointer text-red-600 dark:text-red-400 hover:!bg-red-500/10 focus:!bg-red-500/10"
+                                      onClick={() => handleDelete(bus.id, bus.busNumber)}
+                                    >
+                                      <Trash2 className="mr-2 h-3.5 w-3.5 text-red-500" />
+                                      Delete Bus
+                                    </DropdownMenuItem>
+                                  </>
+                                )}
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+                {!isLoading && filteredBuses.length === 0 && (
+                  <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-xs text-muted-foreground min-h-[220px]">
+                    No buses found
+                  </div>
+                )}
+              </div>
+
+              {/* Pagination Footer */}
+              {filteredBuses.length > 0 && (
+                <div className="pt-3 pb-2.5 flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-zinc-200/60 dark:border-zinc-800/60 px-4 bg-white dark:bg-zinc-900/50">
+                  <div className="text-xs text-zinc-500 dark:text-zinc-400 font-mono">
+                    Showing{" "}
+                    <strong className="text-zinc-700 dark:text-zinc-200 font-semibold">
+                      {(validatedPage - 1) * PAGE_SIZE + 1}–{Math.min(validatedPage * PAGE_SIZE, filteredBuses.length)}
+                    </strong>{" "}
+                    of{" "}
+                    <strong className="text-zinc-700 dark:text-zinc-200 font-semibold">
+                      {filteredBuses.length}
+                    </strong>{" "}
+                    buses
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={handlePrevPage}
+                      disabled={validatedPage <= 1 || isPaginating}
+                      className="text-xs border bg-white dark:bg-zinc-800 text-foreground hover:bg-zinc-50 dark:hover:bg-zinc-700/80 rounded-lg px-3 h-8 cursor-pointer flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      <ChevronLeft className="h-3.5 w-3.5" />
+                      <span>Previous</span>
+                    </Button>
+
+                    <div className="px-2.5 py-1 rounded-md bg-zinc-100 dark:bg-zinc-800/80 text-[11px] font-medium font-mono text-zinc-700 dark:text-zinc-300 border border-zinc-200/50 dark:border-zinc-700/50">
+                      Page {validatedPage} of {totalPages}
+                    </div>
+
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={handleNextPage}
+                      disabled={validatedPage >= totalPages || isPaginating}
+                      className="text-xs border bg-white dark:bg-zinc-800 text-foreground hover:bg-zinc-50 dark:hover:bg-zinc-700/80 rounded-lg px-3 h-8 cursor-pointer flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      <span>Next</span>
+                      <ChevronRight className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
                 </div>
               )}
             </div>

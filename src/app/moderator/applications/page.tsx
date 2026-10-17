@@ -640,7 +640,7 @@ export default function ModeratorApplicationsPage() {
     setApproving(applicationId);
     try {
       const token = await currentUser.getIdToken();
-      const body: Record<string, unknown> = { studentUid: applicationId };
+      const body: Record<string, unknown> = { applicationId, studentUid: applicationId };
       if (overrideBusId) body.overrideBusId = overrideBusId;
       const response = await fetch('/api/applications/approve-unauth', {
         method: 'POST',

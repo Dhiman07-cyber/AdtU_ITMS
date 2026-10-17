@@ -247,8 +247,8 @@ export default function StudentRoster({
         )}
       </div>
 
-      {/* Student List (No scrollbar) */}
-      <div className="flex-1 min-h-0 overflow-y-auto no-scrollbar">
+      {/* Student List (No scrollbar on desktop, naturally scrollable on mobile) */}
+      <div className="flex-1 min-h-0 overflow-visible lg:overflow-y-auto no-scrollbar">
         {filteredStudents.length > 0 ? (
           <div>
             {filteredStudents.map(student => renderStudentRow(student))}

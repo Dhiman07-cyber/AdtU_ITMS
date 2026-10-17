@@ -304,7 +304,7 @@ export default function ModeratorApplicationDetailPage() {
       if (response.ok) {
         const data = await response.json();
         if (data.transactions && data.transactions.length > 0) {
-          const mainPayment = data.transactions.find((t: any) => t.status === 'completed') || data.transactions[0];
+          const mainPayment = data.transactions.find((t: any) => (t.status || '').toLowerCase() === 'completed') || data.transactions[0];
           setPaymentData(mainPayment);
           console.log('✅ Linked payment record found:', mainPayment.paymentId);
         }

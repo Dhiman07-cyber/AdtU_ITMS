@@ -46,7 +46,7 @@ import { exportToExcel } from '@/lib/export-helpers';
 import { safeImageSrc } from "@/lib/security/url-sanitizer";
 import { supabase } from '@/lib/supabase-client';
 import { cn } from '@/lib/utils';
-import { ArrowRightLeft, Download, Edit,Eye,Filter,Loader2,MoreHorizontal,Plus,QrCode,RefreshCw,Search,Trash2 } from "lucide-react";
+import { ArrowRightLeft, ChevronLeft, ChevronRight, ClipboardList, Clock, Download, Edit, Eye, Filter, GraduationCap, Loader2, MoreHorizontal, Plus, QrCode, RefreshCw, RotateCcw, Search, Trash2, UserCheck, Users, UserX } from "lucide-react";
 import { MobileActionFAB } from '@/components/layout/MobileActionFAB';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -205,10 +205,95 @@ export default function AdminStudents() {
         });
     }, [sourceStudents, searchTerm, shiftFilter, busFilter]);
 
+    // Role-Specific Metrics: Top 4 Control Cards for Students
+    const metrics = useMemo(() => {
+        const total = sourceStudents.length;
+        const activeCount = sourceStudents.filter(s => (s.status || "active").toLowerCase() === "active").length;
+        const softBlockedOrExpiredCount = sourceStudents.filter(s => {
+            const st = (s.status || "active").toLowerCase();
+            return st === "soft_blocked" || st === "expired";
+        }).length;
+        const suspendedCount = sourceStudents.filter(s => {
+            const st = (s.status || "active").toLowerCase();
+            return st === "suspended" || st === "inactive";
+        }).length;
+
+        return { total, activeCount, softBlockedOrExpiredCount, suspendedCount };
+    }, [sourceStudents]);
+
     // Unique key safety
     const uniqueFilteredStudents = useMemo(() => filteredStudents.filter((student, index, self) =>
         index === self.findIndex((s) => s.id === student.id)
     ), [filteredStudents]);
+
+    // Section-based pagination state
+    const PAGE_SIZE = 25;
+    const [currentPage, setCurrentPage] = useState(1);
+    const [isPaginating, setIsPaginating] = useState(false);
+
+    // Reset to first section when filters or search change
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [searchTerm, shiftFilter, busFilter]);
+
+    const totalPages = useMemo(() => {
+        const loadedCount = uniqueFilteredStudents.length;
+        const effectiveTotal = hasMoreStudents
+            ? loadedCount + PAGE_SIZE
+            : loadedCount;
+        const calculated = Math.max(1, Math.ceil(effectiveTotal / PAGE_SIZE));
+        return Math.max(currentPage, calculated);
+    }, [uniqueFilteredStudents.length, hasMoreStudents, PAGE_SIZE, currentPage]);
+
+    const validatedPage = Math.max(1, Math.min(currentPage, totalPages));
+
+    useEffect(() => {
+        if (currentPage > totalPages) {
+            setCurrentPage(totalPages);
+        }
+    }, [currentPage, totalPages]);
+
+    const paginatedStudents = useMemo(() => {
+        const startIndex = (validatedPage - 1) * PAGE_SIZE;
+        const slice = uniqueFilteredStudents.slice(startIndex, startIndex + PAGE_SIZE);
+        if (slice.length === 0 && uniqueFilteredStudents.length > 0) {
+            const fallbackStart = Math.max(0, uniqueFilteredStudents.length - PAGE_SIZE);
+            return uniqueFilteredStudents.slice(fallbackStart);
+        }
+        return slice;
+    }, [uniqueFilteredStudents, validatedPage, PAGE_SIZE]);
+
+    const handleNextPage = async (e?: React.MouseEvent) => {
+        e?.preventDefault();
+        if (loadingStudents || isPaginating) return;
+        if (validatedPage >= totalPages && !hasMoreStudents) return;
+
+        const targetPage = validatedPage + 1;
+        const requiredItems = (targetPage - 1) * PAGE_SIZE + 1;
+
+        setIsPaginating(true);
+        try {
+            if (uniqueFilteredStudents.length < requiredItems && hasMoreStudents) {
+                await fetchMoreStudents();
+                await new Promise((r) => setTimeout(r, 60));
+            }
+            setCurrentPage(targetPage);
+        } catch (err) {
+            console.error("Failed to fetch next section:", err);
+        } finally {
+            setTimeout(() => setIsPaginating(false), 200);
+        }
+    };
+
+    const handlePrevPage = (e?: React.MouseEvent) => {
+        e?.preventDefault();
+        if (loadingStudents || isPaginating || validatedPage <= 1) return;
+        setIsPaginating(true);
+        setTimeout(() => {
+            setCurrentPage((prev) => Math.max(1, prev - 1));
+            setIsPaginating(false);
+        }, 200);
+    };
 
     // Export students data from Supabase
     const handleExportStudents = async () => {
@@ -292,35 +377,31 @@ export default function AdminStudents() {
         <div className="itms-admin-container space-y-6">
             {/* Page Header */}
             <div className="itms-page-header-container">
-                <div className="flex items-center justify-between w-full gap-2">
-                    <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-foreground truncate leading-tight pb-1">Student Management</h1>
+                <div className="flex flex-row items-center justify-between gap-3">
+                    <div className="space-y-0.5 min-w-0">
+                        <div className="flex items-center gap-2.5">
+                            <div className="p-2 rounded-xl bg-blue-600/10 border border-blue-500/20 text-blue-500">
+                                <GraduationCap className="w-6 h-6" />
+                            </div>
+                            <h1 className="text-xl sm:text-2xl md:text-3xl font-black text-foreground tracking-tight leading-tight">
+                                Student Management Hub
+                            </h1>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                            Manage student transport enrollment, digital pass validity, shift distribution, and portal access control.
+                        </p>
+                    </div>
 
-                    {/* Desktop action toolbar */}
+                    {/* Desktop Toolbar */}
                     <div className="hidden md:flex items-center gap-2 shrink-0">
                         {canStudentAdd && (
                             <Link href="/moderator/students/add">
-                                <Button className="bg-blue-600 hover:bg-blue-700 text-white border border-blue-700 shadow-sm transition-all duration-200 hover:scale-105 hover:shadow-lg rounded-md px-2.5 py-1.5 text-xs h-8 cursor-pointer">
-                                    <Plus className="mr-1.5 h-3.5 w-3.5" />
-                                    Add New Student
+                                <Button className="bg-blue-600 hover:bg-blue-700 text-white border border-blue-700 shadow-sm transition-all duration-200 hover:scale-105 hover:shadow-lg rounded-lg px-3 py-1.5 text-xs h-9 cursor-pointer gap-1.5">
+                                    <Plus className="h-4 w-4" />
+                                    <span>Add Student</span>
                                 </Button>
                             </Link>
                         )}
-
-                        {canStudentReassign && (
-                            <Link href="/moderator/smart-allocation">
-                                <Button className="bg-teal-600/90 hover:bg-teal-600 text-white border border-teal-500/30 shadow-sm transition-all duration-200 hover:scale-[1.02] hover:shadow-md rounded-lg px-2.5 py-1.5 text-xs h-8 cursor-pointer">
-                                    <ArrowRightLeft className="mr-1.5 h-3.5 w-3.5" />
-                                    Student Reassignment
-                                </Button>
-                            </Link>
-                        )}
-
-                        <Link href="/moderator/verification">
-                            <Button className="bg-cyan-600 hover:bg-cyan-700 text-white border border-cyan-700 shadow-sm transition-all duration-200 hover:scale-105 hover:shadow-lg rounded-md px-2.5 py-1.5 text-xs h-8 cursor-pointer">
-                                <QrCode className="mr-1.5 h-3.5 w-3.5" />
-                                Verification
-                            </Button>
-                        </Link>
                         <ExportButton
                             onClick={() => handleExportStudents()}
                             label="Export"
@@ -337,7 +418,7 @@ export default function AdminStudents() {
                         </Button>
                     </div>
 
-                    {/* Mobile Refresh Button - exact same line as Student Management at rightmost end */}
+                    {/* Mobile Refresh Button */}
                     <div className="flex md:hidden items-center shrink-0">
                         <Button
                             size="sm"
@@ -350,7 +431,77 @@ export default function AdminStudents() {
                         </Button>
                     </div>
                 </div>
-                <p className="text-muted-foreground mt-1 text-xs sm:text-sm truncate">View and manage all student accounts</p>
+
+                {/* ── TOP 4 ROLE-SPECIFIC CONTROL CARDS (STUDENTS) ── */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5 sm:gap-3 mt-4 sm:mt-5">
+                    {/* Card 1: Total Enrolled */}
+                    <Card className="bg-white/60 dark:bg-zinc-900/60 border border-zinc-200/80 dark:border-zinc-800/80 shadow-xs">
+                        <CardContent className="p-2.5 sm:p-3.5 flex items-center gap-2.5 sm:justify-between">
+                            <div className="p-2 rounded-xl bg-blue-500/10 text-blue-500 border border-blue-500/20 shrink-0 sm:order-2">
+                                <Users className="w-4 h-4" />
+                            </div>
+                            <div className="min-w-0 flex-1 sm:order-1">
+                                <p className="text-[10px] sm:text-[11px] font-medium text-muted-foreground uppercase tracking-wider truncate">
+                                    Total Enrolled
+                                </p>
+                                <p className="text-base sm:text-xl md:text-2xl font-black text-foreground mt-0.5 leading-tight">
+                                    {metrics.total.toLocaleString()}
+                                </p>
+                            </div>
+                        </CardContent>
+                    </Card>
+
+                    {/* Card 2: Active Access */}
+                    <Card className="bg-white/60 dark:bg-zinc-900/60 border border-zinc-200/80 dark:border-zinc-800/80 shadow-xs">
+                        <CardContent className="p-2.5 sm:p-3.5 flex items-center gap-2.5 sm:justify-between">
+                            <div className="p-2 rounded-xl bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 shrink-0 sm:order-2">
+                                <UserCheck className="w-4 h-4" />
+                            </div>
+                            <div className="min-w-0 flex-1 sm:order-1">
+                                <p className="text-[10px] sm:text-[11px] font-medium text-muted-foreground uppercase tracking-wider truncate">
+                                    Active Access
+                                </p>
+                                <p className="text-base sm:text-xl md:text-2xl font-black text-emerald-500 mt-0.5 leading-tight">
+                                    {metrics.activeCount.toLocaleString()}
+                                </p>
+                            </div>
+                        </CardContent>
+                    </Card>
+
+                    {/* Card 3: Soft Blocked / Expired */}
+                    <Card className="bg-white/60 dark:bg-zinc-900/60 border border-zinc-200/80 dark:border-zinc-800/80 shadow-xs">
+                        <CardContent className="p-2.5 sm:p-3.5 flex items-center gap-2.5 sm:justify-between">
+                            <div className="p-2 rounded-xl bg-amber-500/10 text-amber-500 border border-amber-500/20 shrink-0 sm:order-2">
+                                <Clock className="w-4 h-4" />
+                            </div>
+                            <div className="min-w-0 flex-1 sm:order-1">
+                                <p className="text-[10px] sm:text-[11px] font-medium text-muted-foreground uppercase tracking-wider truncate">
+                                    Soft Block / Expired
+                                </p>
+                                <p className="text-base sm:text-xl md:text-2xl font-black text-amber-500 mt-0.5 leading-tight">
+                                    {metrics.softBlockedOrExpiredCount.toLocaleString()}
+                                </p>
+                            </div>
+                        </CardContent>
+                    </Card>
+
+                    {/* Card 4: Access Suspended */}
+                    <Card className="bg-white/60 dark:bg-zinc-900/60 border border-zinc-200/80 dark:border-zinc-800/80 shadow-xs">
+                        <CardContent className="p-2.5 sm:p-3.5 flex items-center gap-2.5 sm:justify-between">
+                            <div className="p-2 rounded-xl bg-rose-500/10 text-rose-500 border border-rose-500/20 shrink-0 sm:order-2">
+                                <UserX className="w-4 h-4" />
+                            </div>
+                            <div className="min-w-0 flex-1 sm:order-1">
+                                <p className="text-[10px] sm:text-[11px] font-medium text-muted-foreground uppercase tracking-wider truncate">
+                                    Access Suspended
+                                </p>
+                                <p className="text-base sm:text-xl md:text-2xl font-black text-rose-500 mt-0.5 leading-tight">
+                                    {metrics.suspendedCount.toLocaleString()}
+                                </p>
+                            </div>
+                        </CardContent>
+                    </Card>
+                </div>
             </div>
 
             <Card className="bg-gray-50 dark:bg-gray-900 border-border min-h-[480px] flex flex-col">
@@ -414,17 +565,32 @@ export default function AdminStudents() {
                     </div>
 
                     <div className="students-section md:mt-5 flex-1 flex flex-col min-h-0">
-                        <div className="students-scroll-wrapper rounded-md border overflow-x-auto flex-1 flex flex-col min-h-0" role="region" aria-label="Student list">
-                            <Table>
+                        <div className="students-scroll-wrapper rounded-md border overflow-x-auto flex-1 flex flex-col min-h-0 relative min-h-[540px]" role="region" aria-label="Student list">
+                            {isPaginating && (
+                                <div className="absolute top-0 left-0 right-0 z-20 h-1 bg-blue-500/10 dark:bg-blue-400/10 overflow-hidden">
+                                    <div className="animate-progress w-full h-full bg-blue-500 dark:bg-blue-400 origin-left-right" />
+                                </div>
+                            )}
+                            <div className={cn("flex-1 flex flex-col transition-opacity duration-200", isPaginating && "opacity-60 pointer-events-none")}>
+                                <Table className="w-full table-fixed min-w-[950px]">
+                                <colgroup>
+                                    <col className="w-[24%]" />
+                                    <col className="w-[16%]" />
+                                    <col className="w-[15%]" />
+                                    <col className="w-[16%]" />
+                                    <col className="w-[11%]" />
+                                    <col className="w-[11%]" />
+                                    <col className="w-[7%]" />
+                                </colgroup>
                                 <TableHeader>
-                                    <TableRow className="h-8">
-                                        <TableHead className="text-[11px] py-1.5">Student</TableHead>
-                                        <TableHead className="text-[11px] py-1.5">Phone</TableHead>
-                                        <TableHead className="text-[11px] py-1.5">Enrollment ID</TableHead>
-                                        <TableHead className="text-[11px] py-1.5">Bus Assigned</TableHead>
-                                        <TableHead className="text-[11px] py-1.5">Shift</TableHead>
-                                        <TableHead className="text-[11px] py-1.5">Session</TableHead>
-                                        <TableHead className="text-[11px] py-1.5 text-right">Actions</TableHead>
+                                    <TableRow className="h-9">
+                                        <TableHead className="w-[24%] text-[11px] py-1.5 font-bold">Student</TableHead>
+                                        <TableHead className="w-[16%] text-[11px] py-1.5 font-bold">Phone</TableHead>
+                                        <TableHead className="w-[15%] text-[11px] py-1.5 font-bold">Enrollment ID</TableHead>
+                                        <TableHead className="w-[16%] text-[11px] py-1.5 font-bold">Bus Assigned</TableHead>
+                                        <TableHead className="w-[11%] text-[11px] py-1.5 font-bold">Shift</TableHead>
+                                        <TableHead className="w-[11%] text-[11px] py-1.5 font-bold">Session</TableHead>
+                                        <TableHead className="w-[7%] text-[11px] py-1.5 text-right font-bold">Actions</TableHead>
                                     </TableRow>
                                 </TableHeader>
                                 {uniqueFilteredStudents.length > 0 && (
@@ -439,58 +605,58 @@ export default function AdminStudents() {
                                                 </TableCell>
                                             </TableRow>
                                         )}
-                                        {uniqueFilteredStudents.map((student) => (
+                                        {paginatedStudents.map((student) => (
                                             <TableRow key={student.id} className="h-auto" style={{ contentVisibility: 'auto', containIntrinsicSize: '0 52px' }}>
-                                                <TableCell className="py-1.5">
-                                                    <div className="flex flex-row items-center gap-2">
+                                                <TableCell className="py-2 overflow-hidden">
+                                                    <div className="flex flex-row items-center gap-2 min-w-0">
                                                         <Avatar
                                                             src={safeImageSrc(student.profilePhotoUrl || student.photoURL)}
                                                             name={student.name || student.fullName}
                                                             size="xs"
                                                             className="flex-shrink-0"
                                                         />
-                                                        <div className="flex flex-col min-w-0">
-                                                            <div className="text-sm font-medium text-foreground truncate max-w-[180px]">{student.name || student.fullName}</div>
-                                                            <div className="text-xs text-muted-foreground">{student.email}</div>
+                                                        <div className="flex flex-col min-w-0 flex-1">
+                                                            <div className="text-sm font-medium text-foreground truncate">{student.name || student.fullName}</div>
+                                                            <div className="text-xs text-muted-foreground truncate">{student.email}</div>
                                                         </div>
                                                     </div>
                                                 </TableCell>
-                                                <TableCell className="py-2">
-                                                    <div className="space-y-0.5">
-                                                        <div className="text-xs font-medium text-foreground">
+                                                <TableCell className="py-2 overflow-hidden">
+                                                    <div className="space-y-0.5 truncate">
+                                                        <div className="text-xs font-medium text-foreground truncate">
                                                             Ph: {student.phone || student.phoneNumber || 'N/A'}
                                                         </div>
                                                         {(student.alternatePhone || student.altPhone) && (
-                                                            <div className="text-xs text-muted-foreground">
+                                                            <div className="text-xs text-muted-foreground truncate">
                                                                 Alt: {student.alternatePhone || student.altPhone}
                                                             </div>
                                                         )}
                                                     </div>
                                                 </TableCell>
-                                                <TableCell className="py-1.5">
-                                                    <div className="font-mono text-[10px] text-foreground whitespace-nowrap">
+                                                <TableCell className="py-2 overflow-hidden">
+                                                    <div className="font-mono text-[10px] text-foreground truncate">
                                                         {student.enrollmentId || student.studentId || 'N/A'}
                                                     </div>
                                                 </TableCell>
-                                                <TableCell className="py-1.5">
-                                                    <div className="text-[10px] whitespace-nowrap">{getBusDisplay(student.busId)}</div>
+                                                <TableCell className="py-2 overflow-hidden">
+                                                    <div className="text-[10px] truncate">{getBusDisplay(student.busId)}</div>
                                                 </TableCell>
-                                                <TableCell className="py-1.5">
-                                                    <span className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium ${student.shift?.toLowerCase() === 'morning' ? 'bg-blue-100 text-blue-800' : 'bg-orange-100 text-orange-800'
+                                                <TableCell className="py-2 overflow-hidden">
+                                                    <span className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium shrink-0 ${student.shift?.toLowerCase() === 'morning' ? 'bg-blue-100 text-blue-800' : 'bg-orange-100 text-orange-800'
                                                         }`}>
                                                         {student.shift || 'N/A'}
                                                     </span>
                                                 </TableCell>
-                                                <TableCell className="py-1.5">
-                                                    <div className="flex flex-col items-center gap-0.5">
-                                                        <span className={`inline-block px-1.5 py-0.5 rounded-full text-[9px] font-medium ${student.status === 'active' ? 'bg-green-500 text-white' :
+                                                <TableCell className="py-2 overflow-hidden">
+                                                    <div className="flex flex-col items-center gap-0.5 truncate">
+                                                        <span className={`inline-block px-1.5 py-0.5 rounded-full text-[9px] font-medium shrink-0 ${student.status === 'active' ? 'bg-green-500 text-white' :
                                                             student.status === 'expired' ? 'bg-red-500 text-white' :
                                                                 student.status === 'maintenance' ? 'bg-yellow-500 text-white' :
                                                                     'bg-gray-100 text-gray-700'
                                                             }`}>
                                                             {student.status ? (student.status.charAt(0).toUpperCase() + student.status.slice(1)) : 'Unknown'}
                                                         </span>
-                                                        <div className="text-[10px] text-muted-foreground whitespace-nowrap">
+                                                        <div className="text-[10px] text-muted-foreground truncate">
                                                             {student.sessionStartYear && student.sessionEndYear
                                                                 ? `${student.sessionStartYear}-${student.sessionEndYear}`
                                                                 : 'N/A'
@@ -498,7 +664,7 @@ export default function AdminStudents() {
                                                         </div>
                                                     </div>
                                                 </TableCell>
-                                                <TableCell className="py-1.5 text-right">
+                                                <TableCell className="py-2 text-right overflow-hidden">
                                                     <DropdownMenu>
                                                         <DropdownMenuTrigger asChild>
                                                             <Button variant="ghost" className="h-7 w-7 p-0 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700">
@@ -545,6 +711,7 @@ export default function AdminStudents() {
                                     </TableBody>
                                 )}
                             </Table>
+                            </div>
                             {uniqueFilteredStudents.length === 0 && (
                                 <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-[11px] text-gray-500 min-h-[220px]">
                                     No students found
@@ -553,25 +720,63 @@ export default function AdminStudents() {
                         </div>
                     </div>
 
-                    {/* Pagination / Load More */}
-                    {!isSearching && hasMoreStudents && (
-                        <div className="mt-4 flex justify-center">
-                            <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => fetchMoreStudents()}
-                                disabled={loadingStudents}
-                                className="text-xs bg-white text-black hover:bg-gray-200 border-gray-200"
-                            >
-                                {loadingStudents ? (
-                                    <>
-                                        <Loader2 className="mr-2 h-3 w-3 animate-spin" />
-                                        Loading...
-                                    </>
-                                ) : (
-                                    'Load More Students'
-                                )}
-                            </Button>
+                    {/* Section-Based Pagination Footer */}
+                    {!isSearching && uniqueFilteredStudents.length > 0 && (
+                        <div className="mt-4 pt-3 flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-gray-200 dark:border-zinc-800 px-2">
+                            <div className="text-xs text-zinc-500 dark:text-zinc-400 font-mono">
+                                Showing{" "}
+                                <strong className="text-zinc-700 dark:text-zinc-200 font-semibold">
+                                    {(validatedPage - 1) * PAGE_SIZE + 1}–{Math.min(validatedPage * PAGE_SIZE, uniqueFilteredStudents.length)}
+                                </strong>{" "}
+                                of{" "}
+                                <strong className="text-zinc-700 dark:text-zinc-200 font-semibold">
+                                    {uniqueFilteredStudents.length}
+                                </strong>{" "}
+                                students
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={handlePrevPage}
+                                    disabled={validatedPage <= 1 || loadingStudents || isPaginating}
+                                    className="text-xs border bg-white dark:bg-zinc-800 text-foreground hover:bg-zinc-50 dark:hover:bg-zinc-700/80 rounded-lg px-3 h-8 cursor-pointer flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
+                                >
+                                    <ChevronLeft className="h-3.5 w-3.5" />
+                                    <span>Previous</span>
+                                </Button>
+
+                                <div className="px-2.5 py-1 rounded-md bg-zinc-100 dark:bg-zinc-800/80 text-[11px] font-medium font-mono text-zinc-700 dark:text-zinc-300 border border-zinc-200/50 dark:border-zinc-700/50">
+                                    Page {validatedPage} of {totalPages}
+                                </div>
+
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={handleNextPage}
+                                    disabled={
+                                        (validatedPage >= totalPages && !hasMoreStudents) ||
+                                        loadingStudents ||
+                                        isPaginating
+                                    }
+                                    className="text-xs border bg-white dark:bg-zinc-800 text-foreground hover:bg-zinc-50 dark:hover:bg-zinc-700/80 rounded-lg px-3 h-8 cursor-pointer flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
+                                >
+                                    {isPaginating ? (
+                                        <>
+                                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                            <span>Loading...</span>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <span>Next</span>
+                                            <ChevronRight className="h-3.5 w-3.5" />
+                                        </>
+                                    )}
+                                </Button>
+                            </div>
                         </div>
                     )}
                 </CardContent>
@@ -644,12 +849,18 @@ export default function AdminStudents() {
                         href: "/moderator/students/add",
                         color: "bg-blue-600 text-white",
                     }] : []),
-                    ...(canStudentReassign ? [{
-                        label: "Student Reassignment",
-                        icon: ArrowRightLeft,
-                        href: "/moderator/smart-allocation",
-                        color: "bg-slate-800 text-white",
-                    }] : []),
+                    {
+                        label: "Pass Renewal",
+                        icon: RotateCcw,
+                        href: "/moderator/renewal-service",
+                        color: "bg-amber-600 text-white",
+                    },
+                    {
+                        label: "Applications",
+                        icon: ClipboardList,
+                        href: "/moderator/applications",
+                        color: "bg-orange-600 text-white",
+                    },
                     {
                         label: "Verification",
                         icon: QrCode,

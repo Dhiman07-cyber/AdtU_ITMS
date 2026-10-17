@@ -40,6 +40,7 @@ export interface BusRouteAllocationTabRef {
   exportData: () => void;
   openCommitModal: () => void;
   getStagedCount: () => number;
+  refresh?: () => Promise<void> | void;
 }
 
 interface BusData {
@@ -426,12 +427,15 @@ export const BusRouteAllocationTab = forwardRef<BusRouteAllocationTabRef, BusRou
       exportData: handleExport,
       openCommitModal: openConfirmModal,
       getStagedCount: () => stagedAssignments.length,
+      refresh: async () => {
+        await fetchAllData();
+      },
     }));
 
     return (
       <>
         {/* LEFT COLUMN: BUS ROSTER & MULTI-SELECT */}
-        <div className="lg:col-span-4 flex flex-col min-w-0 h-full overflow-hidden">
+        <div className="lg:col-span-4 flex flex-col min-w-0 h-auto lg:h-full min-h-[380px] max-h-[480px] sm:max-h-[520px] lg:max-h-none overflow-hidden">
           <Card className="bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 shadow-md flex-1 flex flex-col h-full overflow-hidden !p-0 !gap-0">
             <CardHeader className="p-3.5 pb-2.5 border-b border-zinc-200 dark:border-zinc-800 bg-slate-50/70 dark:bg-zinc-800/40 shrink-0 space-y-2">
               <div className="flex items-center justify-between gap-2">
@@ -613,8 +617,8 @@ export const BusRouteAllocationTab = forwardRef<BusRouteAllocationTabRef, BusRou
         </div>
 
         {/* RIGHT COLUMN: ROUTE SELECTION & STAGING */}
-        <div className="lg:col-span-8 flex flex-col min-w-0 h-full overflow-hidden">
-          <Card className="bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 shadow-md flex-1 flex flex-col h-full overflow-hidden !p-0 !gap-0">
+        <div className="lg:col-span-8 flex flex-col min-w-0 h-auto lg:h-full overflow-visible lg:overflow-hidden">
+          <Card className="bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 shadow-md flex-1 flex flex-col h-auto lg:h-full overflow-visible lg:overflow-hidden !p-0 !gap-0">
             <CardHeader className="p-3.5 pb-2.5 border-b border-zinc-200 dark:border-zinc-800 bg-slate-50/70 dark:bg-zinc-800/40 shrink-0">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
                 <div className="flex items-center gap-2">

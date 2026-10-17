@@ -20,6 +20,7 @@ import { useModeratorPermissions } from '@/hooks/useModeratorPermissions';
 import { safeImageSrc } from '@/lib/security/url-sanitizer';
 import {
 	AlertTriangle,
+	AlertCircle,
 	ArrowUpRight,
 	BarChart3,
 	Calendar,
@@ -107,7 +108,7 @@ interface Transaction {
   durationYears: number;
   validUntil: string;
   approvedBy?: string;
-  status?: 'completed' | 'pending' | 'failed';
+  status?: 'Completed' | 'Pending' | 'Rejected' | 'Duplicate_Pending_Refund' | 'Captured_Pending_Review' | 'Refunded' | 'Refund_Denied' | 'completed' | 'pending' | 'failed' | 'duplicate_pending_refund' | 'captured_pending_review' | 'refunded' | 'refund_denied';
 }
 
 interface EnrichedTransaction extends Transaction {
@@ -151,6 +152,7 @@ export default function AdminRenewalServicePage() {
   const [filterYear, setFilterYear] = useState('default');
   const [filterStudentId, setFilterStudentId] = useState('');
   const [filterPaymentMethod, setFilterPaymentMethod] = useState('all');
+  const [filterStatus, setFilterStatus] = useState('all');
   const [buses, setBuses] = useState<any[]>([]);
 
   const [selectedPaymentId, setSelectedPaymentId] = useState<string | null>(null);
@@ -302,6 +304,7 @@ export default function AdminRenewalServicePage() {
     totalRevenue: number;
     completedCount: number;
     pendingCount: number;
+    duplicateRefundCount?: number;
     monthlyData: { name: string; amount: number }[];
   } | null>(null);
   const [loadingDashboard, setLoadingDashboard] = useState(false);
@@ -432,7 +435,8 @@ export default function AdminRenewalServicePage() {
           limit: '20',
           year: (filterYear && filterYear !== 'default') ? filterYear : new Date().getFullYear().toString(),
           ...(filterStudentId && { studentId: filterStudentId }),
-          ...(filterPaymentMethod !== 'all' && { paymentMethod: filterPaymentMethod })
+          ...(filterPaymentMethod !== 'all' && { paymentMethod: filterPaymentMethod }),
+          ...(filterStatus !== 'all' && { status: filterStatus })
         });
 
         const response = await fetch(`/api/payment/transactions?${params}`, {
@@ -866,6 +870,45 @@ export default function AdminRenewalServicePage() {
                     </Card>
                   </div>
 
+                  {/* Duplicate / Refund Queue Alert for Staff */}
+                  {dashboardStats?.duplicateRefundCount && dashboardStats.duplicateRefundCount > 0 ? (
+                    <Card className="bg-gradient-to-r from-amber-500/15 via-orange-500/10 to-amber-500/15 border border-amber-500/30 p-4 rounded-xl shadow-lg">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                          <div className="h-10 w-10 rounded-xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center shrink-0">
+                            <AlertTriangle className="h-5 w-5 text-amber-400" />
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <h3 className="text-sm font-bold text-white">Duplicate Payments — Review Required</h3>
+                              <Badge className="bg-amber-500/20 text-amber-300 border-amber-500/40 text-[10px] px-2 py-0.5">
+                                {dashboardStats.duplicateRefundCount} Record{dashboardStats.duplicateRefundCount > 1 ? 's' : ''} Flagged
+                              </Badge>
+                            </div>
+                            <p className="text-xs text-amber-200/80 mt-0.5">
+                              Students initiated secondary payment captures for an already-paid session. Recorded in ledger for administrative review without issuing duplicate seats or automated refunds.
+                            </p>
+                          </div>
+                        </div>
+                        <Button
+                          size="sm"
+                          onClick={() => {
+                            setActiveTab('history');
+                            setFilterStatus('Duplicate_Pending_Refund');
+                            setFilterPaymentMethod('all');
+                            setFilterStudentId('');
+                            setCurrentPage(1);
+                            setSearchTrigger(prev => prev + 1);
+                          }}
+                          className="bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs h-8 px-4 rounded-lg shrink-0 cursor-pointer shadow-sm"
+                        >
+                          Review Duplicate Queue
+                          <ArrowUpRight className="h-3.5 w-3.5 ml-1" />
+                        </Button>
+                      </div>
+                    </Card>
+                  ) : null}
+
                   {/* Charts Row */}
                   <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
                     {/* Monthly Revenue Trend */}
@@ -1197,7 +1240,7 @@ export default function AdminRenewalServicePage() {
               <CardContent className="pt-4 pb-6 px-6">
                 {/* Filters */}
                 {/* Filters */}
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4 w-full">
+                <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-4 w-full">
                   <div>
                     <Label className="text-[10px] text-gray-500 dark:text-gray-400 mb-1 block">Year</Label>
                     <Select value={filterYear} onValueChange={setFilterYear}>
@@ -1231,6 +1274,24 @@ export default function AdminRenewalServicePage() {
                   </div>
 
                   <div>
+                    <Label className="text-[10px] text-gray-500 dark:text-gray-400 mb-1 block">Status</Label>
+                    <Select value={filterStatus} onValueChange={setFilterStatus}>
+                      <SelectTrigger className="w-full bg-zinc-50 dark:bg-zinc-900 text-gray-900 dark:text-gray-100 border-zinc-200 dark:border-zinc-800 h-8 text-[10px]">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent className="bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800">
+                        <SelectItem value="all" className="text-[10px]">All Statuses</SelectItem>
+                        <SelectItem value="Completed" className="text-[10px]">Completed</SelectItem>
+                        <SelectItem value="Duplicate_Pending_Refund" className="text-[10px] text-amber-500 dark:text-amber-400 font-bold">Duplicate Payment — Review Required</SelectItem>
+                        <SelectItem value="Captured_Pending_Review" className="text-[10px] text-indigo-500 dark:text-indigo-400 font-bold">Captured — Pending Review</SelectItem>
+                        <SelectItem value="Refunded" className="text-[10px] text-slate-500 dark:text-slate-400 font-bold">Refunded</SelectItem>
+                        <SelectItem value="Pending" className="text-[10px]">Pending</SelectItem>
+                        <SelectItem value="Rejected" className="text-[10px]">Rejected</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div>
                     <Label className="text-[10px] text-gray-500 dark:text-gray-400 mb-1 block">Student ID</Label>
                     <Input
                       placeholder="Enter enrollment ID"
@@ -1247,7 +1308,7 @@ export default function AdminRenewalServicePage() {
                         setSearchTrigger(prev => prev + 1);
                         setCurrentPage(1);
                       }}
-                      className="w-full bg-blue-600 hover:bg-blue-700 h-8 text-[10px] text-white rounded-md"
+                      className="w-full bg-blue-600 hover:bg-blue-700 h-8 text-[10px] text-white rounded-md cursor-pointer"
                     >
                       <Filter className="mr-1.5 h-3 w-3" />
                       Apply Filters
@@ -1278,16 +1339,19 @@ export default function AdminRenewalServicePage() {
                         <div className="col-span-2 text-center">
                           <p className="text-[9px] font-extrabold text-gray-600 dark:text-gray-300 uppercase tracking-wider mr-3">Mode</p>
                         </div>
-                        <div className="col-span-4">
-                          <p className="text-[9px] font-extrabold text-gray-600 dark:text-gray-300 uppercase tracking-wider ml-6">Reference ID</p>
+                        <div className="col-span-3">
+                          <p className="text-[9px] font-extrabold text-gray-600 dark:text-gray-300 uppercase tracking-wider ml-4">Reference ID</p>
                         </div>
                         <div className="col-span-2">
                           <p className="text-[9px] font-extrabold text-gray-600 dark:text-gray-300 uppercase tracking-wider ml-2">Date/Time</p>
                         </div>
-                        <div className="col-span-3">
-                          <p className="text-[9px] font-extrabold text-gray-600 dark:text-gray-300 uppercase tracking-wider ml-8">Amount</p>
+                        <div className="col-span-2">
+                          <p className="text-[9px] font-extrabold text-gray-600 dark:text-gray-300 uppercase tracking-wider ml-4">Amount</p>
                         </div>
-                        <div className="col-span-4 text-left pl-2">
+                        <div className="col-span-3 text-center">
+                          <p className="text-[9px] font-extrabold text-gray-600 dark:text-gray-300 uppercase tracking-wider">Status</p>
+                        </div>
+                        <div className="col-span-3 text-left pl-2">
                           <p className="text-[9px] font-extrabold text-gray-600 dark:text-gray-300 uppercase tracking-wider whitespace-nowrap ml-2">Approved By</p>
                         </div>
                         <div className="col-span-4 text-right pr-2">
@@ -1295,15 +1359,52 @@ export default function AdminRenewalServicePage() {
                         </div>
                       </div>
 
-                      {enrichedTransactions.map((transaction, index) => (
+                      {enrichedTransactions.map((transaction, index) => {
+                        const isDuplicate = transaction.status === 'Duplicate_Pending_Refund' || (transaction.status || '').toLowerCase() === 'duplicate_pending_refund';
+                        const isUnresolvedReview = transaction.status === 'Captured_Pending_Review' || (transaction.status || '').toLowerCase() === 'captured_pending_review';
+                        const isRefunded = transaction.status === 'Refunded' || (transaction.status || '').toLowerCase() === 'refunded';
+                        const isRefundDenied = transaction.status === 'Refund_Denied' || (transaction.status || '').toLowerCase() === 'refund_denied';
+                        const isPending = transaction.status === 'Pending' || (transaction.status || '').toLowerCase() === 'pending';
+
+                        return (
                         <div
                           key={index}
                           style={{ contentVisibility: 'auto', containIntrinsicSize: '0 80px' }}
-                          className="relative bg-white dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800 rounded-lg shadow-sm hover:shadow-lg hover:border-blue-400 dark:hover:border-blue-500 transition-all duration-300 overflow-hidden"
+                          className={`relative bg-white dark:bg-zinc-900/60 border ${
+                            isDuplicate
+                              ? 'border-amber-300 dark:border-amber-800/60 hover:border-amber-500 dark:hover:border-amber-400 bg-amber-500/[0.02]'
+                              : isUnresolvedReview
+                              ? 'border-indigo-300 dark:border-indigo-800/60 hover:border-indigo-500 dark:hover:border-indigo-400 bg-indigo-500/[0.02]'
+                              : isRefunded
+                              ? 'border-slate-300 dark:border-slate-800/60 hover:border-slate-500 dark:hover:border-slate-400 bg-slate-500/[0.02]'
+                              : isRefundDenied
+                              ? 'border-rose-300 dark:border-rose-800/60 hover:border-rose-500 dark:hover:border-rose-400 bg-rose-500/[0.02]'
+                              : 'border-zinc-200 dark:border-zinc-800 hover:border-blue-400 dark:hover:border-blue-500'
+                          } rounded-lg shadow-sm hover:shadow-lg transition-all duration-300 overflow-hidden`}
                         >
-                          <div className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-blue-500 via-indigo-500 to-blue-500"></div>
+                          <div className={`absolute left-0 top-0 bottom-0 w-1 ${
+                            isDuplicate
+                              ? 'bg-gradient-to-b from-amber-500 via-orange-500 to-amber-600'
+                              : isUnresolvedReview
+                              ? 'bg-gradient-to-b from-indigo-500 via-purple-500 to-indigo-600'
+                              : isRefunded
+                              ? 'bg-gradient-to-b from-slate-500 via-zinc-500 to-slate-600'
+                              : isRefundDenied
+                              ? 'bg-gradient-to-b from-rose-500 via-red-500 to-pink-600'
+                              : 'bg-gradient-to-b from-blue-500 via-indigo-500 to-blue-500'
+                          }`}></div>
 
-                          <div className="absolute -left-4 top-1/2 -translate-y-1/2 w-10 h-10 bg-gradient-to-br from-blue-600 via-indigo-600 to-blue-600 rounded-full flex items-center justify-center text-white font-bold text-[12px] shadow-xl border-4 border-white dark:border-gray-900 z-10 scale-110">
+                          <div className={`absolute -left-4 top-1/2 -translate-y-1/2 w-10 h-10 ${
+                            isDuplicate
+                              ? 'bg-gradient-to-br from-amber-600 via-orange-600 to-amber-700'
+                              : isUnresolvedReview
+                              ? 'bg-gradient-to-br from-indigo-600 via-purple-600 to-indigo-700'
+                              : isRefunded
+                              ? 'bg-gradient-to-br from-slate-600 via-zinc-600 to-slate-700'
+                              : isRefundDenied
+                              ? 'bg-gradient-to-br from-rose-600 via-red-600 to-pink-700'
+                              : 'bg-gradient-to-br from-blue-600 via-indigo-600 to-blue-600'
+                          } rounded-full flex items-center justify-center text-white font-bold text-[12px] shadow-xl border-4 border-white dark:border-gray-900 z-10 scale-110`}>
                             #{index + 1}
                           </div>
 
@@ -1316,7 +1417,7 @@ export default function AdminRenewalServicePage() {
                                   size="sm"
                                   className="ring-1 ring-blue-100 dark:ring-blue-900/50 h-8 w-8"
                                 />
-                                <div className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-green-500 rounded-full border border-white dark:border-gray-800"></div>
+                                <div className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 ${isDuplicate ? 'bg-amber-500' : 'bg-green-500'} rounded-full border border-white dark:border-gray-800`}></div>
                               </div>
                               <div className="min-w-0">
                                 <p className="text-[11px] font-bold text-gray-900 dark:text-gray-100 truncate">{transaction.studentName}</p>
@@ -1329,14 +1430,14 @@ export default function AdminRenewalServicePage() {
                               <Badge className={`${transaction.paymentMethod === 'online'
                                 ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-400 border-blue-200 dark:border-blue-800'
                                 : 'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-400 border-orange-200 dark:border-orange-800'
-                                } text-[9px] font-black px-1.5 py-0 rounded-full capitalize mr-20`}>
+                                } text-[9px] font-black px-1.5 py-0 rounded-full capitalize mr-4`}>
                                 {transaction.paymentMethod === 'online' ? 'Online' : 'Offline'}
                               </Badge>
                             </div>
 
                             {/* Payment ID */}
-                            <div className="col-span-4">
-                              <div className="group/id flex items-center gap-1.5 bg-gray-50 dark:bg-zinc-900/50 rounded-lg px-2 py-0.5 border border-zinc-200 dark:border-zinc-800 hover:border-blue-400 dark:hover:border-blue-500/50 transition-colors h-7 w-fit max-w-[130px]">
+                            <div className="col-span-3">
+                              <div className="group/id flex items-center gap-1.5 bg-gray-50 dark:bg-zinc-900/50 rounded-lg px-2 py-0.5 border border-zinc-200 dark:border-zinc-800 hover:border-blue-400 dark:hover:border-blue-500/50 transition-colors h-7 w-fit max-w-[120px]">
                                 <p className="text-[8px] font-mono text-gray-500 dark:text-gray-400 truncate flex-1">{transaction.paymentId}</p>
                                 <Copy className="h-2.5 w-2.5 text-gray-400 group-hover/id:text-blue-500 cursor-pointer flex-shrink-0" onClick={(e) => {
                                   e.stopPropagation();
@@ -1355,16 +1456,51 @@ export default function AdminRenewalServicePage() {
                             </div>
 
                             {/* Amount */}
-                            <div className="col-span-3">
-                              <p className="text-[11px] font-mono font-bold text-emerald-600 dark:text-emerald-400 ml-8">
+                            <div className="col-span-2">
+                              <p className="text-[11px] font-mono font-bold text-emerald-600 dark:text-emerald-400 ml-2">
                                 ₹{transaction.amount?.toLocaleString('en-IN') || '0'}
                               </p>
                             </div>
 
+                            {/* Status */}
+                            <div className="col-span-3 flex justify-center">
+                              {isDuplicate ? (
+                                <Badge className="bg-amber-500/15 text-amber-500 dark:text-amber-400 border border-amber-500/30 text-[9px] font-black px-2 py-0.5 rounded-full flex items-center gap-1 shadow-xs">
+                                  <AlertTriangle className="h-2.5 w-2.5 shrink-0" />
+                                  <span>DUPLICATE (REVIEW REQUIRED)</span>
+                                </Badge>
+                              ) : isUnresolvedReview ? (
+                                <Badge className="bg-indigo-500/15 text-indigo-500 dark:text-indigo-400 border border-indigo-500/30 text-[9px] font-black px-2 py-0.5 rounded-full flex items-center gap-1 shadow-xs">
+                                  <AlertCircle className="h-2.5 w-2.5 shrink-0" />
+                                  <span>CAPTURED (REVIEW REQUIRED)</span>
+                                </Badge>
+                              ) : isRefunded ? (
+                                <Badge className="bg-slate-500/15 text-slate-500 dark:text-slate-400 border border-slate-500/30 text-[9px] font-black px-2 py-0.5 rounded-full flex items-center gap-1 shadow-xs">
+                                  <CheckCircle className="h-2.5 w-2.5 shrink-0" />
+                                  <span>REFUNDED</span>
+                                </Badge>
+                              ) : isRefundDenied ? (
+                                <Badge className="bg-rose-500/15 text-rose-500 dark:text-rose-400 border border-rose-500/30 text-[9px] font-black px-2 py-0.5 rounded-full flex items-center gap-1 shadow-xs">
+                                  <XCircle className="h-2.5 w-2.5 shrink-0" />
+                                  <span>REFUND DENIED</span>
+                                </Badge>
+                              ) : isPending ? (
+                                <Badge className="bg-yellow-500/15 text-yellow-600 dark:text-yellow-400 border border-yellow-500/30 text-[9px] font-black px-2 py-0.5 rounded-full flex items-center gap-1 shadow-xs">
+                                  <Clock className="h-2.5 w-2.5 shrink-0" />
+                                  <span>PENDING</span>
+                                </Badge>
+                              ) : (
+                                <Badge className="bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 text-[9px] font-black px-2 py-0.5 rounded-full flex items-center gap-1 shadow-xs">
+                                  <CheckCircle className="h-2.5 w-2.5 shrink-0" />
+                                  <span>COMPLETED</span>
+                                </Badge>
+                              )}
+                            </div>
+
                             {/* Approved By */}
-                            <div className="col-span-4 text-left pl-2 ml-1">
+                            <div className="col-span-3 text-left pl-2">
                               <p className="text-[10px] font-bold text-gray-700 dark:text-gray-300 truncate" title={transaction.approvedBy}>
-                                {transaction.paymentMethod === 'online' || transaction.approvedBy === 'AdtU ITMS System' || transaction.approvedBy === 'System Verified' ? 'System-Approved' : (transaction.approvedBy || 'System-Approved')}
+                                {isDuplicate ? 'Duplicate Capture' : isUnresolvedReview ? 'Unresolved Capture' : isRefunded ? 'Refund Recorded' : isRefundDenied ? 'Refund Denied' : (transaction.paymentMethod === 'online' || transaction.approvedBy === 'AdtU ITMS System' || transaction.approvedBy === 'System Verified' ? 'System-Approved' : (transaction.approvedBy || 'System-Approved'))}
                               </p>
                             </div>
 
@@ -1373,9 +1509,18 @@ export default function AdminRenewalServicePage() {
                               <Button
                                 size="sm"
                                 variant="outline"
+                                onClick={() => handleManualPaymentClick(transaction.paymentId)}
+                                className="h-6 gap-1 text-[9px] font-bold text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 bg-indigo-50/50 dark:bg-indigo-900/20 border-indigo-200 dark:border-indigo-800/50 hover:bg-indigo-100 w-full shadow-xs px-2 cursor-pointer"
+                              >
+                                <Eye className="h-2.5 w-2.5" />
+                                DETAILS
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
                                 onClick={() => handleDownloadReceipt(transaction.paymentId)}
                                 disabled={downloadingReceiptId === transaction.paymentId}
-                                className="h-7 gap-1.5 text-[9px] font-bold text-blue-600 dark:text-blue-400 hover:text-blue-700 bg-blue-50/50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800/50 hover:bg-blue-100 w-full shadow-sm px-2"
+                                className="h-6 gap-1 text-[9px] font-bold text-blue-600 dark:text-blue-400 hover:text-blue-700 bg-blue-50/50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800/50 hover:bg-blue-100 w-full shadow-xs px-2 cursor-pointer"
                               >
                                 {downloadingReceiptId === transaction.paymentId ? (
                                   <>
@@ -1385,7 +1530,7 @@ export default function AdminRenewalServicePage() {
                                 ) : (
                                   <>
                                     <Download className="h-2.5 w-2.5" />
-                                    DOWNLOAD
+                                    {isDuplicate ? 'AUDIT RECORD' : 'DOWNLOAD'}
                                   </>
                                 )}
                               </Button>
@@ -1402,14 +1547,14 @@ export default function AdminRenewalServicePage() {
                                      toast.error('Student profile unavailable');
                                    }
                                 }}
-                                className="h-5 text-[9px] font-bold w-full text-zinc-500 dark:text-zinc-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20"
+                                className="h-5 text-[9px] font-bold w-full text-zinc-500 dark:text-zinc-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 cursor-pointer"
                               >
                                 VIEW PROFILE
                               </Button>
                             </div>
                           </div>
                         </div>
-                      ))}
+                      )})}
                     </div>
                   </div>
                 )}
