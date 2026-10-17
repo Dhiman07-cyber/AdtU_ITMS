@@ -10,7 +10,6 @@ import { stopMessageValidator } from './message-validator';
 import { validateEnvironment } from '../src/lib/env-validator';
 import { redisClient } from './redis-client';
 import { initRedisBroadcastRelay } from './redis-broadcast';
-import { updateLiveBusLocation, clearLiveBusLocation } from './socket-router';
 
 import { assertPrivilegedTokenSafe } from './authenticator';
 
@@ -72,32 +71,16 @@ async function main() {
   });
   wsServer.start(server);
 
-  // Connect Redis and initialize cross-node broadcast relay.
+  // Connect Redis and initialize cross-process security listener (role_invalidate).
   // Graceful: if REDIS_URL is absent, redisClient.connect() returns false
-  // and redisPubSub calls become no-ops — single-node mode continues.
+  // and redisPubSub calls become no-ops.
   redisClient.connect().then((connected) => {
     if (connected) {
-      initRedisBroadcastRelay(
-        // onBroadcast: relay received cross-node events to local WS subscribers
-        (channel, event, payload) => wsServer.broadcastToChannel(channel, event, payload),
-        // onLocationUpdate: keep the in-process live-location cache in sync
-        (busId, payload) => updateLiveBusLocation(busId, payload),
-        // onTripEnded: clear the in-process live-location cache on trip end across nodes
-        (busId) => clearLiveBusLocation(busId),
-      ).catch((err) => {
-        logger.warn('redis_broadcast_relay_init_failed', { error: (err as Error).message });
+      initRedisBroadcastRelay().catch((err) => {
+        logger.warn('redis_security_listener_init_failed', { error: (err as Error).message });
       });
     } else {
-      const isProd = process.env.NODE_ENV === 'production';
-      const isMultiInstance = process.env.WS_CLUSTER === 'true' || process.env.MULTI_INSTANCE === 'true';
-
-      if (isProd && isMultiInstance) {
-        logger.error('redis_mandatory_for_multi_instance_production', {
-          error: 'Multi-instance WebSocket deployment requires Redis for cross-node synchronization. Startup refused.',
-        });
-        process.exit(1);
-      }
-      logger.info('redis_not_configured_running_single_node');
+      logger.info('redis_not_configured_running_standalone');
     }
   });
 

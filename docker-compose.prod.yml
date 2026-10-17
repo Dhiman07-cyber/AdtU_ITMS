@@ -56,36 +56,6 @@ services:
     networks:
       - itms
 
-  ws2:
-    container_name: itms-ws2
-    image: ${ECR_WS_IMAGE_URL:-itms-ws:latest}
-    ports:
-      - "127.0.0.1:3003:3001"
-    environment:
-      - NODE_ENV=production
-      - WS_PORT=3001
-      - HEALTH_PORT=9090
-      - LOG_LEVEL=info
-      - REDIS_URL=redis://redis:6379
-    env_file:
-      - .env
-    depends_on:
-      redis:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:9090/health/live || exit 1"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-      start_period: 15s
-    stop_grace_period: 40s
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          memory: 1536M
-    networks:
-      - itms
 
   nextjs:
     container_name: itms-nextjs
@@ -125,8 +95,7 @@ services:
     depends_on:
       ws1:
         condition: service_healthy
-      ws2:
-        condition: service_healthy
+      # ws2 removed: single-node WS architecture (R-05 / ARCH-01 fix).
       nextjs:
         condition: service_healthy
     restart: unless-stopped

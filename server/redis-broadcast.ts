@@ -51,79 +51,33 @@ interface BroadcastEnvelope {
 }
 
 /**
- * Publish a broadcast to Redis so other nodes can relay it to their local
- * subscribers. Called AFTER the local broadcast has already completed.
+ * In the simplified single-process WebSocket architecture, all client subscribers
+ * connect to this single WS runtime instance. Local in-process broadcast is already
+ * completed synchronously before calling publishToRedis.
  *
- * Fire-and-forget: errors are logged but never surface to callers.
+ * Cross-node relay via Redis Pub/Sub (ws:broadcast) is bypassed to eliminate
+ * redundant network roundtrips, serialization, and Redis pub/sub load.
  */
 export function publishToRedis(
-  channel: string,
-  event: string,
-  payload: Record<string, unknown>
+  _channel: string,
+  _event: string,
+  _payload: Record<string, unknown>
 ): void {
-  const envelope: BroadcastEnvelope = {
-    channel,
-    event,
-    payload,
-    originNodeId: MY_NODE_ID,
-  };
-
-  metricsService.inc('redisPubSubMessages');
-  redisPubSub.publish(REDIS_BROADCAST_CHANNEL, JSON.stringify(envelope)).catch((err) => {
-    logger.warn('redis_broadcast_publish_error', {
-      channel,
-      event,
-      error: (err as Error).message,
-    });
-  });
+  // Bypassed: single-process WS runtime does not require cross-node relay.
+  // Preserved as zero-overhead no-op.
 }
 
 /**
- * Subscribe this node to the Redis broadcast channel.
- * Call once at server startup (after wsServer.start()).
- *
- * Callbacks are injected to avoid circular module imports:
- *   - onBroadcast: called to relay the event to local WS subscribers
- *   - onLocationUpdate: called to keep the in-process live-location cache in sync
+ * Initializes Redis listeners required for system security and state coordination.
+ * In single-process WS mode, cross-node broadcast relay is bypassed, while
+ * cross-process role invalidation (`role_invalidate`) is strictly preserved
+ * to evict demoted or revoked users across application boundaries.
  */
 export async function initRedisBroadcastRelay(
-  onBroadcast: (channel: string, event: string, payload: Record<string, unknown>) => void,
-  onLocationUpdate: (busId: string, payload: Record<string, unknown>) => void,
-  onTripEnded?: (busId: string) => void,
+  _onBroadcast?: (channel: string, event: string, payload: Record<string, unknown>) => void,
+  _onLocationUpdate?: (busId: string, payload: Record<string, unknown>) => void,
+  _onTripEnded?: (busId: string) => void,
 ): Promise<void> {
-  await redisPubSub.subscribe(REDIS_BROADCAST_CHANNEL, (raw) => {
-    metricsService.inc('redisPubSubMessages');
-    let envelope: BroadcastEnvelope;
-    try {
-      envelope = JSON.parse(raw) as BroadcastEnvelope;
-    } catch {
-      logger.warn('redis_broadcast_parse_error', { raw: raw.slice(0, 200) });
-      return;
-    }
-
-    // Skip our own messages — we already broadcast locally before publishing.
-    if (envelope.originNodeId === MY_NODE_ID) return;
-
-    // Keep local live-location cache in sync across nodes.
-    const busIdMatch = envelope.channel.match(/^(?:bus:|bus_location_|trip-status-)(.+)$/);
-    const busId = (envelope.payload.busId as string) || busIdMatch?.[1];
-
-    if (envelope.event === 'bus_location_update' && busId) {
-      metricsService.inc('gpsAccepted');
-      onLocationUpdate(busId, envelope.payload);
-    } else if (envelope.event === 'trip_ended' && busId) {
-      onTripEnded?.(busId);
-    }
-
-    if (envelope.event === 'trip_started') metricsService.inc('tripsStarted');
-    if (envelope.event === 'trip_ended') metricsService.inc('tripsEnded');
-    if (envelope.event === 'waiting_flag_raised' || envelope.event === 'waiting_flag_created') metricsService.inc('waitingFlagsCreated');
-    if (envelope.event === 'waiting_flag_cancelled' || envelope.event === 'waiting_flag_resolved' || envelope.event === 'waiting_flag_removed' || envelope.event === 'waiting_flag_boarded') metricsService.inc('waitingFlagsCancelled');
-
-    // Relay to local subscribers.
-    onBroadcast(envelope.channel, envelope.event, envelope.payload);
-  });
-
   // Cross-node role invalidation listener: purges cached JWT auth and terminates
   // active sessions in this WS instance whenever an admin updates user permissions or roles.
   await redisPubSub.subscribe(ROLE_INVALIDATE_CHANNEL, (rawUid) => {
@@ -159,9 +113,9 @@ export async function initRedisBroadcastRelay(
     logger.info('ws_role_cache_invalidated', { uid: uid || 'all' });
   });
 
-  logger.info('redis_broadcast_relay_initialized', {
+  logger.info('redis_security_listeners_initialized', {
     nodeId: MY_NODE_ID,
-    channel: REDIS_BROADCAST_CHANNEL,
     roleInvalidateChannel: ROLE_INVALIDATE_CHANNEL,
+    broadcastRelay: 'bypassed_single_node',
   });
 }

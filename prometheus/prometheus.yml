@@ -21,16 +21,11 @@ scrape_configs:
           node: 'app-node-01'
           tier: 'frontend-api'
 
-  - job_name: 'itms-websocket-cluster'
+  - job_name: 'itms-websocket'
     metrics_path: '/metrics'
     static_configs:
       - targets: ['ws1:9090']
         labels:
           node: 'ws-node-01'
           instance: 'ws1'
-          tier: 'realtime-transport'
-      - targets: ['ws2:9090']
-        labels:
-          node: 'ws-node-02'
-          instance: 'ws2'
           tier: 'realtime-transport'
