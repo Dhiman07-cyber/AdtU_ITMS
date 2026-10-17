@@ -14,6 +14,7 @@ import {
 } from '@/lib/payment/application-payment.service';
 import { daysUntil,isDateExpired,parseFirestoreDate } from '@/lib/utils/date-utils';
 import {
+	AlertCircle,
 	AlertTriangle,
 	ArrowLeft,
 	Bus,
@@ -32,7 +33,8 @@ import {
 	Sparkles,
 	TrendingUp,
 	User,
-	Zap
+	Zap,
+	XCircle
 } from 'lucide-react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
@@ -845,15 +847,52 @@ export default function StudentRenewalPage() {
                           <div className="relative p-4 sm:p-5">
                             <div className="flex items-center justify-between mb-4 sm:mb-6">
                               <div className="flex items-center gap-3 sm:gap-4">
-                                <div className="p-2.5 sm:p-3.5 rounded-xl sm:rounded-2xl bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 shadow-inner">
+                                <div className={`p-2.5 sm:p-3.5 rounded-xl sm:rounded-2xl ${
+                                  transaction.status === 'Duplicate_Pending_Refund' || (transaction.status || '').toLowerCase() === 'duplicate_pending_refund'
+                                    ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                                    : transaction.status === 'Captured_Pending_Review' || (transaction.status || '').toLowerCase() === 'captured_pending_review'
+                                    ? 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20'
+                                    : transaction.status === 'Refunded' || (transaction.status || '').toLowerCase() === 'refunded'
+                                    ? 'bg-slate-500/10 text-slate-400 border border-slate-500/20'
+                                    : transaction.status === 'Refund_Denied' || (transaction.status || '').toLowerCase() === 'refund_denied'
+                                    ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+                                    : 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/20'
+                                } shadow-inner`}>
                                   <IndianRupee className="h-4 w-4 sm:h-6 sm:w-6" />
                                 </div>
                                 <div>
                                   <div className="flex items-center gap-2 mb-0.5 sm:mb-1">
                                     <h4 className="font-black text-xl sm:text-3xl text-white tracking-tight">₹{transaction.amount?.toLocaleString()}</h4>
-                                    <Badge className="bg-emerald-500/10 text-emerald-400 border-none px-2 py-0.5 text-[10px] font-black uppercase tracking-widest">
-                                      COMPLETED
-                                    </Badge>
+                                    {transaction.status === 'Duplicate_Pending_Refund' || (transaction.status || '').toLowerCase() === 'duplicate_pending_refund' ? (
+                                      <Badge className="bg-amber-500/15 text-amber-400 border border-amber-500/30 px-2 py-0.5 text-[10px] font-black uppercase tracking-widest flex items-center gap-1">
+                                        <AlertTriangle className="h-2.5 w-2.5" />
+                                        DUPLICATE PAYMENT — REVIEW REQUIRED
+                                      </Badge>
+                                    ) : transaction.status === 'Captured_Pending_Review' || (transaction.status || '').toLowerCase() === 'captured_pending_review' ? (
+                                      <Badge className="bg-indigo-500/15 text-indigo-400 border border-indigo-500/30 px-2 py-0.5 text-[10px] font-black uppercase tracking-widest flex items-center gap-1">
+                                        <AlertCircle className="h-2.5 w-2.5" />
+                                        CAPTURED — PENDING REVIEW
+                                      </Badge>
+                                    ) : transaction.status === 'Refunded' || (transaction.status || '').toLowerCase() === 'refunded' ? (
+                                      <Badge className="bg-slate-500/15 text-slate-400 border border-slate-500/30 px-2 py-0.5 text-[10px] font-black uppercase tracking-widest flex items-center gap-1">
+                                        <CheckCircle className="h-2.5 w-2.5" />
+                                        REFUNDED
+                                      </Badge>
+                                    ) : transaction.status === 'Refund_Denied' || (transaction.status || '').toLowerCase() === 'refund_denied' ? (
+                                      <Badge className="bg-rose-500/15 text-rose-400 border border-rose-500/30 px-2 py-0.5 text-[10px] font-black uppercase tracking-widest flex items-center gap-1">
+                                        <XCircle className="h-2.5 w-2.5" />
+                                        REFUND DENIED
+                                      </Badge>
+                                    ) : transaction.status === 'pending' || (transaction.status || '').toLowerCase() === 'pending' ? (
+                                      <Badge className="bg-yellow-500/15 text-yellow-400 border border-yellow-500/30 px-2 py-0.5 text-[10px] font-black uppercase tracking-widest flex items-center gap-1">
+                                        <Clock className="h-2.5 w-2.5" />
+                                        PENDING
+                                      </Badge>
+                                    ) : (
+                                      <Badge className="bg-emerald-500/10 text-emerald-400 border-none px-2 py-0.5 text-[10px] font-black uppercase tracking-widest">
+                                        COMPLETED
+                                      </Badge>
+                                    )}
                                   </div>
                                   <p className="text-[10px] sm:text-[11px] font-bold text-gray-500 uppercase tracking-widest flex items-center gap-1.5 sm:gap-2">
                                     <Calendar className="h-3 w-3 sm:h-3.5 sm:w-3.5" />

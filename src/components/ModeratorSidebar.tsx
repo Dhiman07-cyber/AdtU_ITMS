@@ -45,45 +45,46 @@ interface NavGroup {
 
 const moderatorNavGroups: NavGroup[] = [
   {
-    name: 'CORE',
+    name: "MANAGEMENT",
     items: [
-      { href: '/moderator', label: 'Dashboard', icon: LayoutDashboard, color: 'text-blue-400' },
-    ]
+      {
+        href: "/moderator/students",
+        label: "Students",
+        icon: GraduationCap,
+        color: "text-blue-400",
+      },
+      {
+        href: "/moderator/drivers",
+        label: "Drivers",
+        icon: IdCard,
+        color: "text-indigo-400",
+      },
+    ],
   },
   {
-    name: 'STUDENT',
+    name: "LIFECYCLE",
     items: [
-      { href: '/moderator/students', label: 'Student Management', icon: GraduationCap, color: 'text-blue-400' },
-      { href: '/moderator/students/add', label: 'Add Student', icon: UserPlus, color: 'text-emerald-400' },
-      { href: '/moderator/smart-allocation', label: 'Student Reassignment', icon: ArrowLeftRight, color: 'text-teal-400' },
-      { href: '/moderator/renewal-service', label: 'Renewal', icon: RotateCcw, color: 'text-amber-400' },
-      { href: '/moderator/applications', label: 'Applications', icon: ClipboardList, color: 'text-orange-400' },
-      { href: '/moderator/verification', label: 'Verification', icon: QrCode, color: 'text-cyan-400' },
-    ]
+      { href: "/moderator/applications", label: "Applications", icon: ClipboardList, color: "text-orange-400" },
+      { href: "/moderator/renewal-service", label: "Pass Renewal", icon: RotateCcw, color: "text-amber-400" },
+      { href: "/moderator/verification", label: "Verification", icon: QrCode, color: "text-cyan-400" },
+      { href: "/moderator/smart-allocation", label: "Reassignment Hub", icon: ArrowLeftRight, color: "text-teal-400" },
+    ],
   },
   {
-    name: 'DRIVER',
+    name: "FLEET & OPS",
     items: [
-      { href: '/moderator/drivers', label: 'Driver Management', icon: IdCard, color: 'text-indigo-400' },
-      { href: '/moderator/drivers/add', label: 'Add Driver', icon: UserCheck, color: 'text-emerald-400' },
-      { href: '/moderator/driver-assignment', label: 'Driver Reassignment', icon: GitCompareArrows, color: 'text-purple-400' },
-    ]
+      { href: "/moderator/buses", label: "Buses", icon: Bus, color: "text-amber-400" },
+      { href: "/moderator/routes", label: "Routes", icon: RouteIcon, color: "text-emerald-400" },
+      { href: "/moderator/fleet-map", label: "Fleet Map", icon: Map, color: "text-sky-400" },
+    ],
   },
   {
-    name: 'LOGISTICS',
+    name: "SYSTEM",
     items: [
-      { href: '/moderator/buses', label: 'Buses', icon: Bus, color: 'text-amber-400' },
-      { href: '/moderator/routes', label: 'Routes', icon: RouteIcon, color: 'text-emerald-400' },
-      { href: '/moderator/fleet-map', label: 'Fleet Map', icon: Map, color: 'text-emerald-400' },
-    ]
+      { href: "/moderator/notifications", label: "Notifications", icon: Bell, color: "text-red-400" },
+      { href: "/moderator/feedback", label: "Feedbacks", icon: MessageSquareQuote, color: "text-cyan-400" },
+    ],
   },
-  {
-    name: 'SUPPORT',
-    items: [
-      { href: '/moderator/notifications', label: 'Notifications', icon: Bell, color: 'text-red-400' },
-      { href: '/moderator/feedback', label: 'Feedbacks', icon: MessageSquareQuote, color: 'text-cyan-400' },
-    ]
-  }
 ];
 
 // Precompute once at module scope — avoids rebuilding this array for every
@@ -116,13 +117,14 @@ export default function ModeratorSidebar() {
         willChange: 'width',
         contain: 'layout style paint',
         transform: 'translate3d(0, 0, 0)',
-        backfaceVisibility: 'hidden'
+        backfaceVisibility: 'hidden',
+        overscrollBehavior: 'contain',
       }}
       className={cn(
         "fixed top-12 left-0 bottom-0 z-40",
         "border-r",
         theme === 'dark' ? "border-white/10 bg-[#0B1224]" : "border-admin-border bg-admin-sidebar",
-        "flex flex-col overflow-hidden",
+        "flex flex-col overflow-hidden overscroll-contain",
         "hidden md:flex",
         "transition-[width] duration-100 ease-linear"
       )}
@@ -130,24 +132,31 @@ export default function ModeratorSidebar() {
 
       {/* Header/Toggle Section */}
       <div className={cn(
-        "flex items-center px-3 py-2 h-14 shrink-0",
+        "flex items-center px-3 py-2 h-13 shrink-0 border-b border-white/5",
         collapsed ? "justify-center" : "justify-between"
       )}>
         {!collapsed && (
-          <div className="flex items-center gap-2.5">
-            <div className="relative group">
+          <Link
+            href="/moderator"
+            className="flex items-center gap-2.5 group cursor-pointer outline-none"
+            title="Open Moderator Dashboard"
+          >
+            <div className="relative">
               <div className="absolute inset-0 bg-purple-500/10 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity" />
-              <div className="relative p-1.5 rounded-lg bg-gradient-to-br from-purple-500/10 to-pink-500/10 border border-purple-500/20">
-                <Sparkles className="h-3.5 w-3.5 text-purple-400" />
+              <div className="relative p-1.5 rounded-lg bg-gradient-to-br from-purple-500/10 to-pink-500/10 border border-purple-500/20 group-hover:border-purple-500/40 transition-colors">
+                <Sparkles className="h-3.5 w-3.5 text-purple-400 group-hover:scale-110 transition-transform" />
               </div>
             </div>
             <div className="flex flex-col">
-              <span className="text-[12px] font-bold text-zinc-100 leading-none tracking-tight">
+              <span className={cn(
+                "text-[12px] font-bold leading-none tracking-tight group-hover:text-purple-400 transition-colors",
+                theme === 'dark' ? "text-zinc-100" : "text-admin-text"
+              )}>
                 Operations
               </span>
               <span className={cn("text-[10px] font-medium", theme === 'dark' ? "text-zinc-400" : "text-admin-text-secondary")}>Moderator Hub</span>
             </div>
-          </div>
+          </Link>
         )}
         <Button
           variant="ghost"

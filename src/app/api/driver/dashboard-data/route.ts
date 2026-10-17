@@ -1,6 +1,7 @@
 import { withSecurity } from '@/lib/security/api-security';
 import { RateLimits } from '@/lib/security/rate-limiter';
 import { getSupabaseServer } from '@/lib/supabase-server';
+import { isWaitingFlagExpired } from '@/lib/waiting-flag-helpers';
 import { NextResponse } from 'next/server';
 
 /**
@@ -90,7 +91,7 @@ export const GET = withSecurity(
                 ? supabase.from('student_profiles').select('uid', { count: 'exact', head: true }).eq('bus_id', busId).eq('status', 'active').eq('shift', 'Evening')
                 : Promise.resolve({ count: 0, error: null }),
             busId
-                ? supabase.from('waiting_flags').select('id, student_uid, student_name, student_profile_photo, bus_id, route_id, stop_name, stop_lat, stop_lng, status, created_at, message').eq('bus_id', busId).in('status', ['raised', 'waiting', 'acknowledged']).order('created_at', { ascending: false })
+                ? supabase.from('waiting_flags').select('id, student_uid, student_name, student_profile_photo, bus_id, route_id, stop_name, stop_lat, stop_lng, status, created_at, expires_at, message').eq('bus_id', busId).in('status', ['raised', 'waiting', 'acknowledged']).order('created_at', { ascending: false })
                 : Promise.resolve({ data: null, error: null }),
             // Fleet overview for available buses
             supabase.from('buses').select('id, bus_number, status').neq('status', 'inactive'),
@@ -107,7 +108,7 @@ export const GET = withSecurity(
         const availableBusesCount = (allBusesRes.data || []).filter((b: any) => !occupiedBusIds.has(b.id)).length;
         const totalBusesCount = (allBusesRes.data || []).length;
 
-        const rawFlags = waitingFlagsRes.data || [];
+        const rawFlags = (waitingFlagsRes.data || []).filter((f: any) => !isWaitingFlagExpired(f));
         const waitingFlags = rawFlags.map((f: any) => ({
             id: f.id,
             student_uid: f.student_uid,

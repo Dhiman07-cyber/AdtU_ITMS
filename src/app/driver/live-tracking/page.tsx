@@ -1099,8 +1099,8 @@ export default function DriverLiveTrackingPage() {
     broadcastInputsRef.current = { currentLocation, accuracy, speed, busData, routeData, tripId, currentUser };
   });
 
-  // Send location to /api/location/update every 2s.
-  // The API route saves to DB and calls emitEvent → WS server → subscribed students.
+  // Send location to /api/location/update every 3s.
+  // The API route validates via Redis Lua guard, updates memory cache, and emits to WS server.
   useEffect(() => {
     if (!tripActive) return;
 
@@ -1109,8 +1109,8 @@ export default function DriverLiveTrackingPage() {
     // Send immediately
     broadcastLocation();
 
-    // Throttled interval — 2s
-    locationIntervalRef.current = setInterval(broadcastLocation, 2000);
+    // Throttled interval — 3s cadence (evaluated for optimal mobile battery & network efficiency)
+    locationIntervalRef.current = setInterval(broadcastLocation, 3000);
 
     return () => {
       if (locationIntervalRef.current) {
@@ -1290,77 +1290,9 @@ export default function DriverLiveTrackingPage() {
     };
   }, [broadcastLocation, startLocationTracking]);
 
-  // Distance-based auto-pickup: Automatically board student when bus gets within ~50 meters.
-  // CRITICAL RULE: Applies ONLY to flags that have been explicitly ACKNOWLEDGED by the driver.
-  const PICKUP_THRESHOLD_KM = 0.05; // 50 meters threshold for auto-pickup
-
-  useEffect(() => {
-    if (!tripActive || !currentLocation || (currentLocation as any).isFallback || waitingFlags.length === 0) return;
-
-    // Calculate distances and check for pickups
-    const flagsToRemove: string[] = [];
-
-    waitingFlags.forEach((flag) => {
-      // Support both stop_lat/lng and legacy lat/lng
-      const targetLat = flag.stop_lat || flag.lat;
-      const targetLng = flag.stop_lng || flag.lng;
-
-      if (!targetLat || !targetLng) return;
-
-      // Auto-pickup only applies to flags that have been acknowledged by driver
-      if (flag.status !== 'acknowledged') return;
-
-      // Haversine formula for distance calculation
-      const R = 6371; // Radius of earth in km
-      const dLat = (targetLat - currentLocation.lat) * Math.PI / 180;
-      const dLon = (targetLng - currentLocation.lng) * Math.PI / 180;
-      const a =
-        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-        Math.cos(currentLocation.lat * Math.PI / 180) * Math.cos(targetLat * Math.PI / 180) *
-        Math.sin(dLon / 2) * Math.sin(dLon / 2);
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-      const distance = R * c; // Distance in km
-
-      console.log(`📍 Distance to ${flag.student_name}: ${(distance * 1000).toFixed(0)}m (status: ${flag.status})`);
-
-      if (distance < PICKUP_THRESHOLD_KM) {
-        console.log(`✅ Auto-pickup triggered for acknowledged student ${flag.student_name} (${(distance * 1000).toFixed(0)}m away)`);
-        flagsToRemove.push(flag.id);
-      }
-    });
-
-    // Remove flags for picked up students
-    if (flagsToRemove.length > 0) {
-      // Call API to mark as boarded/picked_up (fire-and-forget)
-      Promise.allSettled(flagsToRemove.map(async (flagId) => {
-        try {
-          const idToken = await currentUser?.getIdToken();
-          await fetch("/api/driver/mark-boarded", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${idToken}`,
-            },
-            body: JSON.stringify({
-              idToken,
-              flagId,
-            }),
-          });
-        } catch (error) {
-          console.error("Error auto-marking student as boarded:", error);
-        }
-      }));
-
-      // Update local state
-      setWaitingFlags((prev) => prev.filter((flag) => !flagsToRemove.includes(flag.id)));
-
-      if (flagsToRemove.length === 1) {
-        addToast("🚌 Student picked up!", "success");
-      } else {
-        addToast(`🚌 ${flagsToRemove.length} students picked up!`, "success");
-      }
-    }
-  }, [tripActive, currentLocation, waitingFlags, currentUser, addToast]);
+  // CRIT-01: Auto-boarding removed. Boarding requires explicit manual driver confirmation
+  // via handleMarkBoarded or digital QR pass verification. Automatic proximity-based
+  // auto-pickup was falsely marking waiting students as boarded when buses drove past at speed.
 
   // Start trip button click -> opens selection card
   const handleStartTrip = () => {

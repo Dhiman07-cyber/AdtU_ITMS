@@ -64,6 +64,8 @@ const Toast = ({ id, message, type, onClose }: ToastProps) => {
 
   return (
     <div
+      role="status"
+      aria-live="polite"
       className={cn(
         "fixed z-[99999] transition-all duration-500 ease-out",
         // Mobile: centered at bottom or top with margin
@@ -90,6 +92,7 @@ const Toast = ({ id, message, type, onClose }: ToastProps) => {
 
         <button
           onClick={handleClose}
+          aria-label="Close notification"
           className="shrink-0 p-1 hover:bg-black/5 dark:hover:bg-white/10 rounded-full transition-colors"
         >
           <X className="h-4 w-4 opacity-60 hover:opacity-100" />

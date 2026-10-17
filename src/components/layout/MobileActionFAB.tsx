@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { Plus, X } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
 
 export interface MobileFABAction {
   label: string;
@@ -48,51 +49,83 @@ export function MobileActionFAB({ actions, ariaLabel = "Quick actions menu" }: M
   return createPortal(
     <div className="md:hidden">
       {/* Backdrop overlay when open */}
-      {isOpen && (
-        <div
-          className="fixed inset-0 bg-black/50 backdrop-blur-[2px] z-40 animate-in fade-in duration-200 pointer-events-auto"
-          onClick={() => setIsOpen(false)}
-          aria-hidden="true"
-        />
-      )}
+      <AnimatePresence>
+        {isOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.15 }}
+            className="fixed inset-0 bg-black/50 backdrop-blur-[2px] z-40 pointer-events-auto"
+            onClick={() => setIsOpen(false)}
+            aria-hidden="true"
+          />
+        )}
+      </AnimatePresence>
 
       {/* Floating Container */}
       <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-2.5 pointer-events-none">
         {/* Action Menu Popup */}
-        {isOpen && (
-          <div className="flex flex-col gap-2 mb-1 items-end animate-in fade-in slide-in-from-bottom-4 duration-200 pointer-events-auto">
-            {actions.map((action, idx) => {
-              const Icon = action.icon;
-              return (
-                <button
-                  key={idx}
-                  type="button"
-                  onClick={() => handleActionClick(action)}
-                  className="focus:outline-none w-full flex justify-end cursor-pointer pointer-events-auto"
-                >
-                  <div className="flex items-center gap-2.5 w-[215px] py-2 px-3 rounded-full bg-slate-900/95 border border-slate-700/80 shadow-2xl backdrop-blur-md text-white hover:bg-slate-800 transition-all active:scale-[0.98] cursor-pointer select-none">
-                    <div className={cn(
-                      "w-8 h-8 rounded-full flex items-center justify-center shadow-md shrink-0",
-                      action.color || "bg-blue-600 text-white"
-                    )}>
-                      <Icon className="w-4 h-4" />
+        <AnimatePresence>
+          {isOpen && (
+            <div className="flex flex-col gap-2 mb-1 items-end pointer-events-auto">
+              {actions.map((action, idx) => {
+                const Icon = action.icon;
+                const reverseIdx = actions.length - 1 - idx;
+                return (
+                  <motion.button
+                    key={idx}
+                    type="button"
+                    onClick={() => handleActionClick(action)}
+                    initial={{ opacity: 0, x: 22, scale: 0.94 }}
+                    animate={{
+                      opacity: 1,
+                      x: 0,
+                      scale: 1,
+                      transition: {
+                        duration: 0.18,
+                        delay: reverseIdx * 0.04,
+                        ease: [0.16, 1, 0.3, 1],
+                      },
+                    }}
+                    exit={{
+                      opacity: 0,
+                      x: 16,
+                      scale: 0.94,
+                      transition: {
+                        duration: 0.12,
+                        delay: idx * 0.02,
+                        ease: "easeIn",
+                      },
+                    }}
+                    whileTap={{ scale: 0.97 }}
+                    className="focus:outline-none w-full flex justify-end cursor-pointer pointer-events-auto will-change-transform"
+                  >
+                    <div className="flex items-center gap-2.5 w-[215px] py-2 px-3 rounded-full bg-slate-900/95 border border-slate-700/80 shadow-2xl backdrop-blur-md text-white hover:bg-slate-800 transition-colors select-none">
+                      <div className={cn(
+                        "w-8 h-8 rounded-full flex items-center justify-center shadow-md shrink-0",
+                        action.color || "bg-blue-600 text-white"
+                      )}>
+                        <Icon className="w-4 h-4" />
+                      </div>
+                      <span className="text-xs font-bold whitespace-nowrap tracking-wide truncate text-left flex-1">{action.label}</span>
                     </div>
-                    <span className="text-xs font-bold whitespace-nowrap tracking-wide truncate text-left flex-1">{action.label}</span>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        )}
+                  </motion.button>
+                );
+              })}
+            </div>
+          )}
+        </AnimatePresence>
 
         {/* Primary FAB Trigger Button */}
-        <button
+        <motion.button
           type="button"
           onClick={() => setIsOpen((prev) => !prev)}
           aria-label={ariaLabel}
           aria-expanded={isOpen}
+          whileTap={{ scale: 0.92 }}
           className={cn(
-            "w-[52px] h-[52px] rounded-full flex items-center justify-center shadow-[0_8px_24px_rgba(0,0,0,0.45)] transition-all duration-200 active:scale-[0.98] focus:outline-none cursor-pointer pointer-events-auto",
+            "w-[52px] h-[52px] rounded-full flex items-center justify-center shadow-[0_8px_24px_rgba(0,0,0,0.45)] transition-all duration-200 focus:outline-none cursor-pointer pointer-events-auto",
             isOpen
               ? "bg-rose-600 text-white rotate-90 shadow-rose-600/30"
               : "bg-blue-600 text-white hover:bg-blue-500 shadow-blue-600/30 ring-2 ring-white/20"
@@ -103,7 +136,7 @@ export function MobileActionFAB({ actions, ariaLabel = "Quick actions menu" }: M
           ) : (
             <Plus className="w-6 h-6 transition-transform duration-200" />
           )}
-        </button>
+        </motion.button>
       </div>
     </div>,
     document.body

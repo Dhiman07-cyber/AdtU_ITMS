@@ -18,6 +18,7 @@ import { Badge } from '@/components/ui/badge';
 import {
 	PaymentMethod,
 	PaymentStatus,
+	formatPaymentStatusDisplay,
 	getMethodBadgeClass,
 	getStatusBadgeClass
 } from '@/lib/types/payment';
@@ -30,7 +31,10 @@ import {
 	IndianRupee,
 	Loader2,
 	Receipt,
-	User
+	User,
+	AlertTriangle,
+	AlertCircle,
+	XCircle
 } from 'lucide-react';
 import React from 'react';
 
@@ -72,6 +76,14 @@ const StatusIcon: React.FC<{ status: PaymentStatus }> = ({ status }) => {
             return <CheckCircle className="h-4 w-4" />;
         case 'Pending':
             return <Loader2 className="h-4 w-4 animate-spin" />;
+        case 'Duplicate_Pending_Refund':
+            return <AlertTriangle className="h-4 w-4 text-amber-500" />;
+        case 'Captured_Pending_Review':
+            return <AlertCircle className="h-4 w-4 text-indigo-500" />;
+        case 'Refunded':
+            return <CheckCircle className="h-4 w-4 text-slate-500" />;
+        case 'Refund_Denied':
+            return <XCircle className="h-4 w-4 text-rose-500" />;
         default:
             return <Receipt className="h-4 w-4" />;
     }
@@ -149,6 +161,14 @@ export const TransactionCard: React.FC<TransactionCardProps> = ({
         absolute top-0 left-0 right-0 h-1
         ${status === 'Completed'
                     ? 'bg-gradient-to-r from-green-500 via-emerald-500 to-teal-500'
+                    : status === 'Duplicate_Pending_Refund'
+                    ? 'bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600'
+                    : status === 'Captured_Pending_Review'
+                    ? 'bg-gradient-to-r from-indigo-500 via-purple-500 to-indigo-600'
+                    : status === 'Refunded'
+                    ? 'bg-gradient-to-r from-slate-500 via-zinc-500 to-slate-600'
+                    : status === 'Refund_Denied'
+                    ? 'bg-gradient-to-r from-rose-500 via-red-500 to-pink-600'
                     : 'bg-gradient-to-r from-yellow-500 via-amber-500 to-orange-500'
                 }
       `} />
@@ -165,6 +185,14 @@ export const TransactionCard: React.FC<TransactionCardProps> = ({
                 p-1.5 rounded-lg shadow-sm
                 ${status === 'Completed'
                                     ? 'bg-green-100 dark:bg-green-900/40'
+                                    : status === 'Duplicate_Pending_Refund'
+                                    ? 'bg-amber-100 dark:bg-amber-900/40'
+                                    : status === 'Captured_Pending_Review'
+                                    ? 'bg-indigo-100 dark:bg-indigo-900/40'
+                                    : status === 'Refunded'
+                                    ? 'bg-slate-100 dark:bg-slate-900/40'
+                                    : status === 'Refund_Denied'
+                                    ? 'bg-rose-100 dark:bg-rose-900/40'
                                     : 'bg-yellow-100 dark:bg-yellow-900/40'
                                 }
               `}>
@@ -172,6 +200,14 @@ export const TransactionCard: React.FC<TransactionCardProps> = ({
                   h-4 w-4
                   ${status === 'Completed'
                                         ? 'text-green-600 dark:text-green-400'
+                                        : status === 'Duplicate_Pending_Refund'
+                                        ? 'text-amber-600 dark:text-amber-400'
+                                        : status === 'Captured_Pending_Review'
+                                        ? 'text-indigo-600 dark:text-indigo-400'
+                                        : status === 'Refunded'
+                                        ? 'text-slate-600 dark:text-slate-400'
+                                        : status === 'Refund_Denied'
+                                        ? 'text-rose-600 dark:text-rose-400'
                                         : 'text-yellow-600 dark:text-yellow-400'
                                     }
                 `} />
@@ -197,7 +233,7 @@ export const TransactionCard: React.FC<TransactionCardProps> = ({
             border-0
           `}>
                         <StatusIcon status={status} />
-                        {status}
+                        {formatPaymentStatusDisplay(status)}
                     </Badge>
                 </div>
 

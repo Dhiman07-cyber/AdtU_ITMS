@@ -7,6 +7,7 @@ import { withSecurity } from '@/lib/security/api-security';
 import { RateLimits } from '@/lib/security/rate-limiter';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import { isShiftCompatible } from '@/lib/utils';
+import { isWaitingFlagExpired } from '@/lib/waiting-flag-helpers';
 import { NextResponse } from 'next/server';
 
 /**
@@ -109,7 +110,7 @@ export const GET = withSecurity(
             routeId ? routeService.getById(routeId) : Promise.resolve(null),
             busId ? getDriversByBusId(busId) : Promise.resolve([]),
             busId ? supabase.from('active_trips').select('trip_id, status, start_time, last_heartbeat, shift').eq('bus_id', busId).eq('status', 'active').gt('expires_at', new Date().toISOString()).maybeSingle() : Promise.resolve(null),
-            supabase.from('waiting_flags').select('id, student_uid, bus_id, status, trip_id, stop_name, created_at').eq('student_uid', uid).in('status', ['raised', 'acknowledged', 'waiting']).limit(1)
+            supabase.from('waiting_flags').select('id, student_uid, bus_id, status, trip_id, stop_name, created_at, expires_at').eq('student_uid', uid).in('status', ['raised', 'acknowledged', 'waiting']).limit(1)
         ]);
 
         // Process Bus & Route
@@ -131,8 +132,10 @@ export const GET = withSecurity(
             }
         }
 
-        const activeWaitingFlag = (isTripActive && waitingFlagRes?.data && waitingFlagRes.data.length > 0)
-            ? waitingFlagRes.data[0]
+        const flagCandidate = waitingFlagRes?.data?.[0];
+        const isFlagExpired = isWaitingFlagExpired(flagCandidate);
+        const activeWaitingFlag = (isTripActive && flagCandidate && !isFlagExpired)
+            ? flagCandidate
             : null;
 
         return NextResponse.json({

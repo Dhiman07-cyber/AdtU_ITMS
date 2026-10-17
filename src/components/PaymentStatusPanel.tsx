@@ -7,6 +7,7 @@ import {
 } from '@/lib/payment/payment-state';
 import { AnimatePresence,motion } from "motion/react";
 import {
+	AlertCircle,
 	AlertTriangle,
 	CheckCircle,
 	Clock,
@@ -86,6 +87,33 @@ const STATUS_META: Record<
     bodyColor: 'text-violet-100/80',
     containerBg: 'bg-violet-900/20',
     containerBorder: 'border-violet-500/25',
+  },
+  duplicate_pending_refund: {
+    icon: <AlertTriangle className="h-7 w-7 text-amber-400" />,
+    iconBg: 'bg-amber-500/10',
+    iconRing: 'border-amber-500/20',
+    titleColor: 'text-amber-300',
+    bodyColor: 'text-amber-100/80',
+    containerBg: 'bg-amber-900/20',
+    containerBorder: 'border-amber-500/25',
+  },
+  captured_pending_review: {
+    icon: <AlertCircle className="h-7 w-7 text-indigo-400" />,
+    iconBg: 'bg-indigo-500/10',
+    iconRing: 'border-indigo-500/20',
+    titleColor: 'text-indigo-300',
+    bodyColor: 'text-indigo-100/80',
+    containerBg: 'bg-indigo-900/20',
+    containerBorder: 'border-indigo-500/25',
+  },
+  refund_denied: {
+    icon: <XCircle className="h-7 w-7 text-rose-400" />,
+    iconBg: 'bg-rose-500/10',
+    iconRing: 'border-rose-500/20',
+    titleColor: 'text-rose-300',
+    bodyColor: 'text-rose-100/80',
+    containerBg: 'bg-rose-900/20',
+    containerBorder: 'border-rose-500/25',
   },
 };
 

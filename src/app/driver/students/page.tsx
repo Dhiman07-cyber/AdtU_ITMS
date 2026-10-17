@@ -152,17 +152,42 @@ export default function DriverStudentsPage() {
         console.log('🔍 Driver data fetched:', driver);
 
         if (driver) {
+          let resolvedBusId = driver.busId;
+          if (!resolvedBusId) {
+            try {
+              const token = await currentUser.getIdToken();
+              const activeRes = await fetch('/api/driver/check-active-trip', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({})
+              });
+              if (activeRes.ok) {
+                const activeData = await activeRes.json();
+                if (activeData?.hasActiveTrip && activeData?.tripData?.busId) {
+                  resolvedBusId = activeData.tripData.busId;
+                }
+              }
+            } catch (err) {
+              console.warn('Failed to check active trip for driver bus:', err);
+            }
+          }
+
+          const effectiveDriver = resolvedBusId ? { ...driver, busId: resolvedBusId } : driver;
+
           // Fetch students on assigned bus
           let busStudents: any[] = [];
-          if (driver.busId) {
-            console.log('🚌 Fetching students for bus ID:', driver.busId);
-            busStudents = await getStudentsByBusId(driver.busId);
+          if (resolvedBusId) {
+            console.log('🚌 Fetching students for bus ID:', resolvedBusId);
+            busStudents = await getStudentsByBusId(resolvedBusId);
           } else {
             console.log('⚠️ No assigned bus ID for driver:', driver);
           }
 
           startTransition(() => {
-            setDriverData(driver);
+            setDriverData(effectiveDriver);
             if (busStudents.length > 0) {
               setStudents(busStudents);
             }
@@ -197,27 +222,25 @@ export default function DriverStudentsPage() {
       // Get Firebase ID token
       const token = await currentUser.getIdToken();
 
-      // Call ack-waiting API endpoint
-      const response = await fetch('/api/ack-waiting', {
+      // Call canonical /api/driver/ack-flag API endpoint
+      const response = await fetch('/api/driver/ack-flag', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify({
-          idToken: token,
-          waitingFlagId: flagId
+          flagId
         })
       });
 
       const result = await response.json();
 
-      if (!result.success) {
-        console.error('Failed to acknowledge waiting flag:', result.error);
-        // Handle error (show notification, etc.)
+      if (!response.ok || !result.success) {
+        console.error('Failed to acknowledge waiting flag:', result.error || result);
       }
     } catch (error) {
       console.error('Error acknowledging waiting flag:', error);
-      // Handle error (show notification, etc.)
     } finally {
       setAcknowledging(null);
     }

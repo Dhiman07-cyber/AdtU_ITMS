@@ -145,7 +145,7 @@ export default function AdminSidebar() {
           collapsed ? "justify-center" : "justify-between"
         )}
       >
-        {!collapsed ? (
+        {!collapsed && (
           <Link
             href="/admin"
             className="flex items-center gap-2.5 group cursor-pointer outline-none"
@@ -164,7 +164,7 @@ export default function AdminSidebar() {
                   theme === "dark" ? "text-zinc-100" : "text-admin-text"
                 )}
               >
-                Control Hub
+                Administration
               </span>
               <span
                 className={cn(
@@ -172,17 +172,9 @@ export default function AdminSidebar() {
                   theme === "dark" ? "text-zinc-400" : "text-admin-text-secondary"
                 )}
               >
-                Administrator
+                Control Center
               </span>
             </div>
-          </Link>
-        ) : (
-          <Link
-            href="/admin"
-            className="p-1.5 rounded-lg bg-gradient-to-br from-blue-500/10 to-indigo-500/10 border border-blue-500/20 hover:border-blue-500/40 transition-colors cursor-pointer"
-            title="Open Dashboard"
-          >
-            <Command className="h-3.5 w-3.5 text-blue-400" />
           </Link>
         )}
         <Button
@@ -233,10 +225,11 @@ export default function AdminSidebar() {
                     ));
 
                 const linkContent = (
-                  <div
+                  <Link
+                    href={item.href}
                     className={cn(
-                      "group relative flex items-center gap-2.5 px-3 rounded-lg transition-colors duration-150",
-                      collapsed ? "py-2" : "py-1.5",
+                      "group relative flex items-center gap-2.5 px-3 rounded-lg transition-colors duration-150 w-full select-none",
+                      collapsed ? "py-2 justify-center" : "py-1.5",
                       "text-[12.5px] font-medium outline-none cursor-pointer",
                       isActive
                         ? theme === "dark"
@@ -251,23 +244,18 @@ export default function AdminSidebar() {
                       <div className="absolute left-0 top-1 bottom-1 w-[2.5px] bg-blue-500 rounded-r-full shadow-[0_0_8px_rgba(59,130,246,0.8)]" />
                     )}
 
-                    <Link
-                      href={item.href}
-                      className="flex items-center gap-2.5 flex-1 min-w-0"
+                    <div
+                      className={cn(
+                        "relative flex items-center justify-center shrink-0",
+                        collapsed ? "mx-auto" : ""
+                      )}
                     >
-                      <div
-                        className={cn(
-                          "relative flex items-center justify-center shrink-0",
-                          collapsed ? "mx-auto" : ""
-                        )}
-                      >
-                        <Icon className={cn("h-4 w-4", isActive ? "text-blue-400" : item.color)} />
-                        {isActive && <div className="absolute inset-0 bg-blue-400/10 rounded-full" />}
-                      </div>
+                      <Icon className={cn("h-4 w-4", isActive ? "text-blue-400" : item.color)} />
+                      {isActive && <div className="absolute inset-0 bg-blue-400/10 rounded-full" />}
+                    </div>
 
-                      {!collapsed && <span className="truncate flex-1">{item.label}</span>}
-                    </Link>
-                  </div>
+                    {!collapsed && <span className="truncate flex-1">{item.label}</span>}
+                  </Link>
                 );
 
                 if (!collapsed) {

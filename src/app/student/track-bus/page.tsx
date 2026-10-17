@@ -666,11 +666,19 @@ function TrackBusLive() {
 
     const busLat = busLocation.lat;
     const busLng = busLocation.lng;
-    const studentLat = studentLocation.lat;
-    const studentLng = studentLocation.lng;
 
-    if (busLat && busLng && studentLat && studentLng) {
-      const distance = calculateDistance(busLat, busLng, studentLat, studentLng);
+    // Rule CRIT-09: Calculate ETA to the student's assigned bus stop, NOT their phone GPS coordinates.
+    // If a student is at home eating breakfast, phone GPS yields misleading "bedroom ETA" while the
+    // bus may already be approaching their physical stop.
+    const assignedStopName = studentData?.stop_name || studentData?.stopName;
+    const assignedStop = routeData?.stops?.find((s: any) => 
+      (s.stop_name || s.name)?.trim().toLowerCase() === assignedStopName?.trim().toLowerCase()
+    );
+    const targetLat = assignedStop?.lat ?? studentData?.stop_lat ?? studentLocation?.lat;
+    const targetLng = assignedStop?.lng ?? studentData?.stop_lng ?? studentLocation?.lng;
+
+    if (busLat && busLng && targetLat && targetLng) {
+      const distance = calculateDistance(busLat, busLng, targetLat, targetLng);
       setDistanceToBus(distance);
 
       // Calculate ETA assuming average speed of 25 km/h in city traffic
@@ -690,10 +698,10 @@ function TrackBusLive() {
         setEta(`${hours}h ${mins}m`);
       }
 
-      // Show toast when bus is within 100m (0.1 km)
+      // Show toast when bus is within 100m (0.1 km) of the designated stop
       if (distance <= 0.1 && !hasShownArrivalToastRef.current && tripActive) {
         hasShownArrivalToastRef.current = true;
-        addToast("🚌 Your bus is about to arrive! Be ready at the stop.", "success");
+        addToast("🚌 Your bus is about to arrive at your stop! Be ready.", "success");
       }
 
       // Reset the toast flag when bus is more than 500m away (so it can show again on next approach)
@@ -701,7 +709,7 @@ function TrackBusLive() {
         hasShownArrivalToastRef.current = false;
       }
     }
-  }, [busLocation, studentLocation, tripActive, addToast]);
+  }, [busLocation, studentLocation, studentData, routeData, tripActive, addToast]);
 
   // Subscribe to waiting flag changes via WebSocket (bus-level channel)
   useEffect(() => {

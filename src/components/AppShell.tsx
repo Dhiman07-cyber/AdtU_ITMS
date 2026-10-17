@@ -77,7 +77,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   // Determine if we're on full-height workspace pages (no footer required)
   const isFleetMapPage = pathname === '/admin/fleet-map' || pathname === '/moderator/fleet-map' || pathname?.startsWith('/admin/fleet-map') || pathname?.startsWith('/moderator/fleet-map');
   const isVerificationPage = pathname === '/admin/verification' || pathname === '/moderator/verification' || pathname?.startsWith('/admin/verification') || pathname?.startsWith('/moderator/verification');
-  const isWorkspaceHubPage = pathname?.startsWith('/admin/smart-allocation') || pathname === '/admin/moderators';
+  const isWorkspaceHubPage = pathname?.startsWith('/admin/smart-allocation') || pathname?.startsWith('/moderator/smart-allocation') || pathname === '/admin/moderators';
 
   // Show navbar/footer based on specific page logic
   // Update: Hide footer on /apply/form, terms, privacy, fleet-map, verification, and full-height workspace routes
@@ -184,7 +184,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                   {/* Main Content Column */}
                   <main
                     suppressHydrationWarning
-                    className={cn("main-content", isWorkspaceHubPage && "overflow-hidden h-[100dvh] max-h-[100dvh]")}
+                    className={cn(
+                      "main-content",
+                      isWorkspaceHubPage && "lg:overflow-hidden lg:h-[100dvh] lg:max-h-[100dvh]"
+                    )}
                     style={{
                       gridColumn: 2,
                       gridRow: 1,
@@ -194,7 +197,6 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                       paddingBottom: '0',
                       boxSizing: 'border-box',
                       minHeight: '100%',
-                      ...(isWorkspaceHubPage ? { height: '100dvh', maxHeight: '100dvh', overflow: 'hidden' } : {})
                     }}
                   >
                     {children}

@@ -19,6 +19,7 @@ import { safeImageSrc } from "@/lib/security/url-sanitizer";
 import { cn } from "@/lib/utils";
 import { AnimatePresence,motion } from "motion/react";
 import {
+	ArrowLeftRight,
 	Bell,
 	Bus,
 	ChevronRight,
@@ -26,6 +27,7 @@ import {
 	GraduationCap,
 	LayoutDashboard,
 	LogOut,
+	Map,
 	MapPin,
 	Menu,
 	MessageCircle,
@@ -90,28 +92,26 @@ const Navbar = React.memo(function Navbar({ onMenuToggle, isSidebarOpen = false 
     if (userData?.role === 'admin') {
       return [
         { label: 'Dashboard', href: '/admin', icon: LayoutDashboard, color: 'text-blue-500' },
-        { label: 'Control Hub', href: '/admin/control-hub', icon: ShieldCheck, color: 'text-indigo-500' },
         { label: 'Students', href: '/admin/students', icon: GraduationCap, color: 'text-indigo-500' },
         { label: 'Drivers', href: '/admin/drivers', icon: UserCog, color: 'text-purple-500' },
         { label: 'Moderators', href: '/admin/moderators', icon: ShieldCheck, color: 'text-pink-500' },
+        { label: 'Reassignment Hub', href: '/admin/smart-allocation', icon: ArrowLeftRight, color: 'text-teal-500' },
         { label: 'Buses', href: '/admin/buses', icon: Bus, color: 'text-amber-500' },
         { label: 'Routes', href: '/admin/routes', icon: MapPin, color: 'text-emerald-500' },
-        { label: 'Applications', href: '/admin/applications', icon: ClipboardCheck, color: 'text-orange-500' },
-        { label: 'Notifications', href: '/admin/notifications', icon: Bell, color: 'text-red-500' },
+        { label: 'Fleet Map', href: '/admin/fleet-map', icon: Map, color: 'text-sky-500' },
         { label: 'Feedback', href: '/admin/feedback', icon: MessageCircle, color: 'text-cyan-500' },
-        { label: 'System Config', href: '/admin/sys-renewal-config-x9k2p', icon: Settings2, color: 'text-slate-600' },
+        { label: 'System Config', href: '/admin/sys-renewal-config-x9k2p', icon: Settings2, color: 'text-slate-400' },
       ];
     }
     if (userData?.role === 'moderator') {
       return [
-        { label: 'Profile', href: '/moderator/profile', icon: User, color: 'text-slate-400' },
         { label: 'Dashboard', href: '/moderator', icon: LayoutDashboard, color: 'text-blue-500' },
         { label: 'Students', href: '/moderator/students', icon: GraduationCap, color: 'text-indigo-500' },
         { label: 'Drivers', href: '/moderator/drivers', icon: UserCog, color: 'text-purple-500' },
+        { label: 'Reassignment Hub', href: '/moderator/smart-allocation', icon: ArrowLeftRight, color: 'text-teal-500' },
         { label: 'Buses', href: '/moderator/buses', icon: Bus, color: 'text-amber-500' },
         { label: 'Routes', href: '/moderator/routes', icon: MapPin, color: 'text-emerald-500' },
-        { label: 'Applications', href: '/moderator/applications', icon: ClipboardCheck, color: 'text-orange-500' },
-        { label: 'Notifications', href: '/moderator/notifications', icon: Bell, color: 'text-red-500' },
+        { label: 'Fleet Map', href: '/moderator/fleet-map', icon: Map, color: 'text-sky-500' },
         { label: 'Feedback', href: '/moderator/feedback', icon: MessageCircle, color: 'text-cyan-500' },
       ];
     }
@@ -310,21 +310,21 @@ const Navbar = React.memo(function Navbar({ onMenuToggle, isSidebarOpen = false 
             className="md:hidden fixed inset-0 z-[10000] overflow-hidden bg-[#09090b] flex flex-col shadow-2xl"
           >
             {/* Profile Section - Dark Premium SaaS style */}
-            <div className="px-6 py-8 border-b border-white/10 bg-white/[0.03] relative">
-              <div className="absolute top-6 right-6 flex items-center gap-4">
+            <div className="px-5 py-4 sm:px-6 sm:py-6 border-b border-white/10 bg-white/[0.03] relative shrink-0">
+              <div className="absolute top-4 right-4 sm:top-5 sm:right-5 flex items-center gap-3">
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-9 w-9 rounded-full bg-white/5 hover:bg-white/10 text-gray-300 transition-all active:scale-95 shadow-sm"
+                  className="h-8 w-8 sm:h-9 sm:w-9 rounded-full bg-white/5 hover:bg-white/10 text-gray-300 transition-all active:scale-95 shadow-sm"
                   onClick={() => setIsMobileMenuOpen(false)}
                 >
-                  <X className="h-5 w-5" />
+                  <X className="h-4 w-4 sm:h-5 sm:w-5" />
                 </Button>
               </div>
 
-              <div className="flex items-center gap-4">
+              <div className="flex items-center gap-3 sm:gap-4 pr-10">
                 <div className="relative flex-shrink-0">
-                  <div className="w-14 h-14 rounded-full bg-gradient-to-br from-blue-600 via-blue-700 to-indigo-800 p-[2px] shadow-lg border border-white/10">
+                  <div className="w-11 h-11 sm:w-13 sm:h-13 rounded-full bg-gradient-to-br from-blue-600 via-blue-700 to-indigo-800 p-[2px] shadow-lg border border-white/10">
                     <div className="w-full h-full rounded-full bg-blue-950 flex items-center justify-center overflow-hidden">
                       {userData?.role !== 'admin' && (userData?.profilePhotoUrl || userData?.photoURL) ? (
                         <img
@@ -333,20 +333,20 @@ const Navbar = React.memo(function Navbar({ onMenuToggle, isSidebarOpen = false 
                           className="w-full h-full object-cover"
                         />
                       ) : (
-                        <User className="h-7 w-7 text-blue-100" />
+                        <User className="h-5 w-5 sm:h-6 sm:w-6 text-blue-100" />
                       )}
                     </div>
                   </div>
                 </div>
                 <div className="flex-1 min-w-0 flex flex-col gap-0.5">
-                  <h2 className="text-lg font-bold text-white tracking-tight leading-snug truncate">
+                  <h2 className="text-base sm:text-lg font-bold text-white tracking-tight leading-snug truncate">
                     {googleName}
                   </h2>
-                  <p className="text-xs text-gray-400 font-medium truncate">
+                  <p className="text-[11px] sm:text-xs text-gray-400 font-medium truncate">
                     {userData?.email || currentUser?.email}
                   </p>
                   <div className="flex pt-0.5">
-                    <span className="inline-flex items-center px-2 py-0.5 rounded-[6px] text-[9px] font-bold bg-blue-500/10 border border-blue-500/20 text-blue-300 uppercase tracking-widest shadow-sm">
+                    <span className="inline-flex items-center px-2 py-0.2 rounded-[5px] text-[9px] font-bold bg-blue-500/10 border border-blue-500/20 text-blue-300 uppercase tracking-widest shadow-sm">
                       {userData?.role || "Member"}
                     </span>
                   </div>
@@ -355,7 +355,7 @@ const Navbar = React.memo(function Navbar({ onMenuToggle, isSidebarOpen = false 
             </div>
 
             {/* Navigation Grid/List - Dark Mode with Separators */}
-            <div className="flex-1 px-0 py-2 overflow-y-auto no-scrollbar">
+            <div className="flex-1 px-0 py-1 overflow-y-auto no-scrollbar">
               {mobileRoutes.map((route, idx) => {
                 const allMobileHrefs = mobileRoutes.map(r => r.href);
                 const isActive = pathname === route.href || (
@@ -376,21 +376,21 @@ const Navbar = React.memo(function Navbar({ onMenuToggle, isSidebarOpen = false 
                       href={route.href}
                       onClick={() => setIsMobileMenuOpen(false)}
                       className={cn(
-                        "group flex items-center justify-between py-4 px-6 transition-all duration-200",
+                        "group flex items-center justify-between py-2.5 sm:py-3 px-5 sm:px-6 transition-all duration-200",
                         isActive
                           ? "bg-white/5 border-l-2 border-l-blue-500"
                           : cn("hover:bg-white/[0.02]", !isLast && "border-b border-white/[0.06]")
                       )}
                     >
-                      <div className="flex items-center gap-4">
+                      <div className="flex items-center gap-3 sm:gap-4">
                         <div className={cn(
-                          "w-8 h-8 rounded-lg flex items-center justify-center transition-all duration-300",
+                          "w-7 h-7 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center transition-all duration-300",
                           isActive ? "bg-blue-600/20 text-blue-400" : "bg-transparent text-gray-500 group-hover:text-gray-300"
                         )}>
-                          <route.icon className={cn("h-5 w-5", isActive && "text-blue-400")} />
+                          <route.icon className={cn("h-4 w-4 sm:h-5 sm:w-5", isActive && "text-blue-400")} />
                         </div>
                         <span className={cn(
-                          "text-[15px] font-medium tracking-wide transition-colors",
+                          "text-sm sm:text-[15px] font-medium tracking-wide transition-colors",
                           isActive ? "text-blue-400 font-semibold" : "text-gray-400 group-hover:text-gray-200"
                         )}>
                           {route.label}
@@ -406,8 +406,8 @@ const Navbar = React.memo(function Navbar({ onMenuToggle, isSidebarOpen = false 
               })}
             </div>
 
-            {/* Sign Out Section - Dark styled */}
-            <div className="p-6 mt-auto bg-white/[0.02] border-t border-white/5">
+            {/* Sign Out Section - Compact Dark styled for mobile viewport harmony */}
+            <div className="p-3.5 sm:p-5 mt-auto bg-white/[0.02] border-t border-white/5 shrink-0">
               <Button
                 variant="default"
                 size="lg"
@@ -415,20 +415,18 @@ const Navbar = React.memo(function Navbar({ onMenuToggle, isSidebarOpen = false 
                   setIsMobileMenuOpen(false);
                   setIsSignOutDialogOpen(true);
                 }}
-                className="w-full justify-center bg-gradient-to-r from-red-600/90 to-rose-700/90 hover:from-red-600 hover:to-rose-700 text-white rounded-[20px] py-7 text-base font-black shadow-lg shadow-red-900/20 border border-white/5 transition-all active:scale-[0.97] flex items-center gap-3"
+                className="w-full justify-center bg-gradient-to-r from-red-600/90 to-rose-700/90 hover:from-red-600 hover:to-rose-700 text-white rounded-xl py-3 h-11 text-sm font-bold shadow-md shadow-red-900/20 border border-white/5 transition-all active:scale-[0.98] flex items-center gap-2"
               >
-                <LogOut className="h-5 w-5" />
+                <LogOut className="h-4 w-4" />
                 <span>Sign Out</span>
               </Button>
 
               {/* Branding Footer */}
-              <div className="mt-8 mb-4 flex flex-col items-center gap-2">
-                <div className="flex items-center gap-1.5 text-gray-500">
-                  <Bus className="h-4 w-4 text-blue-500/80" />
-                  <span className="text-[11px] font-black uppercase tracking-[0.25em]">{appName}</span>
-                </div>
-                <div className="h-1 w-1 rounded-full bg-gray-700" />
-                <span className="text-[10px] font-extrabold text-gray-600">VERSION 2.4.0 • ENTERPRISE EDITION</span>
+              <div className="mt-2.5 mb-1 flex items-center justify-center gap-2 text-gray-500">
+                <Bus className="h-3.5 w-3.5 text-blue-500/80" />
+                <span className="text-[10px] font-black uppercase tracking-[0.2em]">{appName}</span>
+                <span className="text-gray-700">•</span>
+                <span className="text-[9px] font-bold text-gray-600 font-mono">v2.4.0</span>
               </div>
             </div>
           </motion.div>
