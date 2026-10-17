@@ -1,15 +1,14 @@
 /**
  * Stale Lock Cleanup Worker
  *
- * Cron job endpoint that cleans up stale locks automatically.
- * Cron job endpoint that cleans up stale locks automatically.
+ * Cron job endpoint that cleans up stale active_trips locks automatically.
  *
- * CURRENT SCHEDULE (vercel.json): `0 4 * * *` — once daily at 04:00 UTC.
- * DESIGN INTENT: This should run every minute (`* * * * *`) to promptly release
- * stale active_trips locks. At daily frequency, stale trips (e.g., from crashed
- * devices) may persist up to 24 hours, causing GPS/tracking to appear active for
- * terminated trips. Update vercel.json to fix this before production.
- * Ref: FIX-12 (A-16).
+ * CURRENT SCHEDULE (vercel.json): every 5 minutes (cron: "star-slash-5 star star star star").
+ * Rationale: The heartbeat timeout is 10 minutes (HEARTBEAT_TIMEOUT_SECONDS = 600).
+ * Running every 5 min (half the timeout period) ensures stale locks are released
+ * within a maximum of 15 minutes of a driver device crash/disconnect, preventing
+ * buses from being locked for the old 24-hour daily-cleanup window.
+ * Ref: FIX-12 (A-16), CRIT-05.
  *
  * D9: Fully migrated to PostgreSQL. No Firestore usage.
  * The cleanup_stale_locks RPC handles all lock cleanup in PostgreSQL.
@@ -89,9 +88,10 @@ export async function GET(request: Request) {
                         }).catch(() => {});
 
                         // Scoped cleanup — trip_id ensures we don't affect a new trip
-                        // that may have started on the same bus between RPC and these deletes
+                        // that may have started on the same bus between RPC and these operations.
+                        // Soft-archive waiting flags to 'expired' rather than hard DELETE (CRIT-03).
                         await Promise.allSettled([
-                            supabase.from('waiting_flags').delete()
+                            supabase.from('waiting_flags').update({ status: 'expired' })
                                 .eq('bus_id', lock.cleaned_bus_id)
                                 .eq('trip_id', lock.cleaned_trip_id)
                                 .in('status', ['raised', 'acknowledged']),
@@ -116,6 +116,27 @@ export async function GET(request: Request) {
         } catch (err: any) {
             console.error('Error in stale lock cleanup:', err);
             stats.errors.push('stale_locks_general_error');
+        }
+
+        // STEP 2: Ancillary system health sweep — expire orphan waiting flags, stale sessions, abandoned app locks
+        try {
+            const [flagsRes, sessionsRes, appLocksRes] = await Promise.allSettled([
+                supabase.rpc('expire_waiting_flags'),
+                supabase.rpc('cleanup_stale_device_sessions'),
+                supabase.rpc('cleanup_abandoned_application_locks'),
+            ]);
+
+            if (flagsRes.status === 'rejected') {
+                console.warn('⚠️ expire_waiting_flags warning:', flagsRes.reason);
+            }
+            if (sessionsRes.status === 'rejected') {
+                console.warn('⚠️ cleanup_stale_device_sessions warning:', sessionsRes.reason);
+            }
+            if (appLocksRes.status === 'rejected') {
+                console.warn('⚠️ cleanup_abandoned_application_locks warning:', appLocksRes.reason);
+            }
+        } catch (ancillaryErr: any) {
+            console.warn('⚠️ Ancillary maintenance sweep warning:', ancillaryErr?.message);
         }
 
         const elapsed = Date.now() - startTime;

@@ -414,15 +414,23 @@ export async function GET(request: NextRequest) {
                         const graceCutoffMs = eligibleMs + UPCOMING_GRACE_DAYS * 24 * 60 * 60 * 1000;
 
                         if (nowMs >= graceCutoffMs) {
-                            // (2) Past grace window → expire the stale application.
-                            await db
+                            // (2) Past grace window → expire the stale application conditionally
+                            const nowIso = new Date().toISOString();
+                            const { data: updatedRows, error: updateErr } = await db
                                 .from('applications')
                                 .update({
                                     state: 'expired',
-                                    updated_at: new Date().toISOString(),
+                                    expired_at: nowIso,
+                                    expiry_reason: 'Upcoming application grace period expired',
+                                    updated_at: nowIso,
                                 })
-                                .eq('application_id', appId);
-                            upcomingResults.expired++;
+                                .eq('application_id', appId)
+                                .eq('state', 'submitted')
+                                .eq('application_type', 'future')
+                                .select('application_id');
+                            if (!updateErr && updatedRows && updatedRows.length > 0) {
+                                upcomingResults.expired++;
+                            }
                         } else if (!appData.eligible_reminder_sent_at) {
                             // (1) Eligible now, within grace, not yet reminded → notify once.
                             await Notification.createNotification(
@@ -496,18 +504,23 @@ export async function GET(request: NextRequest) {
         });
 
         // Write the Soft Block Completion Marker to allow session activation to proceed
-        try {
-            const config = await getDeadlineConfig();
-            const currentSessionStartYear = getCurrentSessionStartYear(config);
-            await upsertMarker(`soft_block_completed_${currentSessionStartYear}`, {
-                completedAt: new Date().toISOString(),
-                softBlockedCount: results.softBlocked,
-                hardDeletedCount: results.hardDeleted,
-                reconciliationRun: true
-            });
-            console.log(`✅ Written Soft Block completion marker 'soft_block_completed_${currentSessionStartYear}'`);
-        } catch (markerErr) {
-            console.error('⚠️ Failed to write soft block completion marker:', markerErr);
+        // Guard (Finding F-07): Do NOT write the completion marker if cleanup encountered unhandled errors.
+        if (results.errors.length > 0) {
+            console.warn(`⚠️ Soft Block completion marker NOT written due to ${results.errors.length} errors during cleanup.`);
+        } else {
+            try {
+                const config = await getDeadlineConfig();
+                const currentSessionStartYear = getCurrentSessionStartYear(config);
+                await upsertMarker(`soft_block_completed_${currentSessionStartYear}`, {
+                    completedAt: new Date().toISOString(),
+                    softBlockedCount: results.softBlocked,
+                    hardDeletedCount: results.hardDeleted,
+                    reconciliationRun: true
+                });
+                console.log(`✅ Written Soft Block completion marker 'soft_block_completed_${currentSessionStartYear}'`);
+            } catch (markerErr) {
+                console.error('⚠️ Failed to write soft block completion marker:', markerErr);
+            }
         }
 
         console.log(`✅ Cron Job Completed:`, results);
