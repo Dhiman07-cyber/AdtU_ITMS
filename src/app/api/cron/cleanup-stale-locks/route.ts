@@ -3,11 +3,11 @@
  *
  * Cron job endpoint that cleans up stale active_trips locks automatically.
  *
- * CURRENT SCHEDULE (vercel.json): every 5 minutes (cron: "star-slash-5 star star star star").
- * Rationale: The heartbeat timeout is 10 minutes (HEARTBEAT_TIMEOUT_SECONDS = 600).
- * Running every 5 min (half the timeout period) ensures stale locks are released
- * within a maximum of 15 minutes of a driver device crash/disconnect, preventing
- * buses from being locked for the old 24-hour daily-cleanup window.
+ * CURRENT SCHEDULE (vercel.json): `0 4 * * *` — once daily at 04:00 UTC.
+ * Rationale: Vercel Hobby accounts enforce a strict limit of daily cron jobs. Sub-daily
+ * schedules (e.g. every 5 minutes) cause deployment rejection on Vercel Hobby accounts.
+ * Note: Stale locks are also passively validated and treated as expired during tripStartPreflight.
+ * For high-frequency sweeps in production, trigger via external cron webhook or Vercel Pro.
  * Ref: FIX-12 (A-16), CRIT-05.
  *
  * D9: Fully migrated to PostgreSQL. No Firestore usage.

@@ -10,11 +10,11 @@
     },
     {
       "path": "/api/cron/cleanup-expired-students",
-      "schedule": "0 0 * * *"
+      "schedule": "30 0 * * *"
     },
     {
       "path": "/api/cron/cleanup-stale-locks",
-      "schedule": "*/5 * * * *"
+      "schedule": "0 4 * * *"
     },
     {
       "path": "/api/cron/cleanup-trip-history",
