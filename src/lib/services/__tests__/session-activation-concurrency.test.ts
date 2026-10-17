@@ -10,6 +10,7 @@ const {
   mockDecrementBusCapacity,
   mockCreateUser,
   mockCreateStudent,
+  mockActivateStudentWithCapacity,
   mockCreateNotification,
   mockCreateAuditEvent,
 } = vi.hoisted(() => ({
@@ -22,6 +23,7 @@ const {
   mockDecrementBusCapacity: vi.fn(),
   mockCreateUser: vi.fn(),
   mockCreateStudent: vi.fn(),
+  mockActivateStudentWithCapacity: vi.fn(),
   mockCreateNotification: vi.fn(),
   mockCreateAuditEvent: vi.fn(),
 }));
@@ -50,6 +52,7 @@ vi.mock('@/domains/route', () => ({
 vi.mock('@/domains/identity', () => ({
   createUser: mockCreateUser,
   createStudent: mockCreateStudent,
+  activateStudentWithCapacity: mockActivateStudentWithCapacity,
   getUsersByRole: vi.fn().mockResolvedValue([]),
 }));
 
@@ -99,6 +102,13 @@ describe('Session Activation — Concurrency & Capacity Invariants', () => {
     mockReleaseActivationClaim.mockResolvedValue(true);
     mockCreateUser.mockResolvedValue({ success: true });
     mockCreateStudent.mockResolvedValue({ success: true });
+    mockActivateStudentWithCapacity.mockResolvedValue({
+      success: true,
+      capacity: 50,
+      morningLoad: 21,
+      eveningLoad: 20,
+      currentMembers: 41,
+    });
     mockRemove.mockResolvedValue(undefined);
     mockUpdate.mockResolvedValue(undefined);
   });
@@ -132,8 +142,13 @@ describe('Session Activation — Concurrency & Capacity Invariants', () => {
       return null; // Concurrently locked by runner 1
     });
 
-    mockCheckBusCapacity.mockResolvedValue({ available: true, capacity: 50, currentMembers: 20 });
-    mockIncrementBusCapacity.mockResolvedValue({ success: true, capacity: 50, newShiftLoad: 21 });
+    mockActivateStudentWithCapacity.mockResolvedValue({
+      success: true,
+      capacity: 50,
+      morningLoad: 21,
+      eveningLoad: 20,
+      currentMembers: 41,
+    });
 
     // Race both callers simultaneously
     const [result1, result2] = await Promise.all([
@@ -149,11 +164,9 @@ describe('Session Activation — Concurrency & Capacity Invariants', () => {
     expect(skippedCount).toBe(1);
 
     // Invariants:
-    // 1. Bus capacity incremented exactly ONCE
-    expect(mockIncrementBusCapacity).toHaveBeenCalledTimes(1);
-    // 2. Student created exactly ONCE
-    expect(mockCreateStudent).toHaveBeenCalledTimes(1);
-    // 3. Application consumed (deleted) exactly ONCE
+    // 1. Bus capacity & student profile activated atomically exactly ONCE
+    expect(mockActivateStudentWithCapacity).toHaveBeenCalledTimes(1);
+    // 2. Application consumed (deleted) exactly ONCE
     expect(mockRemove).toHaveBeenCalledTimes(1);
   });
 
@@ -161,20 +174,18 @@ describe('Session Activation — Concurrency & Capacity Invariants', () => {
     const CAPACITY = 3;
     let currentLoad = 0;
 
-    mockCheckBusCapacity.mockImplementation(async () => {
-      return {
-        available: currentLoad < CAPACITY,
-        capacity: CAPACITY,
-        currentMembers: currentLoad,
-      };
-    });
-
-    mockIncrementBusCapacity.mockImplementation(async () => {
+    mockActivateStudentWithCapacity.mockImplementation(async () => {
       if (currentLoad >= CAPACITY) {
-        return { success: false, error: 'Bus capacity reached' };
+        return { success: false, error: 'Bus is at full capacity (3/3)' };
       }
       currentLoad++;
-      return { success: true, capacity: CAPACITY, newShiftLoad: currentLoad };
+      return {
+        success: true,
+        capacity: CAPACITY,
+        morningLoad: currentLoad,
+        eveningLoad: 0,
+        currentMembers: currentLoad,
+      };
     });
 
     // 6 distinct applications racing for 3 seats

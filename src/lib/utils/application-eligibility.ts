@@ -1,6 +1,10 @@
-import { Application,ApplicationType,TargetSession } from '@/lib/types/application';
+import { Application, ApplicationFormData, ApplicationType, TargetSession } from '@/lib/types/application';
 import { DeadlineConfig } from '@/lib/types/deadline-config';
 import { computeBlockDatesFromValidUntil } from '@/lib/utils/deadline-computation';
+
+export type ApplicationCandidate = (Partial<Omit<Application, 'formData'>> & {
+  formData?: Partial<ApplicationFormData> | Record<string, any>;
+}) & Record<string, any>;
 
 /**
  * Phase 2 — Future-session eligibility.
@@ -61,7 +65,7 @@ export function computeFutureEligibleApproval(
  * Legacy applications created before Phase 2 carry no discriminator and are, by
  * definition, current-session fresh applications.
  */
-export function resolveApplicationType(app: Partial<Application> & Record<string, any>): ApplicationType {
+export function resolveApplicationType(app: ApplicationCandidate): ApplicationType {
   if (!app) return 'fresh';
   const formData = (app.formData || app.form_data || {}) as Record<string, any>;
   const explicitType = app.applicationType || app.application_type || formData.applicationType || formData.application_type;
@@ -87,12 +91,6 @@ export function resolveApplicationType(app: Partial<Application> & Record<string
     0
   );
   if (startYear > currentYear) {
-    return 'future';
-  }
-
-  // Name hint check for test data (e.g. "Hayato - Future")
-  const studentName = (formData.studentName || formData.student_name || formData.fullName || formData.full_name || app.applicantName || app.name || '').toLowerCase();
-  if (studentName.includes('future')) {
     return 'future';
   }
 
@@ -148,7 +146,7 @@ export function getUpcomingStatus(
  * Whether an application is a future-session ("upcoming") application.
  * Centralised so UI and server agree on the single discriminator.
  */
-export function isUpcomingApplication(app: Partial<Application> & Record<string, any>): boolean {
+export function isUpcomingApplication(app: ApplicationCandidate): boolean {
   if (!app) return false;
   if (app.state === 'verified_upcoming' || app.state === 'pending_seat_allocation') {
     return true;
@@ -175,10 +173,6 @@ export function isUpcomingApplication(app: Partial<Application> & Record<string,
     0
   );
   if (startYear > currentYear) {
-    return true;
-  }
-  const studentName = (formData.studentName || formData.student_name || formData.fullName || formData.full_name || app.applicantName || app.name || '').toLowerCase();
-  if (studentName.includes('future')) {
     return true;
   }
   return false;

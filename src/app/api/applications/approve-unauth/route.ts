@@ -24,10 +24,10 @@ export async function POST(request: NextRequest) {
     const decodedToken = await adminAuth.verifyIdToken(token);
     const moderatorUid = decodedToken.uid;
     const body = asRecord(await request.json());
-    const studentUid = asString(body.studentUid);
+    const applicationId = asString(body.applicationId || body.studentUid);
 
-    if (!studentUid) {
-      return NextResponse.json({ error: 'Missing student UID' }, { status: 400 });
+    if (!applicationId) {
+      return NextResponse.json({ error: 'Missing application ID' }, { status: 400 });
     }
 
     const userRole = await resolveUserRole(moderatorUid);
@@ -49,7 +49,7 @@ export async function POST(request: NextRequest) {
     if (permissionDenied) return permissionDenied;
 
     const result = await approveUnauth(
-      studentUid,
+      applicationId,
       {
         uid: moderatorUid,
         name: updaterInfo.name || 'Approver',

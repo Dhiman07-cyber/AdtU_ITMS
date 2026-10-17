@@ -14,11 +14,11 @@ export async function POST(request: NextRequest) {
     const moderatorUid = decodedToken.uid;
 
     const body = await request.json();
-    const { studentUid } = body;
+    const applicationId = body.applicationId || body.studentUid;
     const reason = body.reason || 'Application rejected by moderator';
 
-    if (!studentUid) {
-      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+    if (!applicationId) {
+      return NextResponse.json({ error: 'Missing required field: applicationId' }, { status: 400 });
     }
 
     const userRole = await resolveUserRole(moderatorUid);
@@ -40,7 +40,7 @@ export async function POST(request: NextRequest) {
     if (permissionDenied) return permissionDenied;
 
     const result = await rejectUnauth(
-      studentUid,
+      applicationId,
       {
         uid: moderatorUid,
         name: updaterInfo.name || 'Moderator',

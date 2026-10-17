@@ -528,20 +528,46 @@ export async function pgFindSeatOccupying(): Promise<Array<{
   seatReleasedAt: string | null; stop_name: string | null;
 }>> {
   const db = getSupabaseServer();
-  const { data, error } = await db
-    .from('student_profiles')
-    .select('uid, bus_id, shift, status, seat_released_at, stop_name')
-    .or('status.eq.active,status.eq.soft_blocked,status.eq.pending_deletion')
-    .not('bus_id', 'is', null);
-  if (error) throw new Error(`StudentRepository (PG) findSeatOccupying failed: ${error.message}`);
-  return (data || []).map(row => ({
-    uid: row.uid,
-    busId: row.bus_id,
-    shift: row.shift,
-    status: row.status,
-    seatReleasedAt: row.seat_released_at,
-    stop_name: row.stop_name,
-  }));
+  const PAGE_SIZE = 1000;
+  let lastUid: string | undefined;
+  const results: Array<{
+    uid: string; busId: string; shift: string; status: string;
+    seatReleasedAt: string | null; stop_name: string | null;
+  }> = [];
+
+  while (true) {
+    let query = db
+      .from('student_profiles')
+      .select('uid, bus_id, shift, status, seat_released_at, stop_name')
+      .or('status.eq.active,status.eq.soft_blocked,status.eq.pending_deletion')
+      .not('bus_id', 'is', null)
+      .order('uid', { ascending: true })
+      .limit(PAGE_SIZE);
+
+    if (lastUid) {
+      query = query.gt('uid', lastUid);
+    }
+
+    const { data, error } = await query;
+    if (error) throw new Error(`StudentRepository (PG) findSeatOccupying failed: ${error.message}`);
+    if (!data || data.length === 0) break;
+
+    for (const row of data) {
+      results.push({
+        uid: row.uid,
+        busId: row.bus_id,
+        shift: row.shift,
+        status: row.status,
+        seatReleasedAt: row.seat_released_at,
+        stop_name: row.stop_name,
+      });
+    }
+
+    if (data.length < PAGE_SIZE) break;
+    lastUid = data[data.length - 1].uid;
+  }
+
+  return results;
 }
 
 /**
@@ -552,33 +578,49 @@ export async function pgGetBusOccupancyStats(): Promise<{
   stops: Record<string, Record<string, number>>;
 }> {
   const db = getSupabaseServer();
-  const { data, error } = await db
-    .from('student_profiles')
-    .select('bus_id, shift, stop_name, status, seat_released_at')
-    .not('bus_id', 'is', null)
-    .in('status', ['active', 'soft_blocked', 'pending_deletion']);
-
-  if (error) throw new Error(`StudentRepository (PG) occupancyStats: ${error.message}`);
-
+  const PAGE_SIZE = 1000;
+  let lastUid: string | undefined;
   const occupancy: Record<string, { total: number; morning: number; evening: number }> = {};
   const stops: Record<string, Record<string, number>> = {};
 
-  for (const row of data || []) {
-    const isActive = row.status === 'active' || (['soft_blocked', 'pending_deletion'].includes(row.status) && !row.seat_released_at);
-    if (!isActive || !row.bus_id) continue;
+  while (true) {
+    let query = db
+      .from('student_profiles')
+      .select('uid, bus_id, shift, stop_name, status, seat_released_at')
+      .not('bus_id', 'is', null)
+      .in('status', ['active', 'soft_blocked', 'pending_deletion'])
+      .order('uid', { ascending: true })
+      .limit(PAGE_SIZE);
 
-    if (!occupancy[row.bus_id]) {
-      occupancy[row.bus_id] = { total: 0, morning: 0, evening: 0 };
+    if (lastUid) {
+      query = query.gt('uid', lastUid);
     }
-    occupancy[row.bus_id].total += 1;
-    if (row.shift === 'Morning') occupancy[row.bus_id].morning += 1;
-    if (row.shift === 'Evening') occupancy[row.bus_id].evening += 1;
 
-    if (row.stop_name) {
-      if (!stops[row.bus_id]) stops[row.bus_id] = {};
-      stops[row.bus_id][row.stop_name] = (stops[row.bus_id][row.stop_name] || 0) + 1;
+    const { data, error } = await query;
+    if (error) throw new Error(`StudentRepository (PG) occupancyStats: ${error.message}`);
+    if (!data || data.length === 0) break;
+
+    for (const row of data) {
+      const isActive = row.status === 'active' || (['soft_blocked', 'pending_deletion'].includes(row.status) && !row.seat_released_at);
+      if (!isActive || !row.bus_id) continue;
+
+      if (!occupancy[row.bus_id]) {
+        occupancy[row.bus_id] = { total: 0, morning: 0, evening: 0 };
+      }
+      occupancy[row.bus_id].total += 1;
+      if (row.shift === 'Morning') occupancy[row.bus_id].morning += 1;
+      if (row.shift === 'Evening') occupancy[row.bus_id].evening += 1;
+
+      if (row.stop_name) {
+        if (!stops[row.bus_id]) stops[row.bus_id] = {};
+        stops[row.bus_id][row.stop_name] = (stops[row.bus_id][row.stop_name] || 0) + 1;
+      }
     }
+
+    if (data.length < PAGE_SIZE) break;
+    lastUid = data[data.length - 1].uid;
   }
+
   return { occupancy, stops };
 }
 

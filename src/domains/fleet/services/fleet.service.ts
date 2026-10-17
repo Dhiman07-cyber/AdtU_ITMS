@@ -109,8 +109,10 @@ export async function onStudentDeleted(event: {
   busId: string;
   shift?: string;
 }): Promise<void> {
-  // Encapsulate capacity update within the Fleet domain
-  await decrementBusCapacity(event.busId, event.shift);
+  // Database capacity counters (morning_load, evening_load, current_members)
+  // are atomically decremented within delete_student_cascade_v1 in PostgreSQL.
+  // Fleet domain invalidates cached bus state to ensure fresh reads without double-decrementing.
+  invalidateBusCache(event.busId);
 }
 
 export async function reassignStudentsAtomically(plans: Array<{

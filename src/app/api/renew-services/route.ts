@@ -1,7 +1,7 @@
 import { getByApplicantUid } from '@/domains/application';
-import { checkBusCapacity,incrementBusCapacity } from '@/domains/fleet';
+import { checkBusCapacity, decrementBusCapacity, incrementBusCapacity } from '@/domains/fleet';
 import { getUserById } from '@/domains/identity';
-import { getByUid as getStudentByUid,update as updateStudent } from '@/domains/student';
+import { getByUid as getStudentByUid, update as updateStudent } from '@/domains/student';
 import { wasSeatReleased } from '@/lib/config/capacity-flags';
 import { getDeadlineConfig } from '@/lib/deadline-config-service';
 import { CapacityFullError } from '@/lib/errors/sentinel-errors';
@@ -9,10 +9,10 @@ import { adminAuth } from '@/lib/firebase-admin';
 import { paymentsSupabaseService } from '@/lib/services/payments-supabase';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import { computeBlockDatesFromValidUntil } from '@/lib/utils/deadline-computation';
-import { calculateRenewalDate,formatRenewalDate } from '@/lib/utils/renewal-utils';
+import { calculateRenewalDate, formatRenewalDate } from '@/lib/utils/renewal-utils';
 import { normalizeShift } from '@/lib/utils/shift-utils';
 import crypto from 'crypto';
-import { NextRequest,NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
 /**
  * POST /api/renew-services
@@ -241,12 +241,14 @@ export async function POST(request: NextRequest) {
         const renewalBusId = studentData.busId || studentData.currentBusId || studentData.busId || null;
 
         if (seatWasReleased && renewalBusId) {
+          let incremented = false;
+          let shift: string | null = null;
           try {
-            const shift = normalizeShift(studentData.shift);
+            shift = normalizeShift(studentData.shift);
             if (!shift) {
               throw new Error('Student profile missing valid shift assignment for renewal seat check.');
             }
-            // ponytail: checkBusCapacity is a fast-fail optimization (STABLE read, no lock).
+            // checkBusCapacity is a fast-fail optimization (STABLE read, no lock).
             // The real capacity guard is inside bus_increment_capacity (FOR UPDATE + re-check).
             // This check avoids the heavier locked increment when the bus is clearly full.
             // Note: there is a TOCTOU gap between check and increment — capacity could
@@ -259,12 +261,19 @@ export async function POST(request: NextRequest) {
             }
             // Increment capacity in PG
             await incrementBusCapacity(renewalBusId, shift);
+            incremented = true;
             // Update student in PostgreSQL (canonical)
             await updateStudent(studentUid, { ...studentUpdate, seatReleasedAt: null });
 
             results.push({ studentUid, success: true, newValidUntil });
-            console.log(`✅ Renewed + reclaimed seat for ${studentUid.substring(0,8)}... on bus ${renewalBusId}`);
+            console.log(`✅ Renewed + reclaimed seat for ${studentUid.substring(0, 8)}... on bus ${renewalBusId}`);
           } catch (txErr: any) {
+            // Compensating rollback: if increment succeeded but student update failed, release the claimed seat
+            if (incremented && shift) {
+              await decrementBusCapacity(renewalBusId, shift).catch(rollbackErr => {
+                console.error(`CRITICAL: Bus capacity rollback failed for ${renewalBusId}/${studentUid}:`, rollbackErr);
+              });
+            }
             // pgIncrementBusCapacity surfaces a full bus as CapacityFullError;
             // the message check below is belt-and-braces for any caller that
             // surfaces the raw RPC error string instead.
@@ -282,7 +291,7 @@ export async function POST(request: NextRequest) {
         await updateStudent(studentUid, studentUpdate);
 
         results.push({ studentUid, success: true, newValidUntil });
-        console.log(`✅ Renewed service for ${studentUid.substring(0,8)}...: ${currentValidUntil ? formatRenewalDate(currentValidUntil) : 'Expired'} → ${formatRenewalDate(newValidUntil)}`);
+        console.log(`✅ Renewed service for ${studentUid.substring(0, 8)}...: ${currentValidUntil ? formatRenewalDate(currentValidUntil) : 'Expired'} → ${formatRenewalDate(newValidUntil)}`);
 
       } catch (error: any) {
         console.error(`❌ Error renewing service for ${studentUid}:`, error);

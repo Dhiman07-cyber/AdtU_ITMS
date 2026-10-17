@@ -6,7 +6,7 @@ import { adminAuth } from '../../firebase-admin';
 
 // Mock dependencies
 vi.mock('@/lib/supabase-server', () => {
-  const mockRpc = vi.fn().mockResolvedValue({ error: null });
+  const mockRpc = vi.fn().mockResolvedValue({ data: { success: true }, error: null });
   return {
     getSupabaseServer: () => ({
       rpc: mockRpc,
@@ -128,5 +128,21 @@ describe('Student Hard Delete Unit Test', () => {
     const result2 = await deleteUserAndData('non-existent-student', 'student');
     expect(result2.success).toBe(false);
     expect(result2.error).toBe('User not found');
+  });
+
+  it('should abort deletion and NOT delete Firebase Auth when delete_student_cascade_v1 returns success: false', async () => {
+    const supabase = getSupabaseServer();
+    (supabase.rpc as any).mockResolvedValueOnce({
+      data: { success: false, error: 'ACTIVE_STUDENT_ABORT_DELETE' },
+      error: null,
+    });
+
+    const result = await deleteUserAndData('test-student-123', 'student');
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Student has active transport status');
+
+    // Invariant: Firebase Auth must NEVER be deleted when PG cascade aborts
+    expect(adminAuth.deleteUser).not.toHaveBeenCalled();
+    expect(adminAuth.revokeRefreshTokens).not.toHaveBeenCalled();
   });
 });

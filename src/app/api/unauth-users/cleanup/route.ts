@@ -54,7 +54,15 @@ export async function POST(request: NextRequest) {
       if (userData.status === 'approved') {
         try {
           const existingUser = await getUserById(userId);
-          if (existingUser) continue;
+          if (existingUser) {
+            try {
+              await deleteUnauthUser(userId);
+              cleanupResults.push({ userId, action: 'deleted', reason: 'already migrated to users' });
+            } catch (pgErr: any) {
+              console.error(`PG delete failed for already migrated unauth user ${userId}:`, pgErr.message);
+            }
+            continue;
+          }
 
           // Write user to PostgreSQL (canonical source of truth)
           await createUser({

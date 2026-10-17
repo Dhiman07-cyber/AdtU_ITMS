@@ -91,11 +91,20 @@ export async function deleteUserAndData(
     // 2. PostgreSQL Transaction Commit Boundary (PG deletes first)
     if (userType === 'student') {
       const db = getSupabaseServer();
-      const { error: rpcError } = await db.rpc('delete_student_cascade_v1', {
+      const { data: rpcData, error: rpcError } = await db.rpc('delete_student_cascade_v1', {
         p_student_uid: userId,
       });
       if (rpcError) {
         throw new Error(`delete_student_cascade_v1 RPC failed: ${rpcError.message}`);
+      }
+      if (!rpcData || (rpcData as any).success !== true) {
+        const rpcErr = (rpcData as any)?.error;
+        const msg = rpcErr === 'ACTIVE_STUDENT_ABORT_DELETE'
+          ? 'Cannot delete student: Student has active transport status. Release seat or soft-block first.'
+          : rpcErr === 'ACTIVE_RENEWAL_APP_ABORT_DELETE'
+          ? 'Cannot delete student: Student has an active renewal application in progress.'
+          : `Student deletion aborted: ${rpcErr || 'Database cascade did not return success'}`;
+        return { success: false, error: msg };
       }
       console.log(`✅ PostgreSQL database cascade transaction committed for student: ${userId.substring(0,8)}...`);
     } else {

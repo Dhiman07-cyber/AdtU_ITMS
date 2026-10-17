@@ -11,6 +11,7 @@
  * All persistence delegated to identity.repository.
  * Permission checks delegated to lib/security/moderator-permissions.
  */
+import { getSupabaseServer } from '@/lib/supabase-server';
 import { getModeratorPermissions as getModPerms,requireModeratorPermission } from '@/lib/security/moderator-permissions';
 import type { ModeratorPermissions } from '@/lib/types/moderator-permissions';
 import type { UserRole } from '@/lib/user-service';
@@ -157,6 +158,45 @@ export async function getAllStudents(): Promise<Record<string, any>[]> {
 
 export async function createStudent(student: Record<string, any>): Promise<void> {
   return repoInsertStudent(student);
+}
+
+/**
+ * Atomically reserve bus capacity and provision user + student_profiles records
+ * inside a single PostgreSQL transaction (RPC: identity_activate_student_with_capacity).
+ */
+export async function activateStudentWithCapacity(params: {
+  busId: string;
+  shift: string;
+  uid: string;
+  email?: string;
+  fullName?: string | null;
+  studentData: Record<string, any>;
+  enforceCapacity?: boolean;
+}): Promise<{
+  success: boolean;
+  busId?: string;
+  shift?: string;
+  morningLoad?: number;
+  eveningLoad?: number;
+  currentMembers?: number;
+  capacity?: number;
+  error?: string;
+}> {
+  const db = getSupabaseServer();
+  const { data, error } = await db.rpc('identity_activate_student_with_capacity', {
+    p_bus_id: params.busId,
+    p_shift: params.shift,
+    p_uid: params.uid,
+    p_email: params.email || '',
+    p_full_name: params.fullName || null,
+    p_student_data: params.studentData,
+    p_enforce_capacity: params.enforceCapacity ?? true,
+  });
+
+  if (error) {
+    return { success: false, error: error.message };
+  }
+  return data as any;
 }
 
 export async function updateStudent(uid: string, data: Record<string, any>): Promise<void> {

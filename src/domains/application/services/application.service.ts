@@ -362,6 +362,7 @@ export async function approve(
   }
 
   const isRenewal = app.application_type === 'renewal' || app.application_type === 'renewal_after_soft_block';
+  let seatCompensation: { busId: string; studentId: string; shift: string } | null = null;
 
   try {
     let studentData: Record<string, any> | null = null;
@@ -463,98 +464,101 @@ const finalSessionEndYear = ((student as any).sessionEndYear && (student as any)
       }
 
       if (targetBusId) {
-        // ── ATOMIC: capacity check + increment + identity activation in one DB transaction ──
-        // Previously this was two separate RPCs (bus_increment_capacity → identity_activate_student)
-        // with a code-level compensating decrement on failure. A process crash between the two
-        // would permanently increment bus capacity with no student enrolled (phantom seat leak).
-        // identity_activate_student_with_capacity fuses both into a single plpgsql transaction,
-        // matching the pattern already used by approve_renewal_with_seat for the renewal path.
-        const { data: atomicResult, error: atomicError } = await db.rpc('identity_activate_student_with_capacity', {
-          p_bus_id: targetBusId,
-          p_shift: studentShift,
-          p_uid: app.applicant_uid,
-          p_email: app.email || app.applicant_email,
-          p_full_name: app.form_data?.fullName || null,
-          p_student_data: studentData,
-        });
-
-        if (atomicError) {
-          console.error('identity_activate_student_with_capacity RPC error:', atomicError);
-          throw new Error(`Student activation with capacity failed: ${atomicError.message || atomicError.code}`);
-        }
-
-        if (!atomicResult?.success) {
-          console.error('identity_activate_student_with_capacity returned failure:', atomicResult?.error);
-          throw new Error(atomicResult?.error || 'Student activation with capacity failed');
-        }
-      } else {
-        // No bus assigned (e.g. walk-in or bus-less application) — activate identity only.
-        const { data: identityResult, error: identityError } = await db.rpc('identity_activate_student', {
-          p_uid: app.applicant_uid,
-          p_email: app.email || app.applicant_email,
-          p_full_name: app.form_data?.fullName || null,
-          p_student_data: studentData,
-        });
-
-        if (identityError) {
-          console.error('identity_activate_student RPC error:', identityError);
-          throw new Error(`Identity activation failed: ${identityError.message || identityError.code}`);
-        }
-
-        if (!identityResult?.success) {
-          throw new Error('Identity activation failed');
-        }
-      }
-
-      // Identity now owns this user — the transient unauth_users row is
-      // superseded. Best-effort delete (45-day TTL cron is the fallback).
-      await deleteUnauthUser(app.applicant_uid).catch(() => {});
-    }
-
-
-    // ── Step 2: Finalize application — atomic commit ────────────────
-    // C3: For renewals, student update + idempotency marker + application
-    // finalization happen in a single RPC (single DB transaction).
-    // For fresh: deletes application. Identity already activated above.
-    // Skip if renewal was already finalized by approve_renewal_with_seat RPC
-    if (!renewalAlreadyFinalized) {
-      const { data: finalizeResult, error: finalizeError } = await db.rpc('finalize_application_approval', {
-        p_application_id: applicationId,
-        p_approver_uid: approverData.uid,
-        ...(studentDataForRpc ? { p_student_data: studentDataForRpc } : {}),
+      // ── ATOMIC: capacity check + increment + identity activation in one DB transaction ──
+      // Previously this was two separate RPCs (bus_increment_capacity → identity_activate_student)
+      // with a code-level compensating decrement on failure. A process crash between the two
+      // would permanently increment bus capacity with no student enrolled (phantom seat leak).
+      // identity_activate_student_with_capacity fuses both into a single plpgsql transaction,
+      // matching the pattern already used by approve_renewal_with_seat for the renewal path.
+      const { data: atomicResult, error: atomicError } = await db.rpc('identity_activate_student_with_capacity', {
+        p_bus_id: targetBusId,
+        p_shift: studentShift,
+        p_uid: app.applicant_uid,
+        p_email: app.email || app.applicant_email,
+        p_full_name: app.form_data?.fullName || null,
+        p_student_data: studentData,
       });
 
-      if (finalizeError) {
-        console.error('finalize_application_approval RPC error:', finalizeError);
-        throw new Error(`Application finalization failed: ${finalizeError.message || finalizeError.code}`);
+      if (atomicError) {
+        console.error('identity_activate_student_with_capacity RPC error:', atomicError);
+        throw new Error(`Student activation with capacity failed: ${atomicError.message || atomicError.code}`);
       }
 
-      if (!finalizeResult?.success) {
-        throw new Error('Application finalization failed');
+      if (!atomicResult?.success) {
+        console.error('identity_activate_student_with_capacity returned failure:', atomicResult?.error);
+        throw new Error(atomicResult?.error || 'Student activation with capacity failed');
+      }
+
+      seatCompensation = { busId: targetBusId, studentId: app.applicant_uid, shift: studentShift };
+    } else {
+      // No bus assigned (e.g. walk-in or bus-less application) — activate identity only.
+      const { data: identityResult, error: identityError } = await db.rpc('identity_activate_student', {
+        p_uid: app.applicant_uid,
+        p_email: app.email || app.applicant_email,
+        p_full_name: app.form_data?.fullName || null,
+        p_student_data: studentData,
+      });
+
+      if (identityError) {
+        console.error('identity_activate_student RPC error:', identityError);
+        throw new Error(`Identity activation failed: ${identityError.message || identityError.code}`);
+      }
+
+      if (!identityResult?.success) {
+        throw new Error('Identity activation failed');
       }
     }
 
-    // ── Step 3: Side effects — AFTER finalize (non-critical) ───────
-    // H4: Payment, audit, notification run last. Each is idempotent.
-    if (studentData) {
-      await postCommitApprovalSideEffects(app, studentData, approverData, isRenewal ? 'renewal' : 'new');
-    }
-
-    return { success: true, studentUid: app.applicant_uid };
-
-  } catch (error: any) {
-    // C4: Compensating rollback — release seat if it was assigned before the failure
-    const seatComp = (app as any).__seatCompensation;
-    if (seatComp) {
-      await Seat.releaseSeat(seatComp.busId, seatComp.studentId, seatComp.shift)
-        .catch(releaseErr => {
-          console.error(`CRITICAL: Seat compensation failed for ${seatComp.busId}/${seatComp.studentId}:`, releaseErr);
-        });
-    }
-    // Release lock — application still exists
-    await db.rpc('release_application_lock', { p_application_id: applicationId });
-    return { success: false, error: error.message, status: 500 };
+    // Identity now owns this user — the transient unauth_users row is
+    // superseded. Best-effort delete (45-day TTL cron is the fallback).
+    await deleteUnauthUser(app.applicant_uid).catch(() => {});
   }
+
+  // ── Step 2: Finalize application — atomic commit ────────────────
+  // C3: For renewals, student update + idempotency marker + application
+  // finalization happen in a single RPC (single DB transaction).
+  // For fresh: deletes application. Identity already activated above.
+  // Skip if renewal was already finalized by approve_renewal_with_seat RPC
+  if (!renewalAlreadyFinalized) {
+    const { data: finalizeResult, error: finalizeError } = await db.rpc('finalize_application_approval', {
+      p_application_id: applicationId,
+      p_approver_uid: approverData.uid,
+      ...(studentDataForRpc ? { p_student_data: studentDataForRpc } : {}),
+    });
+
+    if (finalizeError) {
+      console.error('finalize_application_approval RPC error:', finalizeError);
+      throw new Error(`Application finalization failed: ${finalizeError.message || finalizeError.code}`);
+    }
+
+    if (!finalizeResult?.success) {
+      throw new Error('Application finalization failed');
+    }
+  }
+
+  // Step 2 committed successfully; clear compensating rollback flag
+  seatCompensation = null;
+
+  // ── Step 3: Side effects — AFTER finalize (non-critical) ───────
+  // H4: Payment, audit, notification run last. Each is idempotent.
+  if (studentData) {
+    await postCommitApprovalSideEffects(app, studentData, approverData, isRenewal ? 'renewal' : 'new');
+  }
+
+  return { success: true, studentUid: app.applicant_uid };
+
+} catch (error: any) {
+  // C4: Compensating rollback — release seat if it was assigned before the failure
+  if (seatCompensation) {
+    await Seat.releaseSeat(seatCompensation.busId, seatCompensation.studentId, seatCompensation.shift)
+      .catch(releaseErr => {
+        console.error(`CRITICAL: Seat compensation failed for ${seatCompensation?.busId}/${seatCompensation?.studentId}:`, releaseErr);
+      });
+  }
+  // Release lock — application still exists
+  await db.rpc('release_application_lock', { p_application_id: applicationId });
+  return { success: false, error: error.message, status: 500 };
+}
 }
 
 /**
@@ -586,19 +590,39 @@ export async function reject(
   const db = getSupabaseServer();
 
   // Step 1: Validate + lock + return payload
-  const { data: rpcResult } = await db.rpc('reject_application', {
+  const { data: rpcResult, error: rpcError } = await db.rpc('reject_application', {
     p_application_id: applicationId,
     p_rejector_uid: rejectorData.uid,
   });
 
+  if (rpcError) {
+    console.error('reject_application RPC error:', rpcError);
+    return { success: false, error: rpcError.message, status: 500 };
+  }
+
   if (!rpcResult?.success) {
-    return { success: false, error: rpcResult?.error, status: rpcResult?.status };
+    return { success: false, error: rpcResult?.error || 'Failed to reject application', status: rpcResult?.status || 400 };
   }
 
   const app = rpcResult.application;
 
   try {
-    // Step 2a: Payment cleanup
+    // Step 2: Finalize (delete / commit rejection state) in DB FIRST before external side effects
+    const { data: finalizeResult, error: finalizeError } = await db.rpc('finalize_application_rejection', {
+      p_application_id: applicationId,
+      p_rejector_uid: rejectorData.uid,
+    });
+
+    if (finalizeError) {
+      console.error('finalize_application_rejection RPC error:', finalizeError);
+      throw new Error(finalizeError.message || 'Database error during rejection finalization');
+    }
+
+    if (!finalizeResult?.success) {
+      throw new Error(finalizeResult?.error || 'Failed to finalize application rejection');
+    }
+
+    // Step 3a: Payment cleanup (idempotent, only after DB finalization)
     // H2: Payment operations go through Payment domain public API.
     if (app.payment_id) {
       try {
@@ -614,7 +638,7 @@ export async function reject(
       }
     }
 
-    // Step 2b: Audit
+    // Step 3b: Audit (idempotent)
     await createAuditEvent({
       category: 'applications',
       action: 'application_rejected',
@@ -629,7 +653,7 @@ export async function reject(
       metadata: { reason },
     });
 
-    // Step 2c: Notification
+    // Step 3c: Notification (dispatched ONLY after database finalization succeeds)
     if (app.email || app.applicant_email) {
       const { sendApplicationRejectedNotification } = await import('@/lib/services/admin-email.service');
       await sendApplicationRejectedNotification({
@@ -640,13 +664,7 @@ export async function reject(
       }).catch(err => console.error('Rejection email failed:', err));
     }
 
-    // Step 3: Finalize (delete)
-    const { data: finalizeResult } = await db.rpc('finalize_application_rejection', {
-      p_application_id: applicationId,
-      p_rejector_uid: rejectorData.uid,
-    });
-
-    return { success: finalizeResult?.success, error: finalizeResult?.error };
+    return { success: true };
 
   } catch (error: any) {
     await db.rpc('release_application_lock', { p_application_id: applicationId });
@@ -703,21 +721,32 @@ export async function getMyStatus(uid: string): Promise<{
   message: string;
   applicationData?: Application;
 }> {
-  const { getUserById } = await import('@/domains/identity');
-  const [userResult, appResult] = await Promise.allSettled([
-    getUserById(uid),
+  const { getStudentById } = await import('@/domains/identity');
+  const [studentResult, appResult] = await Promise.allSettled([
+    getStudentById(uid),
     repository.findByApplicantUid(uid),
   ]);
 
-  const user = userResult.status === 'fulfilled' ? userResult.value : null;
-  if (user) {
-    return {
-      status: 'approved',
-      message: 'Your application has been approved!',
-    };
+  const student = studentResult.status === 'fulfilled' ? studentResult.value : null;
+  const app = appResult.status === 'fulfilled' ? appResult.value : null;
+
+  if (student) {
+    if (student.status === 'active') {
+      return {
+        status: 'approved',
+        message: 'Your application has been approved!',
+        applicationData: app || undefined,
+      };
+    }
+    if (student.status === 'soft_blocked' || student.status === 'pending_deletion') {
+      return {
+        status: 'renewal_required',
+        message: 'Your transport service has expired and requires renewal.',
+        applicationData: app || undefined,
+      };
+    }
   }
 
-  const app = appResult.status === 'fulfilled' ? appResult.value : null;
   if (!app) {
     return { status: 'no_application', message: 'No application found' };
   }
@@ -734,6 +763,30 @@ export async function getMyStatus(uid: string): Promise<{
     return {
       status: 'approved',
       message: 'Your application has been approved!',
+      applicationData: app,
+    };
+  }
+
+  if (app.state === 'draft') {
+    return {
+      status: 'draft',
+      message: 'Draft application saved',
+      applicationData: app,
+    };
+  }
+
+  if (app.state === 'cancelled') {
+    return {
+      status: 'cancelled',
+      message: 'Your application was cancelled',
+      applicationData: app,
+    };
+  }
+
+  if (app.state === 'expired') {
+    return {
+      status: 'expired',
+      message: 'Your application has expired',
       applicationData: app,
     };
   }

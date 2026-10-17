@@ -41,7 +41,7 @@ import { getAllByState } from '@/domains/application';
 import * as applicationRepo from '@/domains/application/repositories/application.repository';
 import { createAuditEvent,SYSTEM_ACTOR } from '@/domains/audit';
 import * as fleetService from '@/domains/fleet/services/fleet.service';
-import { createStudent,createUser,getUsersByRole } from '@/domains/identity';
+import { activateStudentWithCapacity,createStudent,createUser,getUsersByRole } from '@/domains/identity';
 import * as Notification from '@/domains/notification';
 import * as routeService from '@/domains/route';
 import { findAlternatives } from '@/domains/seat/repositories/seat.repository';
@@ -304,45 +304,36 @@ async function activateOne(
       throw new StateChangedError();
     }
 
-    // 2. Check capacity via Fleet PG (atomic RPC).
-    const capacityCheck = await fleetService.checkBusCapacity(targetBusId, shift);
-    if (!capacityCheck.available) {
-      throw new CapacityFullError();
-    }
-
-    // 3. Increment capacity via Fleet PG (atomic RPC).
-    const capacityResult = await fleetService.incrementBusCapacity(targetBusId, shift);
-    if (!capacityResult.success) {
-      throw new CapacityFullError(capacityResult.error || `Failed to increment capacity for bus ${targetBusId}`);
-    }
-
-    // 4. Secure the user and student_profiles records in database (atomic post-capacity-increment write)
-    try {
-      await createUser({
-        uid: app.applicantUid,
-        email: (app as any).email || formData.email,
-        name: formData.fullName,
-        role: 'student',
-        createdAt: nowIso,
-      });
-
-      await createStudent({
+    // 2. Atomically check and reserve bus capacity + activate identity via PostgreSQL RPC
+    // Fuses capacity check, capacity increment, and user/student upsert into a single ACID transaction.
+    const activationResult = await activateStudentWithCapacity({
+      busId: targetBusId,
+      shift,
+      uid: app.applicantUid,
+      email: (app as any).email || formData.email || '',
+      fullName: formData.fullName || null,
+      studentData: {
         ...studentDoc,
         uid: app.applicantUid,
         createdAt: nowIso,
         updatedAt: nowIso,
-      });
-    } catch (writeErr) {
-      // rollback the capacity increment on write failure
-      await fleetService.decrementBusCapacity(targetBusId, shift).catch(() => {});
-      throw writeErr;
+      },
+    });
+
+    if (!activationResult.success) {
+      if (activationResult.error && /full capacity/i.test(activationResult.error)) {
+        throw new CapacityFullError(activationResult.error);
+      }
+      throw new Error(activationResult.error || `Failed to activate student on bus ${targetBusId}`);
     }
 
-    // 5. Delete application from PG (activation = consume the application).
+    // 3. Delete application from PG (activation = consume the application).
     await applicationRepo.remove(appId);
 
-    if (capacityResult.newShiftLoad >= capacityResult.capacity) {
-      const bus = await fleetService.getBusById(targetBusId);
+    const bus = await fleetService.getBusById(targetBusId);
+    const busCapacity = bus?.capacity ?? activationResult.capacity ?? 0;
+    const shiftLoad = shift.toLowerCase() === 'evening' ? activationResult.eveningLoad : activationResult.morningLoad;
+    if (busCapacity > 0 && shiftLoad !== undefined && shiftLoad >= busCapacity) {
       postCommitFullAlert = {
         busNumber: bus?.busNumber || '',
         routeId: bus?.routeId || '',
@@ -391,7 +382,7 @@ async function activateOne(
     if (postCommitFullAlert) {
       await sendBusFullAlert(requestedBusId, postCommitFullAlert.busNumber, postCommitFullAlert.routeId).catch(() => {});
     }
-    await notifyStudentActivated(app, formData, validUntil).catch((e) =>
+    await notifyStudentActivated(app, formData, validUntil, startYear, endYear).catch((e) =>
       console.error('[session-activation] activated notify failed:', e?.message || e)
     );
     return 'activated';
@@ -412,7 +403,7 @@ async function activateOne(
             if (postCommitFullAlert) {
               await sendBusFullAlert(altBus.busId, postCommitFullAlert.busNumber, postCommitFullAlert.routeId).catch(() => {});
             }
-            await notifyStudentActivated(app, formData, validUntil).catch((e) =>
+            await notifyStudentActivated(app, formData, validUntil, startYear, endYear).catch((e) =>
               console.error('[session-activation] activated notify failed:', e?.message || e)
             );
             return 'activated';
@@ -485,11 +476,21 @@ async function activateOne(
 }
 
 
-async function notifyStudentActivated(app: Application, formData: any, validUntil: string): Promise<void> {
+async function notifyStudentActivated(
+  app: Application,
+  formData: any,
+  validUntil: string,
+  startYear?: number,
+  endYear?: number
+): Promise<void> {
+  const sYear = startYear || (app as any).targetSession?.startYear || (app as any).sessionStartYear || '';
+  const eYear = endYear || (app as any).targetSession?.endYear || (app as any).sessionEndYear || '';
+  const sessionLabel = sYear && eYear ? ` for the ${sYear}-${eYear} session` : '';
+
   await Notification.createNotification(
     { userId: 'system', userName: 'System', userRole: 'admin' },
     { type: 'specific_users', specificUserIds: [app.applicantUid] },
-    `Your bus service for the ${(app as any).targetSession?.startYear}-${(app as any).targetSession?.endYear} session is now active. Valid until ${new Date(validUntil).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}.`,
+    `Your bus service${sessionLabel} is now active. Valid until ${new Date(validUntil).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}.`,
     'Your transport service is now active',
     { profile: '/student/profile' }
   );
