@@ -3,6 +3,7 @@ import { withSecurity } from '@/lib/security/api-security';
 import { RateLimits } from '@/lib/security/rate-limiter';
 import { MarkBoardedSchema } from '@/lib/security/validation-schemas';
 import { getSupabaseServer } from '@/lib/supabase-server';
+import { isWaitingFlagExpired } from '@/lib/waiting-flag-helpers';
 import { NextResponse } from 'next/server';
 
 /**
@@ -27,7 +28,7 @@ export const POST = withSecurity(
 
     // 1. Fetch the flag first — we need its bus_id to scope the trip check.
     const { data: flagData, error: flagError } = await supabase
-      .from('waiting_flags').select('id, bus_id, status, student_uid').eq('id', flagId).single();
+      .from('waiting_flags').select('id, bus_id, status, student_uid, created_at, expires_at').eq('id', flagId).single();
 
     if (flagError || !flagData) {
       return NextResponse.json(
@@ -64,6 +65,9 @@ export const POST = withSecurity(
     }
     if (['boarded', 'picked_up', 'cancelled', 'expired'].includes(flagData.status)) {
       return NextResponse.json({ error: `Cannot acknowledge flag that is already ${flagData.status}` }, { status: 400 });
+    }
+    if (isWaitingFlagExpired(flagData)) {
+      return NextResponse.json({ error: 'Cannot acknowledge flag that has expired' }, { status: 400 });
     }
 
     // Update waiting flag status atomically

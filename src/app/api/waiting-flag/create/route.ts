@@ -1,185 +1,30 @@
-import { emitEvent } from '@/domains/realtime/event-emitter';
-import { getByUid } from '@/domains/student';
-import { withSecurity } from '@/lib/security/api-security';
-import { RateLimits } from '@/lib/security/rate-limiter';
-import { WaitingFlagPostSchema } from '@/lib/security/validation-schemas';
-import { getSupabaseServer } from '@/lib/supabase-server';
+/**
+ * DEPRECATED — This endpoint has been permanently removed.
+ *
+ * Use the canonical endpoint instead:
+ *   POST /api/student/waiting-flag
+ *
+ * This stub returns 410 Gone for any request to ensure any cached client
+ * or integration test fails loudly rather than silently using stale logic.
+ *
+ * Removed: October 2026 (Issue 4.1 — endpoint deduplication cleanup)
+ */
+
 import { NextResponse } from 'next/server';
 
-/**
- * GPS Accuracy Validator
- */
-const isValidAccuracy = (accuracy: number) => accuracy >= 0 && accuracy <= 1000;
-
-export const POST = withSecurity(
-  async (request, { auth, body, requestId }) => {
-    const startTime = Date.now();
-    const studentUid = auth.uid;
-    // Request-scoped client — avoids stale singleton across Next.js route compilations.
-    const supabase = getSupabaseServer();
-    const {
-      busId,
-      routeId,
-      stop_name,
-      // stop_lat/stop_lng are the student's GPS coordinates at the time of flagging.
-      // stopLat/stopLng are the camelCase aliases sent by the student client.
-      stop_lat: bodyStopLat,
-      stop_lng: bodyStopLng,
-      stopLat,
-      stopLng,
-      lat,
-      lng,
-      accuracy,
-      message
-    } = body as any;
-
-    // Resolve coordinates: prefer explicit stop_lat/stop_lng, then camelCase aliases, then raw lat/lng
-    const resolvedStopLat: number | null = bodyStopLat ?? stopLat ?? lat ?? null;
-    const resolvedStopLng: number | null = bodyStopLng ?? stopLng ?? lng ?? null;
-
-    try {
-      // 1. Validate GPS accuracy (trusted from body)
-      if (!isValidAccuracy(accuracy)) {
-        return NextResponse.json({ success: false, error: 'Invalid GPS accuracy (must be 0-1000m)', requestId }, { status: 400 });
-      }
-
-      // 2, 4, 5. Execute Student profile, Active trip check, and Duplicate flag check in PARALLEL
-      const [studentDataRaw, activeTripRes, existingFlagsRes] = await Promise.all([
-        getByUid(studentUid) as Promise<Record<string, any> | null>,
-        supabase
-          .from('active_trips')
-          .select('trip_id')
-          .eq('bus_id', busId)
-          .eq('status', 'active')
-          .gt('expires_at', new Date().toISOString())
-          .maybeSingle(),
-        supabase
-          .from('waiting_flags')
-          .select('id')
-          .eq('student_uid', studentUid)
-          .in('status', ['raised', 'acknowledged', 'waiting'])
-          .limit(1)
-      ]);
-
-      const studentData = studentDataRaw;
-      if (!studentData) {
-        console.warn(`[${requestId}] Student profile not found for ${studentUid}`);
-        return NextResponse.json({ success: false, error: 'Student profile not found', requestId }, { status: 404 });
-      }
-
-      const studentName = studentData.fullName || studentData.name || 'Student';
-
-      // 3. Authorization: Is student assigned to this bus?
-      const isAssigned = studentData.busId === busId;
-      if (!isAssigned) {
-        return NextResponse.json({ success: false, error: 'Authorization failed: Student not assigned to this bus', requestId }, { status: 403 });
-      }
-
-      // Check active trip result
-      const activeTrip = activeTripRes.data;
-      if (activeTripRes.error || !activeTrip) {
-        return NextResponse.json({ success: false, error: 'This bus is not currently on an active trip', requestId }, { status: 400 });
-      }
-
-      const tripId = activeTrip.trip_id;
-
-      // Duplicate Check result
-      const existingFlags = existingFlagsRes.data;
-      if (existingFlags && existingFlags.length > 0) {
-        return NextResponse.json({ 
-          success: false, 
-          error: 'You already have an active waiting flag for this bus', 
-          requestId,
-          flagId: existingFlags[0].id 
-        }, { status: 409 });
-      }
-
-      // 6. Create Waiting Flag
-      const now = new Date();
-      const expiresAt = new Date(now.getTime() + 15 * 60 * 1000); // 15 min expiry
-
-      const flagData = {
-        student_uid: studentUid,
-        student_name: studentName,
-        bus_id: busId,
-        route_id: routeId,
-        stop_name: stop_name || 'Current Location',
-        // Persist the student's GPS position so the driver map can show the marker
-        // and calculate distance. These come from the student device at flag-raise time.
-        stop_lat: resolvedStopLat,
-        stop_lng: resolvedStopLng,
-        // NOTE: no `accuracy` column exists on waiting_flags (PGRST204) — broadcast-only.
-        status: 'raised',
-        message: message || null,
-        trip_id: tripId,
-        created_at: now.toISOString(),
-        expires_at: expiresAt.toISOString()
-      };
-
-      const { data: flag, error: insertError } = await supabase
-        .from('waiting_flags')
-        .insert(flagData)
-        .select()
-        .single();
-
-      if (insertError) {
-        if ((insertError as any).code === '23505') {
-          return NextResponse.json({ 
-            success: false, 
-            error: 'You already have an active waiting flag for this bus', 
-            requestId 
-          }, { status: 409 });
-        }
-        console.error(`[${requestId}] Supabase insert error:`, insertError);
-        return NextResponse.json({ success: false, error: 'Failed to record waiting flag', requestId }, { status: 500 });
-      }
-
-      // 7. Real-time Broadcast via WebSocket
-      // IMPORTANT: include id, student_uid, student_name, stop_lat, stop_lng so the
-      // driver's handleWaitingFlagPayload can build a complete WaitingFlag object
-      // with coordinates — without these, the student marker never appears on the map.
-      emitEvent(`waiting_flags_${busId}`, 'waiting_flag_created', {
-        id: flag.id,
-        flagId: flag.id,
-        studentUid,
-        student_uid: studentUid,
-        studentName,
-        student_name: studentName,
-        busId,
-        bus_id: busId,
-        routeId: routeId || null,
-        route_id: routeId || null,
-        stop_name: flagData.stop_name,
-        stop_lat: resolvedStopLat,
-        stop_lng: resolvedStopLng,
-        lat: resolvedStopLat,
-        lng: resolvedStopLng,
-        status: 'raised',
-        accuracy,
-        message: flagData.message,
-        created_at: flagData.created_at,
-        timestamp: flagData.created_at
-      }).catch(err => console.warn(`[${requestId}] Real-time broadcast failed (non-critical):`, err));
-
-      const elapsed = Date.now() - startTime;
-      console.log(`✅ [${requestId}] Waiting flag ${flag.id} created in ${elapsed}ms`);
-
-      return NextResponse.json({
-        success: true,
-        flagId: flag.id,
-        message: 'Waiting flag raised successfully. The driver has been notified.',
-        expiresAt: expiresAt.toISOString(),
-        requestId
-      });
-
-    } catch (error: any) {
-      console.error(`[${requestId}] Internal error in waiting-flag/create:`, error);
-      return NextResponse.json({ success: false, error: 'An unexpected error occurred', requestId }, { status: 500 });
+export async function POST() {
+  return NextResponse.json(
+    {
+      error: 'This endpoint has been permanently removed.',
+      alternative: 'POST /api/student/waiting-flag',
+      code: 'ENDPOINT_REMOVED',
+    },
+    {
+      status: 410,
+      headers: {
+        'Sunset': 'Sat, 01 Oct 2026 00:00:00 GMT',
+        'Link': '</api/student/waiting-flag>; rel="successor-version"',
+      },
     }
-  },
-  {
-    requiredRoles: ['student'],
-    schema: WaitingFlagPostSchema,
-    rateLimit: RateLimits.CREATE
-  }
-);
+  );
+}

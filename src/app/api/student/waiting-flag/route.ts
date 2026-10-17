@@ -9,6 +9,7 @@ import {
 	WaitingFlagQuerySchema
 } from '@/lib/security/validation-schemas';
 import { getSupabaseServer } from '@/lib/supabase-server';
+import { isWaitingFlagExpired } from '@/lib/waiting-flag-helpers';
 import { NextResponse } from 'next/server';
 
 /**
@@ -26,10 +27,10 @@ export const POST = withSecurity(
         const [studentData, existingFlagRes, activeTripRes] = await Promise.all([
             getByUid(studentUid).catch(() => null),
             supabase.from('waiting_flags')
-                .select('id')
+                .select('id, status, created_at, expires_at')
                 .eq('student_uid', studentUid)
                 .in('status', ['raised', 'waiting', 'acknowledged'])
-                .limit(1),
+                .limit(5),
             supabase.from('active_trips')
                 .select('trip_id')
                 .eq('bus_id', busId)
@@ -57,16 +58,43 @@ export const POST = withSecurity(
             }, { status: 403 });
         }
 
-        if (existingFlagRes.data && existingFlagRes.data.length > 0) {
+        // Check if any existing flag is genuinely active (not expired)
+        const activeExistingFlag = existingFlagRes.data?.find(f => !isWaitingFlagExpired(f));
+
+        if (activeExistingFlag) {
             return NextResponse.json({
                 success: false,
                 error: 'You already have an active waiting flag for this bus',
-                existingFlagId: existingFlagRes.data[0].id
+                existingFlagId: activeExistingFlag.id
+            }, { status: 409 });
+        }
+
+        // If there are stale/expired flags still sitting in active status, lazily expire them in DB
+        // so they do not trigger the partial unique index idx_waiting_flags_one_active_student
+        if (existingFlagRes.data && existingFlagRes.data.length > 0) {
+            const staleFlags = existingFlagRes.data.filter(f => isWaitingFlagExpired(f));
+            for (const stale of staleFlags) {
+                await supabase
+                    .from('waiting_flags')
+                    .update({ status: 'expired' })
+                    .eq('id', stale.id);
+            }
+        }
+
+        // Rule R-WAIT-01 / CRIT-07: A student may only raise a waiting flag when an active trip
+        // is currently running on their assigned bus. Otherwise, the flag is orphaned with trip_id = null,
+        // no driver is on duty to see it, and the student is locked out by the unique index.
+        if (!activeTripRes.data?.trip_id) {
+            return NextResponse.json({
+                success: false,
+                error: 'Cannot raise waiting flag: No active trip is currently running on your assigned bus.',
+                code: 'NO_ACTIVE_TRIP'
             }, { status: 409 });
         }
 
         // 2. Prepare flag data
         const currentTimestamp = timestamp || Date.now();
+        const flagExpiresAt = new Date(currentTimestamp + 15 * 60 * 1000).toISOString();
         const flagData: any = {
             student_uid: studentUid,
             student_name: studentData.fullName || studentData.name || 'Student',
@@ -76,6 +104,7 @@ export const POST = withSecurity(
             status: 'raised',
             trip_id: activeTripRes.data?.trip_id || null,
             created_at: new Date(currentTimestamp).toISOString(),
+            expires_at: flagExpiresAt,
             message: message || null
         };
 
@@ -94,11 +123,41 @@ export const POST = withSecurity(
         const { data: insertData, error: insertError } = await supabase
             .from('waiting_flags')
             .insert(flagData)
-            .select('id, student_uid, student_name, bus_id, route_id, stop_name, stop_lat, stop_lng, status, trip_id, created_at, message')
+            .select('id, student_uid, student_name, bus_id, route_id, stop_name, stop_lat, stop_lng, status, trip_id, created_at, expires_at, message')
             .single();
 
         if (insertError) {
             if (insertError.code === '23505') {
+                // Check if the conflicting record is actually expired or malformed
+                const { data: conflictRecord } = await supabase
+                    .from('waiting_flags')
+                    .select('id, status, created_at, expires_at')
+                    .eq('student_uid', studentUid)
+                    .in('status', ['raised', 'waiting', 'acknowledged'])
+                    .maybeSingle();
+
+                if (conflictRecord && isWaitingFlagExpired(conflictRecord)) {
+                    await supabase
+                        .from('waiting_flags')
+                        .update({ status: 'expired' })
+                        .eq('id', conflictRecord.id);
+
+                    const retryInsert = await supabase
+                        .from('waiting_flags')
+                        .insert(flagData)
+                        .select('id, student_uid, student_name, bus_id, route_id, stop_name, stop_lat, stop_lng, status, trip_id, created_at, expires_at, message')
+                        .single();
+
+                    if (!retryInsert.error && retryInsert.data) {
+                        emitEvent(`waiting_flags_${busId}`, 'waiting_flag_created', retryInsert.data).catch(() => {});
+                        return NextResponse.json({
+                            success: true,
+                            flagId: retryInsert.data.id,
+                            flag: retryInsert.data
+                        });
+                    }
+                }
+
                 return NextResponse.json({ error: 'You already have an active waiting flag for this bus' }, { status: 409 });
             }
             console.error('Supabase insert error:', insertError);
@@ -187,7 +246,7 @@ export const GET = withSecurity(
 
         const { data, error } = await supabase
             .from('waiting_flags')
-            .select('id, student_uid, bus_id, status, trip_id, created_at, stop_name, stop_lat, stop_lng, message')
+            .select('id, student_uid, bus_id, status, trip_id, created_at, expires_at, stop_name, stop_lat, stop_lng, message')
             .eq('student_uid', studentUid)
             .in('status', ['waiting', 'raised', 'acknowledged'])
             .maybeSingle();
@@ -197,7 +256,8 @@ export const GET = withSecurity(
             return NextResponse.json({ error: 'Database error' }, { status: 500 });
         }
 
-        return NextResponse.json({ data: data || null });
+        const isExpired = isWaitingFlagExpired(data);
+        return NextResponse.json({ data: isExpired ? null : (data || null) });
     },
     {
         requiredRoles: ['student'],

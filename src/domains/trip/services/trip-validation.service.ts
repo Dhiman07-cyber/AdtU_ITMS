@@ -19,16 +19,32 @@ export interface TripPreflightResult {
 export async function tripStartPreflight(driverId: string, busId: string): Promise<TripPreflightResult> {
   const supabase = getSupabaseServer();
 
-  const [busResult, tripResult] = await Promise.all([
+  const [busResult, tripResult, driverTripResult] = await Promise.all([
     supabase.from('buses').select('id, bus_number, route_id, route_name, status').eq('id', busId).maybeSingle(),
     supabase.from('active_trips').select('trip_id, driver_id, expires_at').eq('bus_id', busId).eq('status', 'active').maybeSingle(),
+    supabase.from('active_trips').select('trip_id, bus_id, expires_at').eq('driver_id', driverId).eq('status', 'active').maybeSingle(),
   ]);
 
   const busData = busResult.data;
   if (!busData) return { authorized: false, reason: 'Bus not found', conflict: false };
   if (busData.status === 'inactive') return { authorized: false, reason: 'Bus is inactive', conflict: false };
 
-  const activeTrip = tripResult.data;
+  // 1. Check if the driver is already participating in an active trip on another vehicle (Invariant 1)
+  const driverActiveTrip = driverTripResult?.data;
+  if (driverActiveTrip && driverActiveTrip.bus_id !== busId) {
+    const isDriverExpired = driverActiveTrip.expires_at ? Date.now() > new Date(driverActiveTrip.expires_at).getTime() : false;
+    if (!isDriverExpired) {
+      return {
+        authorized: false,
+        reason: 'You are currently operating an active trip on another bus. End your active trip before starting a new one.',
+        busData,
+        conflict: true,
+        existingTripId: driverActiveTrip.trip_id,
+      };
+    }
+  }
+
+  const activeTrip = tripResult?.data;
 
   // No active trip — bus is free
   if (!activeTrip) {

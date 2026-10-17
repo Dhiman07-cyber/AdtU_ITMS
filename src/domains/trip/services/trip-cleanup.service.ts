@@ -13,7 +13,7 @@ export async function cleanupTrip(params: {
 
   // 1. Delete first, capturing what was actually removed.
   //    This avoids the race where a flag created between a separate FETCH and
-  //    DELETE would be deleted without a removal broadcast.
+  //    DELETE would be deleted without a removal broadcast (WAIT-003).
   const [{ data: deletedFlags }, ] = await Promise.all([
     supabase.from('waiting_flags')
       .delete()

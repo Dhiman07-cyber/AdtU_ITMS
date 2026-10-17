@@ -3,6 +3,7 @@ import { withSecurity } from '@/lib/security/api-security';
 import { RateLimits } from '@/lib/security/rate-limiter';
 import { MarkBoardedSchema } from '@/lib/security/validation-schemas';
 import { getSupabaseServer } from '@/lib/supabase-server';
+import { isWaitingFlagExpired } from '@/lib/waiting-flag-helpers';
 import { NextResponse } from 'next/server';
 
 /**
@@ -22,7 +23,7 @@ export const POST = withSecurity(
 
         // 1. Fetch waiting flag and driver active trip in parallel
         const [flagRes, tripRes] = await Promise.all([
-            supabase.from('waiting_flags').select('id, bus_id, status, student_uid').eq('id', flagId).single(),
+            supabase.from('waiting_flags').select('id, bus_id, status, student_uid, created_at, expires_at').eq('id', flagId).single(),
             supabase.from('active_trips').select('trip_id, bus_id').eq('driver_id', driverUid).eq('status', 'active').gt('expires_at', new Date().toISOString()).maybeSingle(),
         ]);
 
@@ -45,6 +46,10 @@ export const POST = withSecurity(
 
         if (flagData.status === 'cancelled' || flagData.status === 'expired') {
             return NextResponse.json({ error: `Cannot mark boarded: flag is ${flagData.status}` }, { status: 400 });
+        }
+
+        if (isWaitingFlagExpired(flagData)) {
+            return NextResponse.json({ error: 'Cannot mark boarded: flag has expired' }, { status: 400 });
         }
 
         // 2. Atomic update in Supabase

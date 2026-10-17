@@ -76,7 +76,12 @@ describe('WaitingFlag POST & DELETE — concurrency & real-world invariants', ()
   beforeEach(() => {
     vi.clearAllMocks();
     currentInsertResult = null;
-    mockFrom.mockReturnValue(makeChain(null));
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'active_trips') {
+        return makeChain({ trip_id: 'active-trip-1' });
+      }
+      return makeChain(null);
+    });
   });
 
   it('returns 409 when pre-check detects existing active flag', async () => {
@@ -84,9 +89,15 @@ describe('WaitingFlag POST & DELETE — concurrency & real-world invariants', ()
     mockFrom.mockImplementation((table: string) => {
       if (table === 'waiting_flags') {
         const chain = makeChain(null);
-        // Pre-check select returns active flag
-        chain.limit = vi.fn().mockResolvedValue({ data: [{ id: 'flag-existing-1' }], error: null });
+        // Pre-check select returns active flag with future expires_at
+        chain.limit = vi.fn().mockResolvedValue({
+          data: [{ id: 'flag-existing-1', expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString() }],
+          error: null,
+        });
         return chain;
+      }
+      if (table === 'active_trips') {
+        return makeChain({ trip_id: 'active-trip-1' });
       }
       return makeChain(null);
     });
@@ -95,6 +106,55 @@ describe('WaitingFlag POST & DELETE — concurrency & real-world invariants', ()
     expect(res.status).toBe(409);
     const body = await res.json();
     expect(body.error).toContain('already have an active waiting flag');
+  });
+
+  it('allows raising a new flag when existing flag has expired past TTL (expires_at in past)', async () => {
+    // Simulates: student has a flag whose 15-minute TTL has elapsed, but cron hasn't swept it yet
+    const expiredIso = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'waiting_flags') {
+        const chain = makeChain(null);
+        chain.limit = vi.fn().mockResolvedValue({
+          data: [{ id: 'flag-expired-1', expires_at: expiredIso }],
+          error: null,
+        });
+        return chain;
+      }
+      if (table === 'active_trips') {
+        return makeChain({ trip_id: 'active-trip-1' });
+      }
+      return makeChain(null);
+    });
+
+    setInsertResult({ data: { id: 'flag-new-1' }, error: null });
+    const res = await POST(makeRequest());
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.success).toBe(true);
+  });
+
+  it('allows raising a new flag when existing flag has malformed timestamps (fails closed as expired, unblocking re-raise)', async () => {
+    // Simulates: student has an existing row with malformed or missing timestamps
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'waiting_flags') {
+        const chain = makeChain(null);
+        chain.limit = vi.fn().mockResolvedValue({
+          data: [{ id: 'flag-malformed-1', expires_at: 'NOT-A-DATE', created_at: 'INVALID-DATE' }],
+          error: null,
+        });
+        return chain;
+      }
+      if (table === 'active_trips') {
+        return makeChain({ trip_id: 'active-trip-1' });
+      }
+      return makeChain(null);
+    });
+
+    setInsertResult({ data: { id: 'flag-new-2' }, error: null });
+    const res = await POST(makeRequest());
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.success).toBe(true);
   });
 
   it('returns 409 when unique violation (23505) occurs on insert (idx_waiting_flags_one_active_student)', async () => {
@@ -117,11 +177,31 @@ describe('WaitingFlag POST & DELETE — concurrency & real-world invariants', ()
       if (insertCount === 1) return Promise.resolve({ data: { id: 'f1' }, error: null });
       return Promise.resolve({ data: null, error: { code: '23505', message: 'duplicate key' } });
     });
-    mockFrom.mockReturnValue(chain);
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'active_trips') {
+        return makeChain({ trip_id: 'active-trip-1' });
+      }
+      return chain;
+    });
 
     const results = await Promise.all([POST(makeRequest()), POST(makeRequest())]);
     expect(results.filter((r) => r.status === 200).length).toBe(1);
     expect(results.filter((r) => r.status === 409).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('rejects flag creation when no active trip is running on the bus (CRIT-07 / R-WAIT-01)', async () => {
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'active_trips') {
+        return makeChain(null); // No active trip
+      }
+      return makeChain(null);
+    });
+
+    const res = await POST(makeRequest());
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.error).toContain('No active trip is currently running');
+    expect(body.code).toBe('NO_ACTIVE_TRIP');
   });
 
   it('rejects flag creation for an unassigned bus with 403', async () => {

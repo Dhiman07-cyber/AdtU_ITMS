@@ -102,8 +102,8 @@ export const GET = withSecurity(
                 }
             }
 
-            const { getLastLocationForBus } = await import('@/domains/gps');
-            const lastLoc = getLastLocationForBus(busId);
+            const { getLastLocationForBusAsync, getLastLocationForBus } = await import('@/domains/gps');
+            const lastLoc = (await getLastLocationForBusAsync(busId)) || getLastLocationForBus(busId);
 
             let currentLocation = null;
             if (lastLoc) {
@@ -117,26 +117,6 @@ export const GET = withSecurity(
                     accuracy: lastLoc.accuracy ?? 10,
                     timestamp: lastLoc.timestamp,
                 };
-            } else {
-                const { data: dbLoc } = await supabase
-                    .from('bus_locations')
-                    .select('lat, lng, speed, heading, accuracy, timestamp')
-                    .eq('bus_id', data.bus_id)
-                    .order('timestamp', { ascending: false })
-                    .limit(1)
-                    .maybeSingle();
-                if (dbLoc) {
-                    currentLocation = {
-                        busId,
-                        driverUid: data.driver_id,
-                        lat: dbLoc.lat,
-                        lng: dbLoc.lng,
-                        speed: dbLoc.speed !== undefined && dbLoc.speed !== null ? Number(dbLoc.speed) : 0,
-                        heading: dbLoc.heading !== undefined && dbLoc.heading !== null ? Number(dbLoc.heading) : 0,
-                        accuracy: dbLoc.accuracy,
-                        timestamp: dbLoc.timestamp,
-                    };
-                }
             }
 
             return NextResponse.json({

@@ -4,6 +4,7 @@ import { withSecurity } from '@/lib/security/api-security';
 import { RateLimits } from '@/lib/security/rate-limiter';
 import { AckWaitingSchema } from '@/lib/security/validation-schemas';
 import { getSupabaseServer } from '@/lib/supabase-server';
+import { isWaitingFlagExpired } from '@/lib/waiting-flag-helpers';
 import { NextResponse } from 'next/server';
 
 // Initialize Supabase client
@@ -26,7 +27,7 @@ export const POST = withSecurity(
       // 2. Get the waiting flag from Supabase
       const { data: waitingFlag, error: selectError } = await supabase
         .from('waiting_flags')
-        .select('id, bus_id, status, student_uid')
+        .select('id, bus_id, status, student_uid, created_at, expires_at')
         .eq('id', waitingFlagId)
         .single();
 
@@ -36,12 +37,29 @@ export const POST = withSecurity(
       }
 
        // 3. Authorization check: Is this the driver for this bus?
-       // Check both assigned bus and any temporary assignments if necessary
-       // For now, matching the original logic: driverData.busId === waitingFlag.bus_id
-       if (driverBusId !== waitingFlag.bus_id || !waitingFlag.bus_id) {
+       // Check both static assigned bus and active_trips dynamic lock
+       let isAuthorized = Boolean(driverBusId && waitingFlag.bus_id && driverBusId === waitingFlag.bus_id);
+       if (!isAuthorized && waitingFlag.bus_id) {
+         const { data: activeTrip } = await supabase
+           .from('active_trips')
+           .select('trip_id')
+           .eq('driver_id', driverUid)
+           .eq('bus_id', waitingFlag.bus_id)
+           .eq('status', 'active')
+           .maybeSingle();
+         if (activeTrip) {
+           isAuthorized = true;
+         }
+       }
+
+       if (!isAuthorized) {
          console.warn(`[${requestId}] Driver ${driverUid} unauthorized for flag on bus ${waitingFlag.bus_id || 'NULL'} (assigned to ${driverBusId})`);
          return NextResponse.json({ success: false, error: 'Authorization failed: Driver-bus mismatch', requestId }, { status: 403 });
        }
+
+      if (isWaitingFlagExpired(waitingFlag)) {
+        return NextResponse.json({ success: false, error: 'Cannot acknowledge flag that has expired', requestId }, { status: 400 });
+      }
 
       // 4. Check for idempotency and update waiting flag status to acknowledged atomically
       if (waitingFlag.status === 'acknowledged') {

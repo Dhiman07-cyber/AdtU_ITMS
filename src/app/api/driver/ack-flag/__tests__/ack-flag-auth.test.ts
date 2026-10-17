@@ -77,7 +77,15 @@ describe('WAIT-001: ack-flag authorization — bus-scoping', () => {
   });
 
   it('rejects a driver whose active trip is on a DIFFERENT bus than the flag', async () => {
-    const flag = { id: 'flag-1', bus_id: 'bus-Y', trip_id: 'trip-Y', student_uid: 'student-1', status: 'raised' };
+    const flag = {
+      id: 'flag-1',
+      bus_id: 'bus-Y',
+      trip_id: 'trip-Y',
+      student_uid: 'student-1',
+      status: 'raised',
+      created_at: new Date().toISOString(),
+      expires_at: new Date(Date.now() + 600000).toISOString(),
+    };
 
     mockFrom.mockImplementation((table: string) => {
       if (table === 'waiting_flags') return makeFlagQuery(flag);
@@ -103,7 +111,15 @@ describe('WAIT-001: ack-flag authorization — bus-scoping', () => {
   });
 
   it('allows a driver whose active trip IS on the same bus as the flag', async () => {
-    const flag = { id: 'flag-1', bus_id: 'bus-Y', trip_id: 'trip-Y', student_uid: 'student-1', status: 'raised' };
+    const flag = {
+      id: 'flag-1',
+      bus_id: 'bus-Y',
+      trip_id: 'trip-Y',
+      student_uid: 'student-1',
+      status: 'raised',
+      created_at: new Date().toISOString(),
+      expires_at: new Date(Date.now() + 600000).toISOString(),
+    };
 
     mockFrom.mockImplementation((table: string) => {
       if (table === 'waiting_flags') return makeFlagQuery(flag);
@@ -119,4 +135,108 @@ describe('WAIT-001: ack-flag authorization — bus-scoping', () => {
     expect(res.status).toBe(200);
     expect(body.success).toBe(true);
   });
+
+  it('rejects acknowledgment when flag expires_at is in the past', async () => {
+    const flag = {
+      id: 'flag-expired',
+      bus_id: 'bus-Y',
+      trip_id: 'trip-Y',
+      student_uid: 'student-1',
+      status: 'raised',
+      expires_at: new Date(Date.now() - 60000).toISOString(),
+    };
+
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'waiting_flags') return makeFlagQuery(flag);
+      if (table === 'active_trips') return makeActiveTripQuery({ trip_id: 'trip-Y' });
+      return { select: vi.fn() };
+    });
+
+    const req = makeRequest({ flagId: 'flag-expired' });
+    const ctx = { auth: { uid: 'driver-1', role: 'driver' }, body: { flagId: 'flag-expired' }, requestId: 'test' };
+    const res = await (POST as any)(req, ctx);
+    const body = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(body.error).toMatch(/expired/i);
+  });
+
+  it('rejects acknowledgment when flag expires_at is null but created_at is older than 15 minutes', async () => {
+    const flag = {
+      id: 'flag-stale-created',
+      bus_id: 'bus-Y',
+      trip_id: 'trip-Y',
+      student_uid: 'student-1',
+      status: 'raised',
+      expires_at: null,
+      created_at: new Date(Date.now() - 16 * 60 * 1000).toISOString(),
+    };
+
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'waiting_flags') return makeFlagQuery(flag);
+      if (table === 'active_trips') return makeActiveTripQuery({ trip_id: 'trip-Y' });
+      return { select: vi.fn() };
+    });
+
+    const req = makeRequest({ flagId: 'flag-stale-created' });
+    const ctx = { auth: { uid: 'driver-1', role: 'driver' }, body: { flagId: 'flag-stale-created' }, requestId: 'test' };
+    const res = await (POST as any)(req, ctx);
+    const body = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(body.error).toMatch(/expired/i);
+  });
+
+  it('rejects acknowledgment when flag has malformed timestamps (fails closed)', async () => {
+    const flag = {
+      id: 'flag-malformed',
+      bus_id: 'bus-Y',
+      trip_id: 'trip-Y',
+      student_uid: 'student-1',
+      status: 'raised',
+      expires_at: 'NOT-A-DATE',
+      created_at: 'INVALID-DATE',
+    };
+
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'waiting_flags') return makeFlagQuery(flag);
+      if (table === 'active_trips') return makeActiveTripQuery({ trip_id: 'trip-Y' });
+      return { select: vi.fn() };
+    });
+
+    const req = makeRequest({ flagId: 'flag-malformed' });
+    const ctx = { auth: { uid: 'driver-1', role: 'driver' }, body: { flagId: 'flag-malformed' }, requestId: 'test' };
+    const res = await (POST as any)(req, ctx);
+    const body = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(body.error).toMatch(/expired/i);
+  });
+
+  it('rejects acknowledgment when flag timestamps are completely missing or null (fails closed)', async () => {
+    const flag = {
+      id: 'flag-null-timestamps',
+      bus_id: 'bus-Y',
+      trip_id: 'trip-Y',
+      student_uid: 'student-1',
+      status: 'raised',
+      expires_at: null,
+      created_at: null,
+    };
+
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'waiting_flags') return makeFlagQuery(flag);
+      if (table === 'active_trips') return makeActiveTripQuery({ trip_id: 'trip-Y' });
+      return { select: vi.fn() };
+    });
+
+    const req = makeRequest({ flagId: 'flag-null-timestamps' });
+    const ctx = { auth: { uid: 'driver-1', role: 'driver' }, body: { flagId: 'flag-null-timestamps' }, requestId: 'test' };
+    const res = await (POST as any)(req, ctx);
+    const body = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(body.error).toMatch(/expired/i);
+  });
 });
+

@@ -1,226 +1,30 @@
 /**
- * POST /api/waiting-flag/acknowledge
- * 
- * Driver acknowledges a waiting flag with:
- * - Driver validation
- * - Status update
- * - Real-time broadcast to student
- * - Audit logging
+ * DEPRECATED — This endpoint has been permanently removed.
+ *
+ * Use the canonical driver acknowledge endpoint instead:
+ *   POST /api/driver/ack-flag
+ *
+ * This stub returns 410 Gone for any request to ensure any cached client
+ * or integration test fails loudly rather than silently using stale logic.
+ *
+ * Removed: October 2026 (Issue 4.1 — endpoint deduplication cleanup)
  */
 
-import { emitEvent } from '@/domains/realtime/event-emitter';
-import { auth } from '@/lib/firebase-admin';
-import { checkRateLimit,createRateLimitId } from '@/lib/security/rate-limiter';
-import { getSupabaseServer } from '@/lib/supabase-server';
 import { NextResponse } from 'next/server';
 
-export async function POST(request: Request) {
-  const startTime = Date.now();
-
-  try {
-    const body = await request.json();
-    const { idToken, flagId, action } = body;
-
-    // Validate required fields
-    if (!idToken || !flagId || !action) {
-      return NextResponse.json(
-        { error: 'Missing required fields' },
-        { status: 400 }
-      );
+export async function POST() {
+  return NextResponse.json(
+    {
+      error: 'This endpoint has been permanently removed.',
+      alternative: 'POST /api/driver/ack-flag',
+      code: 'ENDPOINT_REMOVED',
+    },
+    {
+      status: 410,
+      headers: {
+        'Sunset': 'Sat, 01 Oct 2026 00:00:00 GMT',
+        'Link': '</api/driver/ack-flag>; rel="successor-version"',
+      },
     }
-
-    // Input length validation to prevent oversized payloads
-    if (typeof flagId !== 'string' || flagId.length > 128) {
-      return NextResponse.json(
-        { error: 'Invalid flag ID' },
-        { status: 400 }
-      );
-    }
-
-    // Validate action
-    if (!['acknowledge', 'boarded', 'ignore'].includes(action)) {
-      return NextResponse.json(
-        { error: 'Invalid action' },
-        { status: 400 }
-      );
-    }
-
-    // Verify Firebase token
-    const decodedToken = await auth.verifyIdToken(idToken);
-    const driverUid = decodedToken.uid;
-
-    // Rate limiting
-    const rlId = createRateLimitId(driverUid, 'waiting-flag-ack');
-    const rl = checkRateLimit(rlId, 30, 60_000);
-    if (!rl.allowed) {
-      return NextResponse.json(
-        { error: 'Too many requests. Please wait.' },
-        { status: 429 }
-      );
-    }
-
-    // SECURITY: Verify driver profile and get flag details in parallel
-    const supabase = getSupabaseServer();
-    const [driverProfileRes, flagRes] = await Promise.all([
-      supabase
-        .from('driver_profiles')
-        .select('uid, full_name')
-        .eq('uid', driverUid)
-        .maybeSingle(),
-      supabase
-        .from('waiting_flags')
-        .select('id, bus_id, status, student_uid')
-        .eq('id', flagId)
-        .single()
-    ]);
-
-    const driverProfile = driverProfileRes.data;
-    if (!driverProfile) {
-      return NextResponse.json(
-        { error: 'User is not authorized as a driver' },
-        { status: 403 }
-      );
-    }
-
-    const flag = flagRes.data;
-    if (flagRes.error || !flag) {
-      return NextResponse.json(
-        { error: 'Waiting flag not found' },
-        { status: 404 }
-      );
-    }
-
-    // Verify driver is assigned to this bus or holds active trip lock
-    const { data: activeTrip } = await supabase
-      .from('active_trips')
-      .select('trip_id')
-      .eq('driver_id', driverUid)
-      .eq('bus_id', flag.bus_id)
-      .eq('status', 'active')
-      .gt('expires_at', new Date().toISOString())
-      .maybeSingle();
-
-    const driverIsAuthorized = activeTrip !== null;
-
-    if (!driverIsAuthorized) {
-      return NextResponse.json(
-        { error: 'Driver is not authorized for this bus' },
-        { status: 403 }
-      );
-    }
-
-    // Validate state transition and check for idempotency
-    let allowedPriorStatuses: string[] = [];
-    if (action === 'acknowledge') {
-      if (flag.status === 'acknowledged') {
-        return NextResponse.json({ success: true, message: 'Flag acknowledge successfully', newStatus: 'acknowledged' });
-      }
-      if (['boarded', 'picked_up', 'cancelled', 'expired'].includes(flag.status)) {
-        return NextResponse.json({ error: `Cannot acknowledge flag that is already ${flag.status}` }, { status: 400 });
-      }
-      allowedPriorStatuses = ['raised', 'waiting'];
-    } else if (action === 'boarded') {
-      if (flag.status === 'boarded' || flag.status === 'picked_up') {
-        return NextResponse.json({ success: true, message: 'Flag boarded successfully', newStatus: flag.status });
-      }
-      if (['cancelled', 'expired'].includes(flag.status)) {
-        return NextResponse.json({ error: `Cannot mark boarded: flag is ${flag.status}` }, { status: 400 });
-      }
-      allowedPriorStatuses = ['raised', 'acknowledged', 'waiting'];
-    } else if (action === 'ignore') {
-      if (flag.status === 'cancelled' || flag.status === 'expired') {
-        return NextResponse.json({ success: true, message: 'Flag ignore successfully', newStatus: flag.status });
-      }
-      if (['boarded', 'picked_up'].includes(flag.status)) {
-        return NextResponse.json({ error: `Cannot ignore flag that is ${flag.status}` }, { status: 400 });
-      }
-      allowedPriorStatuses = ['raised', 'acknowledged', 'waiting'];
-    }
-
-    // Update flag status based on action
-    let newStatus = 'raised';
-    let updateData: any = {
-      ack_by_driver_uid: driverUid
-    };
-
-    switch (action) {
-      case 'acknowledge':
-        newStatus = 'acknowledged';
-        updateData.acknowledged_at = new Date().toISOString();
-        break;
-      case 'boarded':
-        newStatus = 'boarded';
-        updateData.boarded_at = new Date().toISOString();
-        break;
-      case 'ignore':
-        newStatus = 'cancelled';
-        updateData.cancelled_at = new Date().toISOString();
-        break;
-    }
-
-    updateData.status = newStatus;
-
-    // Update in Supabase atomically
-    const { data: updatedFlags, error: updateError } = await supabase
-      .from('waiting_flags')
-      .update(updateData)
-      .eq('id', flagId)
-      .in('status', allowedPriorStatuses)
-      .select('id, status');
-
-    if (updateError) {
-      console.error('❌ Error updating flag:', updateError);
-      return NextResponse.json(
-        { error: 'Failed to update flag' },
-        { status: 500 }
-      );
-    }
-
-    if (!updatedFlags || updatedFlags.length === 0) {
-      return NextResponse.json(
-        { error: 'Flag already processed or state transition invalid' },
-        { status: 409 }
-      );
-    }
-
-    // Broadcast via WebSocket
-    const ts = new Date().toISOString();
-    const flagEvent = action === 'acknowledge' ? 'waiting_flag_acknowledged'
-      : action === 'boarded' ? 'waiting_flag_boarded'
-      : 'waiting_flag_cancelled';
-
-    if (action === 'acknowledge') {
-      emitEvent(`student_${flag.student_uid}`, 'flag_acknowledged', {
-        flagId,
-        driverUid,
-        driverName: driverProfile.full_name || 'Driver',
-        timestamp: ts
-      }).catch(() => {});
-    }
-
-    emitEvent(`waiting_flags_${flag.bus_id}`, flagEvent, {
-      flagId,
-      status: newStatus,
-      action,
-      driverUid,
-      timestamp: ts
-    }).catch(() => {});
-
-    // Log operation (audit_logs moved to Supabase)
-
-    const elapsed = Date.now() - startTime;
-
-    return NextResponse.json({
-      success: true,
-      message: `Flag ${action} successfully`,
-      newStatus
-    });
-
-  } catch (error: any) {
-    console.error('❌ Error in waiting-flag/acknowledge:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
-  }
+  );
 }

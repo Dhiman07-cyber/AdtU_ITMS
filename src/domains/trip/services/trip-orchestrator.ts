@@ -97,11 +97,9 @@ export async function startTrip(params: StartTripParams): Promise<StartTripOutpu
     return { success: false, reason: routeErr?.message || 'Route assignment validation failed', errorCode: 'VALIDATION_ERROR' };
   }
 
-  const conflict = preflight;
-
-  if (conflict.existingTripId) {
-    appLogger.info('trip', 'start_idempotent', { ...logCtx, tripId: conflict.existingTripId, routeId: effectiveRouteId, latencyMs: Date.now() - start });
-    return { success: true, tripId: conflict.existingTripId, routeId: effectiveRouteId, shift: tripShift };
+  if (preflight.existingTripId) {
+    appLogger.info('trip', 'start_idempotent', { ...logCtx, tripId: preflight.existingTripId, routeId: effectiveRouteId, latencyMs: Date.now() - start });
+    return { success: true, tripId: preflight.existingTripId, routeId: effectiveRouteId, shift: tripShift };
   }
 
   const tripId = params.tripId || crypto.randomUUID();
@@ -246,7 +244,6 @@ export async function endTrip(params: EndTripParams): Promise<EndTripOutput> {
   // sub-10-minute trips are discarded from history inside the RPC.
   await Promise.allSettled([
     cleanupTrip({ driverId: params.driverId, busId: params.busId, tripId: activeTripId }),
-    supabase.from('bus_locations').delete().eq('bus_id', params.busId),
   ]);
 
   invalidateActiveTripCache(params.busId, params.driverId);
