@@ -19,7 +19,6 @@ This single file contains everything you need - no other SQL files are required.
 ### Tables (7 total)
 | Table | Purpose |
 |-------|---------|
-| `bus_locations` | Real-time GPS tracking |
 | `waiting_flags` | Student waiting signals |
 | `driver_location_updates` | Historical location breadcrumbs |
 | `reassignment_logs` | Audit logs for assignments |
@@ -38,7 +37,6 @@ This single file contains everything you need - no other SQL files are required.
 
 | Table | Who Can Read |
 |-------|--------------|
-| `bus_locations` | Anon, Authenticated |
 | `waiting_flags` | Student owner, active drivers, or service role |
 | `driver_location_updates` | Driver owner or service role |
 | `payments` | Student owner or service role |

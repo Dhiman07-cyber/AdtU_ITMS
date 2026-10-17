@@ -266,7 +266,7 @@ CREATE TABLE IF NOT EXISTS applications (
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_applications_active_student_session 
-ON applications (applicant_uid, session_start_year) 
+ON applications (applicant_uid, COALESCE(session_start_year, 0)) 
 WHERE state NOT IN ('rejected', 'cancelled', 'expired');
 
 -- ── 3.5 Financial Domain (Payments Ledger) ─────────────────────────────────────
@@ -350,23 +350,9 @@ CREATE TABLE IF NOT EXISTS public.active_trips (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE TABLE IF NOT EXISTS public.bus_locations (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  bus_id TEXT NOT NULL UNIQUE,
-  trip_id UUID,
-  driver_id TEXT,
-  route_id TEXT,
-  shift TEXT,
-  lat DOUBLE PRECISION NOT NULL,
-  lng DOUBLE PRECISION NOT NULL,
-  accuracy DOUBLE PRECISION,
-  speed DOUBLE PRECISION,
-  heading DOUBLE PRECISION,
-  source TEXT NOT NULL DEFAULT 'gps',
-  timestamp TIMESTAMPTZ DEFAULT NOW(),
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW()
-);
+-- Note: Ephemeral real-time GPS tracking is handled exclusively by the Redis & WebSocket (WS1)
+-- cluster. High-frequency telemetry fixes are never written to PostgreSQL.
+
 
 CREATE TABLE IF NOT EXISTS waiting_flags (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -532,7 +518,7 @@ DECLARE
     tbls TEXT[] := ARRAY[
         'users', 'student_profiles', 'driver_profiles', 'moderator_profiles',
         'admin_profiles', 'unauth_users', 'buses', 'temporary_assignments',
-        'routes', 'applications', 'fcm_tokens', 'notifications', 'active_trips', 'bus_locations'
+        'routes', 'applications', 'fcm_tokens', 'notifications', 'active_trips'
     ];
 BEGIN
     FOREACH tbl IN ARRAY tbls LOOP
@@ -548,6 +534,196 @@ CREATE TRIGGER update_payments_updated_at_trigger
   BEFORE UPDATE ON public.payments
   FOR EACH ROW
   EXECUTE FUNCTION update_payments_updated_at();
+
+-- True Financial Immutability Protection: Prevent deletion or tampering of finalized payment records
+CREATE OR REPLACE FUNCTION protect_completed_payments()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- 1. DELETE PROTECTION: Forbid deleting any finalized, duplicate, unresolved, refunded, refund-denied, or rejected payment record
+    IF TG_OP = 'DELETE' THEN
+        IF OLD.status IN ('Completed', 'Duplicate_Pending_Refund', 'Captured_Pending_Review', 'Refunded', 'Refund_Denied', 'Rejected') THEN
+            RAISE EXCEPTION 'Cannot delete finalized or audit payment record %', OLD.payment_id;
+        END IF;
+        RETURN OLD;
+    ELSIF TG_OP = 'UPDATE' THEN
+        -- 2. IMMUTABILITY OF IDENTITY & FINANCIAL FIELDS FOR FINALIZED / AUDIT RECORDS
+        -- Uses NULL-safe IS DISTINCT FROM comparison for all fields including nullable provider identifiers
+        IF OLD.status IN ('Completed', 'Duplicate_Pending_Refund', 'Refunded', 'Refund_Denied', 'Rejected') AND (
+            NEW.amount IS DISTINCT FROM OLD.amount OR
+            NEW.currency IS DISTINCT FROM OLD.currency OR
+            NEW.method IS DISTINCT FROM OLD.method OR
+            NEW.student_uid IS DISTINCT FROM OLD.student_uid OR
+            NEW.student_id IS DISTINCT FROM OLD.student_id OR
+            NEW.payment_id IS DISTINCT FROM OLD.payment_id OR
+            NEW.razorpay_payment_id IS DISTINCT FROM OLD.razorpay_payment_id OR
+            NEW.razorpay_order_id IS DISTINCT FROM OLD.razorpay_order_id OR
+            NEW.session_start_year IS DISTINCT FROM OLD.session_start_year OR
+            NEW.session_end_year IS DISTINCT FROM OLD.session_end_year
+        ) THEN
+            RAISE EXCEPTION 'Cannot mutate financial or identity fields of finalized/audit payment record % (current status: %)', OLD.payment_id, OLD.status;
+        ELSIF OLD.status = 'Captured_Pending_Review' THEN
+            -- Financial, method, and transaction identifiers are strictly immutable on Captured_Pending_Review
+            IF (
+                NEW.amount IS DISTINCT FROM OLD.amount OR
+                NEW.currency IS DISTINCT FROM OLD.currency OR
+                NEW.method IS DISTINCT FROM OLD.method OR
+                NEW.student_uid IS DISTINCT FROM OLD.student_uid OR
+                NEW.payment_id IS DISTINCT FROM OLD.payment_id OR
+                NEW.razorpay_payment_id IS DISTINCT FROM OLD.razorpay_payment_id OR
+                NEW.razorpay_order_id IS DISTINCT FROM OLD.razorpay_order_id
+            ) THEN
+                RAISE EXCEPTION 'Cannot mutate financial or provider identity fields of Captured_Pending_Review payment record %', OLD.payment_id;
+            END IF;
+
+            -- If remaining in Captured_Pending_Review, session years cannot be mutated without a formal status transition
+            IF NEW.status = 'Captured_Pending_Review' AND (
+                NEW.session_start_year IS DISTINCT FROM OLD.session_start_year OR
+                NEW.session_end_year IS DISTINCT FROM OLD.session_end_year
+            ) THEN
+                RAISE EXCEPTION 'Cannot alter session fields of Captured_Pending_Review record % without reconciling to Completed', OLD.payment_id;
+            END IF;
+        END IF;
+
+        -- 3. LIFECYCLE TRANSITION CONSTRAINTS
+        -- A. Completed transition constraints:
+        -- Completed may ONLY transition to 'Refunded' when a verified full refund is recorded with complete audit evidence.
+        -- Any other status change is strictly forbidden.
+        IF OLD.status = 'Completed' AND NEW.status IS DISTINCT FROM OLD.status THEN
+            IF NEW.status = 'Refunded' THEN
+                -- Explicit safe refund transition requirements:
+                -- 1. Authorized actor recorded
+                IF NEW.approved_by IS NULL THEN
+                    RAISE EXCEPTION 'Cannot transition Completed payment % to Refunded without authorized actor (approved_by)', OLD.payment_id;
+                END IF;
+                -- 2. Timestamp recorded
+                IF NEW.approved_at IS NULL THEN
+                    RAISE EXCEPTION 'Cannot transition Completed payment % to Refunded without refund timestamp (approved_at)', OLD.payment_id;
+                END IF;
+                -- 3. External refund reference in metadata
+                IF NEW.metadata IS NULL OR (
+                    (NEW.metadata->>'refund_id' IS NULL OR TRIM(NEW.metadata->>'refund_id') = '') AND
+                    (NEW.metadata->>'external_refund_ref' IS NULL OR TRIM(NEW.metadata->>'external_refund_ref') = '') AND
+                    (NEW.metadata->>'razorpay_refund_id' IS NULL OR TRIM(NEW.metadata->>'razorpay_refund_id') = '')
+                ) THEN
+                    RAISE EXCEPTION 'Cannot transition Completed payment % to Refunded without external refund reference in metadata', OLD.payment_id;
+                END IF;
+                -- 4. Cumulative refunded amount must equal or exceed original captured amount
+                IF NEW.metadata IS NULL OR NEW.metadata->>'refunded_amount' IS NULL OR
+                   (NEW.metadata->>'refunded_amount')::NUMERIC < (OLD.amount - 0.01) THEN
+                    RAISE EXCEPTION 'Cannot transition Completed payment % to Refunded: cumulative refunded amount (%) must equal or exceed original captured amount (%)',
+                        OLD.payment_id, COALESCE(NEW.metadata->>'refunded_amount', '0'), OLD.amount;
+                END IF;
+            ELSE
+                RAISE EXCEPTION 'Cannot mutate status of Completed payment record %: permitted transition is only to Refunded upon verified full refund (attempted: %)', OLD.payment_id, NEW.status;
+            END IF;
+        END IF;
+
+        -- B. Duplicate_Pending_Refund may only transition to 'Refunded' or 'Refund_Denied' (manual audit outcomes)
+        IF OLD.status = 'Duplicate_Pending_Refund' AND NEW.status IS DISTINCT FROM OLD.status THEN
+            IF NEW.status NOT IN ('Refunded', 'Refund_Denied') THEN
+                RAISE EXCEPTION 'Invalid status transition for Duplicate_Pending_Refund record %: permitted transitions are only Refunded or Refund_Denied (attempted: %)', OLD.payment_id, NEW.status;
+            END IF;
+        END IF;
+
+        -- C. Captured_Pending_Review reconciliation transition:
+        -- Permitted transitions are only: Completed, Duplicate_Pending_Refund, Refunded, or Refund_Denied
+        IF OLD.status = 'Captured_Pending_Review' AND NEW.status IS DISTINCT FROM OLD.status THEN
+            IF NEW.status = 'Completed' THEN
+                -- Explicit safe reconciliation operation requirements:
+                -- 1. Valid session bounds: start < end
+                IF NEW.session_start_year IS NULL OR NEW.session_end_year IS NULL OR NEW.session_start_year >= NEW.session_end_year THEN
+                    RAISE EXCEPTION 'Cannot resolve Captured_Pending_Review % to Completed without valid session boundaries (start < end)', OLD.payment_id;
+                END IF;
+                -- 2. Authorized actor recorded
+                IF NEW.approved_by IS NULL THEN
+                    RAISE EXCEPTION 'Cannot reconcile Captured_Pending_Review % to Completed without authorized actor (approved_by)', OLD.payment_id;
+                END IF;
+                -- 3. Timestamp recorded
+                IF NEW.approved_at IS NULL THEN
+                    RAISE EXCEPTION 'Cannot reconcile Captured_Pending_Review % to Completed without reconciliation timestamp (approved_at)', OLD.payment_id;
+                END IF;
+                -- 4. Audit evidence documented in metadata
+                IF NEW.metadata IS NULL OR NEW.metadata->>'reconciliation_evidence' IS NULL OR TRIM(NEW.metadata->>'reconciliation_evidence') = '' THEN
+                    RAISE EXCEPTION 'Cannot reconcile Captured_Pending_Review % to Completed without documented reconciliation_evidence in metadata', OLD.payment_id;
+                END IF;
+            ELSIF NEW.status NOT IN ('Duplicate_Pending_Refund', 'Refunded', 'Refund_Denied') THEN
+                RAISE EXCEPTION 'Invalid status transition for Captured_Pending_Review record %: permitted transitions are Completed (with valid session and audit evidence), Duplicate_Pending_Refund, Refunded, or Refund_Denied (attempted: %)', OLD.payment_id, NEW.status;
+            END IF;
+        END IF;
+
+        -- D. External refund verification requirement: transition to Refunded requires external refund reference and authorized actor
+        IF NEW.status = 'Refunded' AND OLD.status <> 'Refunded' THEN
+            IF NEW.approved_by IS NULL THEN
+                RAISE EXCEPTION 'Cannot mark payment % as Refunded without authorized actor (approved_by)', OLD.payment_id;
+            END IF;
+            IF NEW.metadata IS NULL OR (
+                (NEW.metadata->>'refund_id' IS NULL OR TRIM(NEW.metadata->>'refund_id') = '') AND
+                (NEW.metadata->>'external_refund_ref' IS NULL OR TRIM(NEW.metadata->>'external_refund_ref') = '') AND
+                (NEW.metadata->>'razorpay_refund_id' IS NULL OR TRIM(NEW.metadata->>'razorpay_refund_id') = '')
+            ) THEN
+                RAISE EXCEPTION 'Cannot mark payment % as Refunded without external refund reference in metadata (refund_id, external_refund_ref, or razorpay_refund_id)', OLD.payment_id;
+            END IF;
+        END IF;
+
+        -- E. Refund denial audit requirement: transition to Refund_Denied requires denial reason and authorized actor
+        IF NEW.status = 'Refund_Denied' AND OLD.status <> 'Refund_Denied' THEN
+            IF NEW.approved_by IS NULL THEN
+                RAISE EXCEPTION 'Cannot mark payment % as Refund_Denied without authorized actor (approved_by)', OLD.payment_id;
+            END IF;
+            IF NEW.metadata IS NULL OR (NEW.metadata->>'denial_reason' IS NULL OR TRIM(NEW.metadata->>'denial_reason') = '') THEN
+                RAISE EXCEPTION 'Cannot mark payment % as Refund_Denied without documented denial_reason in metadata', OLD.payment_id;
+            END IF;
+        END IF;
+
+        -- F. Refunded, Refund_Denied and Rejected are terminal: once marked, status cannot change
+        IF OLD.status IN ('Refunded', 'Refund_Denied', 'Rejected') AND NEW.status IS DISTINCT FROM OLD.status THEN
+            RAISE EXCEPTION 'Cannot mutate status of terminal payment record % (status: %)', OLD.payment_id, OLD.status;
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS protect_completed_payments_trigger ON public.payments;
+CREATE TRIGGER protect_completed_payments_trigger
+    BEFORE UPDATE OR DELETE ON public.payments
+    FOR EACH ROW
+    EXECUTE FUNCTION protect_completed_payments();
+
+-- High-Performance Scalable Payment KPI Aggregation Function
+CREATE OR REPLACE FUNCTION public.get_payment_analytics_aggregates()
+RETURNS TABLE (
+  total_payments BIGINT,
+  completed_payments BIGINT,
+  pending_payments BIGINT,
+  duplicate_refund_count BIGINT,
+  unresolved_review_count BIGINT,
+  refund_denied_count BIGINT,
+  total_revenue NUMERIC,
+  online_payments BIGINT,
+  offline_payments BIGINT
+) AS $$
+BEGIN
+  RETURN QUERY
+  SELECT
+    COUNT(*)::BIGINT AS total_payments,
+    COUNT(*) FILTER (WHERE status = 'Completed' OR LOWER(status) = 'completed')::BIGINT AS completed_payments,
+    COUNT(*) FILTER (WHERE status = 'Pending' OR LOWER(status) = 'pending')::BIGINT AS pending_payments,
+    COUNT(*) FILTER (WHERE status = 'Duplicate_Pending_Refund' OR LOWER(status) = 'duplicate_pending_refund')::BIGINT AS duplicate_refund_count,
+    COUNT(*) FILTER (WHERE status = 'Captured_Pending_Review' OR LOWER(status) = 'captured_pending_review')::BIGINT AS unresolved_review_count,
+    COUNT(*) FILTER (WHERE status = 'Refund_Denied' OR LOWER(status) = 'refund_denied')::BIGINT AS refund_denied_count,
+    COALESCE(SUM(amount) FILTER (WHERE status = 'Completed' OR LOWER(status) = 'completed'), 0)::NUMERIC AS total_revenue,
+    COUNT(*) FILTER (WHERE (status = 'Completed' OR LOWER(status) = 'completed') AND (method = 'Online' OR LOWER(method) = 'online'))::BIGINT AS online_payments,
+    COUNT(*) FILTER (WHERE (status = 'Completed' OR LOWER(status) = 'completed') AND (method = 'Offline' OR LOWER(method) = 'offline'))::BIGINT AS offline_payments
+  FROM public.payments;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+
+REVOKE EXECUTE ON FUNCTION public.get_payment_analytics_aggregates() FROM public;
+REVOKE EXECUTE ON FUNCTION public.get_payment_analytics_aggregates() FROM anon;
+GRANT EXECUTE ON FUNCTION public.get_payment_analytics_aggregates() TO authenticated;
+GRANT EXECUTE ON FUNCTION public.get_payment_analytics_aggregates() TO service_role;
+
 
 DROP TRIGGER IF EXISTS trigger_update_reassignment_logs_updated_at ON public.reassignment_logs;
 CREATE TRIGGER trigger_update_reassignment_logs_updated_at
@@ -595,13 +771,31 @@ CREATE INDEX IF NOT EXISTS idx_payments_razorpay_order_id ON payments(razorpay_o
 CREATE INDEX IF NOT EXISTS idx_payments_status ON payments(status);
 CREATE INDEX IF NOT EXISTS idx_payments_created_at ON payments(created_at DESC);
 
+-- Ensure database-level concurrency protection: at most one Completed payment per student and academic session
+CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_one_completed_per_session
+ON payments(student_uid, session_start_year, session_end_year)
+WHERE status = 'Completed';
+
+-- Ensure database-level idempotency: at most one payment record per Razorpay payment ID
+CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_unique_razorpay_payment_id
+ON payments(razorpay_payment_id)
+WHERE razorpay_payment_id IS NOT NULL;
+
+-- Enforce that Completed payments must have non-null session start and end years
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'chk_payments_completed_session'
+  ) THEN
+    ALTER TABLE public.payments ADD CONSTRAINT chk_payments_completed_session
+      CHECK (status <> 'Completed' OR (session_start_year IS NOT NULL AND session_end_year IS NOT NULL));
+  END IF;
+END $$;
+
 CREATE INDEX IF NOT EXISTS idx_active_trips_bus_id ON active_trips(bus_id);
 CREATE INDEX IF NOT EXISTS idx_active_trips_driver_id ON active_trips(driver_id);
 CREATE INDEX IF NOT EXISTS idx_active_trips_status ON active_trips(status);
 
-CREATE INDEX IF NOT EXISTS idx_bus_locations_bus_id ON bus_locations(bus_id);
-CREATE INDEX IF NOT EXISTS idx_bus_locations_trip_id ON bus_locations(trip_id);
-CREATE INDEX IF NOT EXISTS idx_bus_locations_updated_at ON bus_locations(updated_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_waiting_flags_student_uid ON waiting_flags(student_uid);
 CREATE INDEX IF NOT EXISTS idx_waiting_flags_bus_id ON waiting_flags(bus_id);
@@ -1078,7 +1272,7 @@ BEGIN
         ELSE ARRAY[]::TEXT[]
     END;
 
-    IF NOT (p_new_state = ANY(v_valid_from)) THEN
+    IF NOT (v_app.state = ANY(v_valid_from)) THEN
         RETURN jsonb_build_object('success', false, 'error', format('Invalid transition: %s to %s', v_app.state, p_new_state), 'status', 400);
     END IF;
 
@@ -1469,7 +1663,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
 -- ── 7.5 Operational Trip & Session Lifecycle Functions ─────────────────────────
 
--- end_trip_atomically: deletes active_trips and bus_locations in a single atomic transaction
+-- end_trip_atomically: deletes active_trips lock and records history in a single atomic transaction
 -- with short-trip discard guard (p_min_duration_seconds).
 DROP FUNCTION IF EXISTS public.end_trip_atomically(TEXT, TEXT, TEXT);
 CREATE OR REPLACE FUNCTION public.end_trip_atomically(
@@ -1501,9 +1695,8 @@ BEGIN
 
   v_dur_sec := EXTRACT(EPOCH FROM (v_now - v_trip.start_time))::INTEGER;
 
-  -- Remove the active lock and bus location atomically within the single transaction
+  -- Remove the active lock atomically within the single transaction
   DELETE FROM active_trips WHERE trip_id = v_trip.trip_id;
-  DELETE FROM bus_locations WHERE bus_id = p_bus_id;
 
   -- Represent short trips as terminated_early / short_trip rather than deleting historical fact
   IF p_min_duration_seconds > 0 AND v_dur_sec < p_min_duration_seconds THEN
@@ -1557,13 +1750,19 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
 CREATE OR REPLACE FUNCTION expire_waiting_flags()
-RETURNS VOID AS $$
+RETURNS INTEGER AS $$
+DECLARE
+  v_expired INTEGER;
 BEGIN
-  UPDATE waiting_flags
+  UPDATE public.waiting_flags
   SET status = 'expired'
-  WHERE status = 'raised'
-     AND expires_at IS NOT NULL
-     AND expires_at < NOW();
+  WHERE status IN ('raised', 'waiting', 'acknowledged')
+     AND (
+       (expires_at IS NOT NULL AND expires_at < NOW())
+       OR (created_at < NOW() - INTERVAL '2 hours')
+     );
+  GET DIAGNOSTICS v_expired = ROW_COUNT;
+  RETURN v_expired;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
@@ -1705,7 +1904,12 @@ BEGIN
     IF p_release_seat AND p_bus_id IS NOT NULL THEN
         SELECT * FROM bus_decrement_capacity(p_bus_id, v_normalized_shift) INTO v_capacity_result;
         IF v_capacity_result->>'error' IS NOT NULL THEN
-            RETURN jsonb_build_object('success', false, 'error', v_capacity_result->>'error');
+            IF v_capacity_result->>'error' LIKE '%not found%' THEN
+                -- Bus was removed or renamed; proceed with soft-block without blocking student lifecycle
+                v_capacity_result := jsonb_build_object('warning', v_capacity_result->>'error');
+            ELSE
+                RETURN jsonb_build_object('success', false, 'error', v_capacity_result->>'error');
+            END IF;
         END IF;
     END IF;
 
@@ -1719,7 +1923,7 @@ BEGIN
 
     IF v_student_updated <> 1 THEN
         -- Compensating rollback of capacity if student update failed
-        IF p_release_seat AND p_bus_id IS NOT NULL THEN
+        IF p_release_seat AND p_bus_id IS NOT NULL AND v_capacity_result->>'warning' IS NULL THEN
             PERFORM bus_increment_capacity(p_bus_id, v_normalized_shift);
         END IF;
         RAISE EXCEPTION 'Expected 1 row updated for student uid=%, got %', p_student_uid, v_student_updated;
@@ -1735,7 +1939,7 @@ BEGIN
     );
 EXCEPTION WHEN OTHERS THEN
     -- Compensating rollback on any exception
-    IF p_release_seat AND p_bus_id IS NOT NULL THEN
+    IF p_release_seat AND p_bus_id IS NOT NULL AND v_capacity_result->>'warning' IS NULL THEN
         PERFORM bus_increment_capacity(p_bus_id, v_normalized_shift);
     END IF;
     RAISE;
@@ -2615,7 +2819,6 @@ ALTER TABLE public.routes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.applications ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.payments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.active_trips ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.bus_locations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.waiting_flags ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.driver_trip_history ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.driver_location_updates ENABLE ROW LEVEL SECURITY;
@@ -2695,23 +2898,13 @@ DROP POLICY IF EXISTS "active_trips_service_role" ON public.active_trips;
 CREATE POLICY "active_trips_service_role" ON public.active_trips FOR ALL TO service_role
 USING (true) WITH CHECK (true);
 
-DROP POLICY IF EXISTS "bus_locations_select_anon" ON public.bus_locations;
-CREATE POLICY "bus_locations_select_anon" ON public.bus_locations FOR SELECT TO anon, authenticated
-USING (true);
-
-DROP POLICY IF EXISTS "bus_locations_insert_service" ON public.bus_locations;
-CREATE POLICY "bus_locations_insert_service" ON public.bus_locations FOR INSERT TO service_role WITH CHECK (true);
-
-DROP POLICY IF EXISTS "bus_locations_update_service" ON public.bus_locations;
-CREATE POLICY "bus_locations_update_service" ON public.bus_locations FOR UPDATE TO service_role USING (true);
-
-DROP POLICY IF EXISTS "bus_locations_delete_service" ON public.bus_locations;
-CREATE POLICY "bus_locations_delete_service" ON public.bus_locations FOR DELETE TO service_role USING (true);
 
 DROP POLICY IF EXISTS "waiting_flags_select_anon" ON public.waiting_flags;
 DROP POLICY IF EXISTS "waiting_flags_select_authenticated" ON public.waiting_flags;
 CREATE POLICY "waiting_flags_select_authenticated" ON public.waiting_flags FOR SELECT TO authenticated
-USING (status IN ('raised', 'acknowledged') OR student_uid = auth.uid()::text);
+USING (student_uid = auth.uid()::text OR EXISTS (
+  SELECT 1 FROM active_trips WHERE active_trips.driver_id = auth.uid()::text AND active_trips.bus_id = waiting_flags.bus_id AND active_trips.status = 'active'
+) OR public.user_has_role(auth.uid()::text, 'admin') OR public.user_has_role(auth.uid()::text, 'moderator'));
 
 DROP POLICY IF EXISTS "Students can create their own waiting flags" ON public.waiting_flags;
 CREATE POLICY "Students can create their own waiting flags" ON public.waiting_flags FOR INSERT TO authenticated
@@ -2853,8 +3046,10 @@ BEGIN
         'transition_application_state',
         'cleanup_old_trip_history',
         'cleanup_stale_device_sessions',
+        'cleanup_abandoned_application_locks',
+        'release_application_lock',
         'expire_waiting_flags',
-        'cleanup_stale_locks_pg',
+        'cleanup_stale_locks',
         'get_stale_locks',
         'get_reassignment_logs',
         'processed_payments_acquire',
@@ -2888,10 +3083,6 @@ BEGIN
         EXCEPTION WHEN duplicate_object THEN NULL;
         END;
         BEGIN
-            ALTER PUBLICATION supabase_realtime ADD TABLE public.bus_locations;
-        EXCEPTION WHEN duplicate_object THEN NULL;
-        END;
-        BEGIN
             ALTER PUBLICATION supabase_realtime ADD TABLE public.waiting_flags;
         EXCEPTION WHEN duplicate_object THEN NULL;
         END;
@@ -2910,6 +3101,399 @@ COMMENT ON COLUMN public.payments.student_name IS 'Student name - stores AES-256
 COMMENT ON COLUMN public.payments.student_id IS 'Enrollment ID - stores AES-256-GCM encrypted data for new records. Legacy plain-text data is handled transparently.';
 COMMENT ON COLUMN public.payments.offline_transaction_id IS 'Offline transaction ID - stores AES-256-GCM encrypted data for new records. Legacy plain-text data is handled transparently.';
 COMMENT ON COLUMN public.payments.document_signature IS 'RSA-2048 digital signature for tamper-proof receipt verification. Generated during receipt creation and verified during QR scan.';
-COMMENT ON TABLE public.bus_locations IS 'Real-time GPS coordinates of buses during active trips';
 COMMENT ON TABLE public.waiting_flags IS 'Student waiting signals at bus stops';
 COMMENT ON TABLE public.active_trips IS 'Multi-driver lock system - Live trip records with heartbeat for exclusive bus operation';
+
+-- =============================================================================
+-- 12. PAYMENT IMMUTABILITY, CONSTRAINTS & ANALYTICS AGGREGATES
+-- =============================================================================
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_unique_razorpay_payment_id
+ON public.payments(razorpay_payment_id)
+WHERE razorpay_payment_id IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_one_completed_per_session
+ON public.payments(student_uid, session_start_year, session_end_year)
+WHERE status = 'Completed';
+
+CREATE OR REPLACE FUNCTION public.protect_completed_payments()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- 1. DELETE PROTECTION: Forbid deleting any finalized, duplicate, unresolved, refunded, refund-denied, or rejected payment record
+    IF TG_OP = 'DELETE' THEN
+        IF OLD.status IN ('Completed', 'Duplicate_Pending_Refund', 'Captured_Pending_Review', 'Refunded', 'Refund_Denied', 'Rejected') THEN
+            RAISE EXCEPTION 'Cannot delete finalized or audit payment record %', OLD.payment_id;
+        END IF;
+        RETURN OLD;
+    ELSIF TG_OP = 'UPDATE' THEN
+        -- 2. IMMUTABILITY OF IDENTITY & FINANCIAL FIELDS FOR FINALIZED / AUDIT RECORDS
+        -- Uses NULL-safe IS DISTINCT FROM comparison for all fields including nullable provider identifiers
+        IF OLD.status IN ('Completed', 'Duplicate_Pending_Refund', 'Refunded', 'Refund_Denied', 'Rejected') AND (
+            NEW.amount IS DISTINCT FROM OLD.amount OR
+            NEW.currency IS DISTINCT FROM OLD.currency OR
+            NEW.method IS DISTINCT FROM OLD.method OR
+            NEW.student_uid IS DISTINCT FROM OLD.student_uid OR
+            NEW.student_id IS DISTINCT FROM OLD.student_id OR
+            NEW.payment_id IS DISTINCT FROM OLD.payment_id OR
+            NEW.razorpay_payment_id IS DISTINCT FROM OLD.razorpay_payment_id OR
+            NEW.razorpay_order_id IS DISTINCT FROM OLD.razorpay_order_id OR
+            NEW.session_start_year IS DISTINCT FROM OLD.session_start_year OR
+            NEW.session_end_year IS DISTINCT FROM OLD.session_end_year
+        ) THEN
+            RAISE EXCEPTION 'Cannot mutate financial or identity fields of finalized/audit payment record % (current status: %)', OLD.payment_id, OLD.status;
+        ELSIF OLD.status = 'Captured_Pending_Review' THEN
+            -- Financial, method, and transaction identifiers are strictly immutable on Captured_Pending_Review
+            IF (
+                NEW.amount IS DISTINCT FROM OLD.amount OR
+                NEW.currency IS DISTINCT FROM OLD.currency OR
+                NEW.method IS DISTINCT FROM OLD.method OR
+                NEW.student_uid IS DISTINCT FROM OLD.student_uid OR
+                NEW.payment_id IS DISTINCT FROM OLD.payment_id OR
+                NEW.razorpay_payment_id IS DISTINCT FROM OLD.razorpay_payment_id OR
+                NEW.razorpay_order_id IS DISTINCT FROM OLD.razorpay_order_id
+            ) THEN
+                RAISE EXCEPTION 'Cannot mutate financial or provider identity fields of Captured_Pending_Review payment record %', OLD.payment_id;
+            END IF;
+
+            -- If remaining in Captured_Pending_Review, session years cannot be mutated without a formal status transition
+            IF NEW.status = 'Captured_Pending_Review' AND (
+                NEW.session_start_year IS DISTINCT FROM OLD.session_start_year OR
+                NEW.session_end_year IS DISTINCT FROM OLD.session_end_year
+            ) THEN
+                RAISE EXCEPTION 'Cannot alter session fields of Captured_Pending_Review record % without reconciling to Completed', OLD.payment_id;
+            END IF;
+        END IF;
+
+        -- 3. LIFECYCLE TRANSITION CONSTRAINTS
+        -- A. Completed transition constraints:
+        -- Completed may ONLY transition to 'Refunded' when a verified full refund is recorded with complete audit evidence.
+        -- Any other status change is strictly forbidden.
+        IF OLD.status = 'Completed' AND NEW.status IS DISTINCT FROM OLD.status THEN
+            IF NEW.status = 'Refunded' THEN
+                -- Explicit safe refund transition requirements:
+                -- 1. Authorized actor recorded
+                IF NEW.approved_by IS NULL THEN
+                    RAISE EXCEPTION 'Cannot transition Completed payment % to Refunded without authorized actor (approved_by)', OLD.payment_id;
+                END IF;
+                -- 2. Timestamp recorded
+                IF NEW.approved_at IS NULL THEN
+                    RAISE EXCEPTION 'Cannot transition Completed payment % to Refunded without refund timestamp (approved_at)', OLD.payment_id;
+                END IF;
+                -- 3. External refund reference in metadata
+                IF NEW.metadata IS NULL OR (
+                    (NEW.metadata->>'refund_id' IS NULL OR TRIM(NEW.metadata->>'refund_id') = '') AND
+                    (NEW.metadata->>'external_refund_ref' IS NULL OR TRIM(NEW.metadata->>'external_refund_ref') = '') AND
+                    (NEW.metadata->>'razorpay_refund_id' IS NULL OR TRIM(NEW.metadata->>'razorpay_refund_id') = '')
+                ) THEN
+                    RAISE EXCEPTION 'Cannot transition Completed payment % to Refunded without external refund reference in metadata', OLD.payment_id;
+                END IF;
+                -- 4. Cumulative refunded amount must equal or exceed original captured amount
+                IF NEW.metadata IS NULL OR NEW.metadata->>'refunded_amount' IS NULL OR
+                   (NEW.metadata->>'refunded_amount')::NUMERIC < (OLD.amount - 0.01) THEN
+                    RAISE EXCEPTION 'Cannot transition Completed payment % to Refunded: cumulative refunded amount (%) must equal or exceed original captured amount (%)',
+                        OLD.payment_id, COALESCE(NEW.metadata->>'refunded_amount', '0'), OLD.amount;
+                END IF;
+            ELSE
+                RAISE EXCEPTION 'Cannot mutate status of Completed payment record %: permitted transition is only to Refunded upon verified full refund (attempted: %)', OLD.payment_id, NEW.status;
+            END IF;
+        END IF;
+
+        -- B. Duplicate_Pending_Refund may only transition to 'Refunded' or 'Refund_Denied' (manual audit outcomes)
+        IF OLD.status = 'Duplicate_Pending_Refund' AND NEW.status IS DISTINCT FROM OLD.status THEN
+            IF NEW.status NOT IN ('Refunded', 'Refund_Denied') THEN
+                RAISE EXCEPTION 'Invalid status transition for Duplicate_Pending_Refund record %: permitted transitions are only Refunded or Refund_Denied (attempted: %)', OLD.payment_id, NEW.status;
+            END IF;
+        END IF;
+
+        -- C. Captured_Pending_Review reconciliation transition:
+        -- Permitted transitions are only: Completed, Duplicate_Pending_Refund, Refunded, or Refund_Denied
+        IF OLD.status = 'Captured_Pending_Review' AND NEW.status IS DISTINCT FROM OLD.status THEN
+            IF NEW.status = 'Completed' THEN
+                -- Explicit safe reconciliation operation requirements:
+                -- 1. Valid session bounds: start < end
+                IF NEW.session_start_year IS NULL OR NEW.session_end_year IS NULL OR NEW.session_start_year >= NEW.session_end_year THEN
+                    RAISE EXCEPTION 'Cannot resolve Captured_Pending_Review % to Completed without valid session boundaries (start < end)', OLD.payment_id;
+                END IF;
+                -- 2. Authorized actor recorded
+                IF NEW.approved_by IS NULL THEN
+                    RAISE EXCEPTION 'Cannot reconcile Captured_Pending_Review % to Completed without authorized actor (approved_by)', OLD.payment_id;
+                END IF;
+                -- 3. Timestamp recorded
+                IF NEW.approved_at IS NULL THEN
+                    RAISE EXCEPTION 'Cannot reconcile Captured_Pending_Review % to Completed without reconciliation timestamp (approved_at)', OLD.payment_id;
+                END IF;
+                -- 4. Audit evidence documented in metadata
+                IF NEW.metadata IS NULL OR NEW.metadata->>'reconciliation_evidence' IS NULL OR TRIM(NEW.metadata->>'reconciliation_evidence') = '' THEN
+                    RAISE EXCEPTION 'Cannot reconcile Captured_Pending_Review % to Completed without documented reconciliation_evidence in metadata', OLD.payment_id;
+                END IF;
+            ELSIF NEW.status NOT IN ('Duplicate_Pending_Refund', 'Refunded', 'Refund_Denied') THEN
+                RAISE EXCEPTION 'Invalid status transition for Captured_Pending_Review record %: permitted transitions are Completed (with valid session and audit evidence), Duplicate_Pending_Refund, Refunded, or Refund_Denied (attempted: %)', OLD.payment_id, NEW.status;
+            END IF;
+        END IF;
+
+        -- D. External refund verification requirement: transition to Refunded requires external refund reference and authorized actor
+        IF NEW.status = 'Refunded' AND OLD.status <> 'Refunded' THEN
+            IF NEW.approved_by IS NULL THEN
+                RAISE EXCEPTION 'Cannot mark payment % as Refunded without authorized actor (approved_by)', OLD.payment_id;
+            END IF;
+            IF NEW.metadata IS NULL OR (
+                (NEW.metadata->>'refund_id' IS NULL OR TRIM(NEW.metadata->>'refund_id') = '') AND
+                (NEW.metadata->>'external_refund_ref' IS NULL OR TRIM(NEW.metadata->>'external_refund_ref') = '') AND
+                (NEW.metadata->>'razorpay_refund_id' IS NULL OR TRIM(NEW.metadata->>'razorpay_refund_id') = '')
+            ) THEN
+                RAISE EXCEPTION 'Cannot mark payment % as Refunded without external refund reference in metadata (refund_id, external_refund_ref, or razorpay_refund_id)', OLD.payment_id;
+            END IF;
+        END IF;
+
+        -- E. Refund denial audit requirement: transition to Refund_Denied requires denial reason and authorized actor
+        IF NEW.status = 'Refund_Denied' AND OLD.status <> 'Refund_Denied' THEN
+            IF NEW.approved_by IS NULL THEN
+                RAISE EXCEPTION 'Cannot mark payment % as Refund_Denied without authorized actor (approved_by)', OLD.payment_id;
+            END IF;
+            IF NEW.metadata IS NULL OR (NEW.metadata->>'denial_reason' IS NULL OR TRIM(NEW.metadata->>'denial_reason') = '') THEN
+                RAISE EXCEPTION 'Cannot mark payment % as Refund_Denied without documented denial_reason in metadata', OLD.payment_id;
+            END IF;
+        END IF;
+
+        -- F. Refunded, Refund_Denied and Rejected are terminal: once marked, status cannot change
+        IF OLD.status IN ('Refunded', 'Refund_Denied', 'Rejected') AND NEW.status IS DISTINCT FROM OLD.status THEN
+            RAISE EXCEPTION 'Cannot mutate status of terminal payment record % (status: %)', OLD.payment_id, OLD.status;
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS protect_completed_payments_trigger ON public.payments;
+CREATE TRIGGER protect_completed_payments_trigger
+    BEFORE UPDATE OR DELETE ON public.payments
+    FOR EACH ROW
+    EXECUTE FUNCTION public.protect_completed_payments();
+
+CREATE OR REPLACE FUNCTION public.get_payment_analytics_aggregates()
+RETURNS TABLE (
+  total_payments BIGINT,
+  completed_payments BIGINT,
+  pending_payments BIGINT,
+  duplicate_refund_count BIGINT,
+  unresolved_review_count BIGINT,
+  refund_denied_count BIGINT,
+  total_revenue NUMERIC,
+  online_payments BIGINT,
+  offline_payments BIGINT
+) AS $$
+BEGIN
+  RETURN QUERY
+  SELECT
+    COUNT(*)::BIGINT AS total_payments,
+    COUNT(*) FILTER (WHERE status = 'Completed' OR LOWER(status) = 'completed')::BIGINT AS completed_payments,
+    COUNT(*) FILTER (WHERE status = 'Pending' OR LOWER(status) = 'pending')::BIGINT AS pending_payments,
+    COUNT(*) FILTER (WHERE status = 'Duplicate_Pending_Refund' OR LOWER(status) = 'duplicate_pending_refund')::BIGINT AS duplicate_refund_count,
+    COUNT(*) FILTER (WHERE status = 'Captured_Pending_Review' OR LOWER(status) = 'captured_pending_review')::BIGINT AS unresolved_review_count,
+    COUNT(*) FILTER (WHERE status = 'Refund_Denied' OR LOWER(status) = 'refund_denied')::BIGINT AS refund_denied_count,
+    COALESCE(SUM(amount) FILTER (WHERE status = 'Completed' OR LOWER(status) = 'completed'), 0)::NUMERIC AS total_revenue,
+    COUNT(*) FILTER (WHERE (status = 'Completed' OR LOWER(status) = 'completed') AND (method = 'Online' OR LOWER(method) = 'online'))::BIGINT AS online_payments,
+    COUNT(*) FILTER (WHERE (status = 'Completed' OR LOWER(status) = 'completed') AND (method = 'Offline' OR LOWER(method) = 'offline'))::BIGINT AS offline_payments
+  FROM public.payments;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+
+REVOKE EXECUTE ON FUNCTION public.get_payment_analytics_aggregates() FROM public;
+REVOKE EXECUTE ON FUNCTION public.get_payment_analytics_aggregates() FROM anon;
+REVOKE EXECUTE ON FUNCTION public.get_payment_analytics_aggregates() FROM authenticated;
+GRANT EXECUTE ON FUNCTION public.get_payment_analytics_aggregates() TO service_role;
+
+-- 6. Atomic Cumulative Refund Function
+CREATE OR REPLACE FUNCTION public.process_payment_refund_atomic(
+    p_payment_id TEXT,
+    p_refund_id TEXT,
+    p_amount_paise BIGINT,
+    p_authorized_by JSONB,
+    p_reason TEXT DEFAULT 'Processed refund'
+)
+RETURNS JSONB AS $$
+DECLARE
+    v_payment RECORD;
+    v_original_paise BIGINT;
+    v_existing_history JSONB;
+    v_trimmed_ref TEXT;
+    v_already_processed BOOLEAN := FALSE;
+    v_other_refunded_paise BIGINT := 0;
+    v_new_cumulative_paise BIGINT;
+    v_is_fully_refunded BOOLEAN;
+    v_elem JSONB;
+    v_updated_history JSONB := '[]'::JSONB;
+    v_now TIMESTAMPTZ := clock_timestamp();
+    v_now_iso TEXT := to_char(v_now AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"');
+    v_updated_metadata JSONB;
+    v_actor JSONB;
+BEGIN
+    -- Input sanitation
+    v_trimmed_ref := TRIM(COALESCE(p_refund_id, ''));
+    IF v_trimmed_ref = '' THEN
+        RETURN jsonb_build_object('success', false, 'error', 'External refund reference is mandatory');
+    END IF;
+
+    IF p_amount_paise IS NULL OR p_amount_paise <= 0 THEN
+        RETURN jsonb_build_object('success', false, 'error', 'Refund amount in paise must be greater than zero');
+    END IF;
+
+    IF p_authorized_by IS NULL OR p_authorized_by->>'userId' IS NULL OR TRIM(p_authorized_by->>'userId') = '' THEN
+        RETURN jsonb_build_object('success', false, 'error', 'Authorized officer identifier is required');
+    END IF;
+
+    -- Concurrency control: Exclusive row-level lock on payments table
+    SELECT * INTO v_payment
+    FROM public.payments
+    WHERE payment_id = p_payment_id
+    FOR UPDATE;
+
+    IF NOT FOUND THEN
+        RETURN jsonb_build_object('success', false, 'error', format('Payment record %s not found', p_payment_id));
+    END IF;
+
+    -- Status validation: refunds permitted from Completed, Duplicate_Pending_Refund, or Captured_Pending_Review
+    IF v_payment.status NOT IN ('Completed', 'Duplicate_Pending_Refund', 'Captured_Pending_Review') THEN
+        -- If already Refunded, check for idempotent replay of this specific refund
+        IF v_payment.status = 'Refunded' THEN
+            v_existing_history := COALESCE(v_payment.metadata->'refund_history', '[]'::JSONB);
+            FOR v_elem IN SELECT * FROM jsonb_array_elements(v_existing_history)
+            LOOP
+                IF v_elem->>'refund_id' = v_trimmed_ref AND v_elem->>'status' = 'processed' THEN
+                    RETURN jsonb_build_object(
+                        'success', true,
+                        'is_partial', false,
+                        'cumulative_refunded', COALESCE((v_payment.metadata->>'refunded_amount')::NUMERIC, v_payment.amount),
+                        'already_processed', true
+                    );
+                END IF;
+            END LOOP;
+        END IF;
+
+        RETURN jsonb_build_object(
+            'success', false,
+            'error', format('Payment %s has status ''%s''. Refunds can only be processed from Completed, Duplicate_Pending_Refund, or Captured_Pending_Review.', p_payment_id, v_payment.status)
+        );
+    END IF;
+
+    v_original_paise := ROUND(COALESCE(v_payment.amount, 0) * 100)::BIGINT;
+    IF v_original_paise <= 0 THEN
+        RETURN jsonb_build_object('success', false, 'error', format('Payment %s has invalid or zero captured amount (%s)', p_payment_id, v_payment.amount));
+    END IF;
+
+    -- Format actor
+    v_actor := jsonb_build_object(
+        'type', COALESCE(p_authorized_by->>'type', CASE WHEN (p_authorized_by->>'userId') LIKE 'system:%' THEN 'system' ELSE 'admin' END),
+        'userId', p_authorized_by->>'userId',
+        'name', COALESCE(p_authorized_by->>'name', 'System'),
+        'role', COALESCE(p_authorized_by->>'role', 'system')
+    );
+    IF p_authorized_by ? 'empId' THEN
+        v_actor := v_actor || jsonb_build_object('empId', p_authorized_by->>'empId');
+    END IF;
+
+    -- Extract existing refund history
+    v_existing_history := COALESCE(v_payment.metadata->'refund_history', '[]'::JSONB);
+
+    -- Check for idempotent replay and accumulate other processed refunds
+    FOR v_elem IN SELECT * FROM jsonb_array_elements(v_existing_history)
+    LOOP
+        IF v_elem->>'refund_id' = v_trimmed_ref AND v_elem->>'status' = 'processed' THEN
+            v_already_processed := TRUE;
+        ELSE
+            -- Add to updated history preserving non-matching items
+            v_updated_history := v_updated_history || jsonb_build_array(v_elem);
+            IF v_elem->>'status' = 'processed' THEN
+                IF v_elem ? 'amount_paise' AND (v_elem->>'amount_paise') IS NOT NULL THEN
+                    v_other_refunded_paise := v_other_refunded_paise + (v_elem->>'amount_paise')::BIGINT;
+                ELSE
+                    v_other_refunded_paise := v_other_refunded_paise + ROUND(COALESCE((v_elem->>'amount')::NUMERIC, 0) * 100)::BIGINT;
+                END IF;
+            END IF;
+        END IF;
+    END LOOP;
+
+    IF v_already_processed THEN
+        RETURN jsonb_build_object(
+            'success', true,
+            'is_partial', (COALESCE((v_payment.metadata->>'refunded_amount')::NUMERIC, 0) < v_payment.amount),
+            'cumulative_refunded', COALESCE((v_payment.metadata->>'refunded_amount')::NUMERIC, v_payment.amount),
+            'already_processed', true
+        );
+    END IF;
+
+    -- Calculate new cumulative refund in paise
+    v_new_cumulative_paise := v_other_refunded_paise + p_amount_paise;
+
+    -- Invariant: cumulative refunded amount cannot exceed original captured amount
+    IF v_new_cumulative_paise > v_original_paise THEN
+        RETURN jsonb_build_object(
+            'success', false,
+            'error', format('Cumulative refunded amount (%s) cannot exceed original payment amount (%s).', (v_new_cumulative_paise::NUMERIC / 100), (v_original_paise::NUMERIC / 100))
+        );
+    END IF;
+
+    v_is_fully_refunded := (v_new_cumulative_paise >= v_original_paise);
+
+    -- Append current refund record
+    v_updated_history := v_updated_history || jsonb_build_array(jsonb_build_object(
+        'refund_id', v_trimmed_ref,
+        'amount', (p_amount_paise::NUMERIC / 100),
+        'amount_paise', p_amount_paise,
+        'status', 'processed',
+        'authorized_by', v_actor,
+        'reason', COALESCE(p_reason, 'Approved refund'),
+        'processed_at', v_now_iso
+    ));
+
+    -- Construct metadata
+    v_updated_metadata := COALESCE(v_payment.metadata, '{}'::JSONB) || jsonb_build_object(
+        'prior_status', v_payment.status,
+        'razorpay_refund_id', v_trimmed_ref,
+        'external_refund_ref', v_trimmed_ref,
+        'refund_id', v_trimmed_ref,
+        'refund_authorized_by', v_actor,
+        'refund_processed_at', v_now_iso,
+        'refunded_amount', (v_new_cumulative_paise::NUMERIC / 100),
+        'refunded_amount_paise', v_new_cumulative_paise,
+        'remaining_amount', ((v_original_paise - v_new_cumulative_paise)::NUMERIC / 100),
+        'remaining_amount_paise', (v_original_paise - v_new_cumulative_paise),
+        'refund_status', CASE WHEN v_is_fully_refunded THEN 'fully_refunded' ELSE 'partial' END,
+        'is_partially_refunded', NOT v_is_fully_refunded,
+        'refund_history', v_updated_history,
+        'refund_reason', COALESCE(p_reason, 'Approved refund')
+    );
+
+    IF v_is_fully_refunded THEN
+        v_updated_metadata := v_updated_metadata || jsonb_build_object(
+            'requires_refund_review', false,
+            'requires_manual_review', false
+        );
+
+        UPDATE public.payments
+        SET status = 'Refunded',
+            approved_by = v_actor,
+            approved_at = v_now,
+            metadata = v_updated_metadata
+        WHERE payment_id = p_payment_id;
+    ELSE
+        -- Partial refund: retain existing status
+        UPDATE public.payments
+        SET metadata = v_updated_metadata
+        WHERE payment_id = p_payment_id;
+    END IF;
+
+    RETURN jsonb_build_object(
+        'success', true,
+        'is_partial', NOT v_is_fully_refunded,
+        'cumulative_refunded', (v_new_cumulative_paise::NUMERIC / 100),
+        'cumulative_refunded_paise', v_new_cumulative_paise
+    );
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
+
+REVOKE EXECUTE ON FUNCTION public.process_payment_refund_atomic(TEXT, TEXT, BIGINT, JSONB, TEXT) FROM public;
+REVOKE EXECUTE ON FUNCTION public.process_payment_refund_atomic(TEXT, TEXT, BIGINT, JSONB, TEXT) FROM anon;
+REVOKE EXECUTE ON FUNCTION public.process_payment_refund_atomic(TEXT, TEXT, BIGINT, JSONB, TEXT) FROM authenticated;
+GRANT EXECUTE ON FUNCTION public.process_payment_refund_atomic(TEXT, TEXT, BIGINT, JSONB, TEXT) TO service_role;
+
