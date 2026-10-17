@@ -1,8 +1,8 @@
 import { appLogger } from '@/lib/logger';
 import { ErrorClass } from '@/lib/error-classes';
-import { MAX_CLOCK_SKEW_MS,normalizeLocationUpdate } from './gps-normalizer.service';
+import { MAX_CLOCK_SKEW_MS, normalizeLocationUpdate } from './gps-normalizer.service';
 import { checkActiveTrip } from './gps-persistence.service';
-import { atomicGpsGuardAndUpdate, clearGpsState, seedGpsState } from './gps-redis-guard';
+import { atomicGpsGuardAndUpdate, clearGpsState, seedGpsState, getGpsStateFromRedis } from './gps-redis-guard';
 import type { LastLocation, LocationUpdate, LocationUpdateNormalized, PipelineResult } from './types';
 
 // NOTE: live enforcement here is bounds, speed/heading/accuracy caps,
@@ -20,10 +20,31 @@ const MAX_JUMP_METERS = 5000;
 // 150 m is a safer threshold that blocks only genuinely degraded fixes.
 const MAX_ACCURACY_METERS = 150;
 
+// Regional bounding box for the ADTU ITMS operating corridor.
+// Covers Assam and immediately adjacent Northeast Indian territories to prevent
+// spoofed / corrupted coordinates (e.g. null-island, European GPS from test devices)
+// from reaching the student map or audit trail.
+//   Latitude:  25.0°N – 28.5°N  (Assam + Meghalaya + Arunachal southern strip)
+//   Longitude: 89.5°E – 96.5°E  (Full Assam/NE corridor to Myanmar border)
+// Bounds are intentionally generous (±1°) to avoid false-rejections near state borders.
+const REGION_LAT_MIN = 25.0;
+const REGION_LAT_MAX = 28.5;
+const REGION_LNG_MIN = 89.5;
+const REGION_LNG_MAX = 96.5;
+
 function validateBounds(n: LocationUpdateNormalized): string | null {
   if (!Number.isFinite(n.lat) || !Number.isFinite(n.lng)) return 'Valid latitude and longitude are required';
   if (n.lat === 0 && n.lng === 0) return 'GPS fix not acquired (null island coordinates)';
   if (n.lat < -90 || n.lat > 90 || n.lng < -180 || n.lng > 180) return 'Coordinates are out of range';
+  // Regional gate: reject coordinates outside the ADTU ITMS operating corridor (Assam / NE India).
+  // This catches spoofed payloads and misconfigured test devices before they reach the audit trail.
+  if (
+    n.lat < REGION_LAT_MIN || n.lat > REGION_LAT_MAX ||
+    n.lng < REGION_LNG_MIN || n.lng > REGION_LNG_MAX
+  ) {
+    return `Coordinates (${n.lat.toFixed(4)}, ${n.lng.toFixed(4)}) are outside the ADTU ITMS operating region`;
+  }
+
   if (n.speed !== null && (n.speed < 0 || n.speed > MAX_SPEED_KMH)) return `Speed exceeds limit (${MAX_SPEED_KMH} km/h)`;
   if (n.heading !== null && (n.heading < 0 || n.heading > 360)) return 'Heading is out of range';
   if (n.accuracy !== null && (n.accuracy < 0 || n.accuracy > MAX_ACCURACY_METERS)) return `GPS accuracy (${Math.round(n.accuracy)}m) exceeds threshold (${MAX_ACCURACY_METERS}m)`;
@@ -124,7 +145,7 @@ export function setInMemoryLastLocation(busId: string, loc: LastLocation): void 
     const lat = typeof loc.lat === 'string' ? parseFloat(loc.lat) : loc.lat;
     const lng = typeof loc.lng === 'string' ? parseFloat(loc.lng) : loc.lng;
     if (Number.isFinite(lat) && Number.isFinite(lng)) {
-      seedGpsState(busId, lat, lng, tsMs);
+      seedGpsState(busId, lat, lng, tsMs, loc.speed, loc.heading, loc.accuracy);
     }
   }
 }
@@ -135,6 +156,26 @@ export function getLastLocationForBus(busId: string): LastLocation | null {
   for (const id of getBusIdVariations(busId)) {
     const loc = inMemoryLastLocations.get(id);
     if (loc) return loc;
+  }
+  return null;
+}
+
+/**
+ * Read last accepted location for a bus across instances.
+ * Checks in-memory cache first (0ms), then falls back to Redis state (multi-instance safe).
+ * Seeds in-memory cache upon cache miss so subsequent reads are immediate.
+ */
+export async function getLastLocationForBusAsync(busId: string): Promise<LastLocation | null> {
+  if (!busId) return null;
+  const syncLoc = getLastLocationForBus(busId);
+  if (syncLoc) return syncLoc;
+
+  for (const id of getBusIdVariations(busId)) {
+    const redisLoc = await getGpsStateFromRedis(id);
+    if (redisLoc) {
+      inMemoryLastLocations.set(id, redisLoc);
+      return redisLoc;
+    }
   }
   return null;
 }
@@ -161,8 +202,10 @@ export async function processLocationUpdate(raw: LocationUpdate): Promise<Pipeli
     const errorClass = boundsError.includes('null island')
       ? ErrorClass.GPS_NULL_ISLAND
       : boundsError.includes('speed')
-      ? ErrorClass.GPS_SPEED_EXCEEDED
-      : ErrorClass.GPS_INVALID_COORDINATES;
+        ? ErrorClass.GPS_SPEED_EXCEEDED
+        : boundsError.includes('operating region')
+          ? ErrorClass.GPS_OUT_OF_REGION
+          : ErrorClass.GPS_INVALID_COORDINATES;
     appLogger.warn('gps', 'location_rejected', { ...logCtx, reason: boundsError, errorClass, latencyMs: Date.now() - start });
     return { accepted: false, reason: boundsError, normalized };
   }

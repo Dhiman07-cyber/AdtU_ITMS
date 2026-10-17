@@ -35,6 +35,7 @@
  */
 
 import * as net from 'net';
+import type { LastLocation } from './types';
 
 const KEY_PREFIX = 'gps:last:';
 const TTL_SECONDS = 1200; // 20 minutes
@@ -368,6 +369,9 @@ if newRawTs > 0 then
 end
 
 redis.call('HSET', key, 'lat', newLat, 'lng', newLng, 'ts', newTs, 'rawTs', clampedRaw)
+if ARGV[9] and ARGV[9] ~= '' then redis.call('HSET', key, 'speed', ARGV[9]) end
+if ARGV[10] and ARGV[10] ~= '' then redis.call('HSET', key, 'heading', ARGV[10]) end
+if ARGV[11] and ARGV[11] ~= '' then redis.call('HSET', key, 'accuracy', ARGV[11]) end
 redis.call('EXPIRE', key, tonumber(ARGV[8]))
 return 'ok'
 `;
@@ -376,7 +380,15 @@ return 'ok'
 // In-memory fallback (single-instance / Redis unavailable)
 // ──────────────────────────────────────────────────────────────────────────────
 
-interface LastLoc { lat: number; lng: number; ts: number; rawTs: number }
+interface LastLoc {
+  lat: number;
+  lng: number;
+  ts: number;
+  rawTs: number;
+  speed?: number | null;
+  heading?: number | null;
+  accuracy?: number | null;
+}
 
 const memLast = new Map<string, LastLoc>();
 
@@ -406,7 +418,13 @@ export function getGpsRedisHealth(): { ready: boolean; host: string; port: numbe
 
 function memoryGuard(
   busId: string,
-  newLat: number, newLng: number, newTs: number, newRawTs: number | null,
+  newLat: number,
+  newLng: number,
+  newTs: number,
+  newRawTs: number | null,
+  speed?: number | null,
+  heading?: number | null,
+  accuracy?: number | null,
 ): GpsGuardResult {
   const cur = memLast.get(busId);
   if (cur) {
@@ -434,7 +452,15 @@ function memoryGuard(
   const clampedRaw = newRawTs !== null
     ? Math.min(newRawTs, Date.now() + MAX_CLOCK_SKEW_MS)
     : 0;
-  memLast.set(busId, { lat: newLat, lng: newLng, ts: newTs, rawTs: clampedRaw });
+  memLast.set(busId, {
+    lat: newLat,
+    lng: newLng,
+    ts: newTs,
+    rawTs: clampedRaw,
+    speed: speed ?? null,
+    heading: heading ?? null,
+    accuracy: accuracy ?? null,
+  });
   return 'ok';
 }
 
@@ -482,6 +508,9 @@ export async function atomicGpsGuardAndUpdate(
   newLng: number,
   newTs: number,
   newRawTs: number | null,
+  speed?: number | null,
+  heading?: number | null,
+  accuracy?: number | null,
 ): Promise<GpsGuardResult> {
   ensureInit();
   const state = getState();
@@ -495,6 +524,9 @@ export async function atomicGpsGuardAndUpdate(
       const key = `${KEY_PREFIX}${busId}`;
       const rawTsArg = newRawTs !== null ? String(newRawTs) : '-1';
       const serverNow = String(Date.now());
+      const speedArg = speed != null && Number.isFinite(speed) ? String(speed) : '';
+      const headingArg = heading != null && Number.isFinite(heading) ? String(heading) : '';
+      const accuracyArg = accuracy != null && Number.isFinite(accuracy) ? String(accuracy) : '';
 
       // EVALSHA is not used here (no script pre-loading); EVAL is fine at this
       // call frequency (50 buses × 0.5 Hz = 25 calls/sec max).
@@ -506,6 +538,9 @@ export async function atomicGpsGuardAndUpdate(
         String(MAX_CLOCK_SKEW_MS),
         serverNow,
         String(TTL_SECONDS),
+        speedArg,
+        headingArg,
+        accuracyArg,
       ]);
 
       if (result === 'ok' || result === 'stale_raw' || result === 'jump'
@@ -534,7 +569,87 @@ export async function atomicGpsGuardAndUpdate(
   }
 
   // Non-production (development / test) fallback: allow local in-memory fallback
-  return memoryGuard(busId, newLat, newLng, newTs, newRawTs);
+  return memoryGuard(busId, newLat, newLng, newTs, newRawTs, speed, heading, accuracy);
+}
+
+/**
+ * Read the latest GPS fix for a bus directly from Redis.
+ * Cross-instance safe: any Next.js instance can read the authoritative
+ * live coordinate even if the GPS update POST was handled by a different instance.
+ * Falls back to process-local memLast when Redis is not configured or unavailable.
+ */
+export async function getGpsStateFromRedis(busId: string): Promise<LastLocation | null> {
+  if (!busId) return null;
+  ensureInit();
+  const state = getState();
+
+  if (!state.ready && process.env.REDIS_URL) {
+    await waitForReady(state, 200);
+  }
+
+  if (state.ready && state.socket && !state.socket.destroyed) {
+    try {
+      const key = `${KEY_PREFIX}${busId}`;
+      const result = await sendCommand(state, ['HMGET', key, 'lat', 'lng', 'ts', 'speed', 'heading', 'accuracy']);
+      if (result) {
+        let parsed: any = null;
+        try {
+          parsed = JSON.parse(result);
+        } catch {
+          parsed = null;
+        }
+
+        if (Array.isArray(parsed) && parsed.length >= 3) {
+          const [latStr, lngStr, tsStr, speedStr, headingStr, accuracyStr] = parsed;
+          if (latStr !== null && latStr !== undefined && lngStr !== null && lngStr !== undefined) {
+            const lat = Number(latStr);
+            const lng = Number(lngStr);
+            if (Number.isFinite(lat) && Number.isFinite(lng)) {
+              const tsNum = Number(tsStr);
+              const timestamp = Number.isFinite(tsNum) && tsNum > 0
+                ? new Date(tsNum).toISOString()
+                : new Date().toISOString();
+              const speed = speedStr != null && speedStr !== '' && Number.isFinite(Number(speedStr))
+                ? Number(speedStr)
+                : null;
+              const heading = headingStr != null && headingStr !== '' && Number.isFinite(Number(headingStr))
+                ? Number(headingStr)
+                : null;
+              const accuracy = accuracyStr != null && accuracyStr !== '' && Number.isFinite(Number(accuracyStr))
+                ? Number(accuracyStr)
+                : null;
+
+              return {
+                lat,
+                lng,
+                timestamp,
+                speed,
+                heading,
+                accuracy,
+              };
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[gps-redis] getGpsStateFromRedis error:', e);
+    }
+  }
+
+  // Fallback to process-local memLast (single-instance / dev / offline)
+  const mem = memLast.get(busId);
+  if (mem) {
+    return {
+      lat: mem.lat,
+      lng: mem.lng,
+      timestamp: new Date(mem.ts).toISOString(),
+      speed: mem.speed ?? null,
+      heading: mem.heading ?? null,
+      accuracy: mem.accuracy ?? null,
+    };
+  }
+
+  return null;
 }
 
 /**
@@ -561,8 +676,24 @@ export async function clearGpsState(busId: string): Promise<void> {
  *
  * Does NOT write to Redis — the HTTP pipeline owns the Redis state.
  */
-export function seedGpsState(busId: string, lat: number, lng: number, ts: number): void {
-  memLast.set(busId, { lat, lng, ts, rawTs: ts });
+export function seedGpsState(
+  busId: string,
+  lat: number,
+  lng: number,
+  ts: number,
+  speed?: number | null,
+  heading?: number | null,
+  accuracy?: number | null,
+): void {
+  memLast.set(busId, {
+    lat,
+    lng,
+    ts,
+    rawTs: ts,
+    speed: speed ?? null,
+    heading: heading ?? null,
+    accuracy: accuracy ?? null,
+  });
 }
 
 // Eagerly initialize connection if REDIS_URL is present at module load

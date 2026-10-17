@@ -26,8 +26,8 @@ const base = {
   busId: 'bus-1',
   tripId: 'trip-1',
   routeId: 'route-1',
-  lat: 12.9716,
-  lng: 77.5946,
+  lat: 26.1445,
+  lng: 91.7362,
   timestamp: new Date().toISOString(),
 };
 
@@ -43,13 +43,13 @@ describe('GPS Reliability — Coordinate Validation', () => {
   });
 
   it('rejects NaN latitude', async () => {
-    const result = await processLocationUpdate({ ...base, lat: NaN, lng: 77.5946 });
+    const result = await processLocationUpdate({ ...base, lat: NaN, lng: 91.7362 });
     expect(result.accepted).toBe(false);
     expect(result.reason).toMatch(/latitude and longitude/i);
   });
 
   it('rejects coordinates out of global range', async () => {
-    const result = await processLocationUpdate({ ...base, lat: 95, lng: 77.5946 });
+    const result = await processLocationUpdate({ ...base, lat: 95, lng: 91.7362 });
     expect(result.accepted).toBe(false);
     expect(result.reason).toMatch(/out of range/i);
   });
@@ -69,8 +69,8 @@ describe('GPS Reliability — Coordinate Validation', () => {
 
 describe('GPS Reliability — Timestamp Ordering', () => {
   const lastLocation = {
-    lat: '12.9716',
-    lng: '77.5946',
+    lat: '26.1445',
+    lng: '91.7362',
     timestamp: new Date(Date.now() - 5000).toISOString(), // 5s ago
   };
 
@@ -89,8 +89,8 @@ describe('GPS Reliability — Timestamp Ordering', () => {
     const sameTime = lastLocation.timestamp; // exact same timestamp
     const result = await processLocationUpdate({
       ...base,
-      lat: 12.9725,
-      lng: 77.5946,
+      lat: 26.1455,
+      lng: 91.7362,
       timestamp: sameTime,
     });
     expect(result.accepted).toBe(false);
@@ -100,8 +100,8 @@ describe('GPS Reliability — Timestamp Ordering', () => {
   it('accepts duplicate timestamp with same coordinates (idempotent packet)', async () => {
     const result = await processLocationUpdate({
       ...base,
-      lat: 12.9716,
-      lng: 77.5946,
+      lat: 26.1445,
+      lng: 91.7362,
       timestamp: lastLocation.timestamp,
     });
     expect(result.accepted).toBe(true);
@@ -110,8 +110,8 @@ describe('GPS Reliability — Timestamp Ordering', () => {
   it('rejects location jump > 5000m', async () => {
     const result = await processLocationUpdate({
       ...base,
-      lat: 13.1716, // ~22km north
-      lng: 77.5946,
+      lat: 26.3445, // ~22km north within Assam bounds [25.0, 28.5]
+      lng: 91.7362,
       timestamp: new Date().toISOString(),
     });
     expect(result.accepted).toBe(false);
@@ -188,8 +188,8 @@ describe('GPS Reliability — High-Frequency Burst & Jitter Resilience', () => {
     for (let i = 0; i < 5; i++) {
       const res = await processLocationUpdate({
         ...base,
-        lat: 12.9716 + i * 0.0001, // ~11m step
-        lng: 77.5946 + i * 0.0001,
+        lat: 26.1445 + i * 0.0001, // ~11m step
+        lng: 91.7362 + i * 0.0001,
         timestamp: new Date(startMs + i * 1000).toISOString(),
       });
       expect(res.accepted).toBe(true);
@@ -199,33 +199,33 @@ describe('GPS Reliability — High-Frequency Burst & Jitter Resilience', () => {
   it('filters out-of-order jitter while accepting strictly increasing subsequent packets', async () => {
     const t0 = Date.now();
     // 1. First packet at t0
-    const p1 = await processLocationUpdate({ ...base, lat: 12.9716, lng: 77.5946, timestamp: new Date(t0).toISOString() });
+    const p1 = await processLocationUpdate({ ...base, lat: 26.1445, lng: 91.7362, timestamp: new Date(t0).toISOString() });
     expect(p1.accepted).toBe(true);
 
     // 2. Second packet at t0 + 2000ms
-    const p2 = await processLocationUpdate({ ...base, lat: 12.9718, lng: 77.5948, timestamp: new Date(t0 + 2000).toISOString() });
+    const p2 = await processLocationUpdate({ ...base, lat: 26.1447, lng: 91.7364, timestamp: new Date(t0 + 2000).toISOString() });
     expect(p2.accepted).toBe(true);
 
     // 3. Stale lagging packet at t0 + 1000ms (arrived late over cellular network) -> must reject
-    const pLag = await processLocationUpdate({ ...base, lat: 12.9717, lng: 77.5947, timestamp: new Date(t0 + 1000).toISOString() });
+    const pLag = await processLocationUpdate({ ...base, lat: 26.1446, lng: 91.7363, timestamp: new Date(t0 + 1000).toISOString() });
     expect(pLag.accepted).toBe(false);
     expect(pLag.reason).toMatch(/out-of-order/i);
 
     // 4. Fresh packet at t0 + 3000ms -> must accept
-    const p3 = await processLocationUpdate({ ...base, lat: 12.9720, lng: 77.5950, timestamp: new Date(t0 + 3000).toISOString() });
+    const p3 = await processLocationUpdate({ ...base, lat: 26.1449, lng: 91.7366, timestamp: new Date(t0 + 3000).toISOString() });
     expect(p3.accepted).toBe(true);
   });
 
   it('rejects calculated velocity exceeding speed limit during short intervals', async () => {
     const t0 = Date.now();
-    const p1 = await processLocationUpdate({ ...base, lat: 12.9716, lng: 77.5946, timestamp: new Date(t0).toISOString() });
+    const p1 = await processLocationUpdate({ ...base, lat: 26.1445, lng: 91.7362, timestamp: new Date(t0).toISOString() });
     expect(p1.accepted).toBe(true);
 
     // Moves 600 meters in 1 second (~2160 km/h)
     const pSuperFast = await processLocationUpdate({
       ...base,
-      lat: 12.9770, // ~600m away
-      lng: 77.5946,
+      lat: 26.1500, // ~600m away
+      lng: 91.7362,
       timestamp: new Date(t0 + 1000).toISOString(),
     });
     expect(pSuperFast.accepted).toBe(false);

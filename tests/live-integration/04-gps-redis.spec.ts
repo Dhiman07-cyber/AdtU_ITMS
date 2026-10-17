@@ -101,7 +101,7 @@ async function main() {
   await clearGpsState(TEST_BUS);
   assert('Test bus GPS state cleared', true);
 
-  const artifactsDir = path.join('C:', 'Users', 'ADMIN', '.gemini', 'antigravity-ide', 'brain', 'dd2ce0c1-c7d6-48ac-b746-4cd9cf546372');
+  const artifactsDir = process.env.ARTIFACTS_DIR || path.join(process.cwd(), '.evidence');
   const gpsEvidence = {
     testExecutionTimestamp: new Date().toISOString(),
     redisConnection: {
@@ -124,6 +124,7 @@ async function main() {
   };
 
   const fs = require('fs');
+  fs.mkdirSync(artifactsDir, { recursive: true });
   fs.writeFileSync(path.join(artifactsDir, 'redis-gps-results.json'), JSON.stringify(gpsEvidence, null, 2), 'utf8');
   console.log(`\nWritten evidence to: ${path.join(artifactsDir, 'redis-gps-results.json')}`);
 

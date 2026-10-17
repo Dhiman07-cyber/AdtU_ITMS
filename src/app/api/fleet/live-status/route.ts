@@ -1,4 +1,4 @@
-import { getLastLocationForBus } from '@/domains/gps/services/gps-pipeline.service';
+import { getLastLocationForBus, getLastLocationForBusAsync } from '@/domains/gps/services/gps-pipeline.service';
 import { verifyApiAuth } from '@/lib/security/api-auth';
 import { applyRateLimit, createRateLimitId, RateLimits } from '@/lib/security/rate-limiter';
 import { handleApiError } from '@/lib/security/safe-error';
@@ -55,7 +55,7 @@ export async function GET(request: NextRequest) {
     const showAll = request.nextUrl.searchParams.get('all') === 'true';
 
     // 3. Parallel fetch from PostgreSQL with exact schema-verified columns
-    const [busesRes, routesRes, activeTripsRes, busLocationsRes, activeDriversRes] = await Promise.all([
+    const [busesRes, routesRes, activeTripsRes, activeDriversRes] = await Promise.all([
       supabase
         .from('buses')
         .select('id, bus_number, model, capacity, current_members, driver_uid, driver_name, route_id, route_name, status')
@@ -67,9 +67,6 @@ export async function GET(request: NextRequest) {
         .from('active_trips')
         .select('trip_id, bus_id, driver_id, route_id, shift, status, start_time, end_time, last_heartbeat, expires_at')
         .eq('status', 'active'),
-      supabase
-        .from('bus_locations')
-        .select('bus_id, trip_id, driver_id, route_id, lat, lng, accuracy, speed, heading, timestamp'),
       supabase
         .from('driver_profiles')
         .select('uid, full_name, phone, bus_id, route_id, shift, trip_active, active_trip_id')
@@ -87,7 +84,6 @@ export async function GET(request: NextRequest) {
     const buses = busesRes.data || [];
     const routes = routesRes.data || [];
     const activeTrips = activeTripsRes.data || [];
-    const dbLocations = busLocationsRes.data || [];
     const activeDrivers = activeDriversRes.data || [];
 
     // Map routes by id
@@ -113,14 +109,6 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Map DB locations by bus_id
-    const dbLocationMap = new Map<string, any>();
-    for (const loc of dbLocations) {
-      if (loc.bus_id) {
-        dbLocationMap.set(loc.bus_id, loc);
-      }
-    }
-
     // Filter to active buses unless explicit 'all=true' requested
     const targetBuses = showAll
       ? buses
@@ -139,25 +127,14 @@ export async function GET(request: NextRequest) {
     let staleCount = 0;
     let noSignalCount = 0;
 
-    const enrichedBuses: FleetBusLiveStatus[] = targetBuses.map((b: any) => {
+    const enrichedBuses: FleetBusLiveStatus[] = await Promise.all(targetBuses.map(async (b: any) => {
       const busId = b.id;
       const activeTrip = activeTripMap.get(busId) || activeTripMap.get(b.bus_number);
       const activeDriver = activeDriverMap.get(busId) || activeDriverMap.get(b.bus_number);
       const isTripActive = Boolean(activeTrip || activeDriver);
 
-      // Check in-memory fast cache first, then DB location
-      const memLoc = getLastLocationForBus(busId) || getLastLocationForBus(b.bus_number);
-      const dbLoc = dbLocationMap.get(busId) || dbLocationMap.get(b.bus_number);
-
-      // Pick latest
-      let chosenLoc: any = null;
-      if (memLoc && dbLoc) {
-        const memTime = new Date(memLoc.timestamp).getTime();
-        const dbTime = new Date(dbLoc.timestamp).getTime();
-        chosenLoc = memTime >= dbTime ? memLoc : dbLoc;
-      } else {
-        chosenLoc = memLoc || dbLoc || null;
-      }
+      // Check in-memory fast cache with multi-instance Redis fallback
+      const chosenLoc: any = (await getLastLocationForBusAsync(busId)) || (await getLastLocationForBusAsync(b.bus_number)) || null;
 
       let locationStatus: 'LIVE' | 'STALE' | 'NO_SIGNAL' | 'INACTIVE' = 'INACTIVE';
       let locationObj: FleetBusLiveStatus['location'] = null;
@@ -231,7 +208,7 @@ export async function GET(request: NextRequest) {
         locationStatus,
         location: locationObj,
       };
-    });
+    }));
 
     return NextResponse.json(
       {

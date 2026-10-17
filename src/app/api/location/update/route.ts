@@ -5,7 +5,7 @@ import { RateLimits } from '@/lib/security/rate-limiter';
 import { LocationUpdateBodySchema } from '@/lib/security/validation-schemas';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import { getCachedDeviceSession, setCachedDeviceSession } from '@/lib/services/device-session-cache';
-import { shouldWriteLocationBreadcrumb, shouldWriteHeartbeat } from '@/lib/services/location-write-throttle';
+import { shouldWriteHeartbeat } from '@/lib/services/location-write-throttle';
 import { NextResponse } from 'next/server';
 
 const lastSessionRefreshMap = new Map<string, number>();
@@ -18,6 +18,7 @@ export const POST = withSecurity(
 
     const requestDeviceId = deviceId || (request instanceof Request ? request.headers.get('x-device-id') : (request as any).headers?.get?.('x-device-id'));
     const supabase = getSupabaseServer();
+    const writePromises: Promise<void>[] = [];
     let sessionData = getCachedDeviceSession(driverUid);
     if (!sessionData) {
       const { data } = await supabase
@@ -55,15 +56,17 @@ export const POST = withSecurity(
           lastSessionRefreshMap.set(driverUid, nowMs);
           setCachedDeviceSession(driverUid, requestDeviceId, nowMs);
           const nowIso = new Date(nowMs).toISOString();
-          supabase
-            .from('device_sessions')
-            .update({ last_active_at: nowIso, last_active: nowIso })
-            .eq('user_id', driverUid)
-            .eq('feature', 'driver_location_share')
-            .eq('device_id', requestDeviceId)
-            .then(({ error }) => {
+          writePromises.push(
+            (async () => {
+              const { error } = await supabase
+                .from('device_sessions')
+                .update({ last_active_at: nowIso, last_active: nowIso })
+                .eq('user_id', driverUid)
+                .eq('feature', 'driver_location_share')
+                .eq('device_id', requestDeviceId);
               if (error) console.warn('Failed to refresh device session during location update:', error);
-            });
+            })()
+          );
         }
       }
     }
@@ -71,7 +74,7 @@ export const POST = withSecurity(
     const numLat = Number(lat);
     const numLng = Number(lng);
 
-    if (!busId || isNaN(numLat) || isNaN(numLng) || numLat === 0 || numLng === 0) {
+    if (!busId || isNaN(numLat) || isNaN(numLng) || (numLat === 0 && numLng === 0)) {
       return NextResponse.json({
         success: false,
         error: 'Invalid GPS location data provided. Please ensure GPS is active and try again.',
@@ -97,13 +100,20 @@ export const POST = withSecurity(
       return NextResponse.json({ error: result.reason }, { status: 400 });
     }
 
-    // Non-blocking broadcast via WebSocket
+    // Non-blocking broadcast via WebSocket.
+    // Use pipeline-normalized values (not raw body) so the broadcast is consistent
+    // with what was validated and persisted by the GPS pipeline.
+    const norm = result.normalized;
     emitEvent(`bus_location_${busId}`, 'bus_location_update', {
-      busId, driverUid,
-      lat: Number(lat), lng: Number(lng),
-      accuracy, speed, heading: heading || 0,
-      tripId: result.normalized?.tripId || tripId || undefined,
-      timestamp: result.normalized?.timestamp?.toISOString() || (timestamp ? String(timestamp) : new Date().toISOString()),
+      busId,
+      driverUid,
+      lat: norm?.lat ?? numLat,
+      lng: norm?.lng ?? numLng,
+      accuracy: norm?.accuracy ?? accuracy,
+      speed: norm?.speed ?? speed,
+      heading: norm?.heading ?? heading ?? 0,
+      tripId: norm?.tripId || tripId || undefined,
+      timestamp: norm?.timestamp?.toISOString() || (timestamp ? String(timestamp) : new Date().toISOString()),
     }).catch((err: Error) => console.warn('Location broadcast failed:', err));
 
 
@@ -114,7 +124,6 @@ export const POST = withSecurity(
     // even though GPS HTTP 200 continues. The 600s TTL matches acquire_trip_lock /
     // extend_trip_lock RPCs (LOCK_TTL_SECONDS = 600 in trip-lock-service.ts).
     const nowMs = Date.now();
-    const writePromises: Promise<void>[] = [];
 
     if (shouldWriteHeartbeat(busId, nowMs)) {
       const extendedExpiresAt = new Date(nowMs + 600 * 1000).toISOString();
@@ -134,31 +143,6 @@ export const POST = withSecurity(
       );
     }
 
-    // Persist last position to bus_locations (throttled to 1 write/bus/60s).
-    // Student trip-status reads this as a DB fallback when the WS bridge has
-    // no cached position (e.g. right after a WS server restart).
-    const normalizedTripId = result.normalized?.tripId || tripId || '';
-    if (shouldWriteLocationBreadcrumb(normalizedTripId || busId, nowMs)) {
-      writePromises.push(
-        (async () => {
-          const { error } = await supabase
-            .from('bus_locations')
-            .upsert({
-              bus_id: busId,
-              trip_id: normalizedTripId || null,
-              driver_id: driverUid,
-              route_id: routeId || null,
-              lat: Number(lat),
-              lng: Number(lng),
-              accuracy: accuracy !== undefined ? Number(accuracy) : null,
-              speed: speed !== undefined ? Number(speed) : null,
-              heading: heading !== undefined ? Number(heading) : null,
-              timestamp: new Date().toISOString(),
-            }, { onConflict: 'bus_id' });
-          if (error) console.warn('Failed to persist bus location:', error);
-        })()
-      );
-    }
 
     if (writePromises.length > 0) {
       await Promise.all(writePromises);

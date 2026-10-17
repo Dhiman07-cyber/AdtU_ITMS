@@ -12,5 +12,6 @@ export async function processUpdate(raw: LocationUpdate): Promise<PipelineResult
   return processLocationUpdate(raw);
 }
 
-export { getLastLocationForBus } from './gps-pipeline.service';
+export { getLastLocationForBus, getLastLocationForBusAsync } from './gps-pipeline.service';
+export { getGpsStateFromRedis } from './gps-redis-guard';
 export type { GPSFilterResult,GPSLocation,LocationUpdate,PipelineResult };
