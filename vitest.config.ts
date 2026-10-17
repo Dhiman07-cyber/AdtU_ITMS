@@ -7,6 +7,6 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
     environment: 'node',
-    exclude: [...configDefaults.exclude, 'e2e/**', '.kilo/**', 'tests/**'],
+    exclude: [...configDefaults.exclude, 'e2e/**', '.kilo/**', 'tests/**', '.agents/**'],
   },
 });

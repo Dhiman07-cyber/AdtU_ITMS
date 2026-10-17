@@ -56,9 +56,6 @@ service cloud.firestore {
     match /waiting_flags/{flagId} {
       allow read, write: if false;
     }
-    match /bus_locations/{locationId} {
-      allow read, write: if false;
-    }
     match /driver_location_updates/{updateId} {
       allow read, write: if false;
     }

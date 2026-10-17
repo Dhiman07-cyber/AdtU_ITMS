@@ -275,11 +275,12 @@ export function validateOrigin(request: NextRequest): boolean {
     }
 
     // If neither Origin nor Referer is present, allow ONLY non-browser API clients
-    // that authenticate via Bearer token or internal server token (browsers cannot send
-    // custom headers in simple cross-origin requests).
+    // that authenticate via a Bearer token (browsers cannot attach Authorization headers
+    // in simple cross-origin requests, so this is CSRF-safe).
+    // NOTE: x-internal-token was previously accepted here but had no comparator in the repo,
+    // allowing any client to self-grant CSRF bypass. Removed (R-02).
     const authHeader = request.headers.get('authorization');
-    const internalToken = request.headers.get('x-internal-token');
-    if ((authHeader && authHeader.startsWith('Bearer ')) || internalToken) {
+    if (authHeader && authHeader.startsWith('Bearer ')) {
         return true;
     }
 
@@ -334,11 +335,10 @@ export async function proxy(request: NextRequest) {
         request.headers.get('x-load-test-bypass') === process.env.LOAD_TEST_SECRET;
 
     const hasAuthToken = Boolean(
-        request.cookies.get('session')?.value ||
-        request.cookies.get('token')?.value ||
-        request.headers.get('authorization')?.startsWith('Bearer ') ||
-        request.headers.get('x-device-id') ||
-        request.headers.get('x-internal-token')
+        // NOTE: Only real Bearer auth tokens qualify for the higher rate-limit tier.
+        // x-internal-token was previously included here but had no comparator; it allowed
+        // any client to self-grant a 10x rate-limit allowance. Removed (R-02).
+        request.headers.get('authorization')?.startsWith('Bearer ')
     );
 
     const rateLimit = checkGlobalRateLimit(clientIp, hasAuthToken);
@@ -389,9 +389,9 @@ export async function proxy(request: NextRequest) {
 
     // ── 11. For API routes, require authorization header for non-public routes ──
     if (pathname.startsWith('/api/') && !isPublicApiRoute(pathname) && !isCronRoute(pathname)) {
-        const hasAuth = request.headers.get('authorization') ||
-            request.cookies.get('__session')?.value ||
-            request.cookies.get('firebase-auth-token')?.value;
+        // This app uses Firebase Web SDK with IndexedDB — auth is via Authorization: Bearer header only.
+        // Dead cookie probes (__session, firebase-auth-token) removed (R-28: Phase 3 F-12).
+        const hasAuth = request.headers.get('authorization');
 
         if (!hasAuth) {
             // Don't block — the API handler will do final auth. 

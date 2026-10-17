@@ -124,6 +124,8 @@ export function getClientIp(request: Request): string {
 
     const xff = request.headers.get('x-forwarded-for');
     if (xff) {
+        // Rightmost entry is appended by the trusted reverse proxy / edge hop.
+        // Using the rightmost hop prevents client-spoofed leftmost entries (INV-AUTH-006).
         const parts = xff.split(',').map(s => s.trim()).filter(Boolean);
         if (parts.length > 0) return parts[parts.length - 1];
     }
@@ -174,8 +176,6 @@ async function safeParseBody(request: Request): Promise<any> {
  * 8. Call the handler
  * 9. Catch and sanitize errors
  */
-let cachedAllowedHosts: Set<string> | null = null;
-
 function getAllowedOriginHosts(): Set<string> {
     const hosts = new Set<string>();
     const appUrl = process.env.NEXT_PUBLIC_APP_URL;
