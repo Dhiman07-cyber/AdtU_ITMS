@@ -20,6 +20,7 @@
  */
 
 import * as net from 'net';
+import * as tls from 'tls';
 
 const ROLE_INVALIDATE_CHANNEL = 'role_invalidate';
 const RECONNECT_DELAY_MS = 5000;
@@ -29,13 +30,15 @@ const RECONNECT_DELAY_MS = 5000;
 // ──────────────────────────────────────────────────────────────────────────────
 
 interface BridgeState {
-  pubSocket: net.Socket | null;
-  subSocket: net.Socket | null;
+  pubSocket: net.Socket | tls.TLSSocket | null;
+  subSocket: net.Socket | tls.TLSSocket | null;
   pubReady: boolean;
   subReady: boolean;
   reconnectTimer: NodeJS.Timeout | null;
   host: string;
   port: number;
+  tls: boolean;
+  username?: string;
   password?: string;
   invalidationHandlers: Set<(uid: string) => void>;
   initialized: boolean;
@@ -52,6 +55,8 @@ function getState(): BridgeState {
       reconnectTimer: null,
       host: '127.0.0.1',
       port: 6379,
+      tls: false,
+      username: undefined,
       password: undefined,
       invalidationHandlers: new Set<(uid: string) => void>(),
       initialized: false,
@@ -72,15 +77,17 @@ function encodeCommand(args: string[]): string {
   return cmd;
 }
 
-function parseUrl(urlStr?: string): { host: string; port: number; password?: string } {
-  const defaults = { host: '127.0.0.1', port: 6379 };
+function parseUrl(urlStr?: string): { host: string; port: number; tls: boolean; username?: string; password?: string } {
+  const defaults = { host: '127.0.0.1', port: 6379, tls: false };
   if (!urlStr) return defaults;
   try {
     const u = new URL(urlStr);
     return {
       host: u.hostname || '127.0.0.1',
-      port: parseInt(u.port || '6379', 10),
-      password: u.password || undefined,
+      port: parseInt(u.port || (u.protocol === 'rediss:' ? '6379' : '6379'), 10),
+      tls: u.protocol === 'rediss:',
+      username: u.username ? decodeURIComponent(u.username) : undefined,
+      password: u.password ? decodeURIComponent(u.password) : undefined,
     };
   } catch {
     return defaults;
@@ -143,9 +150,20 @@ function connectPub(state: BridgeState): void {
   if (state.pubSocket && !state.pubSocket.destroyed) state.pubSocket.destroy();
   state.pubReady = false;
 
-  const sock = net.createConnection({ host: state.host, port: state.port }, () => {
+  const sock = state.tls
+    ? tls.connect({ host: state.host, port: state.port, servername: state.host })
+    : net.createConnection({ host: state.host, port: state.port });
+
+  const connectEvent = state.tls ? 'secureConnect' : 'connect';
+
+  sock.on(connectEvent, () => {
     state.pubReady = true;
-    if (state.password) sock.write(encodeCommand(['AUTH', state.password]));
+    if (state.password) {
+      const authCmd = (state.username && state.username !== 'default')
+        ? ['AUTH', state.username, state.password]
+        : ['AUTH', state.password];
+      sock.write(encodeCommand(authCmd));
+    }
   });
 
   sock.on('error', () => {
@@ -165,9 +183,20 @@ function connectSub(state: BridgeState): void {
   if (state.subSocket && !state.subSocket.destroyed) state.subSocket.destroy();
   state.subReady = false;
 
-  const sock = net.createConnection({ host: state.host, port: state.port }, () => {
+  const sock = state.tls
+    ? tls.connect({ host: state.host, port: state.port, servername: state.host })
+    : net.createConnection({ host: state.host, port: state.port });
+
+  const connectEvent = state.tls ? 'secureConnect' : 'connect';
+
+  sock.on(connectEvent, () => {
     state.subReady = true;
-    if (state.password) sock.write(encodeCommand(['AUTH', state.password]));
+    if (state.password) {
+      const authCmd = (state.username && state.username !== 'default')
+        ? ['AUTH', state.username, state.password]
+        : ['AUTH', state.password];
+      sock.write(encodeCommand(authCmd));
+    }
     sock.write(encodeCommand(['SUBSCRIBE', ROLE_INVALIDATE_CHANNEL]));
   });
 
@@ -189,7 +218,6 @@ function connectSub(state: BridgeState): void {
 
   state.subSocket = sock;
 }
-
 
 function scheduleReconnect(state: BridgeState): void {
   if (state.reconnectTimer) return;
@@ -227,6 +255,8 @@ export function initRoleCacheRedis(localInvalidate: (uid: string) => void): void
   const parsed = parseUrl(redisUrl);
   state.host = parsed.host;
   state.port = parsed.port;
+  state.tls = parsed.tls;
+  state.username = parsed.username;
   state.password = parsed.password;
   state.initialized = true;
 

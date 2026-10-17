@@ -1,4 +1,5 @@
 import * as net from 'net';
+import * as tls from 'tls';
 import { logger } from './structured-logger';
 
 export interface RedisClientOptions {
@@ -8,8 +9,8 @@ export interface RedisClientOptions {
 }
 
 export class ResilientRedisClient {
-    private clientSocket: net.Socket | null = null;
-    private subSocket: net.Socket | null = null;
+    private clientSocket: net.Socket | tls.TLSSocket | null = null;
+    private subSocket: net.Socket | tls.TLSSocket | null = null;
     private isConnected = false;
     private isSubConnected = false;
     private options: RedisClientOptions;
@@ -20,6 +21,8 @@ export class ResilientRedisClient {
     private lastSubRecoveryAt = 0;
     private host = '127.0.0.1';
     private port = 6379;
+    private isTls = false;
+    private username?: string;
     private password?: string;
 
     constructor(options?: RedisClientOptions) {
@@ -32,9 +35,13 @@ export class ResilientRedisClient {
         try {
             const parsed = new URL(urlStr);
             this.host = parsed.hostname || '127.0.0.1';
-            this.port = parseInt(parsed.port || '6379', 10);
+            this.port = parseInt(parsed.port || (parsed.protocol === 'rediss:' ? '6379' : '6379'), 10);
+            this.isTls = parsed.protocol === 'rediss:';
+            if (parsed.username) {
+                this.username = decodeURIComponent(parsed.username);
+            }
             if (parsed.password) {
-                this.password = parsed.password;
+                this.password = decodeURIComponent(parsed.password);
             }
         } catch {
             logger.warn('redis_url_parse_failed', { url: urlStr });
@@ -56,16 +63,23 @@ export class ResilientRedisClient {
 
         return new Promise((resolve) => {
             try {
-                this.clientSocket = net.createConnection({ host: this.host, port: this.port }, () => {
+                const onConnect = () => {
                     if (gen !== this.generation) return;
                     this.isConnected = true;
                     this.clientSocket?.setKeepAlive(true, 30000);
                     logger.info('redis_client_connected', { host: this.host, port: this.port });
                     if (this.password && this.clientSocket) {
-                        this.sendCommand(this.clientSocket, ['AUTH', this.password]);
+                        const authCmd = (this.username && this.username !== 'default')
+                            ? ['AUTH', this.username, this.password]
+                            : ['AUTH', this.password];
+                        this.sendCommand(this.clientSocket, authCmd);
                     }
                     resolve(true);
-                });
+                };
+
+                this.clientSocket = this.isTls
+                    ? tls.connect({ host: this.host, port: this.port, servername: this.host }, onConnect)
+                    : net.createConnection({ host: this.host, port: this.port }, onConnect);
 
                 this.clientSocket.on('error', (err) => {
                     if (gen !== this.generation) return;
@@ -98,7 +112,7 @@ export class ResilientRedisClient {
         if (this.subSocket && !this.subSocket.destroyed) this.subSocket.destroy();
 
         try {
-            this.subSocket = net.createConnection({ host: this.host, port: this.port }, () => {
+            const onConnect = () => {
                 if (gen !== this.subGeneration) return;
                 this.isSubConnected = true;
                 this.subSocket?.setKeepAlive(true, 30000);
@@ -106,7 +120,10 @@ export class ResilientRedisClient {
                 // W10: Pipeline AUTH + all channel SUBSCRIBEs into a single TCP write
                 let pipeline = '';
                 if (this.password) {
-                    pipeline += this.encodeCommand(['AUTH', this.password]);
+                    const authCmd = (this.username && this.username !== 'default')
+                        ? ['AUTH', this.username, this.password]
+                        : ['AUTH', this.password];
+                    pipeline += this.encodeCommand(authCmd);
                 }
                 for (const channel of this.pubSubHandlers.keys()) {
                     pipeline += this.encodeCommand(['SUBSCRIBE', channel]);
@@ -114,7 +131,11 @@ export class ResilientRedisClient {
                 if (pipeline && this.subSocket && !this.subSocket.destroyed) {
                     this.subSocket.write(pipeline);
                 }
-            });
+            };
+
+            this.subSocket = this.isTls
+                ? tls.connect({ host: this.host, port: this.port, servername: this.host }, onConnect)
+                : net.createConnection({ host: this.host, port: this.port }, onConnect);
 
             let subBuffer = Buffer.alloc(0);
             this.subSocket.on('data', (chunk: Buffer) => {

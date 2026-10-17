@@ -35,6 +35,7 @@
  */
 
 import * as net from 'net';
+import * as tls from 'tls';
 import type { LastLocation } from './types';
 
 const KEY_PREFIX = 'gps:last:';
@@ -49,11 +50,13 @@ const MAX_CLOCK_SKEW_MS = 2 * 60 * 1000; // 2 minutes
 // ──────────────────────────────────────────────────────────────────────────────
 
 interface GpsRedisState {
-  socket: net.Socket | null;
+  socket: net.Socket | tls.TLSSocket | null;
   ready: boolean;
   reconnectTimer: NodeJS.Timeout | null;
   host: string;
   port: number;
+  tls: boolean;
+  username?: string;
   password?: string;
   generation: number;
   /** Pending command callbacks: resolve with response string or null on error */
@@ -65,17 +68,25 @@ interface GpsRedisState {
 // URL parsing
 // ──────────────────────────────────────────────────────────────────────────────
 
-function parseRedisUrl(urlStr?: string): { host: string; port: number; password?: string } {
-  if (!urlStr) return { host: '127.0.0.1', port: 6379 };
+function parseRedisUrl(urlStr?: string): {
+  host: string;
+  port: number;
+  tls: boolean;
+  username?: string;
+  password?: string;
+} {
+  if (!urlStr) return { host: '127.0.0.1', port: 6379, tls: false };
   try {
     const u = new URL(urlStr);
     return {
       host: u.hostname || '127.0.0.1',
-      port: parseInt(u.port || '6379', 10),
-      password: u.password || undefined,
+      port: parseInt(u.port || (u.protocol === 'rediss:' ? '6379' : '6379'), 10),
+      tls: u.protocol === 'rediss:',
+      username: u.username ? decodeURIComponent(u.username) : undefined,
+      password: u.password ? decodeURIComponent(u.password) : undefined,
     };
   } catch {
-    return { host: '127.0.0.1', port: 6379 };
+    return { host: '127.0.0.1', port: 6379, tls: false };
   }
 }
 
@@ -89,6 +100,8 @@ function getState(): GpsRedisState {
       reconnectTimer: null,
       host: parsed.host,
       port: parsed.port,
+      tls: parsed.tls,
+      username: parsed.username,
       password: parsed.password,
       generation: 0,
       pending: [],
@@ -162,14 +175,18 @@ function connectGpsRedis(state: GpsRedisState): void {
   state.ready = false;
   state.buffer = Buffer.alloc(0);
 
-  const sock = net.createConnection({ host: state.host, port: state.port });
+  const sock = state.tls
+    ? tls.connect({ host: state.host, port: state.port, servername: state.host })
+    : net.createConnection({ host: state.host, port: state.port });
 
   const timeout = setTimeout(() => {
     if (gen !== state.generation) return;
     sock.destroy(new Error('GPS Redis connect timeout'));
   }, CONNECT_TIMEOUT_MS);
 
-  sock.on('connect', () => {
+  const connectEvent = state.tls ? 'secureConnect' : 'connect';
+
+  sock.on(connectEvent, () => {
     clearTimeout(timeout);
     if (gen !== state.generation) return;
     sock.setKeepAlive(true, 30000);
@@ -187,7 +204,10 @@ function connectGpsRedis(state: GpsRedisState): void {
           }
         },
       });
-      sock.write(encodeCmd(['AUTH', state.password]));
+      const authCmd = (state.username && state.username !== 'default')
+        ? ['AUTH', state.username, state.password]
+        : ['AUTH', state.password];
+      sock.write(encodeCmd(authCmd));
     } else {
       state.ready = true;
     }
@@ -471,19 +491,24 @@ function memoryGuard(
 let initialized = false;
 
 function ensureInit(): void {
-  if (initialized) return;
-  initialized = true;
   const url = process.env.REDIS_URL;
   if (!url) return; // memory-only mode
   const parsed = parseRedisUrl(url);
   const state = getState();
   state.host = parsed.host;
   state.port = parsed.port;
+  state.tls = parsed.tls;
+  state.username = parsed.username;
   state.password = parsed.password;
+
+  if (initialized && state.socket && !state.socket.destroyed) {
+    return;
+  }
+  initialized = true;
   connectGpsRedis(state);
 }
 
-async function waitForReady(state: GpsRedisState, timeoutMs = 400): Promise<boolean> {
+async function waitForReady(state: GpsRedisState, timeoutMs = 800): Promise<boolean> {
   if (state.ready) return true;
   const start = Date.now();
   while (!state.ready && Date.now() - start < timeoutMs) {
@@ -515,8 +540,11 @@ export async function atomicGpsGuardAndUpdate(
   ensureInit();
   const state = getState();
 
-  if (!state.ready && process.env.REDIS_URL) {
-    await waitForReady(state, 400);
+  if ((!state.ready || !state.socket || state.socket.destroyed) && process.env.REDIS_URL) {
+    if (!state.socket || state.socket.destroyed) {
+      connectGpsRedis(state);
+    }
+    await waitForReady(state, 800);
   }
 
   if (state.ready && state.socket && !state.socket.destroyed) {
@@ -583,8 +611,11 @@ export async function getGpsStateFromRedis(busId: string): Promise<LastLocation 
   ensureInit();
   const state = getState();
 
-  if (!state.ready && process.env.REDIS_URL) {
-    await waitForReady(state, 200);
+  if ((!state.ready || !state.socket || state.socket.destroyed) && process.env.REDIS_URL) {
+    if (!state.socket || state.socket.destroyed) {
+      connectGpsRedis(state);
+    }
+    await waitForReady(state, 500);
   }
 
   if (state.ready && state.socket && !state.socket.destroyed) {
