@@ -168,9 +168,7 @@ function makeMarkerEl(kind: MapPoint["kind"], theme: MapTheme, label?: string, h
     inner.innerHTML = SVG_ICONS.stop;
   }
 
-  if (isBus && heading !== undefined && heading > 0) {
-    inner.style.transform = `rotate(${heading}deg)`;
-  }
+  // Bus icon orientation is kept fixed upright to avoid jitter from noisy compass/heading readings
 
   el.appendChild(inner);
   container.appendChild(el);
@@ -506,11 +504,7 @@ const GuwahatiMap = forwardRef<GuwahatiMapHandles, Props>(({
       lastKindRef.current = primaryKind;
     } else {
       animateMarkerTo(busMarkerRef.current, busMarkerRef.current.getLngLat() as any, pos, busAnimationRef);
-      if (busHeading > 0) {
-        const el = busMarkerRef.current.getElement();
-        const inner = el?.querySelector('.bus-marker-inner') as HTMLElement | null;
-        if (inner) inner.style.transform = `rotate(${busHeading}deg)`;
-      }
+      // Bus icon orientation is kept fixed upright to avoid erratic spinning from GPS heading fluctuation
     }
 
     // Auto-follow: smoothly pan camera to bus when followBus=true and driver
