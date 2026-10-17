@@ -50,7 +50,7 @@ export function generateReleaseManifest(): ReleaseManifest {
             websocket: `itms/ws:${version}`,
             nginx: `nginx:1.27-alpine`
         },
-        services: ['nextjs', 'ws1', 'ws2', 'nginx', 'prometheus', 'alertmanager', 'grafana']
+        services: ['nextjs', 'ws1', 'nginx', 'prometheus', 'alertmanager', 'grafana']
     };
 
     const outputDir = path.join(__dirname, '../public');

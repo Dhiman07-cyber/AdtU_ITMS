@@ -113,7 +113,6 @@ async function cleanup() {
   if (busIds.length) {
     await sb.from('waiting_flags').delete().in('bus_id', busIds);
     await sb.from('active_trips').delete().in('bus_id', busIds);
-    await sb.from('bus_locations').delete().in('bus_id', busIds);
     await sb.from('buses').delete().in('id', busIds);
     await sb.from('routes').delete().in('id', (existing?.routes || []).map((r) => r.id));
   }

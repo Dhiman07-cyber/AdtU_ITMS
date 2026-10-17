@@ -100,7 +100,7 @@ function validateDockerCompose() {
   }
 
   const content = fs.readFileSync(composePath, 'utf8');
-  const requiredServices = ['redis', 'ws1', 'ws2', 'nextjs', 'nginx', 'prometheus', 'alertmanager', 'grafana'];
+  const requiredServices = ['redis', 'ws1', 'nextjs', 'nginx', 'prometheus', 'alertmanager', 'grafana'];
 
   for (const svc of requiredServices) {
     if (!content.includes(`  ${svc}:`)) {
@@ -110,8 +110,8 @@ function validateDockerCompose() {
 
   // Verify health checks are defined
   const healthcheckCount = (content.match(/healthcheck:/g) ?? []).length;
-  if (healthcheckCount < 3) {
-    warn('Docker', `Only ${healthcheckCount} healthcheck definitions found — expected at least 3 (nextjs, ws1, ws2)`);
+  if (healthcheckCount < 2) {
+    warn('Docker', `Only ${healthcheckCount} healthcheck definitions found — expected at least 2 (nextjs, ws1)`);
   } else {
     info('Docker', `${healthcheckCount} health checks defined in docker-compose.yml`);
   }
@@ -149,7 +149,7 @@ function validatePrometheus() {
     return;
   }
   const content = fs.readFileSync(promYml, 'utf8');
-  if (!content.includes('itms-websocket-cluster')) warn('Prometheus', 'WebSocket scrape job not found in prometheus.yml');
+  if (!content.includes('itms-websocket')) warn('Prometheus', 'WebSocket scrape job not found in prometheus.yml');
   if (!content.includes('itms-nextjs-cluster')) warn('Prometheus', 'Next.js scrape job not found in prometheus.yml');
   if (!content.includes('alertmanager')) warn('Prometheus', 'Alertmanager target not configured in prometheus.yml');
   info('Prometheus', 'prometheus.yml present and validated');

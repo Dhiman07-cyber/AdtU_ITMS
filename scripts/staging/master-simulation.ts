@@ -381,7 +381,7 @@ async function cleanup() {
   if (busIds.length) {
     try { await sb.from('waiting_flags').delete().in('bus_id', busIds); } catch { }
     try { await sb.from('active_trips').delete().in('bus_id', busIds); } catch { }
-    try { await sb.from('bus_locations').delete().in('bus_id', busIds); } catch { }
+
   }
   if (busIds.length) {
     const [tr, fl] = await Promise.allSettled([

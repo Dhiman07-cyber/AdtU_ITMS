@@ -1,9 +1,9 @@
 {
   "version": "0.1.0",
   "appName": "ITMS ADTU Bus Services",
-  "buildTimestamp": "2026-07-27T09:33:24.447Z",
-  "gitCommitHash": "8b25da6",
-  "gitBranch": "feat/architecture-redesign",
+  "buildTimestamp": "2026-10-17T07:35:38.258Z",
+  "gitCommitHash": "ee5bbd8",
+  "gitBranch": "main",
   "environment": "production",
   "nodeVersion": "v26.2.0",
   "targetArchitecture": "x86_64-linux-gnu",
@@ -15,7 +15,6 @@
   "services": [
     "nextjs",
     "ws1",
-    "ws2",
     "nginx",
     "prometheus",
     "alertmanager",

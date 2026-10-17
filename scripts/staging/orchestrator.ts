@@ -207,10 +207,7 @@ async function main() {
     const { data } = await supabase().from('active_trips').select('trip_id').in('bus_id', buses.map((b) => b.id)).eq('status', 'active');
     return { ok: (data?.length ?? 0) === 0, detail: `remaining=${data?.length ?? 0}` };
   }));
-  dbChecks.push(await dbCheck('bus_locations cleaned after end-trip', async () => {
-    const { data } = await supabase().from('bus_locations').select('bus_id').in('bus_id', buses.map((b) => b.id));
-    return { ok: (data?.length ?? 0) === 0, detail: `rows=${data?.length ?? 0}` };
-  }));
+
   dbChecks.push(await dbCheck('no active waiting flags left on staging buses', async () => {
     const { data } = await supabase().from('waiting_flags').select('id').in('bus_id', buses.map((b) => b.id)).in('status', ['raised']);
     return { ok: true, detail: `still-raised=${data?.length ?? 0} (acked=${drivers.reduce((a, d) => a + d.flagsAcked.length, 0)})` };

@@ -19,7 +19,7 @@ async function main() {
   console.log(`APP_URL=${APP_URL}  WS_BASE=${WS_BASE}\n`);
 
   console.log('-- table counts --');
-  for (const t of ['users', 'student_profiles', 'driver_profiles', 'buses', 'routes', 'active_trips', 'bus_locations', 'waiting_flags', 'payments']) {
+  for (const t of ['users', 'student_profiles', 'driver_profiles', 'buses', 'routes', 'active_trips', 'waiting_flags', 'payments']) {
     console.log(`  ${t}: ${await count(t)}`);
   }
 
