@@ -21,10 +21,8 @@ export function clearTripBreadcrumbCache(tripId: string): void {
   breadcrumbWriteCache.delete(tripId);
 }
 
-// Heartbeat throttle: caps active_trips.last_heartbeat writes to 1 per bus per 45s.
-// Lives here (not in the route file) so it's co-located with the breadcrumb throttle
-// and easier to back with Redis if multi-worker sharing becomes necessary.
-const MIN_HEARTBEAT_INTERVAL_MS = 45 * 1000;
+// Heartbeat throttle: caps active_trips.last_heartbeat writes to 1 per bus per 30s.
+const MIN_HEARTBEAT_INTERVAL_MS = 30 * 1000;
 const heartbeatWriteCache = new Map<string, number>();
 
 export function shouldWriteHeartbeat(busId: string, nowMs: number): boolean {

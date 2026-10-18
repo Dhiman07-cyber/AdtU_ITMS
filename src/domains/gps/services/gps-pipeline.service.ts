@@ -3,6 +3,7 @@ import { ErrorClass } from '@/lib/error-classes';
 import { MAX_CLOCK_SKEW_MS, normalizeLocationUpdate } from './gps-normalizer.service';
 import { checkActiveTrip } from './gps-persistence.service';
 import { atomicGpsGuardAndUpdate, clearGpsState, seedGpsState, getGpsStateFromRedis } from './gps-redis-guard';
+import { trackStopDwell, clearStopDwellState, processWaitingFlagsOnGpsTick } from './stop-dwell.service';
 import type { LastLocation, LocationUpdate, LocationUpdateNormalized, PipelineResult } from './types';
 
 // NOTE: live enforcement here is bounds, speed/heading/accuracy caps,
@@ -123,6 +124,7 @@ export function clearInMemoryLastLocation(busId: string): void {
     inMemoryLastLocations.delete(id);
     inMemoryLastRawTs.delete(id);
   }
+  clearStopDwellState(busId);
   // Best-effort Redis eviction — does not block the caller.
   clearGpsState(busId).catch(() => { /* ignore */ });
 }
@@ -267,6 +269,27 @@ export async function processLocationUpdate(raw: LocationUpdate): Promise<Pipeli
   if (rawTime !== null) {
     inMemoryLastRawTs.set(normalized.busId, Math.min(rawTime, Date.now() + MAX_CLOCK_SKEW_MS));
   }
+
+  // Non-blocking stop dwell tracking for incontrovertible audit proof (INV-2)
+  trackStopDwell({
+    busId: normalized.busId,
+    tripId: normalized.tripId,
+    driverId: normalized.driverId,
+    routeId: normalized.routeId,
+    lat: normalized.lat,
+    lng: normalized.lng,
+    speed: normalized.speed,
+    timestamp: normalized.timestamp,
+  }).catch(() => {});
+
+  // Hands-free proximity auto-ack and pass-by auto-cleanup (0 Supabase reads on hot path)
+  processWaitingFlagsOnGpsTick({
+    busId: normalized.busId,
+    routeId: normalized.routeId,
+    lat: normalized.lat,
+    lng: normalized.lng,
+    shift: (raw as any).shift,
+  }).catch(() => {});
 
   appLogger.debug('gps', 'location_accepted', { ...logCtx, lat: normalized.lat, lng: normalized.lng, latencyMs: Date.now() - start });
   return { accepted: true, normalized, persisted: false };

@@ -689,13 +689,371 @@ export async function getGpsStateFromRedis(busId: string): Promise<LastLocation 
  */
 export async function clearGpsState(busId: string): Promise<void> {
   memLast.delete(busId);
+  memActiveFlags.delete(busId);
+  memFlagsHydrated.delete(busId);
   const state = getState();
   if (state.ready && state.socket && !state.socket.destroyed) {
     try {
       await sendCommand(state, ['DEL', `${KEY_PREFIX}${busId}`]);
+      await sendCommand(state, ['DEL', `${FLAGS_ACTIVE_PREFIX}${busId}`]);
+      await sendCommand(state, ['DEL', `${DWELL_ACTIVE_PREFIX}${busId}`]);
+      await sendCommand(state, ['DEL', `${FLAGS_HYDRATED_PREFIX}${busId}`]);
     } catch { /* best-effort */ }
   }
 }
+
+
+export interface RedisTripLockData {
+  tripId: string;
+  driverId: string;
+  routeId?: string;
+  deviceId?: string;
+  expiresAtMs: number;
+}
+
+/**
+ * Execute an arbitrary Redis command using the singleton connection.
+ * Safe for use across Next.js domain services (singleflight caches, student assignments).
+ */
+export async function executeGpsRedisCommand(args: string[]): Promise<string | null> {
+  ensureInit();
+  const state = getState();
+  if ((!state.ready || !state.socket || state.socket.destroyed) && process.env.REDIS_URL) {
+    if (!state.socket || state.socket.destroyed) {
+      connectGpsRedis(state);
+    }
+    await waitForReady(state, 500);
+  }
+  if (!state.ready || !state.socket || state.socket.destroyed) {
+    return null;
+  }
+  return sendCommand(state, args);
+}
+
+const TRIP_LOCK_PREFIX = 'trip:active:';
+
+export async function getRedisTripLock(busId: string): Promise<RedisTripLockData | null> {
+  const state = getState();
+  if (!state.ready || !state.socket || state.socket.destroyed) return null;
+  try {
+    const raw = await sendCommand(state, ['GET', `${TRIP_LOCK_PREFIX}${busId}`]);
+    if (!raw) return null;
+    const data = JSON.parse(raw) as RedisTripLockData;
+    if (!data || typeof data.expiresAtMs !== 'number' || data.expiresAtMs <= Date.now()) {
+      return null;
+    }
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+export async function setRedisTripLock(busId: string, data: RedisTripLockData): Promise<void> {
+  const state = getState();
+  if (!state.ready || !state.socket || state.socket.destroyed) return;
+  try {
+    await sendCommand(state, ['SET', `${TRIP_LOCK_PREFIX}${busId}`, JSON.stringify(data), 'EX', '120']);
+  } catch { /* best-effort */ }
+}
+
+export async function clearRedisTripLock(busId: string): Promise<void> {
+  const state = getState();
+  if (!state.ready || !state.socket || state.socket.destroyed) return;
+  try {
+    await sendCommand(state, ['DEL', `${TRIP_LOCK_PREFIX}${busId}`]);
+  } catch { /* best-effort */ }
+}
+
+const DWELL_ACTIVE_PREFIX = 'dwell:active:';
+
+export async function getRedisActiveDwell(busId: string): Promise<any | null> {
+  const state = getState();
+  if (!state.ready || !state.socket || state.socket.destroyed) return null;
+  try {
+    const raw = await sendCommand(state, ['GET', `${DWELL_ACTIVE_PREFIX}${busId}`]);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+export async function setRedisActiveDwell(busId: string, data: any): Promise<void> {
+  const state = getState();
+  if (!state.ready || !state.socket || state.socket.destroyed) return;
+  try {
+    await sendCommand(state, ['SET', `${DWELL_ACTIVE_PREFIX}${busId}`, JSON.stringify(data), 'EX', '300']);
+  } catch { /* best-effort */ }
+}
+
+export async function clearRedisActiveDwell(busId: string): Promise<void> {
+  const state = getState();
+  if (!state.ready || !state.socket || state.socket.destroyed) return;
+  try {
+    await sendCommand(state, ['DEL', `${DWELL_ACTIVE_PREFIX}${busId}`]);
+  } catch { /* best-effort */ }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Active Waiting Flags Store (flags:active:<busId>)
+// Zero DB reads on the 2s GPS tick.
+// ──────────────────────────────────────────────────────────────────────────────
+
+export interface ActiveWaitingFlag {
+  flagId: string;
+  studentUid: string;
+  studentName: string;
+  stopName: string;
+  lat: number;
+  lng: number;
+  routeProgressMeters: number;
+  ackSent: boolean;
+  busId: string;
+  routeId: string;
+  tripId: string;
+  createdAt: number;
+  shift?: string;
+}
+
+const FLAGS_ACTIVE_PREFIX = 'flags:active:';
+const FLAGS_HYDRATED_PREFIX = 'flags:hydrated:';
+const FLAG_COUNT_PREFIX = 'flag:count:';
+const memActiveFlags = new Map<string, Map<string, ActiveWaitingFlag>>();
+const memFlagsHydrated = new Set<string>();
+const memFlagCounts = new Map<string, number>();
+const lastFlagSyncMs = new Map<string, number>();
+
+export async function getRedisActiveFlags(busId: string): Promise<Record<string, ActiveWaitingFlag>> {
+  if (!busId) return {};
+  const now = Date.now();
+  const lastSync = lastFlagSyncMs.get(busId) || 0;
+  const busMap = memActiveFlags.get(busId);
+
+  // Zero-Waste Fast Path: If hydrated and synced within last 4s (2 GPS ticks), return local mirror
+  if (memFlagsHydrated.has(busId) && busMap !== undefined && now - lastSync < 4_000) {
+    const res: Record<string, ActiveWaitingFlag> = {};
+    for (const [k, v] of busMap.entries()) {
+      res[k] = v;
+    }
+    return res;
+  }
+
+  const state = getState();
+
+  if (state.ready && state.socket && !state.socket.destroyed) {
+    try {
+      const raw = await sendCommand(state, ['HGETALL', `${FLAGS_ACTIVE_PREFIX}${busId}`]);
+      if (raw) {
+        lastFlagSyncMs.set(busId, now);
+        const parsed = JSON.parse(raw);
+        const result: Record<string, ActiveWaitingFlag> = {};
+        if (Array.isArray(parsed)) {
+          for (let i = 0; i < parsed.length; i += 2) {
+            const k = parsed[i];
+            const v = parsed[i + 1];
+            if (k && v) {
+              try {
+                result[k] = typeof v === 'string' ? JSON.parse(v) : v;
+              } catch { /* ignore malformed */ }
+            }
+          }
+        } else if (typeof parsed === 'object' && parsed !== null) {
+          for (const [k, v] of Object.entries(parsed)) {
+            try {
+              result[k] = typeof v === 'string' ? JSON.parse(v as string) : (v as ActiveWaitingFlag);
+            } catch { /* ignore malformed */ }
+          }
+        }
+
+        // Sync local memory mirror
+        let m = memActiveFlags.get(busId);
+        if (!m) {
+          m = new Map();
+          memActiveFlags.set(busId, m);
+        }
+        m.clear();
+        for (const [k, v] of Object.entries(result)) {
+          m.set(k, v);
+        }
+        memFlagsHydrated.add(busId);
+        return result;
+      }
+    } catch {
+      // fallback to memory below
+    }
+  }
+
+  // In-memory fallback
+  if (!busMap) return {};
+  const res: Record<string, ActiveWaitingFlag> = {};
+  for (const [k, v] of busMap.entries()) {
+    res[k] = v;
+  }
+  return res;
+}
+
+export async function setRedisActiveFlag(busId: string, flag: ActiveWaitingFlag): Promise<void> {
+  if (!busId || !flag.flagId) return;
+
+  // Update in-memory fallback
+  let busMap = memActiveFlags.get(busId);
+  if (!busMap) {
+    busMap = new Map();
+    memActiveFlags.set(busId, busMap);
+  }
+  busMap.set(flag.flagId, flag);
+
+  memFlagsHydrated.add(busId);
+  lastFlagSyncMs.set(busId, Date.now());
+
+  const state = getState();
+  if (!state.ready || !state.socket || state.socket.destroyed) return;
+
+  try {
+    const key = `${FLAGS_ACTIVE_PREFIX}${busId}`;
+    await sendCommand(state, ['HSET', key, flag.flagId, JSON.stringify(flag)]);
+    await sendCommand(state, ['EXPIRE', key, '7200']);
+    await sendCommand(state, ['SET', `${FLAGS_HYDRATED_PREFIX}${busId}`, '1', 'EX', '1800']);
+  } catch { /* best-effort */ }
+}
+
+export async function updateRedisActiveFlag(
+  busId: string,
+  flagId: string,
+  patch: Partial<ActiveWaitingFlag>
+): Promise<void> {
+  if (!busId || !flagId) return;
+
+  // In-memory update
+  const busMap = memActiveFlags.get(busId);
+  let updatedFlag: ActiveWaitingFlag | null = null;
+  if (busMap && busMap.has(flagId)) {
+    updatedFlag = { ...busMap.get(flagId)!, ...patch };
+    busMap.set(flagId, updatedFlag);
+    lastFlagSyncMs.set(busId, Date.now());
+  }
+
+  const state = getState();
+  if (!state.ready || !state.socket || state.socket.destroyed) return;
+
+  try {
+    const key = `${FLAGS_ACTIVE_PREFIX}${busId}`;
+    if (!updatedFlag) {
+      const raw = await sendCommand(state, ['HGET', key, flagId]);
+      if (raw) {
+        const existing = JSON.parse(raw);
+        updatedFlag = { ...existing, ...patch };
+      }
+    }
+    if (updatedFlag) {
+      await sendCommand(state, ['HSET', key, flagId, JSON.stringify(updatedFlag)]);
+      lastFlagSyncMs.set(busId, Date.now());
+    }
+  } catch { /* best-effort */ }
+}
+
+export async function removeRedisActiveFlag(busId: string, flagId: string): Promise<void> {
+  if (!busId || !flagId) return;
+
+  const busMap = memActiveFlags.get(busId);
+  if (busMap) {
+    busMap.delete(flagId);
+    lastFlagSyncMs.set(busId, Date.now());
+  }
+
+  const state = getState();
+  if (!state.ready || !state.socket || state.socket.destroyed) return;
+
+  try {
+    await sendCommand(state, ['HDEL', `${FLAGS_ACTIVE_PREFIX}${busId}`, flagId]);
+  } catch { /* best-effort */ }
+}
+
+export async function isRedisFlagsHydrated(busId: string): Promise<boolean> {
+  if (!busId) return false;
+  // Zero-Waste Fast Path: If already hydrated in memory, avoid sequential Redis TCP GET
+  if (memFlagsHydrated.has(busId)) return true;
+  const state = getState();
+  if (state.ready && state.socket && !state.socket.destroyed) {
+    try {
+      const raw = await sendCommand(state, ['GET', `${FLAGS_HYDRATED_PREFIX}${busId}`]);
+      if (raw === '1') {
+        memFlagsHydrated.add(busId);
+        return true;
+      }
+      return false;
+    } catch {
+      return memFlagsHydrated.has(busId);
+    }
+  }
+  return memFlagsHydrated.has(busId);
+}
+
+export async function setRedisFlagsHydrated(busId: string): Promise<void> {
+  if (!busId) return;
+  memFlagsHydrated.add(busId);
+  const state = getState();
+  if (state.ready && state.socket && !state.socket.destroyed) {
+    try {
+      await sendCommand(state, ['SET', `${FLAGS_HYDRATED_PREFIX}${busId}`, '1', 'EX', '1800']);
+    } catch { /* best-effort */ }
+  }
+}
+
+export async function clearRedisFlagsHydrated(busId: string): Promise<void> {
+  if (!busId) return;
+  memFlagsHydrated.delete(busId);
+  const state = getState();
+  if (state.ready && state.socket && !state.socket.destroyed) {
+    try {
+      await sendCommand(state, ['DEL', `${FLAGS_HYDRATED_PREFIX}${busId}`]);
+    } catch { /* best-effort */ }
+  }
+}
+
+export async function clearRedisActiveFlags(busId: string): Promise<void> {
+  if (!busId) return;
+
+  memActiveFlags.delete(busId);
+  memFlagsHydrated.delete(busId);
+  lastFlagSyncMs.delete(busId);
+
+  const state = getState();
+  if (!state.ready || !state.socket || state.socket.destroyed) return;
+
+  try {
+    await sendCommand(state, ['DEL', `${FLAGS_ACTIVE_PREFIX}${busId}`]);
+    await sendCommand(state, ['DEL', `${FLAGS_HYDRATED_PREFIX}${busId}`]);
+  } catch { /* best-effort */ }
+}
+
+export async function incrementStudentTripFlagCount(tripId: string, studentUid: string): Promise<number> {
+  const key = `${tripId}:${studentUid}`;
+  const memCount = (memFlagCounts.get(key) || 0) + 1;
+  memFlagCounts.set(key, memCount);
+
+  const state = getState();
+  if (!state.ready || !state.socket || state.socket.destroyed) {
+    return memCount;
+  }
+
+  try {
+    const redisKey = `${FLAG_COUNT_PREFIX}${key}`;
+    const raw = await sendCommand(state, ['INCR', redisKey]);
+    const count = raw ? parseInt(raw, 10) : memCount;
+    if (count === 1) {
+      await sendCommand(state, ['EXPIRE', redisKey, '7200']);
+    }
+    return count;
+  } catch {
+    return memCount;
+  }
+}
+
+export function clearStudentTripFlagCounts(): void {
+  memFlagCounts.clear();
+}
+
 
 /**
  * Seed the process-local guard anchor for a bus.
