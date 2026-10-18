@@ -1,4 +1,5 @@
-import { clearHistory } from '@/domains/gps';
+import { clearHistory, flushStopDwellOnTripEnd, invalidateActiveTripCache } from '@/domains/gps';
+import { clearRedisActiveFlags } from '@/domains/gps/services/gps-redis-guard';
 import { emitEvent } from '@/domains/realtime/event-emitter';
 import { clearTripBreadcrumbCache } from '@/lib/services/location-write-throttle';
 import { invalidateCachedDeviceSession } from '@/lib/services/device-session-cache';
@@ -12,8 +13,7 @@ export async function cleanupTrip(params: {
   const supabase = getSupabaseServer();
 
   // 1. Delete first, capturing what was actually removed.
-  //    This avoids the race where a flag created between a separate FETCH and
-  //    DELETE would be deleted without a removal broadcast (WAIT-003).
+  //    Also clear Redis active flags for the bus (WAIT-003).
   const [{ data: deletedFlags }, ] = await Promise.all([
     supabase.from('waiting_flags')
       .delete()
@@ -21,8 +21,10 @@ export async function cleanupTrip(params: {
       .in('status', ['raised', 'acknowledged', 'waiting'])
       .select('id, student_uid, bus_id'),
     supabase.from('device_sessions').delete().eq('user_id', params.driverId),
+    clearRedisActiveFlags(params.busId).catch(() => {}),
   ]);
   invalidateCachedDeviceSession(params.driverId);
+  invalidateActiveTripCache(params.busId, params.driverId);
 
   // 2. Broadcast only the flags that were actually deleted.
   if (deletedFlags && deletedFlags.length > 0) {
@@ -56,4 +58,5 @@ export async function cleanupTrip(params: {
 
   clearHistory(params.driverId);
   clearTripBreadcrumbCache(params.tripId);
+  await flushStopDwellOnTripEnd(params.busId).catch(() => {});
 }

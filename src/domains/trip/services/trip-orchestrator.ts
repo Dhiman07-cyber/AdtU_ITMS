@@ -9,7 +9,7 @@ import { broadcastTripEvent } from './trip-broadcast.service';
 import { cleanupTrip } from './trip-cleanup.service';
 import { dispatchTripNotification } from './trip-notification.service';
 import { checkNoConflict,resolveRouteId,resolveRouteName,tripStartPreflight,verifyDriverBusAssignment } from './trip-validation.service';
-import { invalidateActiveTripCache } from '@/domains/gps/services/gps-persistence.service';
+import { invalidateActiveTripCache, setActiveTripCache } from '@/domains/gps/services/gps-persistence.service';
 import { clearInMemoryLastLocation } from '@/domains/gps/services/gps-pipeline.service';
 
 // FCM send is best-effort and must not dictate trip-response latency, but it
@@ -37,6 +37,7 @@ export interface StartTripParams {
   routeId?: string;
   shift?: string;
   tripId?: string;
+  deviceId?: string;
 }
 
 export interface StartTripOutput {
@@ -146,6 +147,15 @@ export async function startTrip(params: StartTripParams): Promise<StartTripOutpu
     );
   }
 
+  // Prime active trip cache in memory and Redis for 0-DB read hot path on GPS ticks
+  setActiveTripCache(params.busId, {
+    tripId: activeTripId,
+    driverId: params.driverId,
+    routeId: effectiveRouteId,
+    deviceId: params.deviceId,
+    expiresAtMs: Date.now() + 600_000,
+  });
+
   return { success: true, tripId: activeTripId, routeId: effectiveRouteId, shift: tripShift };
 }
 
@@ -236,6 +246,7 @@ export async function endTrip(params: EndTripParams): Promise<EndTripOutput> {
   // Return success WITHOUT emitting a second trip_ended / FCM / cleanup wave.
   if (endResult.alreadyEnded) {
     appLogger.info('trip', 'end_duplicate_suppressed', { ...logCtx, tripId: activeTripId, latencyMs: Date.now() - start });
+    invalidateActiveTripCache(params.busId, params.driverId);
     return { success: true, tripId: activeTripId };
   }
 

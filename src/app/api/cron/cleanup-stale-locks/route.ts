@@ -23,6 +23,8 @@
 
 import { emitEvent } from '@/domains/realtime/event-emitter';
 import { clearInMemoryLastLocation } from '@/domains/gps/services/gps-pipeline.service';
+import { clearRedisActiveFlags } from '@/domains/gps/services/gps-redis-guard';
+import { invalidateActiveTripCache, flushStopDwellOnTripEnd } from '@/domains/gps';
 import { verifyCronAuth } from '@/lib/security/cron-auth';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import { NextResponse } from 'next/server';
@@ -79,6 +81,9 @@ export async function GET(request: Request) {
                         // Drop the in-memory GPS anchor so a new trip on this
                         // bus isn't jump-rejected against a stale position.
                         clearInMemoryLastLocation(lock.cleaned_bus_id);
+                        await clearRedisActiveFlags(lock.cleaned_bus_id).catch(() => {});
+                        invalidateActiveTripCache(lock.cleaned_bus_id, lock.cleaned_driver_id);
+                        await flushStopDwellOnTripEnd(lock.cleaned_bus_id).catch(() => {});
                         // Non-critical broadcast — fire and forget
                         emitEvent(`trip-status-${lock.cleaned_bus_id}`, 'trip_ended', {
                             busId: lock.cleaned_bus_id,

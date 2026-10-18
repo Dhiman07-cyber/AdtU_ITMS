@@ -148,5 +148,29 @@ describe('Multi-Driver Concurrency & Dynamic Bus Assignment Invariants', () => {
       const startC = startTrip('driver_C', 'bus_6');
       expect(startC.success).toBe(true);
     });
+
+    it('resumes trip idempotently for the same driver on page refresh/reconnect without locking', () => {
+      const activeTrips = new Map<string, { driverId: string; busId: string; tripId: string }>();
+      activeTrips.set('bus_6', { driverId: 'driver_A', busId: 'bus_6', tripId: 'trip_orig_101' });
+
+      const startTrip = (driverId: string, busId: string, newTripId: string) => {
+        if (activeTrips.has(busId)) {
+          const existing = activeTrips.get(busId)!;
+          if (existing.driverId !== driverId) {
+            return { success: false, errorCode: 'LOCKED_BY_OTHER', reason: 'Bus currently operated by another driver' };
+          }
+          // Same driver resumes their existing trip seamlessly!
+          return { success: true, tripId: existing.tripId, alreadyActive: true };
+        }
+        activeTrips.set(busId, { driverId, busId, tripId: newTripId });
+        return { success: true, tripId: newTripId, alreadyActive: false };
+      };
+
+      // Driver A reconnects / initiates trip again on page refresh
+      const resumeResult = startTrip('driver_A', 'bus_6', 'trip_new_random_uuid');
+      expect(resumeResult.success).toBe(true);
+      expect(resumeResult.alreadyActive).toBe(true);
+      expect(resumeResult.tripId).toBe('trip_orig_101'); // Returns original tripId, never locks out
+    });
   });
 });

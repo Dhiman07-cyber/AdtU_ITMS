@@ -108,4 +108,22 @@ describe('TripService', () => {
     const result = await heartbeat({ driverId: 'd1', busId: 'b1', tripId: 't1' });
     expect(result.success).toBe(true);
   });
+
+  it('resumes trip idempotently for the same driver on page refresh / reconnect without locking', async () => {
+    (tripLockService.startTrip as any).mockResolvedValueOnce({
+      success: true,
+      tripId: 'canonical_existing_trip_999',
+      alreadyActive: true,
+    });
+
+    const result = await startTrip({
+      driverId: 'd1',
+      busId: 'b1',
+      routeId: 'r1',
+      shift: 'Morning',
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.tripId).toBe('canonical_existing_trip_999');
+  });
 });

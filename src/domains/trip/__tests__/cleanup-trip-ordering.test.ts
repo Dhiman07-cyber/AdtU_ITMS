@@ -13,6 +13,8 @@ vi.mock('@/domains/realtime/event-emitter', () => ({
 
 vi.mock('@/domains/gps', () => ({
   clearHistory: vi.fn(),
+  flushStopDwellOnTripEnd: vi.fn().mockResolvedValue(undefined),
+  invalidateActiveTripCache: vi.fn(),
 }));
 
 vi.mock('@/lib/services/location-write-throttle', () => ({
