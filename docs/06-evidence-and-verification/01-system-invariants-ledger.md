@@ -161,6 +161,16 @@ Every invariant is designated with a permanent identifier (`INV-*`) that must be
 * **Statement:** A late or replayed GPS packet from an ended trip cannot recreate active state in `active_trips` or resurrect student UI markers.
 * **Authoritative Boundary:** `active_trips` existence check + Redis heartbeat check before accepting location breadcrumbs.
 
+### `INV-TRIP-005`: Same-Driver Idempotent Resume & Hardware Handover
+* **Statement:** If an active driver's browser reloads, crashes, or switches to a backup handset mid-trip, calling initiate-trip returns the canonical existing `tripId`, updates `device_sessions` with their current `deviceId`, re-primes `setActiveTripCache`, and resumes streaming with zero `LOCKED_BY_OTHER` conflicts.
+* **Authoritative Boundary:** `acquire_trip_lock` returning `alreadyActive: true` + `/api/driver/initiate-trip`.
+* **Verification Proof:** `src/domains/trip/__tests__/trip-concurrency-multidriver.test.ts` & `src/domains/trip/__tests__/trip.service.test.ts`.
+
+### `INV-TRIP-006`: Incontrovertible Stop Dwell Audit Proof & Jitter Resilience
+* **Statement:** Dwell duration at canonical bus stops must record exact geofence entry, residency window, and exit into immutable `public.stop_dwell_logs`. Single-tick GNSS multipath speed jitter (> 5 km/h) cannot truncate or zero out genuine stop residency duration.
+* **Authoritative Boundary:** `src/domains/gps/services/stop-dwell.service.ts` (`persistDwellRecord`).
+* **Verification Proof:** `src/domains/gps/__tests__/stop-dwell.service.test.ts`.
+
 ---
 
 ## 5. GPS & Ingestion Invariants
@@ -187,6 +197,20 @@ Every invariant is designated with a permanent identifier (`INV-*`) that must be
 ### `INV-GPS-006`: No Alternate/Bypass Ingestion Routes
 * **Statement:** No direct WebSocket message, legacy HTTP route, or test helper can bypass the canonical GPS pipeline to mutate authoritative live location.
 * **Authoritative Boundary:** `server/socket-router.ts` drops direct WS location updates; all traffic routes through `/api/location/update`.
+
+### `INV-GPS-007`: Direction-Aware Route Corridor Progress Symmetry
+* **Statement:** Proximity evaluation along canonical route polylines must be symmetric across Morning (outbound) and Evening (inbound return) trips. Inverting relative delta math ensures auto-acknowledgement (<= 600m) and pass-by cleanup (> 200m past) operate accurately in both directions.
+* **Authoritative Boundary:** `src/domains/route/services/route-alignment-engine.ts` (`checkApproachingBusWindow`).
+* **Verification Proof:** `src/domains/gps/__tests__/stop-dwell.service.test.ts`.
+
+### `INV-GPS-008`: Lazy Self-Healing Redis Sentinel Hydration
+* **Statement:** If Redis evacuates or restarts mid-trip, the hot-path 2s GPS pipeline must self-heal via a single non-blocking query to PostgreSQL using a `flags:hydrated:<busId>` sentinel, preserving 0 database reads on subsequent warm ticks.
+* **Authoritative Boundary:** `src/domains/gps/services/stop-dwell.service.ts` (`processWaitingFlagsOnGpsTick`).
+* **Verification Proof:** `src/domains/gps/__tests__/stop-dwell.service.test.ts`.
+
+### `INV-GPS-009`: Instant Client State Reconciliation on Reconnect
+* **Statement:** Client WebSocket reconnection or browser tab visibility change must reconcile trip and waiting flag states within <200ms out-of-band via `/api/student/trip-status`.
+* **Authoritative Boundary:** `src/hooks/useBusLocation.ts` & `src/app/student/track-bus/page.tsx`.
 
 ---
 

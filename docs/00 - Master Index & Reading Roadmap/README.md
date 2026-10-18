@@ -62,6 +62,7 @@ After reviewing this foundational section, proceed to the detailed domain implem
 2. **[02. Payments & Financial Subscriptions](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/02-payments-and-subscriptions/)**:
    - `01-razorpay-lifecycle.md`: Order generation, HMAC-SHA256 signature verification, and webhook handling.
    - `02-ledger-and-renewals.md`: Double-entry immutable ledger, academic terms, and pass expiry.
+   - `03-payment-query-audit-and-accounting.md`: Full quantitative audit of Supabase SQL queries, RPC calls, external HTTP calls, per-page costs, and database index optimizations.
 
 3. **[03. Identity & Role-Based Access Control](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/03-identity-and-access/)**:
    - `01-auth-architecture.md`: Firebase Auth + Supabase PostgreSQL dual identity model and Edge proxy.

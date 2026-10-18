@@ -247,14 +247,27 @@ This document provides the exhaustive engineering justification for every direct
 
 ## 8. Incontrovertible Stop Dwell Proof & Audit Engine (`src/domains/audit/`)
 
-### 8.1 Stop Geofence Entry, Dwell & Exit Detector
-- **Architectural Role**: Solves the core student-driver conflict described in Section 01. Whenever a vehicle enters the 80m geofenced radius of an official bus stop, the system logs `arrived_at`. While speed remains <3 km/h within the geofence, it accumulates `dwell_seconds`. When the vehicle leaves the perimeter, it stamps `departed_at`.
+### 8.1 Stop Geofence Entry, Dwell & Exit Detector (`src/domains/gps/services/stop-dwell.service.ts`)
+- **Architectural Role**: Solves the core student-driver conflict described in Section 01. Whenever a vehicle enters the 80m geofenced radius of an official bus stop, the system logs `arrived_at`. To protect against urban GNSS multipath reflections causing single-tick speed spikes (`> 5 km/h`), dwell duration is computed from the continuous zone residency window: `Math.max(accumulatedLowSpeedSeconds, Math.round((lastTickMs - arrivedAtMs) / 1000))`. Roadside halts along the corridor are captured when stationary $\ge 15\text{s}$. When the vehicle leaves the perimeter (> 100m), it stamps `departed_at` and persists the record into `public.stop_dwell_logs`.
 - **Why the System Fails Without It**:
   - In disputes where a student claims the bus never stopped, the university has no objective proof.
   - With stop dwell logs stored permanently in PostgreSQL, the transport officer can inspect the exact telemetry record:
-    $$\text{Stop: Chandmari}\quad\vert\quad\text{Arrived: 07:18:22}\quad\vert\quad\text{Dwell: 145 seconds}\quad\vert\quad\text{Departed: 07:20:47}$$
+    $$\text{Stop: Boragaon}\quad\vert\quad\text{Arrived: 07:18:22}\quad\vert\quad\text{Dwell: 145 seconds}\quad\vert\quad\text{Departed: 07:20:47}$$
   - The dispute is resolved in seconds with incontrovertible mathematical evidence.
 - **State Taxonomy**: *Immutable Audit History*.
+
+### 8.2 Route Corridor Alignment Engine (`src/domains/route/services/route-alignment-engine.ts`)
+- **Architectural Role**: Projects student coordinates onto the continuous highway polyline to support roadside boarding between discrete stops. Enforces perpendicular cross-track distance ($\le 120\text{m}$), upstream distance ($\le 4\text{km}$), and temporal freshness ($\le 60\text{s}$). Supports directional polyline progress evaluation:
+  $$\text{signedAheadMeters} = \text{isReverse} \;?\; (\text{busProgress} - \text{studentProgress}) : (\text{studentProgress} - \text{busProgress})$$
+  guaranteeing that auto-ack ($\le 600\text{m}$) and pass-by auto-cleanup ($> 200\text{m}$ past) operate accurately across both Morning (outbound) and Evening (inbound return) shifts.
+- **Why the System Fails Without It**:
+  - Point-radius stop checking blocks legitimate commuters waiting along highway corridors between stops.
+  - Direction-blind polyline math breaks completely on return shifts when bus progress meters decrease along the canonical polyline.
+- **State Taxonomy**: *Derived Ephemeral State*.
+
+### 8.3 Lazy Self-Healing Redis Hydration on Mid-Trip Redis Restart
+- **Architectural Role**: Uses a lightweight boolean sentinel in Redis (`flags:hydrated:<busId>` with 1800s TTL). If Redis restarts or flushes mid-trip, the 2-second GPS pipeline performs a one-time non-blocking query to `public.waiting_flags`, repopulates `flags:active:<busId>`, and sets the sentinel. All subsequent GPS ticks execute with **0 database reads**.
+- **State Taxonomy**: *Ephemeral Realtime State & Cache*.
 
 ---
 

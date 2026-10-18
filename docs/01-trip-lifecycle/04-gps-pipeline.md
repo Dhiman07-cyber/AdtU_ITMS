@@ -420,4 +420,50 @@ export function decideLocationPacket(
 - **Optimization, Complexity Minimization & Anti-Overhead Rationale**:
   - *GPU-Accelerated `requestAnimationFrame`*: Driven entirely by browser animation frames, avoiding heavy third-party physics libraries or client CPU throttling.
   - *1800ms Animation Window*: Bridges the 3-second network window cleanly while leaving a 1200ms safety buffer to prevent extrapolation past unverified points.
+  - *Instant Reconnect Sync*: Ingests WebSocket `onStatus('connected')` transitions and page `visibilitychange` to trigger an out-of-band `/api/student/trip-status` query, healing dropped packets in <200ms.
+
+---
+
+### 7.4 `src/domains/gps/services/stop-dwell.service.ts` (Stop Dwell Audit Service & Multipath Jitter Resilience)
+- **Concrete Architectural Role**: Tracks vehicle dwell at canonical named stops (`<= 80m` entry, `> 100m` exit) and roadside halts (`>= 15s` stationary along highway corridor). Records immutable stop dwell records into `public.stop_dwell_logs` for dispute resolution.
+- **Failure Analysis ("Why the System Fails Without It")**:
+  - In urban Guwahati, GPS multipath from tall buildings and overpasses causes momentary speed spikes (`> 5 km/h`) on stationary buses. If dwell calculation relied solely on low-speed counters, a single noisy packet would wipe out or severely underestimate the recorded dwell time, failing dispute audits.
+  - By anchoring the dwell calculation to the continuous stop-zone residency duration `Math.max(accumulatedLowSpeedSeconds, Math.round((lastTickMs - arrivedAtMs) / 1000))`, single-tick GPS jitter is completely filtered out without inflating transit durations.
+- **State Taxonomy & Invariants Enforced**:
+  - *Stop-Anchored Incontrovertible Audit Proof (Invariant 2)*.
+  - *Durable State* (`public.stop_dwell_logs`).
+- **Production Code Implementation**:
+  ```typescript
+  // File: src/domains/gps/services/stop-dwell.service.ts
+  async function persistDwellRecord(dwell: ActiveDwellState, departedAtIso: string): Promise<void> {
+    const residencySeconds = Math.max(0, Math.round((dwell.lastTickMs - dwell.arrivedAtMs) / 1000));
+    const dwellSeconds = Math.max(Math.round(dwell.dwellSeconds), residencySeconds);
+
+    if (dwell.isRoadside && dwellSeconds < MIN_ROADSIDE_DWELL_SECONDS) return;
+
+    const supabase = getSupabaseServer();
+    await supabase.from('stop_dwell_logs').insert({
+      trip_id: dwell.tripId,
+      bus_id: dwell.busId,
+      driver_id: dwell.driverId,
+      route_id: dwell.routeId,
+      stop_id: dwell.stopId,
+      stop_name: dwell.stopName,
+      arrived_at: dwell.arrivedAt,
+      departed_at: departedAtIso,
+      dwell_seconds: dwellSeconds,
+    });
+  }
+  ```
+
+---
+
+### 7.5 `src/domains/route/services/route-alignment-engine.ts` (Direction-Aware Route Corridor Engine)
+- **Concrete Architectural Role**: Projects student and vehicle GPS points onto the canonical route geometry, evaluating perpendicular cross-track distance ($\le 120\text{m}$) and shift-aware polyline progress ($0 \to L$ vs $L \to 0$).
+- **Failure Analysis ("Why the System Fails Without It")**:
+  - Canonical geometries are defined City $\to$ Campus. On return/evening shifts, the bus travels Campus $\to$ City, decreasing progress meters. Direction-blind math causes waiting flags to falsely report `BUS_ALREADY_PASSED` or `BUS_TOO_FAR_UPSTREAM`.
+  - Inverting delta math (`signedAheadMeters = isReverse ? (busProgress - studentProgress) : (studentProgress - busProgress)`) ensures hands-free auto-ack ($\le 600\text{m}$) and pass-by auto-cleanup ($> 200\text{m}$ past) operate symmetrically in all directions.
+- **State Taxonomy & Invariants Enforced**:
+  - *Derived Ephemeral State* (Route corridor projection and approaching bus window).
+
 

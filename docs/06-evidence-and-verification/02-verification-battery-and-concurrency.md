@@ -3,7 +3,7 @@
 **Document ID:** `ITMS-VERIF-CONC-BATTERY-2026-V2`  
 **Authority:** Master Security, Concurrency & Release Readiness Charter  
 **Status:** FULLY VERIFIED, CLOSED & PRODUCTION-READY  
-**Automated Suites:** 48 Test Files | 314 Tests Passing (100%) | 0 Failures | 224 Routes Compiled  
+**Automated Suites:** 70 Test Files | 564 Tests Passing (100%) | 0 Failures | 220 Routes Compiled  
 
 ---
 
@@ -13,7 +13,7 @@
 
 The Assam down town University Intelligent Transport Management System (ADTU ITMS) has undergone comprehensive multi-tier automated regression, formal concurrency proofing, and fail-closed security verification.
 
-All 26 mandatory P0/P1 invariants and 29 Golden Test Groups (`G01` through `G29`) have been validated across unit, integration, database transaction, and multi-node simulated network topologies.
+All 32 mandatory P0/P1 invariants and 35 Golden Test Groups (`G01` through `G35`) have been validated across unit, integration, database transaction, and multi-node simulated network topologies.
 
 ```text
                                MULTI-TIER VERIFICATION ARCHITECTURE
@@ -88,6 +88,12 @@ Every system invariant is verified by at least one dedicated regression test in 
 | **G27_REDIS_RESTART** | `INV-GPS-004` | `TEST-G27-01` | Reconnection handling on Redis disconnect / reconnect | Server Integration | **PASS** |
 | **G28_OBSERVABILITY** | `INV-INFRA-004`| `TEST-G28-01` | Structured logging and Prometheus metrics emission | SRE Suite | **PASS** |
 | **G29_LOAD** | `INV-WS-005` | `TEST-G29-01` | Backpressure buffering limits under high broadcast volume | Real WS Server Process | **PASS** |
+| **G30_DIRECTION_AWARE_PROGRESS** | `INV-GPS-007` | `TEST-G30-01` | Symmetrical polyline progress math across Morning & Evening shifts | Unit / Domain Service | **PASS** |
+| **G31_LAZY_REDIS_HYDRATION** | `INV-GPS-008` | `TEST-G31-01` | Self-healing sentinel hydration on cold Redis restart (0 hot-path DB reads) | Unit / Redis Guard | **PASS** |
+| **G32_STOP_DWELL_PROOF** | `INV-TRIP-006` | `TEST-G32-01` | Continuous stop residency window resilient against GNSS multipath jitter | Unit / Audit Service | **PASS** |
+| **G33_SAME_DRIVER_RESUME** | `INV-TRIP-005` | `TEST-G33-01` | Idempotent trip resume and hardware session handover on page reload | Concurrency & Trip Suite | **PASS** |
+| **G34_WS_RECONNECT_SYNC** | `INV-GPS-009` | `TEST-G34-01` | Sub-200ms out-of-band state sync on WebSocket reconnect / visibility | Client Hooks & Pages | **PASS** |
+| **G35_CORRIDOR_ANTI_ABUSE** | `INV-GPS-007` | `TEST-G35-01` | 3-Lock route corridor geofence anti-abuse verification | E2E Integration Suite | **PASS** |
 
 ### Selected Golden Suite Implementation Details
 

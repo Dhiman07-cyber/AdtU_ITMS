@@ -171,7 +171,7 @@ export async function withRetry<T>(fn: () => Promise<T>, attempts = 2, backoffMs
 }
 
 // ── Persona persistence ─────────────────────────────────────────────────
-export interface Persona { label: string; role: 'driver' | 'student' | 'admin' | 'moderator'; uid: string; email: string; busId?: string; routeId?: string; }
+export interface Persona { label: string; role: 'driver' | 'student' | 'admin' | 'moderator'; uid: string; email: string; busId?: string; routeId?: string; stopName?: string; }
 export interface PersonaSet { createdAt: string; drivers: Persona[]; students: Persona[]; buses: { id: string; routeId: string }[]; routes: { id: string }[]; }
 
 const PERSONA_PATH = path.join(ROOT, 'scripts', 'staging', '.personas.json');

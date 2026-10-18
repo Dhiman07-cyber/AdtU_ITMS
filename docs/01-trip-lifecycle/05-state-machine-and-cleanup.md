@@ -239,11 +239,22 @@ export async function cleanupTrip(params: {
     await Promise.allSettled(broadcastPromises);
   }
 
-  // 3. Clear in-memory GPS cache and throttle breadcrumbs
+  // 3. Conclude any pending stop dwell and persist final audit record
+  await flushStopDwellOnTripEnd(params.busId, params.tripId);
+
+  // 4. Clear in-memory GPS cache and throttle breadcrumbs
   clearHistory(params.driverId);
   clearTripBreadcrumbCache(params.tripId);
+  clearGpsState(params.busId);
 }
 ```
+
+### 4.1 Same-Driver Device Handover & Session Recovery on Crash/Reload
+When a driver's browser tab reloads or the app restarts mid-trip:
+1. `acquire_trip_lock` recognizes the matching `driver_id` and returns `{ success: true, tripId: existingTripId, alreadyActive: true }`.
+2. `/api/driver/initiate-trip` updates `device_sessions` with the driver's current `deviceId`, immediately binding location stream authorization to the active device.
+3. `setActiveTripCache` is re-primed in memory so the 2s GPS pipeline accepts incoming coordinate frames immediately with 0 database reads.
+4. The driver UI smoothly adopts the canonical `tripId` and resumes GPS transmission without error dialogs.
 
 ---
 
