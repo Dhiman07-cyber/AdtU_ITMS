@@ -32,9 +32,12 @@ function collectAssignedBusIds(data: Record<string, unknown> | undefined): Set<s
 }
 
 export function scannerBusMatchesStudent(scannerBusId: unknown, busId: unknown): boolean {
-  if (typeof scannerBusId !== 'string' || !scannerBusId.trim()) return false;
+  // If scannerBusId is not specified (e.g. Admin or Moderator desk verification), there is no vehicle-specific mismatch
+  if (scannerBusId === undefined || scannerBusId === null || (typeof scannerBusId === 'string' && !scannerBusId.trim())) {
+    return true;
+  }
   if (typeof busId !== 'string' || !busId.trim()) return false;
-  return scannerBusId.trim() === busId.trim();
+  return String(scannerBusId).trim().toLowerCase() === busId.trim().toLowerCase();
 }
 
 export async function validateStudentScannerContext(

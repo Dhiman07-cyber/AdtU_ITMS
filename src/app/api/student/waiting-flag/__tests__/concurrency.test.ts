@@ -34,6 +34,7 @@ vi.mock('@/lib/security/role-cache', () => ({
 }));
 
 import { POST, DELETE } from '../route';
+import { clearStudentTripFlagCounts } from '@/domains/gps/services/gps-redis-guard';
 
 interface MockChain {
   select: any; eq: any; in: any; limit: any; maybeSingle: any; single: any; insert: any; update: any; gte: any; order: any;
@@ -68,13 +69,14 @@ function makeRequest(overrides = {}) {
   return new Request('http://localhost/api/student/waiting-flag', {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: 'Bearer test-token' },
-    body: JSON.stringify({ busId: 'b1', lat: 14.5, lng: 121.0, ...overrides }),
+    body: JSON.stringify({ busId: 'b1', lat: 26.1128, lng: 91.6876, ...overrides }),
   });
 }
 
 describe('WaitingFlag POST & DELETE — concurrency & real-world invariants', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    clearStudentTripFlagCounts();
     currentInsertResult = null;
     mockFrom.mockImplementation((table: string) => {
       if (table === 'active_trips') {

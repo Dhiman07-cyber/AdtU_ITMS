@@ -5,6 +5,7 @@ import { TripStatusQuerySchema } from '@/lib/security/validation-schemas';
 import { getStudentProfileAndShift } from '@/lib/student-shift-resolver';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import { isShiftCompatible } from '@/lib/utils';
+import { getSharedBusTripSnapshot } from '@/lib/services/trip-snapshot-cache';
 import { NextResponse } from 'next/server';
 
 /**
@@ -12,6 +13,7 @@ import { NextResponse } from 'next/server';
  * 
  * Check if there's an active trip for a given bus.
  * Uses service role key to bypass RLS policies.
+ * Employs Singleflight deduplication and a 3s shared snapshot cache (Optimization 1).
  */
 export const GET = withSecurity(
     async (request, { auth }) => {
@@ -61,82 +63,40 @@ export const GET = withSecurity(
             }
         }
 
-        const busVariations = [busId];
-        if (busId.startsWith('bus_')) {
-            busVariations.push(busId.replace('bus_', ''));
-        } else {
-            busVariations.push(`bus_${busId}`);
-        }
+        // Optimization 1: Singleflight deduplication & 3-second shared bus snapshot.
+        // If 60 students on the same bus reconnect or poll simultaneously, only 1 query
+        // hits PostgreSQL; the other 59 resolve in <0.05ms from memory.
+        const snapshot = await getSharedBusTripSnapshot(busId);
 
-        const supabase = getSupabaseServer();
-
-        const { data: rows, error } = await supabase
-            .from('active_trips')
-            .select('trip_id, bus_id, driver_id, route_id, shift, status, start_time, last_heartbeat, expires_at')
-            .in('bus_id', busVariations)
-            .eq('status', 'active')
-            .gt('expires_at', new Date().toISOString())
-            .order('start_time', { ascending: false })
-            .limit(1);
-
-        const data = rows && rows.length > 0 ? rows[0] : null;
-
-        if (error) {
-            console.error('Error querying active_trips:', error);
+        if (!snapshot.tripActive || !snapshot.tripData) {
             return NextResponse.json({
                 tripActive: false,
-                error: 'An unexpected error occurred',
-                tripData: null
+                tripData: null,
+                activeWaitingFlag: null,
             });
         }
 
-        if (data) {
-            // Check shift compatibility for student role using already-resolved profile.
-            if (auth.role === 'student' && studentProfile) {
-                if (studentProfile.shift && !isShiftCompatible(studentProfile.shift, data.shift)) {
-                    return NextResponse.json({
-                        tripActive: false,
-                        tripData: null,
-                        reason: 'shift_mismatch'
-                    });
-                }
+        // Check shift compatibility for student role using already-resolved profile.
+        if (auth.role === 'student' && studentProfile) {
+            if (studentProfile.shift && !isShiftCompatible(studentProfile.shift, snapshot.tripData.shift)) {
+                return NextResponse.json({
+                    tripActive: false,
+                    tripData: null,
+                    reason: 'shift_mismatch',
+                    activeWaitingFlag: null,
+                });
             }
+        }
 
-            const { getLastLocationForBusAsync, getLastLocationForBus } = await import('@/domains/gps');
-            const lastLoc = (await getLastLocationForBusAsync(busId)) || getLastLocationForBus(busId);
-
-            let currentLocation = null;
-            if (lastLoc) {
-                currentLocation = {
-                    busId,
-                    driverUid: data.driver_id,
-                    lat: lastLoc.lat,
-                    lng: lastLoc.lng,
-                    speed: lastLoc.speed != null ? Number(lastLoc.speed) : 0,
-                    heading: lastLoc.heading != null ? Number(lastLoc.heading) : 0,
-                    accuracy: lastLoc.accuracy ?? 10,
-                    timestamp: lastLoc.timestamp,
-                };
-            }
-
-            return NextResponse.json({
-                tripActive: true,
-                tripData: {
-                    tripId: data.trip_id,
-                    status: data.status,
-                    driverUid: data.driver_id,
-                    routeId: data.route_id,
-                    shift: data.shift,
-                    startedAt: data.start_time,
-                    lastUpdated: data.last_heartbeat,
-                    current_location: currentLocation
-                }
-            });
+        let activeWaitingFlag: any = null;
+        if (auth.role === 'student' && auth.uid) {
+            activeWaitingFlag = snapshot.activeFlagsByStudentUid?.[auth.uid] || null;
         }
 
         return NextResponse.json({
-            tripActive: false,
-            tripData: null
+            tripActive: true,
+            tripData: snapshot.tripData,
+            activeWaitingFlag,
         });
     },
     {

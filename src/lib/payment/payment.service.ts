@@ -116,7 +116,32 @@ export async function createOnlinePayment(
  * Unifies webhook verification, client verification, and recovery actions.
  * Strict idempotency checks ensure exactly one success processing.
  */
+const inFlightPayments = new Map<string, Promise<{ status: 'success' | 'already_processed' | 'error' | 'already_paid_for_session' | 'captured_pending_review'; error?: string }>>();
+
 export async function processCapturedPayment(paymentDetails: {
+    paymentId: string;
+    orderId: string;
+    amount: number; // in rupees
+    method?: string;
+    notes?: any;
+    source?: string;
+}): Promise<{ status: 'success' | 'already_processed' | 'error' | 'already_paid_for_session' | 'captured_pending_review'; error?: string }> {
+    const { paymentId } = paymentDetails;
+    if (inFlightPayments.has(paymentId)) {
+        console.log(`[PAYMENT_TRACE] Deduplicating concurrent execution for in-flight payment ${paymentId}`);
+        return await inFlightPayments.get(paymentId)!;
+    }
+
+    const execPromise = executeProcessCapturedPayment(paymentDetails);
+    inFlightPayments.set(paymentId, execPromise);
+    try {
+        return await execPromise;
+    } finally {
+        inFlightPayments.delete(paymentId);
+    }
+}
+
+async function executeProcessCapturedPayment(paymentDetails: {
     paymentId: string;
     orderId: string;
     amount: number; // in rupees

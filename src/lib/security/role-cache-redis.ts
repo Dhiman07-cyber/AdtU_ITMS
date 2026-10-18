@@ -23,6 +23,7 @@ import * as net from 'net';
 import * as tls from 'tls';
 
 const ROLE_INVALIDATE_CHANNEL = 'role_invalidate';
+const ROLE_INVALIDATE_CHANNEL_ALT = 'itms:roles:invalidate';
 const RECONNECT_DELAY_MS = 5000;
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -197,7 +198,7 @@ function connectSub(state: BridgeState): void {
         : ['AUTH', state.password];
       sock.write(encodeCommand(authCmd));
     }
-    sock.write(encodeCommand(['SUBSCRIBE', ROLE_INVALIDATE_CHANNEL]));
+    sock.write(encodeCommand(['SUBSCRIBE', ROLE_INVALIDATE_CHANNEL, ROLE_INVALIDATE_CHANNEL_ALT]));
   });
 
   let buf: Buffer = Buffer.alloc(0);
@@ -276,6 +277,7 @@ export function publishRoleInvalidation(uid: string): void {
   if (state.pubReady && state.pubSocket && !state.pubSocket.destroyed) {
     try {
       state.pubSocket.write(encodeCommand(['PUBLISH', ROLE_INVALIDATE_CHANNEL, uid]));
+      state.pubSocket.write(encodeCommand(['PUBLISH', ROLE_INVALIDATE_CHANNEL_ALT, uid]));
     } catch {
       /* best-effort — local invalidation already happened */
     }

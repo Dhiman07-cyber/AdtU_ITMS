@@ -1,5 +1,6 @@
 import { getSystemConfig } from '@/domains/admin';
 import { getByUid as getStudentByUid } from '@/domains/student';
+import { getCurrentBusFee } from '@/lib/bus-fee-service';
 import { createRazorpayOrder, generateReceiptId } from '@/lib/payment/razorpay.service';
 import { paymentsSupabaseService } from '@/lib/services/payments-supabase';
 import { isOriginAllowed, withSecurity } from '@/lib/security/api-security';
@@ -19,15 +20,19 @@ export const POST = withSecurity<CreateOrderBody>(
         const { amount, notes, userName, enrollmentId, durationYears } = body;
         const trustedUserId = auth.uid;
         const trustedDurationYears = durationYears || Number(notes?.duration || 1);
-        const [systemConfigResult, student] = await Promise.all([
+        const [busFeeResult, systemConfigResult, student] = await Promise.all([
+            getCurrentBusFee().catch((err) => {
+                console.error('[create-order] getCurrentBusFee failed:', err);
+                return null;
+            }),
             getSystemConfig(),
             getStudentByUid(trustedUserId).catch(() => null),
         ]);
 
-        const busFeeAmount = Number(systemConfigResult.data.busFee?.amount || 0);
+        const busFeeAmount = Number(busFeeResult?.amount ?? systemConfigResult.data.busFee?.amount ?? 0);
         const expectedAmount = busFeeAmount * trustedDurationYears;
 
-        if (!busFeeAmount || !amountsMatch(amount, expectedAmount)) {
+        if (!busFeeAmount || busFeeAmount <= 0 || !amountsMatch(amount, expectedAmount)) {
             return NextResponse.json(
                 { success: false, error: 'Payment amount does not match the official bus fee' },
                 { status: 400 }
