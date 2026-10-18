@@ -39,6 +39,7 @@ import {
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useEffect,useState } from 'react';
+import { StopDwellAuditProof } from '@/components/admin/StopDwellAuditProof';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -55,6 +56,7 @@ interface AuditLogsResponse {
 
 const CATEGORIES = [
   { value: 'all', label: 'All' },
+  { value: 'transit_dwell', label: 'Stop Dwell Proof' },
   { value: 'applications', label: 'Applications' },
   { value: 'renewals', label: 'Renewals' },
   { value: 'reassignments', label: 'Reassignments' },
@@ -394,6 +396,11 @@ export default function AdminAuditLogsPage() {
   // Fetch logs
   const fetchLogs = async (pageNum: number, refresh = false) => {
     if (!currentUser) return;
+    if (activeCategory === 'transit_dwell') {
+      setIsLoading(false);
+      setIsRefreshing(false);
+      return;
+    }
     if (refresh) setIsRefreshing(true);
     else setIsLoading(true);
 
@@ -555,60 +562,66 @@ export default function AdminAuditLogsPage() {
 
         {CATEGORIES.map((cat) => (
           <TabsContent key={cat.value} value={cat.value}>
-            {/* Audit List */}
-            {isLoading ? (
-              <LoadingSkeleton />
-            ) : logs.length === 0 ? (
-              <Card className="border border-white/[0.06] bg-white/[0.02]">
-                <CardContent className="p-8 text-center">
-                  <FileText className="h-8 w-8 text-zinc-600 mx-auto mb-2" />
-                  <p className="text-sm text-zinc-400">No audit logs found</p>
-                  <p className="text-xs text-zinc-600 mt-1">
-                    {debouncedSearch || severityFilter || roleFilter || startDate || endDate
-                      ? 'Try adjusting your filters'
-                      : 'Business events will appear here'}
-                  </p>
-                </CardContent>
-              </Card>
+            {cat.value === 'transit_dwell' ? (
+              <StopDwellAuditProof className="pt-2" />
             ) : (
-              <div className="space-y-2">
-                {logs.map((log) => (
-                  <AuditCard
-                    key={log.id}
-                    log={log}
-                    onViewDetails={handleViewDetails}
-                  />
-                ))}
-              </div>
-            )}
+              <>
+                {/* Audit List */}
+                {isLoading ? (
+                  <LoadingSkeleton />
+                ) : logs.length === 0 ? (
+                  <Card className="border border-white/[0.06] bg-white/[0.02]">
+                    <CardContent className="p-8 text-center">
+                      <FileText className="h-8 w-8 text-zinc-600 mx-auto mb-2" />
+                      <p className="text-sm text-zinc-400">No audit logs found</p>
+                      <p className="text-xs text-zinc-600 mt-1">
+                        {debouncedSearch || severityFilter || roleFilter || startDate || endDate
+                          ? 'Try adjusting your filters'
+                          : 'Business events will appear here'}
+                      </p>
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <div className="space-y-2">
+                    {logs.map((log) => (
+                      <AuditCard
+                        key={log.id}
+                        log={log}
+                        onViewDetails={handleViewDetails}
+                      />
+                    ))}
+                  </div>
+                )}
 
-            {/* Pagination */}
-            {!isLoading && logs.length > 0 && (
-              <div className="flex items-center justify-between mt-4 pt-3 border-t border-white/[0.06]">
-                <p className="text-xs text-zinc-500">
-                  Page {page} {hasMore ? `· ${logs.length} loaded` : `· ${logs.length} total`}
-                </p>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setPage((p) => Math.max(1, p - 1))}
-                    disabled={page === 1}
-                    className="h-7 px-2 text-xs border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.05] text-zinc-400 disabled:opacity-30"
-                  >
-                    <ChevronLeft className="h-3.5 w-3.5" />
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setPage((p) => p + 1)}
-                    disabled={!hasMore}
-                    className="h-7 px-2 text-xs border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.05] text-zinc-400 disabled:opacity-30"
-                  >
-                    <ChevronRight className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
-              </div>
+                {/* Pagination */}
+                {!isLoading && logs.length > 0 && (
+                  <div className="flex items-center justify-between mt-4 pt-3 border-t border-white/[0.06]">
+                    <p className="text-xs text-zinc-500">
+                      Page {page} {hasMore ? `· ${logs.length} loaded` : `· ${logs.length} total`}
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setPage((p) => Math.max(1, p - 1))}
+                        disabled={page === 1}
+                        className="h-7 px-2 text-xs border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.05] text-zinc-400 disabled:opacity-30"
+                      >
+                        <ChevronLeft className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setPage((p) => p + 1)}
+                        disabled={!hasMore}
+                        className="h-7 px-2 text-xs border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.05] text-zinc-400 disabled:opacity-30"
+                      >
+                        <ChevronRight className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </>
             )}
           </TabsContent>
         ))}

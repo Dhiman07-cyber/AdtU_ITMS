@@ -232,53 +232,83 @@ function buildVectorStyle(pmtilesUrl: string, isDark: boolean) {
 }
 
 /**
- * Creates high-fidelity animated DOM marker for active bus
+ * Creates high-fidelity animated top-down DOM marker for active bus (zero circular container or aura)
  */
+function getFleetBusSvg(status: FleetBusLiveStatus["locationStatus"], busId: string) {
+  let c1 = "#facc15";
+  let c2 = "#ca8a04";
+  if (status === "STALE") {
+    c1 = "#f59e0b";
+    c2 = "#d97706";
+  } else if (status === "NO_SIGNAL") {
+    c1 = "#ef4444";
+    c2 = "#dc2626";
+  }
+  const gradId = `fleetBusGrad_${busId.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
+  return `
+<svg width="28" height="50" viewBox="0 0 44 80" fill="none" xmlns="http://www.w3.org/2000/svg" style="filter: drop-shadow(0 2px 4px rgba(0,0,0,0.4));">
+  <!-- Vehicle Body Drop Shadow / Ambient -->
+  <rect x="5" y="3" width="34" height="74" rx="10" fill="rgba(0,0,0,0.2)"/>
+  <!-- Main Bus Chassis -->
+  <rect x="6" y="2" width="32" height="72" rx="9" fill="url(#${gradId})" stroke="#0f172a" stroke-width="1.8"/>
+  <!-- Front Windshield -->
+  <path d="M10 16 C10 11 15 8 22 8 C29 8 34 11 34 16 L33 22 C33 22 28 20 22 20 C16 20 11 22 11 22 Z" fill="#38bdf8"/>
+  <!-- Front Windshield Reflection -->
+  <path d="M13 14 Q22 10 31 14" stroke="rgba(255,255,255,0.7)" stroke-width="1.5" stroke-linecap="round"/>
+  <!-- Side Mirrors -->
+  <rect x="2" y="16" width="4" height="7" rx="2" fill="#0f172a" stroke="#ffffff" stroke-width="0.8"/>
+  <rect x="38" y="16" width="4" height="7" rx="2" fill="#0f172a" stroke="#ffffff" stroke-width="0.8"/>
+  <!-- Rooftop A/C unit -->
+  <rect x="13" y="29" width="18" height="24" rx="3.5" fill="rgba(255,255,255,0.25)" stroke="rgba(255,255,255,0.5)" stroke-width="1"/>
+  <!-- Rooftop Vent Slats -->
+  <line x1="16" y1="35" x2="28" y2="35" stroke="rgba(255,255,255,0.6)" stroke-width="1.2" stroke-linecap="round"/>
+  <line x1="16" y1="41" x2="28" y2="41" stroke="rgba(255,255,255,0.6)" stroke-width="1.2" stroke-linecap="round"/>
+  <line x1="16" y1="47" x2="28" y2="47" stroke="rgba(255,255,255,0.6)" stroke-width="1.2" stroke-linecap="round"/>
+  <!-- Rear Window -->
+  <rect x="11" y="66" width="22" height="4" rx="1.5" fill="#38bdf8" opacity="0.85"/>
+  <!-- Front Headlights (Warm White / Yellow Glow) -->
+  <rect x="8" y="2.5" width="6" height="2" rx="1" fill="#fef08a"/>
+  <rect x="30" y="2.5" width="6" height="2" rx="1" fill="#fef08a"/>
+  <!-- Tail Lights (Ruby Red) -->
+  <rect x="8" y="72.5" width="6" height="2" rx="1" fill="#ef4444"/>
+  <rect x="30" y="72.5" width="6" height="2" rx="1" fill="#ef4444"/>
+  <defs>
+    <linearGradient id="${gradId}" x1="6" y1="2" x2="38" y2="74" gradientUnits="userSpaceOnUse">
+      <stop stop-color="${c1}"/>
+      <stop offset="1" stop-color="${c2}"/>
+    </linearGradient>
+  </defs>
+</svg>
+`;
+}
+
 function createBusMarkerElement(bus: FleetBusLiveStatus, isSelected: boolean) {
   const container = document.createElement("div");
   container.className = "itms-fleet-bus-marker group cursor-pointer select-none";
   container.style.display = "flex";
   container.style.flexDirection = "column";
   container.style.alignItems = "center";
+  container.style.backgroundColor = "transparent";
+  container.style.border = "none";
+  container.style.boxShadow = "none";
 
-  const ring = document.createElement("div");
-  ring.className = "itms-fleet-marker-bubble";
-  ring.style.width = isSelected ? "42px" : "36px";
-  ring.style.height = isSelected ? "42px" : "36px";
-  ring.style.borderRadius = "50%";
-  ring.style.display = "flex";
-  ring.style.alignItems = "center";
-  ring.style.justifyContent = "center";
-  ring.style.position = "relative";
-  ring.style.border = isSelected ? "2.5px solid #38bdf8" : "2px solid rgba(255,255,255,0.85)";
+  // Pure top-down vector vehicle icon with NO circular background, NO circular border, and NO aura ring
+  const rotator = document.createElement("div");
+  rotator.className = "itms-fleet-bus-rotator";
+  rotator.style.width = "30px";
+  rotator.style.height = "52px";
+  rotator.style.display = "grid";
+  rotator.style.placeItems = "center";
+  rotator.style.backgroundColor = "transparent";
+  rotator.style.border = "none";
+  rotator.style.boxShadow = "none";
+  rotator.style.transition = "transform 1.2s ease-out";
+  rotator.style.transformOrigin = "center center";
 
-  let gradient = "linear-gradient(135deg, #10b981, #059669)"; // Live emerald
-  if (bus.locationStatus === "STALE") {
-    gradient = "linear-gradient(135deg, #f59e0b, #d97706)"; // Amber
-  } else if (bus.locationStatus === "NO_SIGNAL") {
-    gradient = "linear-gradient(135deg, #ef4444, #dc2626)"; // Red
-  }
-  ring.style.background = gradient;
-  ring.style.boxShadow = isSelected
-    ? "0 0 16px rgba(56, 189, 248, 0.8), 0 2px 8px rgba(0,0,0,0.5)"
-    : bus.locationStatus === "LIVE"
-    ? "0 0 0 2.5px rgba(52, 211, 153, 0.4), 0 2px 8px rgba(0,0,0,0.4)"
-    : "0 2px 8px rgba(0,0,0,0.4)";
-
-  // Heading arrow / bus icon
-  const iconWrapper = document.createElement("div");
-  iconWrapper.style.zIndex = "2";
-  iconWrapper.style.display = "flex";
-  iconWrapper.style.alignItems = "center";
-  iconWrapper.style.justifyContent = "center";
-  iconWrapper.style.color = "#ffffff";
-  iconWrapper.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6v6"/><path d="M15 6v6"/><path d="M2 12h19.6"/><path d="M18 18h3s.5-1.7.8-2.8c.1-.4.2-.8.2-1.2 0-.4-.1-.8-.2-1.2l-1.4-5C20.1 6.8 19.1 6 18 6H4a2 2 0 0 0-2 2v10h3"/><circle cx="7" cy="18" r="2"/><path d="M9 18h5"/><circle cx="16" cy="18" r="2"/></svg>`;
-
-  if (bus.location?.heading && bus.location.heading > 0) {
-    iconWrapper.style.transform = `rotate(${bus.location.heading}deg)`;
-  }
-  ring.appendChild(iconWrapper);
-  container.appendChild(ring);
+  const initHeading = Number(bus.location?.heading) || 0;
+  rotator.style.transform = `rotate(${initHeading}deg)`;
+  rotator.innerHTML = getFleetBusSvg(bus.locationStatus, bus.busId);
+  container.appendChild(rotator);
 
   // Floating speed tag if moving
   if (bus.location?.speed && bus.location.speed > 0) {
@@ -312,7 +342,7 @@ function createBusMarkerElement(bus: FleetBusLiveStatus, isSelected: boolean) {
   label.style.whiteSpace = "nowrap";
   label.style.pointerEvents = "none";
   label.style.background = "rgba(5, 6, 14, 0.92)";
-  label.style.color = "#f8fafc";
+  label.style.color = isSelected ? "#38bdf8" : "#f8fafc";
   label.style.border = isSelected ? "1.5px solid #38bdf8" : "1px solid rgba(255,255,255,0.18)";
   label.style.boxShadow = "0 3px 8px rgba(0,0,0,0.6)";
   label.textContent = `Bus ${bus.busNumber}`;
@@ -719,13 +749,16 @@ export default function FleetMap({ role = "admin" }: { role?: "admin" | "moderat
       } else {
         marker.setLngLat([clamped.lng, clamped.lat]);
         const el = marker.getElement();
-        const bubble = el.querySelector(".itms-fleet-marker-bubble") as HTMLElement | null;
-        if (bubble) {
-          let gradient = "linear-gradient(135deg, #10b981, #059669)";
-          if (bus.locationStatus === "STALE") gradient = "linear-gradient(135deg, #f59e0b, #d97706)";
-          else if (bus.locationStatus === "NO_SIGNAL") gradient = "linear-gradient(135deg, #ef4444, #dc2626)";
-          bubble.style.background = gradient;
-          bubble.style.border = isSelected ? "2.5px solid #38bdf8" : "2px solid rgba(255,255,255,0.85)";
+        const rotator = el.querySelector(".itms-fleet-bus-rotator") as HTMLElement | null;
+        if (rotator) {
+          const heading = Number(bus.location?.heading) || 0;
+          rotator.style.transform = `rotate(${heading}deg)`;
+          rotator.innerHTML = getFleetBusSvg(bus.locationStatus, bus.busId);
+        }
+        const label = el.querySelector(".itms-fleet-marker-label") as HTMLElement | null;
+        if (label) {
+          label.style.border = isSelected ? "1.5px solid #38bdf8" : "1px solid rgba(255,255,255,0.18)";
+          label.style.color = isSelected ? "#38bdf8" : "#f8fafc";
         }
       }
     });

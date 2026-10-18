@@ -21,7 +21,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Slider } from "@/components/ui/slider";
 import React, { useCallback, useEffect, useMemo, useRef, useState, useImperativeHandle, forwardRef } from "react";
-import { toast } from "react-hot-toast";
+import { toast } from "sonner";
 
 // Smart allocation sub-components
 import ReassignmentPanel from "@/components/smart-allocation/ReassignmentPanel";

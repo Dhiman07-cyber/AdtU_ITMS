@@ -152,6 +152,8 @@ export default function DriverLiveTrackingPage() {
   // Ref to track resolved busId so WS subscription can read latest value without stale closure
   const resolvedBusIdRef = useRef<string | null>(null);
   const wakeLockRef = useRef<any>(null); // Screen wake lock to prevent screen from turning off
+  const [isNetworkOffline, setIsNetworkOffline] = useState(false);
+  const latestOfflineCoordRef = useRef<QueuedGpsPoint | null>(null);
 
   // Map Full Screen State - Automatically syncs with trip status
   const [isFullScreenMap, setIsFullScreenMap] = useState(false);
@@ -1231,25 +1233,36 @@ export default function DriverLiveTrackingPage() {
 
       if (!response.ok) {
         console.warn("⚠️ Location update failed:", response.status);
-      } else if (tripId) {
-        // Success: flush any previously buffered offline points
-        flushOfflineQueue(tripId);
+        if (response.status >= 500 || response.status === 429) {
+          setIsNetworkOffline(true);
+        }
+      } else {
+        // Successful response - clear offline indicator and pending slot
+        setIsNetworkOffline(false);
+        latestOfflineCoordRef.current = null;
+        if (tripId) {
+          flushOfflineQueue(tripId);
+        }
       }
     } catch (error) {
       console.warn("⚠️ Error broadcasting location (buffering offline):", error);
+      setIsNetworkOffline(true);
+      const point: QueuedGpsPoint = {
+        tripId: tripId || 'unknown',
+        busId: resolvedBus,
+        routeId: currentRouteId,
+        lat: currentLocation.lat,
+        lng: currentLocation.lng,
+        accuracy,
+        speed,
+        heading: currentHeading,
+        timestamp: currentIsoTimestamp,
+        createdAtMs: Date.now(),
+      };
+      // Single-slot in-memory ref for next-tick / online immediate flush
+      latestOfflineCoordRef.current = point;
       if (tripId) {
-        enqueueOfflinePoint({
-          tripId,
-          busId: resolvedBus,
-          routeId: currentRouteId,
-          lat: currentLocation.lat,
-          lng: currentLocation.lng,
-          accuracy,
-          speed,
-          heading: currentHeading,
-          timestamp: currentIsoTimestamp,
-          createdAtMs: Date.now(),
-        });
+        enqueueOfflinePoint(point);
       }
     }
   }, [selectedBusId, flushOfflineQueue]);
@@ -1259,6 +1272,15 @@ export default function DriverLiveTrackingPage() {
     const handleResume = () => {
       if (document.visibilityState === 'visible') {
         console.log("📱 [MobileResume] Screen turned ON / App back in foreground — restoring state");
+
+        // Immediately re-acquire wake lock if released by OS while sleeping
+        if ('wakeLock' in navigator && tripActiveRef.current) {
+          try {
+            navigator.wakeLock.request('screen').then((lock) => {
+              wakeLockRef.current = lock;
+            }).catch(() => {});
+          } catch (_) {}
+        }
 
         // Reconnect WebSocket if disconnected during phone sleep
         if (wsClientRef.current) {
@@ -1273,20 +1295,28 @@ export default function DriverLiveTrackingPage() {
             console.log("🔄 Re-starting location tracking after screen wake...");
             startLocationTracking();
           }
-          // Send immediate location update
+          // Send immediate location / heartbeat transmission upon return
           broadcastLocation();
         }
       }
     };
 
+    const handleOnline = () => {
+      console.log("🌐 [Network] Connectivity restored — flushing buffered location");
+      setIsNetworkOffline(false);
+      if (tripActiveRef.current) {
+        broadcastLocation();
+      }
+    };
+
     document.addEventListener('visibilitychange', handleResume);
     window.addEventListener('focus', handleResume);
-    window.addEventListener('online', handleResume);
+    window.addEventListener('online', handleOnline);
 
     return () => {
       document.removeEventListener('visibilitychange', handleResume);
       window.removeEventListener('focus', handleResume);
-      window.removeEventListener('online', handleResume);
+      window.removeEventListener('online', handleOnline);
     };
   }, [broadcastLocation, startLocationTracking]);
 
@@ -1337,7 +1367,11 @@ export default function DriverLiveTrackingPage() {
 
       const res = await authApiFetch(currentUser, '/api/driver/initiate-trip', {
         method: 'POST',
-        body: JSON.stringify({ busId: selectedBusId, shift: selectedShift }),
+        body: JSON.stringify({
+          busId: selectedBusId,
+          shift: selectedShift,
+          deviceId: getOrCreateDeviceId(),
+        }),
       });
 
       if (res.ok) {
@@ -1952,7 +1986,7 @@ export default function DriverLiveTrackingPage() {
               </div>
             </div>
 
-            {/* Map Container */}
+            {/* Map Container (renders inactive standby state without initializing mapLibre, active map when trip starts) */}
             <div
               className={`h-[480px] md:h-[calc(100vh-18rem)] md:min-h-[550px] rounded-3xl overflow-hidden shadow-2xl border border-white/5 transition-all duration-300 ${
                 isScannerOpen ? "blur-sm opacity-50 pointer-events-none" : ""
@@ -1972,9 +2006,6 @@ export default function DriverLiveTrackingPage() {
                 isFullScreen={false}
                 onToggleFullScreen={() => setIsFullScreenMap(true)}
                 showStatsOnMobile={false}
-                primaryActionLabel="Start Trip"
-                primaryActionColor="green"
-                onPrimaryAction={handleStartTrip}
               />
             </div>
           </div>
@@ -1982,6 +2013,16 @@ export default function DriverLiveTrackingPage() {
 
         {/* Browser Compatibility Banner */}
         <BrowserCompatibilityBanner />
+
+        {/* Reconnecting Network Banner */}
+        {tripActive && isNetworkOffline && (
+          <div className="fixed top-16 left-0 right-0 z-[9999] mx-auto max-w-md px-4 pointer-events-none">
+            <div className="bg-amber-500/95 text-white text-xs font-semibold px-4 py-2.5 rounded-2xl shadow-xl flex items-center justify-center gap-2 backdrop-blur-md border border-white/20 animate-pulse pointer-events-auto">
+              <AlertCircle className="w-4 h-4 shrink-0 text-white" />
+              <span>Reconnecting network — trip still active</span>
+            </div>
+          </div>
+        )}
 
         {/* PWA Install Prompt */}
         <PWAInstallPrompt />

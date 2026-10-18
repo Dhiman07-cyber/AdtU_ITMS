@@ -50,6 +50,7 @@ export default function GuwahatiDriverMap({
   busNumber,
   routeName,
   speed,
+  accuracy,
   isFullScreen = false,
   onToggleFullScreen,
   primaryActionLabel,
@@ -130,6 +131,33 @@ export default function GuwahatiDriverMap({
 
 
 
+  // Ensure the driver map is NEVER shown if the trip is not started yet
+  if (!tripActive) {
+    return (
+      <div className="dark w-full h-full min-h-[420px] bg-[#0a0f1e] rounded-3xl flex items-center justify-center relative overflow-hidden border border-white/5">
+        <div className="text-center p-8 relative z-10 max-w-md mx-auto">
+          <div className="w-16 h-16 mx-auto mb-5 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center">
+            <MapPin className="w-8 h-8 text-amber-500" />
+          </div>
+
+          <h3 className="text-2xl font-black text-white mb-2 tracking-tight">
+            Trip Not Started
+          </h3>
+          <p className="text-slate-400 text-sm font-medium leading-relaxed mb-2">
+            The driver live map and GPS navigation will activate as soon as you start your trip.
+          </p>
+
+          <div className="mt-4 flex items-center justify-center gap-2 px-3.5 py-1.5 rounded-full bg-white/5 border border-white/10 w-fit mx-auto">
+            <div className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+            <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">
+              {busNumber ? `Assigned to Bus ${busNumber}` : "Trip Inactive"}
+            </span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // Fatal error fallback
   if (fatal) {
     return (
@@ -148,7 +176,13 @@ export default function GuwahatiDriverMap({
           ref={mapRef}
           theme={mapTheme}
 
-          busPosition={(driverLocation && (driverLocation.lat !== 0 || driverLocation.lng !== 0)) ? { lat: driverLocation.lat, lng: driverLocation.lng, heading: driverLocation.heading } : null}
+          busPosition={(driverLocation && (driverLocation.lat !== 0 || driverLocation.lng !== 0)) ? {
+            lat: driverLocation.lat,
+            lng: driverLocation.lng,
+            heading: driverLocation.heading,
+            speed: speed,
+            accuracy: accuracy ?? driverLocation.accuracy,
+          } : null}
           primaryKind="driver"
           points={points}
           restrictToGuwahati={true}

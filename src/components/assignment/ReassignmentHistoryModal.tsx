@@ -30,7 +30,7 @@ import {
 	XCircle
 } from "lucide-react";
 import { useEffect,useState } from "react";
-import { toast } from "react-hot-toast";
+import { toast } from "sonner";
 
 // ============================================
 // TYPES

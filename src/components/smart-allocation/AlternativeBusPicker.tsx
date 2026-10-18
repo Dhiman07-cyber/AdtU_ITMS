@@ -19,7 +19,7 @@ import {
 	MapPin,
 } from "lucide-react";
 import React from "react";
-import { toast } from "react-hot-toast";
+import { toast } from "sonner";
 
 // ── Types (compatible with ReassignmentPanel) ─────────────────────────────────
 

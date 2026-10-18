@@ -100,9 +100,56 @@ async function preflightPmtiles(url: string): Promise<void> {
   if (!res.ok) throw Object.assign(new Error(`PMTiles file inaccessible`), { status: res.status });
 }
 
+const TOP_DOWN_BUS_SVG = `
+<svg width="28" height="50" viewBox="0 0 44 80" fill="none" xmlns="http://www.w3.org/2000/svg" style="filter: drop-shadow(0 2px 4px rgba(0,0,0,0.4));">
+  <!-- Vehicle Body Drop Shadow / Ambient -->
+  <rect x="5" y="3" width="34" height="74" rx="10" fill="rgba(0,0,0,0.2)"/>
+  <!-- Main Bus Chassis (Transit Yellow) -->
+  <rect x="6" y="2" width="32" height="72" rx="9" fill="url(#busBodyGradient)" stroke="#0f172a" stroke-width="1.8"/>
+  <!-- Front Windshield -->
+  <path d="M10 16 C10 11 15 8 22 8 C29 8 34 11 34 16 L33 22 C33 22 28 20 22 20 C16 20 11 22 11 22 Z" fill="#38bdf8"/>
+  <!-- Front Windshield Reflection -->
+  <path d="M13 14 Q22 10 31 14" stroke="rgba(255,255,255,0.7)" stroke-width="1.5" stroke-linecap="round"/>
+  <!-- Side Mirrors -->
+  <rect x="2" y="16" width="4" height="7" rx="2" fill="#0f172a" stroke="#ffffff" stroke-width="0.8"/>
+  <rect x="38" y="16" width="4" height="7" rx="2" fill="#0f172a" stroke="#ffffff" stroke-width="0.8"/>
+  <!-- Rooftop A/C unit -->
+  <rect x="13" y="29" width="18" height="24" rx="3.5" fill="rgba(0,0,0,0.12)" stroke="rgba(0,0,0,0.25)" stroke-width="1"/>
+  <!-- Rooftop Vent Slats -->
+  <line x1="16" y1="35" x2="28" y2="35" stroke="rgba(0,0,0,0.25)" stroke-width="1.2" stroke-linecap="round"/>
+  <line x1="16" y1="41" x2="28" y2="41" stroke="rgba(0,0,0,0.25)" stroke-width="1.2" stroke-linecap="round"/>
+  <line x1="16" y1="47" x2="28" y2="47" stroke="rgba(0,0,0,0.25)" stroke-width="1.2" stroke-linecap="round"/>
+  <!-- Rear Window -->
+  <rect x="11" y="66" width="22" height="4" rx="1.5" fill="#38bdf8" opacity="0.85"/>
+  <!-- Front Headlights (Warm White / Bright Glow) -->
+  <rect x="8" y="2.5" width="6" height="2" rx="1" fill="#ffffff"/>
+  <rect x="30" y="2.5" width="6" height="2" rx="1" fill="#ffffff"/>
+  <!-- Tail Lights (Ruby Red) -->
+  <rect x="8" y="72.5" width="6" height="2" rx="1" fill="#ef4444"/>
+  <rect x="30" y="72.5" width="6" height="2" rx="1" fill="#ef4444"/>
+  <!-- Defs for Gradient -->
+  <defs>
+    <linearGradient id="busBodyGradient" x1="6" y1="2" x2="38" y2="74" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#facc15"/>
+      <stop offset="1" stop-color="#ca8a04"/>
+    </linearGradient>
+    <linearGradient id="driverBodyGradient" x1="6" y1="2" x2="38" y2="74" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#f59e0b"/>
+      <stop offset="1" stop-color="#d97706"/>
+    </linearGradient>
+  </defs>
+</svg>
+`;
+
+export function computeShortestRotation(currentTotalAngle: number, newHeading: number): number {
+  const currentAngleMod = ((currentTotalAngle % 360) + 360) % 360;
+  let diff = newHeading - currentAngleMod;
+  if (diff > 180) diff -= 360;
+  if (diff < -180) diff += 360;
+  return currentTotalAngle + diff;
+}
+
 const SVG_ICONS = {
-  bus: `<svg width="24" height="24" viewBox="0 0 50 50" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M12 0C5.4375 0 3 2.167969 3 8L3 41C3 42.359375 3.398438 43.339844 4 44.0625L4 47C4 48.652344 5.347656 50 7 50L11 50C12.652344 50 14 48.652344 14 47L14 46L36 46L36 47C36 48.652344 37.347656 50 39 50L43 50C44.652344 50 46 48.652344 46 47L46 44.0625C46.601563 43.339844 47 42.359375 47 41L47 9C47 4.644531 46.460938 0 40 0 Z M 15 4L36 4C36.554688 4 37 4.449219 37 5L37 7C37 7.550781 36.554688 8 36 8L15 8C14.449219 8 14 7.550781 14 7L14 5C14 4.449219 14.449219 4 15 4 Z M 11 11L39 11C41 11 42 12 42 14L42 26C42 28 40.046875 28.9375 39 28.9375L11 29C9 29 8 28 8 26L8 14C8 12 9 11 11 11 Z M 2 12C0.898438 12 0 12.898438 0 14L0 22C0 23.101563 0.898438 24 2 24 Z M 48 12L48 24C49.105469 24 50 23.101563 50 22L50 14C50 12.898438 49.105469 12 48 12 Z M 11.5 34C13.433594 34 15 35.566406 15 37.5C15 39.433594 13.433594 41 11.5 41C9.566406 41 8 39.433594 8 37.5C8 35.566406 9.566406 34 11.5 34 Z M 38.5 34C40.433594 34 42 35.566406 42 37.5C42 39.433594 40.433594 41 38.5 41C36.566406 41 35 39.433594 35 37.5C35 35.566406 36.566406 34 38.5 34Z"/></svg>`,
-  driver: `<svg width="24" height="24" viewBox="0 0 50 50" fill="currentColor" xmlns="http://www.w3.org/2000/svg"><path d="M12 0C5.4375 0 3 2.167969 3 8L3 41C3 42.359375 3.398438 43.339844 4 44.0625L4 47C4 48.652344 5.347656 50 7 50L11 50C12.652344 50 14 48.652344 14 47L14 46L36 46L36 47C36 48.652344 37.347656 50 39 50L43 50C44.652344 50 46 48.652344 46 47L46 44.0625C46.601563 43.339844 47 42.359375 47 41L47 9C47 4.644531 46.460938 0 40 0 Z M 15 4L36 4C36.554688 4 37 4.449219 37 5L37 7C37 7.550781 36.554688 8 36 8L15 8C14.449219 8 14 7.550781 14 7L14 5C14 4.449219 14.449219 4 15 4 Z M 11 11L39 11C41 11 42 12 42 14L42 26C42 28 40.046875 28.9375 39 28.9375L11 29C9 29 8 28 8 26L8 14C8 12 9 11 11 11 Z M 2 12C0.898438 12 0 12.898438 0 14L0 22C0 23.101563 0.898438 24 2 24 Z M 48 12L48 24C49.105469 24 50 23.101563 50 22L50 14C50 12.898438 49.105469 12 48 12 Z M 11.5 34C13.433594 34 15 35.566406 15 37.5C15 39.433594 13.433594 41 11.5 41C9.566406 41 8 39.433594 8 37.5C8 35.566406 9.566406 34 11.5 34 Z M 38.5 34C40.433594 34 42 35.566406 42 37.5C42 39.433594 40.433594 41 38.5 41C36.566406 41 35 39.433594 35 37.5C35 35.566406 36.566406 34 38.5 34Z"/></svg>`,
   university: `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/></svg>`,
   student: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>`,
   waiting: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s-8-4.5-8-11.8A8 8 0 0 1 12 2a8 8 0 0 1 8 8.2c0 7.3-8 11.8-8 11.8z"/><circle cx="12" cy="10" r="3"/></svg>`,
@@ -113,66 +160,92 @@ function makeMarkerEl(kind: MapPoint["kind"], theme: MapTheme, label?: string, h
   const isDark = theme === "dark";
   const isBus = kind === "bus" || kind === "driver";
   const isUni = kind === "university";
-  const size = isBus ? 52 : (isUni ? 48 : 36);
-  const innerSize = isBus ? 40 : (isUni ? 36 : 28);
+  const size = isUni ? 48 : 36;
+  const innerSize = isUni ? 36 : 28;
 
   const container = document.createElement("div");
   container.className = "flex flex-col items-center group cursor-pointer";
   const el = document.createElement("div");
-  el.style.width = `${size}px`;
-  el.style.height = `${size}px`;
-  el.style.borderRadius = "50%";
-  el.style.display = "grid";
-  el.style.placeItems = "center";
-  el.style.position = "relative";
-  el.style.boxShadow = isDark ? "0 10px 25px rgba(0,0,0,0.6)" : "0 10px 25px rgba(0,0,0,0.15)";
-  el.style.border = isDark ? "2px solid rgba(255,255,255,0.15)" : "2px solid rgba(255,255,255,0.9)";
-  el.style.backgroundColor = isDark ? "#1e293b" : "#ffffff";
-  el.style.transition = "transform 0.3s ease";
 
   if (isBus) {
-    const ring = document.createElement("div");
-    ring.className = "absolute inset-0 rounded-full animate-ping pointer-events-none";
-    ring.style.backgroundColor = isDark ? "rgba(59, 130, 246, 0.4)" : "rgba(37, 99, 235, 0.3)";
-    el.appendChild(ring);
-  }
+    // Pure top-down vector vehicle icon with NO circular background, NO circular border, NO sphere, and NO aura ring
+    container.style.backgroundColor = "transparent";
+    container.style.border = "none";
+    container.style.boxShadow = "none";
+    container.style.borderRadius = "0";
+    container.style.overflow = "visible";
 
-  const inner = document.createElement("div");
-  inner.className = "bus-marker-inner";
-  inner.style.width = `${innerSize}px`;
-  inner.style.height = `${innerSize}px`;
-  inner.style.borderRadius = "50%";
-  inner.style.display = "grid";
-  inner.style.placeItems = "center";
-  inner.style.fontWeight = "800";
-  inner.style.color = "white";
-  inner.style.transition = "transform 0.4s cubic-bezier(0.4, 0, 0.2, 1)";
+    el.style.width = "28px";
+    el.style.height = "50px";
+    el.style.display = "grid";
+    el.style.placeItems = "center";
+    el.style.position = "relative";
+    el.style.backgroundColor = "transparent";
+    el.style.border = "none";
+    el.style.boxShadow = "none";
+    el.style.borderRadius = "0";
+    el.style.overflow = "visible";
 
-  if (kind === "bus") {
-    inner.style.background = "linear-gradient(135deg, #2563eb, #7c3aed)";
-    inner.innerHTML = SVG_ICONS.bus;
-  } else if (kind === "driver") {
-    inner.style.background = "linear-gradient(135deg, #0891b2, #2563eb)";
-    inner.innerHTML = SVG_ICONS.driver;
-  } else if (kind === "university") {
-    inner.style.background = "linear-gradient(135deg, #dc2626, #991b1b)";
-    inner.innerHTML = SVG_ICONS.university;
-  } else if (kind === "student") {
-    inner.style.background = "linear-gradient(135deg, #f97316, #db2777)";
-    inner.innerHTML = SVG_ICONS.student;
-  } else if (kind === "waiting") {
-    inner.style.background = "linear-gradient(135deg, #ea580c, #c026d3)";
-    inner.innerHTML = SVG_ICONS.waiting;
+    // Uber-style rotating top-down bus graphic container
+    const rotator = document.createElement("div");
+    rotator.className = "bus-marker-rotator";
+    rotator.style.width = "100%";
+    rotator.style.height = "100%";
+    rotator.style.display = "grid";
+    rotator.style.placeItems = "center";
+    rotator.style.backgroundColor = "transparent";
+    rotator.style.border = "none";
+    rotator.style.boxShadow = "none";
+    rotator.style.transition = "transform 1.2s ease-out";
+    rotator.style.transformOrigin = "center center";
+    const initHeading = Number(heading) || 0;
+    rotator.style.transform = `rotate(${initHeading}deg)`;
+
+    const busGraphic = kind === "driver"
+      ? TOP_DOWN_BUS_SVG.replace('url(#busBodyGradient)', 'url(#driverBodyGradient)')
+      : TOP_DOWN_BUS_SVG;
+    rotator.innerHTML = busGraphic;
+    el.appendChild(rotator);
   } else {
-    inner.style.background = "linear-gradient(135deg, #64748b, #94a3b8)";
-    inner.innerHTML = SVG_ICONS.stop;
+    el.style.width = `${size}px`;
+    el.style.height = `${size}px`;
+    el.style.borderRadius = "50%";
+    el.style.display = "grid";
+    el.style.placeItems = "center";
+    el.style.position = "relative";
+    el.style.boxShadow = isDark ? "0 10px 25px rgba(0,0,0,0.6)" : "0 10px 25px rgba(0,0,0,0.15)";
+    el.style.border = isDark ? "2px solid rgba(255,255,255,0.15)" : "2px solid rgba(255,255,255,0.9)";
+    el.style.backgroundColor = isDark ? "#1e293b" : "#ffffff";
+    el.style.transition = "transform 0.3s ease";
+    const inner = document.createElement("div");
+    inner.className = "bus-marker-inner";
+    inner.style.width = `${innerSize}px`;
+    inner.style.height = `${innerSize}px`;
+    inner.style.borderRadius = "50%";
+    inner.style.display = "grid";
+    inner.style.placeItems = "center";
+    inner.style.fontWeight = "800";
+    inner.style.color = "white";
+    inner.style.transition = "transform 0.4s cubic-bezier(0.4, 0, 0.2, 1)";
+
+    if (kind === "university") {
+      inner.style.background = "linear-gradient(135deg, #dc2626, #991b1b)";
+      inner.innerHTML = SVG_ICONS.university;
+    } else if (kind === "student") {
+      inner.style.background = "linear-gradient(135deg, #f97316, #db2777)";
+      inner.innerHTML = SVG_ICONS.student;
+    } else if (kind === "waiting") {
+      inner.style.background = "linear-gradient(135deg, #ea580c, #c026d3)";
+      inner.innerHTML = SVG_ICONS.waiting;
+    } else {
+      inner.style.background = "linear-gradient(135deg, #64748b, #94a3b8)";
+      inner.innerHTML = SVG_ICONS.stop;
+    }
+    el.appendChild(inner);
   }
 
-  // Bus icon orientation is kept fixed upright to avoid jitter from noisy compass/heading readings
-
-  el.appendChild(inner);
   container.appendChild(el);
-  if (label) {
+  if (!isBus && label) {
     const labelEl = document.createElement("div");
     labelEl.className = "mt-2 px-2.5 py-1 bg-white dark:bg-slate-900 shadow-xl rounded-lg text-[10px] font-black tracking-wider uppercase border border-black/5 dark:border-white/10 whitespace-nowrap";
     labelEl.style.color = isDark ? "#cbd5e1" : "#1e293b";
@@ -393,6 +466,8 @@ const GuwahatiMap = forwardRef<GuwahatiMapHandles, Props>(({
   const lastThemeRef = useRef<MapTheme>(theme);
   const lastKindRef = useRef(primaryKind);
   const routeAlignmentStateRef = useRef<RouteAlignmentState>(createInitialAlignmentState());
+  const lastValidHeadingRef = useRef<number>(0);
+  const cumulativeHeadingRef = useRef<number>(0);
 
   // Reset alignment state if routeId or routeGeometry changes
   useEffect(() => {
@@ -423,7 +498,14 @@ const GuwahatiMap = forwardRef<GuwahatiMapHandles, Props>(({
 
     const busLat = Number(busPosition.lat);
     const busLng = Number(busPosition.lng);
-    const busHeading = busPosition.heading !== undefined ? Number(busPosition.heading) : 0;
+    const rawHeading = busPosition.heading !== undefined ? Number(busPosition.heading) : 0;
+    // Retain last known valid heading if heading is undefined or 0 (never snap backward or spin when stationary)
+    let effectiveHeading = cumulativeHeadingRef.current;
+    if (Number.isFinite(rawHeading) && rawHeading > 0) {
+      cumulativeHeadingRef.current = computeShortestRotation(cumulativeHeadingRef.current, rawHeading);
+      lastValidHeadingRef.current = rawHeading;
+      effectiveHeading = cumulativeHeadingRef.current;
+    }
 
     if (isNaN(busLat) || isNaN(busLng) || (busLat === 0 && busLng === 0)) {
       return;
@@ -441,7 +523,7 @@ const GuwahatiMap = forwardRef<GuwahatiMapHandles, Props>(({
         {
           lat: busLat,
           lng: busLng,
-          heading: busHeading,
+          heading: effectiveHeading,
           speed: busPosition.speed,
           accuracy: busPosition.accuracy,
         },
@@ -477,14 +559,15 @@ const GuwahatiMap = forwardRef<GuwahatiMapHandles, Props>(({
 
     const pos = restrictToGuwahati
       ? clampLatLngToBounds(displayLat, displayLng)
-      : { lat: displayLat, lng: displayLng, heading: busHeading };
+      : { lat: displayLat, lng: displayLng, heading: effectiveHeading };
 
     // E2E observability: expose the marker's target position so Playwright
     // can verify the rendered marker follows the accepted GPS state.
     (window as any).__itmsMarkerPosition = {
       lat: pos.lat,
       lng: pos.lng,
-      heading: busHeading,
+      heading: effectiveHeading,
+      rawHeading: rawHeading,
       atMs: Date.now(),
       isSnapped: isAligned,
       rawLat: busLat,
@@ -497,14 +580,19 @@ const GuwahatiMap = forwardRef<GuwahatiMapHandles, Props>(({
     if (themeChanged || kindChanged || !busMarkerRef.current) {
       if (busAnimationRef.current != null) { cancelAnimationFrame(busAnimationRef.current); busAnimationRef.current = null; }
       if (busMarkerRef.current) busMarkerRef.current.remove();
-      busMarkerRef.current = new maplibregl.Marker({ element: makeMarkerEl(primaryKind, theme, undefined, busHeading) })
+      busMarkerRef.current = new maplibregl.Marker({ element: makeMarkerEl(primaryKind, theme, undefined, effectiveHeading) })
         .setLngLat([pos.lng, pos.lat])
         .addTo(mapRef.current);
       lastThemeRef.current = theme;
       lastKindRef.current = primaryKind;
     } else {
       animateMarkerTo(busMarkerRef.current, busMarkerRef.current.getLngLat() as any, pos, busAnimationRef);
-      // Bus icon orientation is kept fixed upright to avoid erratic spinning from GPS heading fluctuation
+      // Smoothly rotate bus marker rotator element along road corners and intersections (Uber-style)
+      const rotator = busMarkerRef.current.getElement().querySelector('.bus-marker-rotator') as HTMLElement | null;
+      if (rotator) {
+        rotator.style.transition = 'transform 1.2s ease-out';
+        rotator.style.transform = `rotate(${effectiveHeading}deg)`;
+      }
     }
 
     // Auto-follow: smoothly pan camera to bus when followBus=true and driver

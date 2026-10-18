@@ -28,7 +28,7 @@ import {
 	UserCog,
 	Users
 } from "lucide-react";
-import { toast } from "react-hot-toast";
+import { toast } from "sonner";
 
 // Assignment components and services
 import { AssignmentFinalizeCard } from "@/components/assignment/AssignmentFinalizeCard";

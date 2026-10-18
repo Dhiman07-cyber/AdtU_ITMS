@@ -202,39 +202,14 @@ export const useBusLocation = (busId: string, token?: string | null, externalCli
   useEffect(() => {
     if (!busId) return;
 
-    const setupSubscriptions = (ws: WebSocketClient) => {
-      const unsubs: (() => void)[] = [];
-
-      // Queue presence BEFORE subscribing — the server requires busId to be
-      // set (via presence) before a student/driver can subscribe to bus channels.
-      ws.setPresence({ busId });
-
-      // Subscribe to live location updates on the dedicated bus_location_* channel
-      unsubs.push(
-        ws.subscribe(`bus_location_${busId}`, (payload: any) => {
-          handleBusLocationUpdate(payload);
-        })
-      );
-      // Subscribe to trip status events (trip_started, trip_ended)
-      unsubs.push(
-        ws.subscribe(`trip-status-${busId}`, (payload: any) => {
-          handleBusLocationUpdate(payload);
-        })
-      );
-
-      return () => {
-        unsubs.forEach((unsub) => unsub());
-      };
-    };
-
     // Build a handleResume function that re-syncs position from DB whenever
     // the screen wakes up, the network comes back online, or the WS reconnects.
     // This is registered for BOTH the externalClient and self-managed-client
     // paths — the previous code skipped it for externalClient, which meant
     // any screen-off/on or network blip left the student's marker frozen.
     const handleResume = () => {
-      if (document.visibilityState === 'visible' && busId) {
-        console.log('[useBusLocation] Screen awake / app resumed — re-syncing bus location');
+      if ((typeof document === 'undefined' || document.visibilityState === 'visible') && busId) {
+        console.log('[useBusLocation] Screen awake / app resumed / WS reconnected — re-syncing bus location');
 
         const activeClient = externalClient || clientRef.current;
         if (activeClient) {
@@ -292,6 +267,39 @@ export const useBusLocation = (busId: string, token?: string | null, externalCli
           })
           .catch(() => {});
       }
+    };
+
+    const setupSubscriptions = (ws: WebSocketClient) => {
+      const unsubs: (() => void)[] = [];
+
+      // Queue presence BEFORE subscribing — the server requires busId to be
+      // set (via presence) before a student/driver can subscribe to bus channels.
+      ws.setPresence({ busId });
+
+      // Subscribe to live location updates on the dedicated bus_location_* channel
+      unsubs.push(
+        ws.subscribe(`bus_location_${busId}`, (payload: any) => {
+          handleBusLocationUpdate(payload);
+        })
+      );
+      // Subscribe to trip status events (trip_started, trip_ended)
+      unsubs.push(
+        ws.subscribe(`trip-status-${busId}`, (payload: any) => {
+          handleBusLocationUpdate(payload);
+        })
+      );
+      // Re-sync position immediately when WebSocket reconnects
+      unsubs.push(
+        ws.onStatus((status) => {
+          if (status === 'connected') {
+            handleResume();
+          }
+        })
+      );
+
+      return () => {
+        unsubs.forEach((unsub) => unsub());
+      };
     };
 
     document.addEventListener('visibilitychange', handleResume);

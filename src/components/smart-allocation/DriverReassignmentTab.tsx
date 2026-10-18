@@ -24,7 +24,7 @@ import {
   Zap,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, useImperativeHandle, forwardRef } from "react";
-import { toast } from "react-hot-toast";
+import { toast } from "sonner";
 
 // Assignment components and services
 import { AssignmentFinalizeCard } from "@/components/assignment/AssignmentFinalizeCard";

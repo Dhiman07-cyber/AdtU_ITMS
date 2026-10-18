@@ -119,6 +119,7 @@ function TrackBusLive() {
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const hasShownArrivalToastRef = useRef(false); // Track if 100m arrival toast shown
   const wsClientRef = useRef<WebSocketClient | null>(null);
+  const lastWsTelemetryMsRef = useRef<number>(0);
   // wsClient is a STATE mirror of wsClientRef so effects that depend on the
   // client re-run when it becomes available. Refs are not reactive — passing
   // wsClientRef.current to useBusLocation always gives null on first render.
@@ -405,20 +406,60 @@ function TrackBusLive() {
 
   const [wsConnected, setWsConnected] = useState(false);
 
-  // Track live WebSocket connection health to dynamically tune HTTP fallback polling
+  // Track live WebSocket connection health and reconcile state on reconnect
   useEffect(() => {
     if (!wsClient) {
       setWsConnected(false);
       return;
     }
     setWsConnected(wsClient.isConnected());
+
+    const reconcileState = async () => {
+      const busIdToReconcile = busData?.id || studentData?.busId || studentData?.bus_id;
+      if (!busIdToReconcile || !currentUser) return;
+      try {
+        const token = await currentUser.getIdToken();
+        const res = await fetch(`/api/student/trip-status?busId=${encodeURIComponent(busIdToReconcile)}`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.tripActive) {
+          setTripActive(true);
+        } else {
+          setTripActive(false);
+        }
+        if (data.activeWaitingFlag) {
+          setIsWaiting(true);
+          setCurrentFlagId(data.activeWaitingFlag.id);
+        } else {
+          setIsWaiting(false);
+          setCurrentFlagId(null);
+        }
+      } catch {
+        // fail-safe background sync
+      }
+    };
+
     const unsub = wsClient.onStatus((status) => {
       setWsConnected(status === 'connected');
+      if (status === 'connected') {
+        reconcileState();
+      }
     });
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        reconcileState();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
     return () => {
       unsub();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [wsClient]);
+  }, [wsClient, busData?.id, studentData?.busId, studentData?.bus_id, currentUser]);
 
 
   // Subscribe to per-student events (ack broadcasts, trip-end teardown)
@@ -480,6 +521,7 @@ function TrackBusLive() {
   // Update local busLocation state whenever hook location changes (monotonic guard)
   useEffect(() => {
     if (!hookBusLocation) return;
+    lastWsTelemetryMsRef.current = Date.now();
     setBusLocation((prev: any) => {
       if (!prev) return hookBusLocation;
       const prevTs = parseTimestampMs(prev.timestamp);
@@ -504,6 +546,7 @@ function TrackBusLive() {
 
     const unsub = wsClient.subscribe(`trip-status-${targetBusId}`, (payload: any) => {
       console.log("🚦 Trip status broadcast:", payload);
+      lastWsTelemetryMsRef.current = Date.now();
       const data = payload.payload || payload;
       const eventType = data.event || payload.event;
       if (eventType === "trip_started" || data.status === "active") {
@@ -533,11 +576,12 @@ function TrackBusLive() {
     };
   }, [targetBusId, wsClient, studentData, addToast]);
 
-  // Adaptive HTTP fallback polling:
-  // - WebSocket healthy (wsConnected === true): relaxes to 25s check.
-  // - WebSocket disconnected/reconnecting (wsConnected === false): 5s fast recovery poll.
-  // Guarantees: inFlight guard prevents overlapping polls; cleanup prevents timer leaks;
-  // monotonic timestamp guard accepts only newer snapshots.
+  // Optimization 2: Smart WebSocket-Aware Polling Suppression
+  // - WebSocket healthy & receiving 2s frames: background safety poll slows to 120s (2 minutes),
+  //   cutting steady-state HTTP polling load by 80%+.
+  // - WebSocket disconnected/reconnecting: 5s fast recovery poll.
+  // - WebSocket connected but silent (>20s): 25s check.
+  // - Instant out-of-band sync on mount, tab wake (visibilitychange), and WS reconnect.
   useEffect(() => {
     if (!targetBusId) return;
 
@@ -545,16 +589,27 @@ function TrackBusLive() {
     let timerId: NodeJS.Timeout | null = null;
     let inFlight = false;
 
-    const pollIntervalMs = wsConnected ? 25000 : 5000;
-
     const checkActiveTrip = async () => {
       if (!isMounted || inFlight) return;
       if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
         if (isMounted) {
-          timerId = setTimeout(checkActiveTrip, pollIntervalMs);
+          timerId = setTimeout(checkActiveTrip, 5000);
         }
         return;
       }
+
+      const now = Date.now();
+      const hasRecentTelemetry = wsConnected && (now - lastWsTelemetryMsRef.current < 20000);
+
+      // If WebSocket is actively receiving live 2s telemetry and trip is known active,
+      // skip redundant HTTP poll to trip-status and schedule next check in 120s.
+      if (hasRecentTelemetry && tripActive) {
+        if (isMounted) {
+          timerId = setTimeout(checkActiveTrip, 120000);
+        }
+        return;
+      }
+
       inFlight = true;
 
       try {
@@ -615,7 +670,8 @@ function TrackBusLive() {
       } finally {
         inFlight = false;
         if (isMounted) {
-          timerId = setTimeout(checkActiveTrip, pollIntervalMs);
+          const nextDelay = wsConnected ? (hasRecentTelemetry ? 120000 : 25000) : 5000;
+          timerId = setTimeout(checkActiveTrip, nextDelay);
         }
       }
     };
@@ -641,7 +697,7 @@ function TrackBusLive() {
         document.removeEventListener('visibilitychange', handleVisibilityChange);
       }
     };
-  }, [targetBusId, wsConnected, authToken, currentUser]);
+  }, [targetBusId, wsConnected, authToken, currentUser, tripActive]);
 
   // Calculate distance and ETA between bus and student
   useEffect(() => {

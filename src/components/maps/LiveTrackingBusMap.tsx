@@ -31,6 +31,7 @@ export type LiveTrackingBusMapProps = {
     onShowQrCode?: () => void;
     currentLocation?: any;
     speed?: number;
+    accuracy?: number;
     loading?: boolean;
     /** Shown on Google Maps only (route polyline + stop pins). */
     route_stops?: RouteStopLite[];
