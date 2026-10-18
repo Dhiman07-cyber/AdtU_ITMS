@@ -59,7 +59,8 @@ export type MetricKey =
   // Notifications
   | 'notificationsSent' | 'notificationsFailed' | 'notificationsDeduplicated'
   // Redis Pub/Sub & Fleet
-  | 'redisPubSubMessages' | 'waitingFlagsCreated' | 'waitingFlagsCancelled';
+  | 'redisPubSubMessages' | 'waitingFlagsCreated' | 'waitingFlagsCancelled'
+  | 'securityAuditShiftMismatch';
 
 export class MetricsService {
   private startTime = Date.now();
@@ -75,6 +76,7 @@ export class MetricsService {
     tripsStarted: 0, tripsEnded: 0, heartbeatsSent: 0,
     notificationsSent: 0, notificationsFailed: 0, notificationsDeduplicated: 0,
     redisPubSubMessages: 0, waitingFlagsCreated: 0, waitingFlagsCancelled: 0,
+    securityAuditShiftMismatch: 0,
   };
 
   inc(k: MetricKey, n = 1): void { this.state[k] = (this.state[k] || 0) + n; }

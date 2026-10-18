@@ -20,6 +20,7 @@ import { metricsService } from './metrics-service';
 import { sessionManager } from './session-manager';
 import { stopMessageValidator } from './message-validator';
 import { stopRateLimiter, clearAllRateLimits } from './rate-limiter';
+import { clearStudentPresenceCache } from './socket-router';
 
 const { authenticateSocket } = vi.hoisted(() => ({
   authenticateSocket: vi.fn(async (request: any) => {
@@ -57,6 +58,8 @@ vi.mock('./redis-broadcast', () => ({
 //   student-1  is authorized for any bus it claims (controlled per-test by busAuthMap)
 //   driver-1   is authorized via active_trips for any bus it claims
 const busAuthMap: Record<string, string | null> = {};
+const studentShiftMap: Record<string, string | null> = {};
+const activeTripShiftMap: Record<string, string | null> = {};
 const mockSupabaseFrom = vi.fn((table: string) => {
   const chain = {
     select: vi.fn().mockReturnThis(),
@@ -67,18 +70,26 @@ const mockSupabaseFrom = vi.fn((table: string) => {
       const calls: any[][] = (chain.eq as any).mock.calls;
       const uidCall = calls.find((c) => c[0] === 'uid' || c[0] === 'driver_id');
       const uid = uidCall?.[1];
+      const busIdCall = calls.find((c) => c[0] === 'bus_id');
+      const busId = busIdCall?.[1];
 
       if (table === 'student_profiles' && uid === 'student-1') {
-        const busId = busAuthMap['student-1'] ?? null;
-        return { data: busId ? { bus_id: busId, status: 'active' } : null, error: null };
+        const assignedBus = busAuthMap['student-1'] ?? null;
+        const shift = studentShiftMap['student-1'] ?? undefined;
+        return { data: assignedBus ? { bus_id: assignedBus, status: 'active', shift } : null, error: null };
       }
-      if (table === 'active_trips' && uid === 'driver-1') {
-        const busId = busAuthMap['driver-1'] ?? null;
-        return { data: busId ? { bus_id: busId } : null, error: null };
+      if (table === 'active_trips') {
+        if (uid === 'driver-1') {
+          const bId = busAuthMap['driver-1'] ?? null;
+          return { data: bId ? { bus_id: bId } : null, error: null };
+        }
+        if (busId && activeTripShiftMap[busId]) {
+          return { data: { id: `trip-${busId}`, bus_id: busId, shift: activeTripShiftMap[busId], status: 'active' }, error: null };
+        }
       }
       if (table === 'driver_profiles' && uid === 'driver-1') {
-        const busId = busAuthMap['driver-1'] ?? null;
-        return { data: busId ? { bus_id: busId } : null, error: null };
+        const bId = busAuthMap['driver-1'] ?? null;
+        return { data: bId ? { bus_id: bId } : null, error: null };
       }
       return { data: null, error: null };
     }),
@@ -136,6 +147,7 @@ beforeAll(async () => {
 // next test's assertions.
 beforeEach(() => {
   clearAllRateLimits();
+  clearStudentPresenceCache();
 });
 
 afterAll(() => {
@@ -533,6 +545,32 @@ describe('WS server — location pipeline', () => {
       expect(sub.type).toBe('subscribed');
       expect(sub.channel).toBe('bus_location_b1');
       admin.ws.close();
+    });
+  });
+
+  describe('Permanent Shift Isolation', () => {
+    it('rejects cross-shift subscription with close code 4403 (SHIFT_MISMATCH)', async () => {
+      clearStudentPresenceCache('student-1');
+      busAuthMap['student-1'] = 'b_shift_test';
+      studentShiftMap['student-1'] = 'Evening';
+      activeTripShiftMap['b_shift_test'] = 'Morning';
+
+      const student = await connect('?token=tok-student');
+      await student.next(); // auth_ok
+
+      // Send presence for their assigned bus
+      student.ws.send(JSON.stringify({ type: 'presence', busId: 'b_shift_test' }));
+
+      // Catch the 4403 close event
+      const closePromise = new Promise<{ code: number; reason: string }>((resolve) => {
+        student.ws.on('close', (code, reason) => {
+          resolve({ code, reason: reason.toString() });
+        });
+      });
+
+      const closeEvent = await closePromise;
+      expect(closeEvent.code).toBe(4403);
+      expect(closeEvent.reason).toBe('SHIFT_MISMATCH');
     });
   });
 });

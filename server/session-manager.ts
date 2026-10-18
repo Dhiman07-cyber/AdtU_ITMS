@@ -7,6 +7,7 @@ export interface Session {
   busId?: string;
   tripId?: string;
   routeId?: string;
+  shift?: string;
   subscriptions: Set<string>;
   connectedSince: number;
   lastHeartbeat: number;
@@ -18,6 +19,7 @@ export interface Session {
 
 const sessions = new Map<string, Session>();
 const reconnectTokens = new Map<string, string>(); // token → socketId
+const disconnectedSessions = new Map<string, { session: Session; expiresAt: number }>(); // token → disconnected session snapshot
 const uidIndex = new Map<string, Set<string>>();
 const busIdIndex = new Map<string, Set<string>>();
 const tripIdIndex = new Map<string, Set<string>>();
@@ -99,8 +101,18 @@ export class SessionManager {
 
   findByReconnectToken(token: string): Session | undefined {
     const socketId = reconnectTokens.get(token);
-    if (!socketId) return undefined;
-    return sessions.get(socketId);
+    if (socketId) {
+      const active = sessions.get(socketId);
+      if (active) return active;
+    }
+    const cached = disconnectedSessions.get(token);
+    if (cached) {
+      if (Date.now() < cached.expiresAt) {
+        return cached.session;
+      }
+      disconnectedSessions.delete(token);
+    }
+    return undefined;
   }
 
   updateHeartbeat(socketId: string): void {
@@ -153,6 +165,7 @@ export class SessionManager {
     const tripId = session.tripId;
     const routeId = session.routeId;
 
+    disconnectedSessions.delete(token);
     this.delete(session.socketId);
 
     const restored = this.create({
@@ -168,6 +181,7 @@ export class SessionManager {
     if (busId) this.setBusId(newSocketId, busId);
     if (tripId) this.setTripId(newSocketId, tripId);
     if (routeId) this.setRouteId(newSocketId, routeId);
+    if (session.shift) restored.shift = session.shift;
 
     return restored;
   }
@@ -180,7 +194,15 @@ export class SessionManager {
     if (session.routeId) removeFromIndex(routeIdIndex, session.routeId, socketId);
     removeFromIndex(uidIndex, session.uid, socketId);
     removeFromIndex(roleIndex, session.role, socketId);
-    if (session.reconnectToken) reconnectTokens.delete(session.reconnectToken);
+    if (session.reconnectToken) {
+      reconnectTokens.delete(session.reconnectToken);
+      // Retain in disconnectedSessions with 60s grace TTL so clients reconnecting
+      // after temporary socket closure can seamlessly restore subscriptions/state
+      disconnectedSessions.set(session.reconnectToken, {
+        session: { ...session, subscriptions: new Set(session.subscriptions) },
+        expiresAt: Date.now() + 60_000,
+      });
+    }
     sessions.delete(socketId);
   }
 

@@ -104,9 +104,24 @@ export class WebSocketServer {
       } else {
         // Path B (preferred): wait for an 'auth' message with the token.
         auth = await new Promise<Awaited<ReturnType<typeof authenticateSocket>>>((resolve) => {
+          let resolved = false;
           const timeout = setTimeout(() => {
+            if (resolved) return;
+            resolved = true;
+            ws.removeListener('close', onCloseEarly);
+            ws.removeListener('message', onMessage);
             resolve({ authenticated: false, error: 'Authentication timeout: send { type: "auth", token: "..." } within 5 seconds of connecting' });
           }, AUTH_TIMEOUT_MS);
+
+          const onCloseEarly = () => {
+            if (resolved) return;
+            resolved = true;
+            clearTimeout(timeout);
+            ws.removeListener('close', onCloseEarly);
+            ws.removeListener('message', onMessage);
+            resolve({ authenticated: false, error: 'Connection closed before authentication completed' });
+          };
+          ws.once('close', onCloseEarly);
 
           // Temporary one-time listener for the auth message.
           const onMessage = async (data: Buffer | ArrayBuffer | Buffer[]) => {
@@ -114,8 +129,11 @@ export class WebSocketServer {
             try { parsed = JSON.parse(data.toString()); } catch { return; }
             if (parsed?.type !== 'auth' || !parsed?.token) return;
 
-            // Cancel timeout and remove this listener — we got the auth message.
+            // Cancel timeout and remove listeners — we got the auth message.
+            if (resolved) return;
+            resolved = true;
             clearTimeout(timeout);
+            ws.removeListener('close', onCloseEarly);
             ws.removeListener('message', onMessage);
 
             // Build a synthetic request with the token in the Authorization header
@@ -134,8 +152,11 @@ export class WebSocketServer {
       }
 
       if (!auth.authenticated) {
-        sendToSocket(ws, { type: 'auth_required', message: auth.error || 'Authentication required' });
-        ws.close(4001, 'Authentication failed');
+        ws.removeListener('message', bufferMessage);
+        if (ws.readyState === ws.OPEN) {
+          sendToSocket(ws, { type: 'auth_required', message: auth.error || 'Authentication required' });
+          ws.close(4001, 'Authentication failed');
+        }
         metricsService.inc('connectionsRejected');
         metricsService.inc('authFailures');
         return;
@@ -321,13 +342,25 @@ export class WebSocketServer {
   }
 
   broadcastToChannel(channel: string, event: string, payload: Record<string, unknown>): void {
-    const subscriberIds = Array.from(subscriptionManager.getSubscribers(channel));
+    let subscriberIds = Array.from(subscriptionManager.getSubscribers(channel));
+
+    // Channel aliasing: unify 'bus_location_<busId>' and 'bus:<busId>' subscribers
+    if (channel.startsWith('bus_location_')) {
+      const altChannel = 'bus:' + channel.slice('bus_location_'.length);
+      const altSubs = subscriptionManager.getSubscribers(altChannel);
+      if (altSubs && altSubs.size > 0) {
+        subscriberIds = Array.from(new Set([...subscriberIds, ...altSubs]));
+      }
+    } else if (channel.startsWith('bus:')) {
+      const altChannel = 'bus_location_' + channel.slice('bus:'.length);
+      const altSubs = subscriptionManager.getSubscribers(altChannel);
+      if (altSubs && altSubs.size > 0) {
+        subscriberIds = Array.from(new Set([...subscriberIds, ...altSubs]));
+      }
+    }
+
     if (subscriberIds.length === 0) {
-      // Critical diagnostic: if we reach here for a bus_location channel, the
-      // broadcast was received but NO subscriber was registered — either the
-      // student's subscription was never registered server-side, or it was
-      // removed on reconnect without re-subscribe.
-      if (channel.startsWith('bus_location_')) {
+      if (channel.startsWith('bus_location_') || channel.startsWith('bus:')) {
         logger.warn('broadcast_zero_subscribers', { channel, event });
       }
       return;

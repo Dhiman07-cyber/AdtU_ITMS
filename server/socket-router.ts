@@ -10,6 +10,7 @@ import { wsServer } from './websocket-server';
 import { publishToRedis } from './redis-broadcast';
 import { encode } from './socket-encoder';
 import { getSupabaseServer } from '@/lib/supabase-server';
+import { areShiftsCompatible } from '@/lib/utils/shift-utils';
 
 type MessageHandler = (ws: WebSocket, session: Session, payload: any) => void | Promise<void>;
 
@@ -89,7 +90,7 @@ export function getLiveBusLocation(busId: string): Record<string, unknown> | und
   return loc;
 }
 
-handle('subscribe', (ws, session, payload) => {
+handle('subscribe', async (ws, session, payload) => {
   const channel = payload.channel as string | undefined;
   if (!channel) { send(ws, { type: 'error', message: 'subscribe requires "channel"' }); return; }
 
@@ -127,6 +128,49 @@ handle('subscribe', (ws, session, payload) => {
         metricsService.inc('errors');
         logger.warn('subscribe_unauthorized', { uid: session.uid, role: session.role, channel, sessionBusId: session.busId, channelBusId });
         return;
+      }
+
+      // PERMANENT SHIFT ISOLATION: Validate student shift against active trip shift
+      if (session.role === 'student') {
+        let studentShift = session.shift || studentPresenceCache.get(session.uid)?.data.shift;
+        const supabase = getSupabaseServer();
+        if (!studentShift) {
+          const { data: profile } = await supabase
+            .from('student_profiles')
+            .select('shift')
+            .eq('uid', session.uid)
+            .maybeSingle();
+          if (profile?.shift) {
+            studentShift = profile.shift;
+            session.shift = profile.shift;
+          }
+        }
+
+        if (studentShift) {
+          const { data: activeTrip } = await supabase
+            .from('active_trips')
+            .select('id, shift')
+            .eq('bus_id', channelBusId)
+            .eq('status', 'active')
+            .maybeSingle();
+
+          if (activeTrip?.shift && !areShiftsCompatible(studentShift, activeTrip.shift)) {
+            logger.warn('security_audit_shift_mismatch', {
+              event: 'SHIFT_MISMATCH',
+              uid: session.uid,
+              role: session.role,
+              busId: channelBusId,
+              studentShift,
+              tripShift: activeTrip.shift,
+              tripId: activeTrip.id,
+              channel,
+            });
+            metricsService.inc('errors');
+            metricsService.inc('securityAuditShiftMismatch');
+            ws.close(4403, 'SHIFT_MISMATCH');
+            return;
+          }
+        }
       }
     } else {
       // FIX-02 (WS-01): Default-deny for all non-bus-prefixed channels.
@@ -176,6 +220,24 @@ handle('pong', (ws, session) => {
   send(ws, { type: 'pong_ack' });
 });
 
+interface CachedStudentPresence {
+  busId: string | null;
+  status: string;
+  softBlock: string | null;
+  validUntil: string | null;
+  shift: string | null;
+}
+const studentPresenceCache = new Map<string, { data: CachedStudentPresence; expiresAtMs: number }>();
+const STUDENT_PRESENCE_TTL_MS = 5 * 60 * 1000;
+
+export function clearStudentPresenceCache(uid?: string) {
+  if (uid) {
+    studentPresenceCache.delete(uid);
+  } else {
+    studentPresenceCache.clear();
+  }
+}
+
 handle('presence', async (ws, session, payload) => {
   const claimedBusId = payload.busId && typeof payload.busId === 'string' && payload.busId.trim()
     ? payload.busId.trim()
@@ -186,25 +248,83 @@ handle('presence', async (ws, session, payload) => {
     let authorized = false;
 
     if (session.role === 'student') {
-      const { data } = await supabase
-        .from('student_profiles')
-        // Enforce canonical entitlement: status must be active AND not past soft_block / valid_until boundary
-        .select('bus_id, status, soft_block, valid_until')
-        .eq('uid', session.uid)
-        .maybeSingle();
-      if (data?.bus_id === claimedBusId) {
+      let data: CachedStudentPresence | null = null;
+      const cached = studentPresenceCache.get(session.uid);
+      const nowMs = Date.now();
+      if (cached && nowMs < cached.expiresAtMs) {
+        data = cached.data;
+        if (data.shift && !session.shift) {
+          session.shift = data.shift;
+        }
+      } else {
+        const { data: dbRow } = await supabase
+          .from('student_profiles')
+          // Enforce canonical entitlement: status must be active AND not past soft_block / valid_until boundary
+          .select('bus_id, status, soft_block, valid_until, shift')
+          .eq('uid', session.uid)
+          .maybeSingle();
+
+        if (dbRow) {
+          data = {
+            busId: dbRow.bus_id || null,
+            status: dbRow.status || 'active',
+            softBlock: dbRow.soft_block || null,
+            validUntil: dbRow.valid_until || null,
+            shift: dbRow.shift || null,
+          };
+          if (dbRow.shift) {
+            session.shift = dbRow.shift;
+          }
+          studentPresenceCache.set(session.uid, {
+            data,
+            expiresAtMs: nowMs + STUDENT_PRESENCE_TTL_MS,
+          });
+          if (studentPresenceCache.size > 5000) {
+            const first = studentPresenceCache.keys().next().value;
+            if (first) studentPresenceCache.delete(first);
+          }
+        }
+      }
+
+      if (data?.busId === claimedBusId) {
         const st = data.status || 'active';
         if (st === 'active') {
           const now = new Date();
           let pastBoundary = false;
-          if (data.soft_block) {
-            pastBoundary = new Date(data.soft_block) <= now;
-          } else if (data.valid_until) {
-            pastBoundary = new Date(data.valid_until) <= now;
+          if (data.softBlock) {
+            pastBoundary = new Date(data.softBlock) <= now;
+          } else if (data.validUntil) {
+            pastBoundary = new Date(data.validUntil) <= now;
           }
           if (!pastBoundary) {
             authorized = true;
           }
+        }
+      }
+
+      // PERMANENT SHIFT ISOLATION: Check student shift against active trip shift on claimed bus
+      if (authorized && data?.shift) {
+        const { data: trip } = await supabase
+          .from('active_trips')
+          .select('id, shift')
+          .eq('bus_id', claimedBusId)
+          .eq('status', 'active')
+          .maybeSingle();
+
+        if (trip?.shift && !areShiftsCompatible(data.shift, trip.shift)) {
+          logger.warn('security_audit_shift_mismatch', {
+            event: 'SHIFT_MISMATCH',
+            uid: session.uid,
+            role: session.role,
+            busId: claimedBusId,
+            studentShift: data.shift,
+            tripShift: trip.shift,
+            tripId: trip.id,
+          });
+          metricsService.inc('errors');
+          metricsService.inc('securityAuditShiftMismatch');
+          ws.close(4403, 'SHIFT_MISMATCH');
+          return;
         }
       }
     } else if (session.role === 'driver') {
@@ -239,7 +359,34 @@ handle('presence', async (ws, session, payload) => {
   }
 
   if (payload.tripId && typeof payload.tripId === 'string' && payload.tripId.trim()) {
-    sessionManager.setTripId(session.socketId, payload.tripId.trim());
+    const tripId = payload.tripId.trim();
+    sessionManager.setTripId(session.socketId, tripId);
+    if (session.role === 'student') {
+      const studentShift = session.shift || studentPresenceCache.get(session.uid)?.data.shift;
+      if (studentShift) {
+        const supabase = getSupabaseServer();
+        const { data: tripRow } = await supabase
+          .from('active_trips')
+          .select('id, shift')
+          .eq('id', tripId)
+          .maybeSingle();
+
+        if (tripRow?.shift && !areShiftsCompatible(studentShift, tripRow.shift)) {
+          logger.warn('security_audit_shift_mismatch', {
+            event: 'SHIFT_MISMATCH',
+            uid: session.uid,
+            role: session.role,
+            tripId,
+            studentShift,
+            tripShift: tripRow.shift,
+          });
+          metricsService.inc('errors');
+          metricsService.inc('securityAuditShiftMismatch');
+          ws.close(4403, 'SHIFT_MISMATCH');
+          return;
+        }
+      }
+    }
   }
   if (payload.routeId && typeof payload.routeId === 'string' && payload.routeId.trim()) {
     sessionManager.setRouteId(session.socketId, payload.routeId.trim());

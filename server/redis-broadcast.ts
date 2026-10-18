@@ -38,6 +38,7 @@ export const MY_NODE_ID = crypto.randomUUID();
 /** Redis channel all WS nodes listen on for cross-node broadcasts. */
 const REDIS_BROADCAST_CHANNEL = 'ws:broadcast';
 const ROLE_INVALIDATE_CHANNEL = 'role_invalidate';
+const ROLE_INVALIDATE_CHANNEL_ALT = 'itms:roles:invalidate';
 
 interface BroadcastEnvelope {
   /** The WS channel to broadcast on (e.g. 'bus:ABC', 'trip-status-BUS123') */
@@ -80,9 +81,14 @@ export async function initRedisBroadcastRelay(
 ): Promise<void> {
   // Cross-node role invalidation listener: purges cached JWT auth and terminates
   // active sessions in this WS instance whenever an admin updates user permissions or roles.
-  await redisPubSub.subscribe(ROLE_INVALIDATE_CHANNEL, (rawUid) => {
+  const handleRoleInvalidation = (rawUid: string) => {
     const uid = rawUid ? rawUid.trim() : undefined;
     invalidateTokenAuthCache(uid);
+
+    // Evict cached student presence to reflect reassignment or privilege change immediately
+    import('./socket-router')
+      .then((m) => m.clearStudentPresenceCache(uid))
+      .catch(() => {});
 
     if (uid) {
       const activeSessions = sessionManager.getByUid(uid);
@@ -111,11 +117,25 @@ export async function initRedisBroadcastRelay(
     }
 
     logger.info('ws_role_cache_invalidated', { uid: uid || 'all' });
-  });
+  };
+
+  const handleStudentAssignInvalidation = (rawUid: string) => {
+    const uid = rawUid ? rawUid.trim() : undefined;
+    import('./socket-router')
+      .then((m) => m.clearStudentPresenceCache(uid === '*' ? undefined : uid))
+      .catch(() => {});
+    logger.info('ws_student_presence_cache_invalidated', { uid: uid || 'all' });
+  };
+
+  await redisPubSub.subscribe(ROLE_INVALIDATE_CHANNEL, handleRoleInvalidation);
+  await redisPubSub.subscribe(ROLE_INVALIDATE_CHANNEL_ALT, handleRoleInvalidation);
+  await redisPubSub.subscribe('student_assign_invalidate', handleStudentAssignInvalidation);
 
   logger.info('redis_security_listeners_initialized', {
     nodeId: MY_NODE_ID,
     roleInvalidateChannel: ROLE_INVALIDATE_CHANNEL,
+    roleInvalidateChannelAlt: ROLE_INVALIDATE_CHANNEL_ALT,
+    studentAssignInvalidateChannel: 'student_assign_invalidate',
     broadcastRelay: 'bypassed_single_node',
   });
 }

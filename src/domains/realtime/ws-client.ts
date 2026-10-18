@@ -205,6 +205,9 @@ export class WebSocketClient {
       this.emitStatus('disconnected');
       if (event.code === 4001 || event.reason === 'Authentication failed') {
         this.handleAuthRequired();
+      } else if (event.code === 4403 || event.reason === 'SHIFT_MISMATCH') {
+        this.destroyed = true;
+        this.emitStatus('error');
       } else {
         this.scheduleReconnect();
       }
