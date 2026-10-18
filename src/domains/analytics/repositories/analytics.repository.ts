@@ -12,6 +12,7 @@ import { getAllBuses } from '@/domains/fleet';
 import * as routeService from '@/domains/route';
 import { getDeadlineConfig } from '@/lib/deadline-config-service';
 import { adminDb } from '@/lib/firebase-admin';
+import { getSystemConfig } from '@/domains/admin/services/config.service';
 import { paymentsSupabaseService } from '@/lib/services/payments-supabase';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import type { Bus,Route } from '@/lib/types';
@@ -120,7 +121,7 @@ export async function fetchDashboardRawData(): Promise<DashboardRawData> {
     feedbackSnap,
     statusSnap,
     paymentsSnap,
-    sysSnap,
+    sysConfigResult,
     deadlineConfig,
   ] = await Promise.all([
     supabase.from('driver_profiles').select('*', { count: 'exact', head: true }),
@@ -129,7 +130,7 @@ export async function fetchDashboardRawData(): Promise<DashboardRawData> {
     adminDb.collection('feedback').where('created_at', '>=', sevenDaysAgo.toISOString()).count().get().catch(() => ({ data: () => ({ count: 0 }) })),
     supabase.from('active_trips').select('id, trip_id, bus_id, route_id, driver_id, driver_uid, status, start_time, started_at').eq('status', 'active'),
     supabase.from('payments').select('amount, method').or('status.eq.Completed,status.eq.completed'),
-    adminDb.collection('settings').doc('config').get(),
+    getSystemConfig(),
     getDeadlineConfig(),
   ]);
 
@@ -148,7 +149,10 @@ export async function fetchDashboardRawData(): Promise<DashboardRawData> {
     feedbackCount: (feedbackSnap as any).data ? (feedbackSnap as any).data().count : 0,
     driverStatusData: statusSnap.data || [],
     paymentsData: paymentsSnap.data || [],
-    systemConfigDoc: sysSnap,
+    systemConfigDoc: {
+      exists: Boolean(sysConfigResult?.data),
+      data: () => sysConfigResult?.data || {},
+    } as any,
     deadlineConfig,
   };
 }

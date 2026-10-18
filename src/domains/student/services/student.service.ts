@@ -129,12 +129,16 @@ export async function applyPaymentValidity(
 }
 
 
+import { invalidateStudentAssignment } from './student-assignment-cache';
+
 export async function update(id: string, data: Partial<Student>): Promise<void> {
   await studentRepository.update(id, data);
+  invalidateStudentAssignment(id).catch(() => {});
 }
 
 export async function remove(id: string): Promise<void> {
   await studentRepository.remove(id);
+  invalidateStudentAssignment(id).catch(() => {});
 }
 
 export async function unassignRoute(routeId: string): Promise<boolean> {

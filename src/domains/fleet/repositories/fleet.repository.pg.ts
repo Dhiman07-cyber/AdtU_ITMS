@@ -322,6 +322,17 @@ export async function pgReassignStudentsAtomically(plans: Array<{
   });
   if (error) throw new Error(`FleetRepository (PG) reassignStudentsAtomically failed: ${error.message}`);
   if (data?.error) throw new Error(data.error);
+
+  // Invalidate cached student assignments across L1 and Redis
+  try {
+    const { invalidateStudentAssignment } = await import('@/domains/student');
+    for (const plan of plans) {
+      if (plan.studentId) {
+        invalidateStudentAssignment(plan.studentId).catch(() => {});
+      }
+    }
+  } catch {}
+
   return data as { success: boolean; processed: number };
 }
 

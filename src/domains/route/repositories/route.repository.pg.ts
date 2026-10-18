@@ -20,6 +20,7 @@
  */
 import { getSupabaseServer } from '@/lib/supabase-server';
 import type { Route } from '@/lib/types';
+import { getCanonicalStopsForRoute, enrichRouteStops } from '../data/canonical-route-geometries';
 
 // Helper to convert timestamp values
 function toISOOrNull(value: any): string | null {
@@ -59,12 +60,14 @@ function routeDomainToRow(data: Partial<Route>): Record<string, any> {
 
 // Convert PostgreSQL row to domain Route mapping
 function pgRowToRoute(row: Record<string, any>): Route {
+  const stops = enrichRouteStops(row.id, row.stops);
+
   return {
     id: row.id,
     routeId: row.id,  // route_id column dropped; routeId domain field reads from id
     routeName: row.route_name,
-    stops: row.stops || [],
-    totalStops: row.total_stops || 0,
+    stops,
+    totalStops: row.total_stops || stops.length,
     estimatedTime: row.estimated_time || '',
     status: row.status === 'inactive' ? 'inactive' : 'active',
     createdAt: row.created_at,

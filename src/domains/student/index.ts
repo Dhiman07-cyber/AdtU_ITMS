@@ -10,3 +10,9 @@ export {
 	unassignRoute,update
 } from './services/student.service';
 export type { Student } from './services/student.service';
+export {
+  getCachedStudentAssignment,
+  invalidateStudentAssignment,
+  clearStudentAssignmentMemoryCache,
+} from './services/student-assignment-cache';
+export type { CachedStudentAssignment } from './services/student-assignment-cache';

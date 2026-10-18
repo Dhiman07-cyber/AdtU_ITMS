@@ -6,6 +6,7 @@
  */
 
 import { adminDb } from '@/lib/firebase-admin';
+import { getSupabaseServer } from '@/lib/supabase-server';
 import type { DeadlineConfig } from '@/lib/types/deadline-config';
 import { deriveAcademicLifecycle } from '@/lib/utils/deadline-computation';
 
@@ -45,7 +46,25 @@ export async function findActiveConfig(): Promise<DeadlineConfig> {
   }
 
   let firestoreData: Record<string, any> = {};
-  if (adminDb) {
+
+  // 1. Query PostgreSQL system_settings (Authoritative Source of Truth)
+  try {
+    if (process.env.NEXT_PUBLIC_SUPABASE_URL) {
+      const supabase = getSupabaseServer();
+      const { data, error } = await supabase
+        .from('system_settings')
+        .select('value')
+        .eq('key', 'deadline')
+        .maybeSingle();
+      if (!error && data?.value && Object.keys(data.value).length > 0) {
+        firestoreData = data.value;
+      }
+    }
+  } catch {
+    // Fallback to Firestore below
+  }
+
+  if (Object.keys(firestoreData).length === 0 && adminDb) {
     try {
       const doc = await adminDb.collection(SETTINGS_COLLECTION).doc(DEADLINE_DOC_ID).get();
       if (doc.exists) {
@@ -185,10 +204,6 @@ export async function findActiveConfig(): Promise<DeadlineConfig> {
 }
 
 export async function saveConfig(config: DeadlineConfig, updatedByUid?: string): Promise<void> {
-  if (!adminDb) {
-    throw new Error('Firebase Admin SDK is not initialized.');
-  }
-
   const payload = {
     description: config.description,
     version: config.version,
@@ -210,7 +225,30 @@ export async function saveConfig(config: DeadlineConfig, updatedByUid?: string):
     contactInfo: config.contactInfo,
   };
 
-  await adminDb.collection(SETTINGS_COLLECTION).doc(DEADLINE_DOC_ID).set(payload, { merge: true });
+  // 1. Write to PostgreSQL system_settings
+  try {
+    if (process.env.NEXT_PUBLIC_SUPABASE_URL) {
+      const supabase = getSupabaseServer();
+      await supabase.from('system_settings').upsert({
+        key: 'deadline',
+        value: payload,
+        updated_at: payload.lastUpdated,
+        updated_by: updatedByUid || 'admin',
+      });
+    }
+  } catch (err) {
+    console.warn('[calendar.repository] Failed to persist deadline to PostgreSQL system_settings:', err);
+  }
+
+  // 2. Dual-write to Firestore if adminDb initialized
+  if (adminDb) {
+    try {
+      await adminDb.collection(SETTINGS_COLLECTION).doc(DEADLINE_DOC_ID).set(payload, { merge: true });
+    } catch (err: any) {
+      console.warn('[calendar.repository] Firestore write failed:', err.message);
+    }
+  }
+
   invalidateActiveConfigCache();
 }
 
