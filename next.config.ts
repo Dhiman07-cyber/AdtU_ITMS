@@ -46,7 +46,6 @@ const nextConfig: NextConfig = {
       'firebase',
       'firebase/firestore',
       'firebase/auth',
-      'react-hot-toast',
       'zod',
       'crypto-js',
       'class-variance-authority',
