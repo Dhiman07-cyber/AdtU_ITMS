@@ -58,16 +58,12 @@ function makeFlagQuery(flagData: any) {
 }
 
 function makeActiveTripQuery(tripData: any) {
+  const chain: any = {};
+  chain.eq = vi.fn(() => chain);
+  chain.in = vi.fn(() => chain);
+  chain.maybeSingle = vi.fn().mockResolvedValue({ data: tripData, error: null });
   return {
-    select: vi.fn(() => ({
-      eq: vi.fn(() => ({
-        eq: vi.fn(() => ({
-          eq: vi.fn(() => ({
-            maybeSingle: vi.fn().mockResolvedValue({ data: tripData, error: null }),
-          })),
-        })),
-      })),
-    })),
+    select: vi.fn(() => chain),
   };
 }
 

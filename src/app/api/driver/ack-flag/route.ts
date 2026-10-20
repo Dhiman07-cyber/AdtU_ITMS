@@ -4,6 +4,9 @@ import { RateLimits } from '@/lib/security/rate-limiter';
 import { MarkBoardedSchema } from '@/lib/security/validation-schemas';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import { isWaitingFlagExpired } from '@/lib/waiting-flag-helpers';
+import { updateRedisActiveFlag } from '@/domains/gps/services/gps-redis-guard';
+import { invalidateBusTripSnapshot } from '@/lib/services/trip-snapshot-cache';
+import { getBusIdVariations } from '@/lib/utils';
 import { NextResponse } from 'next/server';
 
 /**
@@ -43,7 +46,7 @@ export const POST = withSecurity(
       .from('active_trips')
       .select('trip_id')
       .eq('driver_id', driverUid)
-      .eq('bus_id', flagData.bus_id)
+      .in('bus_id', getBusIdVariations(flagData.bus_id))
       .eq('status', 'active')
       .maybeSingle();
 
@@ -75,6 +78,7 @@ export const POST = withSecurity(
       .from('waiting_flags')
       .update({
         status: 'acknowledged',
+        ack_sent: true,
         ack_by_driver_uid: driverUid
       })
       .eq('id', flagId)
@@ -95,11 +99,15 @@ export const POST = withSecurity(
       );
     }
 
+    // Synchronize Redis active waiting flags and bus snapshot cache (Fix 5)
+    await updateRedisActiveFlag(flagData.bus_id, flagId, { ackSent: true }).catch(() => {});
+    invalidateBusTripSnapshot(flagData.bus_id);
+
     // Broadcast via WebSocket
     try {
       const ts = new Date().toISOString();
       await Promise.allSettled([
-        emitEvent(`waiting_flags_${flagData.bus_id}`, 'waiting_flag_acknowledged', { flagId, studentUid: flagData.student_uid, status: 'acknowledged' }),
+        emitEvent(`waiting_flags_${flagData.bus_id}`, 'waiting_flag_acknowledged', { flagId, studentUid: flagData.student_uid, status: 'acknowledged', driverUid }),
         emitEvent(`student_${flagData.student_uid}`, 'flag_acknowledged', { flagId, busId: flagData.bus_id, ackByDriverUid: driverUid, timestamp: ts, message: 'Driver has acknowledged your waiting flag!' }),
       ]);
     } catch (broadcastError) {

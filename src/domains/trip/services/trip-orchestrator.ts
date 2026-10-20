@@ -11,6 +11,7 @@ import { dispatchTripNotification } from './trip-notification.service';
 import { checkNoConflict,resolveRouteId,resolveRouteName,tripStartPreflight,verifyDriverBusAssignment } from './trip-validation.service';
 import { invalidateActiveTripCache, setActiveTripCache } from '@/domains/gps/services/gps-persistence.service';
 import { clearInMemoryLastLocation } from '@/domains/gps/services/gps-pipeline.service';
+import { invalidateScannerBusCache } from '@/lib/security/scanner-auth';
 
 // FCM send is best-effort and must not dictate trip-response latency, but it
 // also must not be dropped silently: serverless runtimes may freeze the
@@ -100,6 +101,14 @@ export async function startTrip(params: StartTripParams): Promise<StartTripOutpu
 
   if (preflight.existingTripId) {
     appLogger.info('trip', 'start_idempotent', { ...logCtx, tripId: preflight.existingTripId, routeId: effectiveRouteId, latencyMs: Date.now() - start });
+    setActiveTripCache(params.busId, {
+      tripId: preflight.existingTripId,
+      driverId: params.driverId,
+      routeId: effectiveRouteId,
+      shift: tripShift,
+      deviceId: params.deviceId,
+      expiresAtMs: Date.now() + 600_000,
+    });
     return { success: true, tripId: preflight.existingTripId, routeId: effectiveRouteId, shift: tripShift };
   }
 
@@ -114,6 +123,7 @@ export async function startTrip(params: StartTripParams): Promise<StartTripOutpu
   // Drop any cached trip-lock entries and in-memory location anchors for this driver/bus —
   // ensures every new trip begins with a completely clean GPS state.
   invalidateActiveTripCache(params.busId, params.driverId);
+  invalidateScannerBusCache(params.driverId);
   clearInMemoryLastLocation(params.busId);
 
   const activeTripId = lockResult.tripId || tripId;
@@ -152,6 +162,7 @@ export async function startTrip(params: StartTripParams): Promise<StartTripOutpu
     tripId: activeTripId,
     driverId: params.driverId,
     routeId: effectiveRouteId,
+    shift: tripShift,
     deviceId: params.deviceId,
     expiresAtMs: Date.now() + 600_000,
   });
@@ -247,6 +258,7 @@ export async function endTrip(params: EndTripParams): Promise<EndTripOutput> {
   if (endResult.alreadyEnded) {
     appLogger.info('trip', 'end_duplicate_suppressed', { ...logCtx, tripId: activeTripId, latencyMs: Date.now() - start });
     invalidateActiveTripCache(params.busId, params.driverId);
+    invalidateScannerBusCache(params.driverId);
     return { success: true, tripId: activeTripId };
   }
 
@@ -258,6 +270,7 @@ export async function endTrip(params: EndTripParams): Promise<EndTripOutput> {
   ]);
 
   invalidateActiveTripCache(params.busId, params.driverId);
+  invalidateScannerBusCache(params.driverId);
   clearInMemoryLastLocation(params.busId);
 
   const cachedBusNumber = (params as any)._cachedBusNumber;
@@ -291,6 +304,26 @@ export async function endTrip(params: EndTripParams): Promise<EndTripOutput> {
 
   return { success: true, tripId: activeTripId };
 }
+
+export async function forceEndTrip(params: {
+  busId: string;
+  tripId?: string;
+  endedReason?: string;
+  actorUid?: string;
+}): Promise<{ success: boolean; tripId?: string; reason?: string; alreadyEnded?: boolean }> {
+  appLogger.warn('trip', 'force_end_rejected', {
+    busId: params.busId,
+    tripId: params.tripId,
+    actorUid: params.actorUid,
+    reason: 'External force-ending of trips has been deprecated and disabled. Trips can only be ended by the assigned driver or automatically reaped by the heartbeat mechanism.',
+  });
+
+  return {
+    success: false,
+    reason: 'External force-ending of trips has been deprecated and disabled. Trips can only be ended by the assigned driver or automatically reaped by the heartbeat mechanism.',
+  };
+}
+
 
 export async function heartbeat(params: HeartbeatParams): Promise<HeartbeatResult> {
   return tripLockService.heartbeat(params.tripId, params.driverId, params.busId);

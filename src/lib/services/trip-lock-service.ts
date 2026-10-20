@@ -245,9 +245,10 @@ export class TripLockService {
      */
     async endTrip(
         tripId: string,
-        driverId: string,
-        busId: string,
-        minDurationSeconds = 0
+        driverId?: string | null,
+        busId = '',
+        minDurationSeconds = 0,
+        endedReason = 'completed'
     ): Promise<EndTripResult> {
         try {
             // Ownership is already verified by the orchestrator before this call.
@@ -257,8 +258,9 @@ export class TripLockService {
                 .rpc('end_trip_atomically', {
                     p_trip_id: tripId,
                     p_bus_id: busId,
-                    p_driver_id: driverId,
+                    p_driver_id: driverId || null,
                     p_min_duration_seconds: minDurationSeconds,
+                    p_ended_reason: endedReason,
                 });
 
             if (rpcError) {

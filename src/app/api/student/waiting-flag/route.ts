@@ -17,10 +17,12 @@ import {
     getGpsStateFromRedis,
     setRedisActiveFlag,
     removeRedisActiveFlag,
+    getStudentTripFlagCount,
     incrementStudentTripFlagCount,
 } from '@/domains/gps/services/gps-redis-guard';
 import { getSharedBusTripSnapshot, invalidateBusTripSnapshot } from '@/lib/services/trip-snapshot-cache';
 import { pgFindById } from '@/domains/route/repositories/route.repository.pg';
+import { isShiftCompatible, isMatchingBusId, getBusIdVariations } from '@/lib/utils';
 import { NextResponse } from 'next/server';
 
 /**
@@ -74,7 +76,7 @@ export const POST = withSecurity(
                 .limit(5),
             supabase.from('active_trips')
                 .select('trip_id, bus_id, route_id, shift')
-                .eq('bus_id', busId)
+                .in('bus_id', getBusIdVariations(busId))
                 .eq('status', 'active')
                 .maybeSingle()
         ]);
@@ -92,7 +94,7 @@ export const POST = withSecurity(
 
         const studentBusId = studentData.bus_id || studentData.busId || (studentData as any).id;
         
-        if (!studentBusId || studentBusId !== busId) {
+        if (!studentBusId || !isMatchingBusId(studentBusId, busId)) {
             return NextResponse.json({
                 error: `Forbidden: You are not assigned to bus ${busId}. Your assigned bus is ${studentBusId || 'none'}.`
             }, { status: 403 });
@@ -128,6 +130,15 @@ export const POST = withSecurity(
                 error: 'Cannot raise waiting flag: No active trip is currently running on your assigned bus.',
                 code: 'NO_ACTIVE_TRIP'
             }, { status: 409 });
+        }
+
+        // Permanent Shift Compatibility Validation (Fix 3)
+        if (studentData.shift && activeTripRes.data?.shift && !isShiftCompatible(studentData.shift, activeTripRes.data.shift)) {
+            return NextResponse.json({
+                success: false,
+                error: 'You cannot raise a waiting flag for a trip outside your assigned shift.',
+                code: 'SHIFT_MISMATCH',
+            }, { status: 403 });
         }
 
         // 2. Validate timestamp freshness (<= 60s skew)
@@ -170,8 +181,8 @@ export const POST = withSecurity(
         }
 
         // Lock 3: Per-Trip Anti-Spam Cooldown Guard (max 2 flag raises per trip)
-        const tripFlagCount = await incrementStudentTripFlagCount(tripId, studentUid);
-        if (tripFlagCount > 2) {
+        const currentTripFlagCount = await getStudentTripFlagCount(tripId, studentUid);
+        if (currentTripFlagCount >= 2) {
             return NextResponse.json({
                 success: false,
                 error: 'You have reached the maximum of 2 waiting flag raises for this trip.',
@@ -236,7 +247,7 @@ export const POST = withSecurity(
 
         // 6. Prepare flag data with exact roadside pickup coordinates
         const currentTimestamp = timestamp || Date.now();
-        const flagExpiresAt = new Date(currentTimestamp + 15 * 60 * 1000).toISOString();
+        const flagExpiresAt = new Date(currentTimestamp + 90 * 60 * 1000).toISOString();
         const flagData: any = {
             student_uid: studentUid,
             student_name: studentData.fullName || studentData.name || 'Student',
@@ -251,6 +262,10 @@ export const POST = withSecurity(
             message: message || null,
             stop_lat: studentLat,
             stop_lng: studentLng,
+            lat: studentLat,
+            lng: studentLng,
+            route_progress_meters: studentCorridor.routeProgressMeters,
+            ack_sent: false,
         };
 
         // 7. Atomic Insert (1 Supabase write)
@@ -282,6 +297,9 @@ export const POST = withSecurity(
                         .single();
 
                     if (!retryInsert.error && retryInsert.data) {
+                        // Increment student trip flag count ONLY after successful insertion (Fix 2)
+                        await incrementStudentTripFlagCount(tripId, studentUid);
+
                         // Store in Redis flags:active:<busId> for 0-DB-read hot path
                         await setRedisActiveFlag(busId, {
                             flagId: retryInsert.data.id,
@@ -324,6 +342,9 @@ export const POST = withSecurity(
             console.error('Supabase insert error:', insertError);
             return NextResponse.json({ error: 'Failed to create waiting flag' }, { status: 500 });
         }
+
+        // Increment student trip flag count ONLY after successful insertion (Fix 2)
+        await incrementStudentTripFlagCount(tripId, studentUid);
 
         // 8. Store in Redis flags:active:<busId> for 0-DB-read hot path
         await setRedisActiveFlag(busId, {

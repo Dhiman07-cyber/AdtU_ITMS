@@ -15,6 +15,25 @@ vi.mock('@/domains/gps', () => ({
   clearHistory: vi.fn(),
   flushStopDwellOnTripEnd: vi.fn().mockResolvedValue(undefined),
   invalidateActiveTripCache: vi.fn(),
+  clearStopDwellState: vi.fn(),
+}));
+
+vi.mock('@/domains/gps/services/gps-pipeline.service', () => ({
+  clearInMemoryLastLocation: vi.fn(),
+}));
+
+vi.mock('@/domains/gps/services/gps-redis-guard', () => ({
+  clearRedisActiveFlags: vi.fn().mockResolvedValue(undefined),
+  clearRedisTripLock: vi.fn().mockResolvedValue(undefined),
+  clearGpsState: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock('@/lib/services/trip-snapshot-cache', () => ({
+  invalidateBusTripSnapshot: vi.fn(),
+}));
+
+vi.mock('@/lib/services/device-session-cache', () => ({
+  invalidateCachedDeviceSession: vi.fn(),
 }));
 
 vi.mock('@/lib/services/location-write-throttle', () => ({

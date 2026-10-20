@@ -88,6 +88,7 @@ export const POST = withSecurity(
         tripId: result.tripId,
         driverId: driverUid,
         routeId: result.routeId || '',
+        shift: result.shift,
         deviceId: requestDeviceId,
         expiresAtMs: Date.now() + 600_000,
       });

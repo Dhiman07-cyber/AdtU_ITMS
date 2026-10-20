@@ -1,9 +1,59 @@
-import { clearHistory, flushStopDwellOnTripEnd, invalidateActiveTripCache } from '@/domains/gps';
-import { clearRedisActiveFlags } from '@/domains/gps/services/gps-redis-guard';
+import { clearHistory, flushStopDwellOnTripEnd, invalidateActiveTripCache, clearStopDwellState } from '@/domains/gps';
+import { clearRedisActiveFlags, clearRedisTripLock, clearGpsState } from '@/domains/gps/services/gps-redis-guard';
+import { clearInMemoryLastLocation } from '@/domains/gps/services/gps-pipeline.service';
 import { emitEvent } from '@/domains/realtime/event-emitter';
 import { clearTripBreadcrumbCache } from '@/lib/services/location-write-throttle';
 import { invalidateCachedDeviceSession } from '@/lib/services/device-session-cache';
+import { invalidateBusTripSnapshot } from '@/lib/services/trip-snapshot-cache';
+import { invalidateScannerBusCache } from '@/lib/security/scanner-auth';
 import { getSupabaseServer } from '@/lib/supabase-server';
+
+/**
+ * Evict all bus runtime state across all memory and distributed Redis layers.
+ * Unifies teardown across gps-persistence, gps-pipeline, stop-dwell, gps-redis-guard,
+ * trip-snapshot-cache, device-session-cache, and location-write-throttle.
+ */
+export async function evictAllBusRuntimeState(
+  busId: string,
+  driverId?: string,
+  tripId?: string
+): Promise<void> {
+  if (!busId) return;
+
+  // 1. Invalidate active trip lock cache & DB state
+  invalidateActiveTripCache(busId, driverId);
+
+  // 2. Clear GPS pipeline location anchors, process-local raw timestamps, and driver history
+  clearInMemoryLastLocation(busId);
+  await clearGpsState(busId).catch(() => {});
+  if (driverId) {
+    clearHistory(driverId);
+  }
+
+  // 3. Flush & clear stop-dwell state (memory & Redis)
+  await flushStopDwellOnTripEnd(busId).catch(() => {});
+  clearStopDwellState(busId);
+
+  // 4. Clear Redis waiting flags & active trip locks
+  await Promise.allSettled([
+    clearRedisActiveFlags(busId),
+    clearRedisTripLock(busId),
+  ]);
+
+  // 5. Invalidate shared bus trip snapshot
+  invalidateBusTripSnapshot(busId);
+
+  // 6. Invalidate device session cache if driverId provided
+  if (driverId) {
+    invalidateCachedDeviceSession(driverId);
+    invalidateScannerBusCache(driverId);
+  }
+
+  // 7. Clear breadcrumb throttle cache if tripId provided
+  if (tripId) {
+    clearTripBreadcrumbCache(tripId);
+  }
+}
 
 export async function cleanupTrip(params: {
   driverId: string;
@@ -13,20 +63,19 @@ export async function cleanupTrip(params: {
   const supabase = getSupabaseServer();
 
   // 1. Delete first, capturing what was actually removed.
-  //    Also clear Redis active flags for the bus (WAIT-003).
-  const [{ data: deletedFlags }, ] = await Promise.all([
+  const [{ data: deletedFlags }] = await Promise.all([
     supabase.from('waiting_flags')
       .delete()
       .eq('bus_id', params.busId)
       .in('status', ['raised', 'acknowledged', 'waiting'])
       .select('id, student_uid, bus_id'),
     supabase.from('device_sessions').delete().eq('user_id', params.driverId),
-    clearRedisActiveFlags(params.busId).catch(() => {}),
   ]);
-  invalidateCachedDeviceSession(params.driverId);
-  invalidateActiveTripCache(params.busId, params.driverId);
 
-  // 2. Broadcast only the flags that were actually deleted.
+  // 2. Atomically evict all bus runtime state across all memory and Redis layers (Fix 6)
+  await evictAllBusRuntimeState(params.busId, params.driverId, params.tripId);
+
+  // 3. Broadcast only the flags that were actually deleted.
   if (deletedFlags && deletedFlags.length > 0) {
     const broadcastPromises: Promise<any>[] = [];
 
@@ -55,8 +104,4 @@ export async function cleanupTrip(params: {
 
     await Promise.allSettled(broadcastPromises);
   }
-
-  clearHistory(params.driverId);
-  clearTripBreadcrumbCache(params.tripId);
-  await flushStopDwellOnTripEnd(params.busId).catch(() => {});
 }

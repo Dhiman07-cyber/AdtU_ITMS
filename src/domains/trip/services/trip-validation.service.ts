@@ -27,7 +27,9 @@ export async function tripStartPreflight(driverId: string, busId: string): Promi
 
   const busData = busResult.data;
   if (!busData) return { authorized: false, reason: 'Bus not found', conflict: false };
-  if (busData.status === 'inactive') return { authorized: false, reason: 'Bus is inactive', conflict: false };
+  if (busData.status === 'inactive' || busData.status === 'maintenance') {
+    return { authorized: false, reason: `Bus is currently ${busData.status} and cannot start a trip`, conflict: false };
+  }
 
   // 1. Check if the driver is already participating in an active trip on another vehicle (Invariant 1)
   const driverActiveTrip = driverTripResult?.data;

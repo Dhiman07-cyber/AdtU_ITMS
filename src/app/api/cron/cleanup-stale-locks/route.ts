@@ -22,9 +22,7 @@
  */
 
 import { emitEvent } from '@/domains/realtime/event-emitter';
-import { clearInMemoryLastLocation } from '@/domains/gps/services/gps-pipeline.service';
-import { clearRedisActiveFlags } from '@/domains/gps/services/gps-redis-guard';
-import { invalidateActiveTripCache, flushStopDwellOnTripEnd } from '@/domains/gps';
+import { evictAllBusRuntimeState } from '@/domains/trip';
 import { verifyCronAuth } from '@/lib/security/cron-auth';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import { NextResponse } from 'next/server';
@@ -78,12 +76,8 @@ export async function GET(request: Request) {
                 // the old serial loop would take N × 2 DB round-trips before completing.
                 const cleanupResults = await Promise.allSettled(
                     cleanedLocks.map(async (lock: any) => {
-                        // Drop the in-memory GPS anchor so a new trip on this
-                        // bus isn't jump-rejected against a stale position.
-                        clearInMemoryLastLocation(lock.cleaned_bus_id);
-                        await clearRedisActiveFlags(lock.cleaned_bus_id).catch(() => {});
-                        invalidateActiveTripCache(lock.cleaned_bus_id, lock.cleaned_driver_id);
-                        await flushStopDwellOnTripEnd(lock.cleaned_bus_id).catch(() => {});
+                        // Atomically evict all bus runtime state across all memory and Redis layers (Fix 6)
+                        await evictAllBusRuntimeState(lock.cleaned_bus_id, lock.cleaned_driver_id, lock.cleaned_trip_id);
                         // Non-critical broadcast — fire and forget
                         emitEvent(`trip-status-${lock.cleaned_bus_id}`, 'trip_ended', {
                             busId: lock.cleaned_bus_id,
@@ -92,16 +86,33 @@ export async function GET(request: Request) {
                             timestamp: new Date().toISOString()
                         }).catch(() => {});
 
-                        // Scoped cleanup — trip_id ensures we don't affect a new trip
-                        // that may have started on the same bus between RPC and these operations.
-                        // Soft-archive waiting flags to 'expired' rather than hard DELETE (CRIT-03).
-                        await Promise.allSettled([
-                            supabase.from('waiting_flags').update({ status: 'expired' })
-                                .eq('bus_id', lock.cleaned_bus_id)
-                                .eq('trip_id', lock.cleaned_trip_id)
-                                .in('status', ['raised', 'acknowledged']),
-                            supabase.from('device_sessions').delete().eq('user_id', lock.cleaned_driver_id),
-                        ]);
+                        // Scoped cleanup — bus_id ensures we expire all pending flags on this bus
+                        // Soft-archive waiting flags to 'expired' and broadcast waiting_flag_removed (Fix 7)
+                        const { data: expiredFlags } = await supabase
+                            .from('waiting_flags')
+                            .update({ status: 'expired' })
+                            .eq('bus_id', lock.cleaned_bus_id)
+                            .in('status', ['raised', 'acknowledged', 'waiting'])
+                            .select('id, student_uid, bus_id');
+
+                        if (expiredFlags && expiredFlags.length > 0) {
+                            for (const flag of expiredFlags) {
+                                emitEvent(`student_${flag.student_uid}`, 'waiting_flag_removed', {
+                                    flagId: flag.id,
+                                    studentUid: flag.student_uid,
+                                    busId: flag.bus_id,
+                                    reason: 'heartbeat_timeout',
+                                }).catch(() => {});
+                                emitEvent(`waiting_flags_${lock.cleaned_bus_id}`, 'waiting_flag_removed', {
+                                    flagId: flag.id,
+                                    studentUid: flag.student_uid,
+                                    busId: flag.bus_id,
+                                    reason: 'heartbeat_timeout',
+                                }).catch(() => {});
+                            }
+                        }
+
+                        await supabase.from('device_sessions').delete().eq('user_id', lock.cleaned_driver_id);
 
                         return lock.cleaned_bus_id;
                     })
@@ -125,6 +136,38 @@ export async function GET(request: Request) {
 
         // STEP 2: Ancillary system health sweep — expire orphan waiting flags, stale sessions, abandoned app locks
         try {
+            // SEAM FIX 11: Pre-sweep expired waiting flags from Redis and broadcast removal before DB expiry
+            try {
+                const { data: candidateExpiredFlags } = await supabase
+                    .from('waiting_flags')
+                    .select('id, bus_id, student_uid')
+                    .in('status', ['raised', 'waiting', 'acknowledged'])
+                    .lt('expires_at', new Date().toISOString());
+
+                if (candidateExpiredFlags && candidateExpiredFlags.length > 0) {
+                    const { removeRedisActiveFlag } = await import('@/domains/gps/services/gps-redis-guard');
+                    const { invalidateBusTripSnapshot } = await import('@/lib/services/trip-snapshot-cache');
+                    for (const flag of candidateExpiredFlags) {
+                        await removeRedisActiveFlag(flag.bus_id, flag.id).catch(() => {});
+                        invalidateBusTripSnapshot(flag.bus_id);
+                        emitEvent(`student_${flag.student_uid}`, 'waiting_flag_removed', {
+                            flagId: flag.id,
+                            studentUid: flag.student_uid,
+                            busId: flag.bus_id,
+                            reason: 'expired',
+                        }).catch(() => {});
+                        emitEvent(`waiting_flags_${flag.bus_id}`, 'waiting_flag_removed', {
+                            flagId: flag.id,
+                            studentUid: flag.student_uid,
+                            busId: flag.bus_id,
+                            reason: 'expired',
+                        }).catch(() => {});
+                    }
+                }
+            } catch (flagSweepErr) {
+                console.warn('⚠️ Expired waiting flag pre-sweep warning:', flagSweepErr);
+            }
+
             const [flagsRes, sessionsRes, appLocksRes] = await Promise.allSettled([
                 supabase.rpc('expire_waiting_flags'),
                 supabase.rpc('cleanup_stale_device_sessions'),

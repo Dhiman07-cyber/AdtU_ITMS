@@ -2,6 +2,8 @@ import { withSecurity } from '@/lib/security/api-security';
 import { RateLimits } from '@/lib/security/rate-limiter';
 import { BusIdSchema } from '@/lib/security/validation-schemas';
 import { getSupabaseServer } from '@/lib/supabase-server';
+import { shouldWriteHeartbeat } from '@/lib/services/location-write-throttle';
+import { setActiveTripCache } from '@/domains/gps/services/gps-persistence.service';
 import { NextResponse } from 'next/server';
 
 /**
@@ -32,7 +34,29 @@ export const POST = withSecurity(
       .maybeSingle();
 
     if (myTrip) {
-      const startTime = myTrip.start_time ? new Date(myTrip.start_time).getTime() : Date.now();
+      const nowMs = Date.now();
+      // Keep trip lock alive under temporary satellite blindness (Fix 18)
+      if (shouldWriteHeartbeat(myTrip.bus_id, nowMs)) {
+        const extendedExpiresAt = new Date(nowMs + 600 * 1000).toISOString();
+        setActiveTripCache(myTrip.bus_id, {
+          tripId: myTrip.trip_id,
+          driverId: driverUid,
+          routeId: myTrip.route_id,
+          shift: myTrip.shift,
+          expiresAtMs: nowMs + 600 * 1000,
+        });
+        Promise.resolve(
+          supabase
+            .from('active_trips')
+            .update({
+              last_heartbeat: new Date(nowMs).toISOString(),
+              expires_at: extendedExpiresAt,
+            })
+            .eq('trip_id', myTrip.trip_id)
+        ).catch(() => {});
+      }
+
+      const startTime = myTrip.start_time ? new Date(myTrip.start_time).getTime() : nowMs;
       return NextResponse.json({
         hasActiveTrip: true,
         tripData: {

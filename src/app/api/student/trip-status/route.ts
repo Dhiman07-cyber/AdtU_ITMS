@@ -4,7 +4,7 @@ import { RateLimits } from '@/lib/security/rate-limiter';
 import { TripStatusQuerySchema } from '@/lib/security/validation-schemas';
 import { getStudentProfileAndShift } from '@/lib/student-shift-resolver';
 import { getSupabaseServer } from '@/lib/supabase-server';
-import { isShiftCompatible } from '@/lib/utils';
+import { isShiftCompatible, isMatchingBusId } from '@/lib/utils';
 import { getSharedBusTripSnapshot } from '@/lib/services/trip-snapshot-cache';
 import { NextResponse } from 'next/server';
 
@@ -54,7 +54,7 @@ export const GET = withSecurity(
                 studentProfile = await getStudentProfileAndShift(auth.uid);
             }
             const studentBusId = studentProfile.busId;
-            if (studentBusId && studentBusId !== busId && studentBusId !== busId.replace('bus_', '') && `bus_${studentBusId}` !== busId) {
+            if (studentBusId && !isMatchingBusId(studentBusId, busId)) {
                 return NextResponse.json({
                     tripActive: false,
                     error: 'Forbidden: You are not assigned to this bus',

@@ -4,6 +4,7 @@ const mockFrom = vi.hoisted(() => vi.fn());
 const mockVerifyIdToken = vi.hoisted(() => vi.fn().mockResolvedValue({ uid: 'student_geofence_1', email: 'student@adtu.ac.in' }));
 const mockGetGpsState = vi.hoisted(() => vi.fn().mockResolvedValue(null));
 const mockIncrementFlagCount = vi.hoisted(() => vi.fn().mockResolvedValue(1));
+const mockGetFlagCount = vi.hoisted(() => vi.fn().mockResolvedValue(0));
 
 vi.mock('@/lib/supabase-server', () => ({
   getSupabaseServer: vi.fn(() => ({ from: mockFrom })),
@@ -47,6 +48,7 @@ vi.mock('@/domains/gps/services/gps-redis-guard', () => ({
   setRedisActiveFlag: vi.fn().mockResolvedValue(undefined),
   removeRedisActiveFlag: vi.fn().mockResolvedValue(undefined),
   incrementStudentTripFlagCount: mockIncrementFlagCount,
+  getStudentTripFlagCount: mockGetFlagCount,
 }));
 
 import { POST } from '../route';
@@ -89,6 +91,7 @@ describe('Waiting Flag 3-Lock Route Corridor & Approach Window Validation Endpoi
     vi.clearAllMocks();
     mockGetGpsState.mockResolvedValue(null);
     mockIncrementFlagCount.mockResolvedValue(1);
+    mockGetFlagCount.mockResolvedValue(0);
     mockFrom.mockImplementation((table: string) => {
       if (table === 'active_trips') {
         return makeChain({ trip_id: 'trip_active_123', bus_id: 'bus_1', route_id: 'route_4' });
@@ -225,8 +228,8 @@ describe('Waiting Flag 3-Lock Route Corridor & Approach Window Validation Endpoi
   });
 
   it('Lock 3: enforces per-trip anti-spam cooldown limit (<= 2 flags per trip) with HTTP 429 FLAG_COOLDOWN_ACTIVE', async () => {
-    // Third flag attempt on the same trip
-    mockIncrementFlagCount.mockResolvedValueOnce(3);
+    // Current count is 2 (student already reached limit)
+    mockGetFlagCount.mockResolvedValueOnce(2);
 
     const req = makeRequest({
       lat: 26.1348,
@@ -240,5 +243,101 @@ describe('Waiting Flag 3-Lock Route Corridor & Approach Window Validation Endpoi
     const json = await res.json();
     expect(json.code).toBe('FLAG_COOLDOWN_ACTIVE');
     expect(json.error).toContain('maximum of 2 waiting flag raises');
+    expect(mockIncrementFlagCount).not.toHaveBeenCalled();
+  });
+
+  it('MANDATORY FIX 2: failed waiting-flag attempts (BUS_TOO_FAR_UPSTREAM & OUT_OF_ROUTE_CORRIDOR) do NOT burn cooldown quota', async () => {
+    // 1. Out of corridor attempt
+    const offCorridorLat = 26.1433;
+    const offCorridorLng = 91.8107 + 0.0045; // ~450m east
+    const req1 = makeRequest({ lat: offCorridorLat, lng: offCorridorLng, accuracy: 20 });
+    const res1 = await POST(req1);
+    expect(res1.status).toBe(403);
+    expect(mockIncrementFlagCount).not.toHaveBeenCalled();
+
+    // 2. Bus too far upstream attempt
+    mockGetGpsState.mockResolvedValueOnce({
+      lat: 26.1818,
+      lng: 91.7516,
+      timestamp: new Date().toISOString(),
+      speed: 20,
+      heading: 120,
+      accuracy: 15,
+    });
+    const req2 = makeRequest({ lat: 26.1518, lng: 91.8152, accuracy: 10 });
+    const res2 = await POST(req2);
+    expect(res2.status).toBe(400);
+    expect(mockIncrementFlagCount).not.toHaveBeenCalled();
+  });
+
+  it('MANDATORY FIX 3: rejects cross-shift waiting flag requests with HTTP 403 SHIFT_MISMATCH', async () => {
+    // Student profile has morning shift, but active trip is evening shift
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'active_trips') {
+        return makeChain({ trip_id: 'trip_evening_99', bus_id: 'bus_1', route_id: 'route_4', shift: 'evening' });
+      }
+      return makeChain(null);
+    });
+
+    const req = makeRequest({
+      lat: (26.1348 + 26.1518) / 2,
+      lng: (91.8062 + 91.8152) / 2,
+      accuracy: 15,
+      timestamp: Date.now(),
+    });
+
+    const studentModule = await import('@/domains/student');
+    (studentModule.getByUid as any).mockResolvedValueOnce({
+      fullName: 'Shift Test Student',
+      busId: 'bus_1',
+      routeId: 'route_4',
+      stopName: 'Six Mile Bus Stop',
+      shift: 'morning',
+    });
+
+    const res = await POST(req);
+    expect(res.status).toBe(403);
+    const json = await res.json();
+    expect(json.code).toBe('SHIFT_MISMATCH');
+    expect(json.error).toContain('outside your assigned shift');
+    expect(mockIncrementFlagCount).not.toHaveBeenCalled();
+  });
+
+  it('MANDATORY FIX 4: canonical bus ID matching accepts "01" vs "bus_01" for student assignment', async () => {
+    // Student assigned to '01', active trip has 'bus_01', request sends 'bus_01'
+    const studentModule = await import('@/domains/student');
+    (studentModule.getByUid as any).mockResolvedValueOnce({
+      fullName: 'Canonical Bus Student',
+      busId: '01',
+      routeId: 'route_4',
+      stopName: 'Six Mile Bus Stop',
+      shift: 'morning',
+    });
+
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'active_trips') {
+        return makeChain({ trip_id: 'trip_active_123', bus_id: 'bus_01', route_id: 'route_4', shift: 'morning' });
+      }
+      if (table === 'waiting_flags') {
+        const chain = makeChain(null);
+        chain.limit = vi.fn().mockResolvedValue({ data: [], error: null });
+        return chain;
+      }
+      return makeChain(null);
+    });
+
+    const req = makeRequest({
+      busId: 'bus_01',
+      lat: (26.1348 + 26.1518) / 2,
+      lng: (91.8062 + 91.8152) / 2,
+      accuracy: 15,
+      timestamp: Date.now(),
+    });
+
+    const res = await POST(req);
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.success).toBe(true);
+    expect(mockIncrementFlagCount).toHaveBeenCalledTimes(1);
   });
 });

@@ -74,6 +74,7 @@ describe('Trip end — atomicity and idempotency', () => {
       p_bus_id: 'b-1',
       p_driver_id: 'd-1',
       p_min_duration_seconds: 600,
+      p_ended_reason: 'completed',
     });
   });
 
@@ -170,6 +171,7 @@ describe('Trip end — atomicity and idempotency', () => {
       p_bus_id: 'b-1',
       p_driver_id: 'd-1',
       p_min_duration_seconds: 0,
+      p_ended_reason: 'completed',
     });
   });
 
