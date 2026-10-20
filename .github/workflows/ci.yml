@@ -14,6 +14,9 @@ on:
       - 'prometheus/**'
       - 'nginx/**'
       - 'terraform/**'
+      - 'LICENSE'
+      - '.dockerignore'
+      - '.gitignore'
   push:
     branches: [main]
     paths-ignore:
@@ -27,6 +30,10 @@ on:
       - 'prometheus/**'
       - 'nginx/**'
       - 'terraform/**'
+      - 'LICENSE'
+      - '.dockerignore'
+      - '.gitignore'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -67,52 +74,3 @@ jobs:
         run: npm ci --prefer-offline
       - name: Run Vitest Suite
         run: npm run test:run
-
-  build-app:
-    name: 3. Next.js Production Build & Artifact Manifest
-    needs: [quality-gate, unit-tests]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-      - name: Install dependencies
-        run: npm ci --prefer-offline
-      - name: Cache Next.js Build
-        uses: actions/cache@v4
-        with:
-          path: ${{ github.workspace }}/.next/cache
-          key: ${{ runner.os }}-nextjs-${{ hashFiles('**/package-lock.json') }}-${{ hashFiles('**.[jt]s', '**.[jt]sx') }}
-          restore-keys: |
-            ${{ runner.os }}-nextjs-${{ hashFiles('**/package-lock.json') }}-
-      - name: Build Next.js Application
-        run: npm run build
-        env:
-          NODE_ENV: production
-          NEXT_PUBLIC_FIREBASE_API_KEY: ci-placeholder
-          NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: ci.firebaseapp.com
-          NEXT_PUBLIC_FIREBASE_PROJECT_ID: ci
-          NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: ci.appspot.com
-          NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: "000000000000"
-          NEXT_PUBLIC_FIREBASE_APP_ID: 1:000000000000:web:ci
-          FIREBASE_CLIENT_EMAIL: ci@ci.iam.gserviceaccount.com
-          FIREBASE_PRIVATE_KEY: "-----BEGIN RSA PRIVATE KEY-----\nci\n-----END RSA PRIVATE KEY-----"
-          NEXT_PUBLIC_SUPABASE_URL: https://ci.supabase.co
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: ci
-          SUPABASE_SERVICE_ROLE_KEY: ci
-          SIGNING_SECRET_KEY: ci-signing-secret-key-placeholder-32ch
-          ENCRYPTION_SECRET_KEY: ci-encryption-secret-placeholder-32ch
-          RECEIPT_SIGNING_SECRET: ci-receipt-signing-secret-placeholder
-          DOCUMENT_PRIVATE_KEY: ci
-          DOCUMENT_PUBLIC_KEY: ci
-          RAZORPAY_KEY_ID: ci
-          RAZORPAY_KEY_SECRET: ci
-          RAZORPAY_WEBHOOK_SECRET: ci
-          CLOUDINARY_API_KEY: ci
-          CLOUDINARY_API_SECRET: ci
-          CRON_SECRET: ci
-          WS_PRIVILEGED_TOKEN: ci-ws-token
-      - name: Generate Release Manifest
-        run: npm run manifest

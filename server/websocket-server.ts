@@ -237,23 +237,40 @@ export class WebSocketServer {
       // independent queue, so GPS from Driver A is never blocked by
       // Student B's slow presence query.
       let messageQueue: Promise<void> = Promise.resolve();
+      let queuedCount = 0;
+      const MAX_QUEUED_MESSAGES = 64;
+
       ws.removeListener('message', bufferMessage);
       ws.on('message', (data) => {
         if (this.shuttingDown) {
           ws.close(4003, 'Server shutting down');
           return;
         }
-        // Chain onto the per-socket queue; swallow errors so the queue
-        // never stalls — processMessage already sends an error frame and
-        // increments the error metric on any failure.
-        messageQueue = messageQueue.then(() => this.processMessage(ws, session, ip, data));
+        if (session.role !== 'server' && queuedCount >= MAX_QUEUED_MESSAGES) {
+          logger.warn('ws_message_queue_overflow', { socketId: session.socketId, queuedCount });
+          ws.close(1008, 'Policy Violation: Message queue overflow');
+          return;
+        }
+        queuedCount++;
+        messageQueue = messageQueue
+          .then(() => this.processMessage(ws, session, ip, data))
+          .catch((err) => {
+            logger.error('ws_message_queue_error', { socketId: session.socketId, error: (err as Error)?.message });
+          })
+          .finally(() => {
+            queuedCount = Math.max(0, queuedCount - 1);
+          });
       });
 
       for (const buffered of preAuthBuffer) {
         if (this.isAuthMessage(buffered)) continue; // consumed by Path B already
         // Replay buffered messages through the same per-socket queue so
         // ordering is preserved even for messages sent before auth resolved.
-        messageQueue = messageQueue.then(() => this.processMessage(ws, session, ip, buffered));
+        messageQueue = messageQueue
+          .then(() => this.processMessage(ws, session, ip, buffered))
+          .catch((err) => {
+            logger.error('ws_message_queue_preauth_error', { socketId: session.socketId, error: (err as Error)?.message });
+          });
       }
 
       ws.on('pong', () => {

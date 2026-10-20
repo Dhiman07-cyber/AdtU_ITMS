@@ -134,12 +134,29 @@ export class WebSocketClient {
     const url = paramStr ? `${baseUrl}?${paramStr}` : baseUrl;
     this.ws = new WebSocket(url);
 
-    this.ws.onopen = () => {
+    this.ws.onopen = async () => {
       if (this.destroyed) { this.close(); return; }
       this.reconnectAttempts = 0;
       this.confirmedSubscriptions.clear();
       this.emitStatus('connected');
       this.startPing();
+
+      // Fix 11: Refresh token before auth frame on connect/reconnect so 24h trips never send expired JWT
+      try {
+        if (this.config.getNewToken) {
+          const fresh = await this.config.getNewToken();
+          if (fresh) this.currentToken = fresh;
+        } else if (typeof window !== 'undefined') {
+          const { auth } = await import('@/lib/firebase');
+          if (auth.currentUser) {
+            const fresh = await auth.currentUser.getIdToken(false);
+            if (fresh) this.currentToken = fresh;
+          }
+        }
+      } catch (err) {
+        console.warn('[WS Client] Token refresh on connect failed:', err);
+      }
+
       // Phase-04: Send auth as first message (preferred path).
       this.send({ type: 'auth', token: this.currentToken });
       // Send presence BEFORE resubscribing — server requires busId set
@@ -203,7 +220,12 @@ export class WebSocketClient {
     this.ws.onclose = (event: CloseEvent) => {
       this.stopPing();
       this.emitStatus('disconnected');
-      if (event.code === 4001 || event.reason === 'Authentication failed') {
+      if (
+        event.code === 4001 ||
+        event.reason === 'Authentication failed' ||
+        event.reason === 'auth/id-token-expired' ||
+        (event.reason && event.reason.includes('expired'))
+      ) {
         this.handleAuthRequired();
       } else if (event.code === 4403 || event.reason === 'SHIFT_MISMATCH') {
         this.destroyed = true;

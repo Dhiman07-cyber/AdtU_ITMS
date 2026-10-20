@@ -61,17 +61,21 @@ const busAuthMap: Record<string, string | null> = {};
 const studentShiftMap: Record<string, string | null> = {};
 const activeTripShiftMap: Record<string, string | null> = {};
 const mockSupabaseFrom = vi.fn((table: string) => {
-  const chain = {
+  const chain: any = {
     select: vi.fn().mockReturnThis(),
     eq: vi.fn().mockReturnThis(),
+    in: vi.fn().mockReturnThis(),
     maybeSingle: vi.fn(async () => {
-      // Determine which identity is being queried by inspecting the eq calls
-      // accumulated on this chain. We piggyback on the last eq() arg to find uid.
+      // Determine which identity is being queried by inspecting the eq and in calls
+      // accumulated on this chain.
       const calls: any[][] = (chain.eq as any).mock.calls;
+      const inCalls: any[][] = (chain.in as any).mock.calls;
       const uidCall = calls.find((c) => c[0] === 'uid' || c[0] === 'driver_id');
       const uid = uidCall?.[1];
       const busIdCall = calls.find((c) => c[0] === 'bus_id');
-      const busId = busIdCall?.[1];
+      const busIdInCall = inCalls.find((c) => c[0] === 'bus_id');
+      const busIdVariations = busIdInCall?.[1] as string[] | undefined;
+      const busId = busIdCall?.[1] || (busIdVariations ? busIdVariations.find((b) => activeTripShiftMap[b]) || busIdVariations[0] : undefined);
 
       if (table === 'student_profiles' && uid === 'student-1') {
         const assignedBus = busAuthMap['student-1'] ?? null;
@@ -94,8 +98,9 @@ const mockSupabaseFrom = vi.fn((table: string) => {
       return { data: null, error: null };
     }),
   };
-  // Each eq() call must return the same chain object for chaining to work.
+  // Each call must return the same chain object for chaining to work.
   (chain.eq as any).mockImplementation((..._args: any[]) => chain);
+  (chain.in as any).mockImplementation((..._args: any[]) => chain);
   (chain.select as any).mockImplementation((..._args: any[]) => chain);
   return chain;
 });

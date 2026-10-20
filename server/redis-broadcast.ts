@@ -124,6 +124,38 @@ export async function initRedisBroadcastRelay(
     import('./socket-router')
       .then((m) => m.clearStudentPresenceCache(uid === '*' ? undefined : uid))
       .catch(() => {});
+
+    if (uid && uid !== '*') {
+      const activeSessions = sessionManager.getByUid(uid);
+      for (const session of activeSessions) {
+        const conn = connectionRegistry.get(session.socketId);
+        if (conn) {
+          try {
+            conn.ws.close(4402, 'Student assignment or transport entitlement updated - reconnecting');
+          } catch (err) {
+            logger.warn('ws_close_on_reassign_error', { socketId: session.socketId, error: (err as Error).message });
+          }
+          connectionRegistry.unregister(session.socketId);
+        }
+        sessionManager.delete(session.socketId);
+      }
+      logger.info('ws_student_sessions_evicted', { uid, count: activeSessions.length });
+    } else {
+      let closedCount = 0;
+      for (const [socketId, conn] of connectionRegistry.getAll().entries()) {
+        const session = sessionManager.get(socketId);
+        if (session && session.role === 'student') {
+          try {
+            conn.ws.close(4402, 'Student assignment or transport entitlement updated - reconnecting');
+          } catch { /* ignore */ }
+          connectionRegistry.unregister(socketId);
+          sessionManager.delete(socketId);
+          closedCount++;
+        }
+      }
+      logger.info('ws_all_student_sessions_evicted', { count: closedCount });
+    }
+
     logger.info('ws_student_presence_cache_invalidated', { uid: uid || 'all' });
   };
 
