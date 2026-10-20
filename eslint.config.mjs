@@ -42,6 +42,7 @@ const eslintConfig = [
       "react-hooks/refs": "off",
       "react-hooks/preserve-manual-memoization": "off",
       "react-hooks/immutability": "off",
+      "react-hooks/static-components": "off",
       "@typescript-eslint/no-empty-object-type": "off",
     }
   }

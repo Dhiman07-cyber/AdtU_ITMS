@@ -274,9 +274,9 @@ export class LocationValidationService {
       result.reasons.push(`High speed: ${speedKmh.toFixed(0)} km/h`);
     }
 
-    // Check speed consistency if provided
+    // Check speed consistency if provided (speed is standardized as km/h)
     if (currentLocation.speed !== undefined) {
-      const reportedSpeedKmh = (currentLocation.speed || 0) * 3.6;
+      const reportedSpeedKmh = currentLocation.speed || 0;
       const speedDiscrepancy = Math.abs(speedKmh - reportedSpeedKmh);
       
       if (speedDiscrepancy > 20) {

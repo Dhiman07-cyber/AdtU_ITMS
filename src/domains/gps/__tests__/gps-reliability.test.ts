@@ -202,17 +202,17 @@ describe('GPS Reliability — High-Frequency Burst & Jitter Resilience', () => {
     const p1 = await processLocationUpdate({ ...base, lat: 26.1445, lng: 91.7362, timestamp: new Date(t0).toISOString() });
     expect(p1.accepted).toBe(true);
 
-    // 2. Second packet at t0 + 2000ms
-    const p2 = await processLocationUpdate({ ...base, lat: 26.1447, lng: 91.7364, timestamp: new Date(t0 + 2000).toISOString() });
+    // 2. Second packet at t0 + 4000ms
+    const p2 = await processLocationUpdate({ ...base, lat: 26.1447, lng: 91.7364, timestamp: new Date(t0 + 4000).toISOString() });
     expect(p2.accepted).toBe(true);
 
-    // 3. Stale lagging packet at t0 + 1000ms (arrived late over cellular network) -> must reject
+    // 3. Stale lagging packet at t0 + 1000ms (arrived 3000ms late over cellular network, beyond 2000ms jitter tolerance) -> must reject
     const pLag = await processLocationUpdate({ ...base, lat: 26.1446, lng: 91.7363, timestamp: new Date(t0 + 1000).toISOString() });
     expect(pLag.accepted).toBe(false);
     expect(pLag.reason).toMatch(/out-of-order/i);
 
-    // 4. Fresh packet at t0 + 3000ms -> must accept
-    const p3 = await processLocationUpdate({ ...base, lat: 26.1449, lng: 91.7366, timestamp: new Date(t0 + 3000).toISOString() });
+    // 4. Fresh packet at t0 + 5000ms -> must accept
+    const p3 = await processLocationUpdate({ ...base, lat: 26.1449, lng: 91.7366, timestamp: new Date(t0 + 5000).toISOString() });
     expect(p3.accepted).toBe(true);
   });
 

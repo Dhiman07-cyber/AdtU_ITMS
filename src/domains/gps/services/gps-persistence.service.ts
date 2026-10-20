@@ -11,6 +11,7 @@ export interface PositiveTripLock {
   tripId: string;
   driverId: string;
   routeId?: string;
+  shift?: string;
   deviceId?: string;
   expiresAtMs: number;
   cachedUntilMs: number;
@@ -18,18 +19,28 @@ export interface PositiveTripLock {
 const positiveLockCache = new Map<string, PositiveTripLock>();
 const POSITIVE_CACHE_TTL_MS = 35_000; // 35 seconds: covers 30s heartbeat interval
 
-export function setActiveTripCache(busId: string, data: { tripId: string; driverId: string; routeId?: string; deviceId?: string; expiresAtMs: number }): void {
+export function setActiveTripCache(busId: string, data: { tripId: string; driverId: string; routeId?: string; shift?: string; deviceId?: string; expiresAtMs: number }): void {
   const cacheKey = `${data.driverId}:${busId}`;
   negativeLockCache.delete(cacheKey);
-  positiveLockCache.set(cacheKey, {
+
+  // Preserve existing fields if omitted or undefined in data (Fix 1)
+  const existing = positiveLockCache.get(cacheKey);
+  const routeId = data.routeId || existing?.routeId;
+  const shift = data.shift || existing?.shift;
+  const deviceId = data.deviceId || existing?.deviceId;
+
+  const mergedData = {
     tripId: data.tripId,
     driverId: data.driverId,
-    routeId: data.routeId,
-    deviceId: data.deviceId,
+    routeId,
+    shift,
+    deviceId,
     expiresAtMs: data.expiresAtMs,
     cachedUntilMs: Date.now() + POSITIVE_CACHE_TTL_MS,
-  });
-  setRedisTripLock(busId, data).catch(() => {});
+  };
+
+  positiveLockCache.set(cacheKey, mergedData);
+  setRedisTripLock(busId, mergedData).catch(() => {});
 }
 
 export function getPositiveTripLock(driverId: string, busId: string): PositiveTripLock | null {
@@ -67,7 +78,7 @@ export function invalidateActiveTripCache(busId?: string, driverId?: string): vo
   invalidateBusTripSnapshot(busId);
 }
 
-export async function checkActiveTrip(driverId: string, busId: string, tripId: string): Promise<{ valid: boolean; reason?: string }> {
+export async function checkActiveTrip(driverId: string, busId: string, tripId: string): Promise<{ valid: boolean; reason?: string; tripId?: string; routeId?: string; shift?: string }> {
   const cacheKey = `${driverId}:${busId}`;
   const now = Date.now();
 
@@ -89,7 +100,7 @@ export async function checkActiveTrip(driverId: string, busId: string, tripId: s
       return { valid: false, reason: 'Trip mismatch for location update' };
     }
     positiveEntry.cachedUntilMs = now + POSITIVE_CACHE_TTL_MS;
-    return { valid: true };
+    return { valid: true, tripId: positiveEntry.tripId, routeId: positiveEntry.routeId, shift: positiveEntry.shift };
   }
 
   // Multi-instance Redis check: Zero-DB read path across Next.js containers
@@ -104,11 +115,12 @@ export async function checkActiveTrip(driverId: string, busId: string, tripId: s
         tripId: redisLock.tripId,
         driverId: redisLock.driverId,
         routeId: redisLock.routeId,
+        shift: redisLock.shift,
         deviceId: redisLock.deviceId,
         expiresAtMs: redisLock.expiresAtMs,
         cachedUntilMs: now + POSITIVE_CACHE_TTL_MS,
       });
-      return { valid: true };
+      return { valid: true, tripId: redisLock.tripId, routeId: redisLock.routeId, shift: redisLock.shift };
     }
   }
 
@@ -116,7 +128,7 @@ export async function checkActiveTrip(driverId: string, busId: string, tripId: s
 
   const { data: activeTrip, error } = await supabase
     .from('active_trips')
-    .select('trip_id, route_id, driver_id, status, expires_at')
+    .select('trip_id, route_id, driver_id, shift, status, expires_at')
     .eq('bus_id', busId)
     .eq('driver_id', driverId)
     .eq('status', 'active')
@@ -149,6 +161,7 @@ export async function checkActiveTrip(driverId: string, busId: string, tripId: s
     tripId: activeTrip.trip_id,
     driverId,
     routeId: activeTrip.route_id,
+    shift: activeTrip.shift,
     expiresAtMs,
   }).catch(() => {});
 
@@ -158,6 +171,7 @@ export async function checkActiveTrip(driverId: string, busId: string, tripId: s
     tripId: activeTrip.trip_id,
     driverId,
     routeId: activeTrip.route_id,
+    shift: activeTrip.shift,
     expiresAtMs,
     cachedUntilMs: now + POSITIVE_CACHE_TTL_MS,
   });
@@ -166,6 +180,6 @@ export async function checkActiveTrip(driverId: string, busId: string, tripId: s
     if (firstKey) positiveLockCache.delete(firstKey);
   }
 
-  return { valid: true };
+  return { valid: true, tripId: activeTrip.trip_id, routeId: activeTrip.route_id, shift: activeTrip.shift };
 }
 

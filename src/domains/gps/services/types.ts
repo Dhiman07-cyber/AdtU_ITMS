@@ -32,6 +32,7 @@ export interface LocationUpdate {
   tripId: string;
   busId: string;
   routeId: string;
+  shift?: string;
   lat: number;
   lng: number;
   accuracy?: number;
@@ -49,6 +50,7 @@ export interface LocationUpdateNormalized {
   tripId: string;
   busId: string;
   routeId: string;
+  shift?: string;
   lat: number;
   lng: number;
   accuracy: number | null;
@@ -63,6 +65,7 @@ export interface LocationUpdateNormalized {
 export interface PipelineResult {
   accepted: boolean;
   reason?: string;
+  errorClass?: string;
   normalized?: LocationUpdateNormalized;
   persisted?: boolean;
 }

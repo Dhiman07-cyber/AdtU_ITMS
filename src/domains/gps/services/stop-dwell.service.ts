@@ -48,6 +48,7 @@ export interface ActiveDwellState {
   lastTickMs: number;
   dwellSeconds: number;
   isRoadside?: boolean;
+  lastRedisWriteMs?: number;
 }
 
 export interface StopDwellInput {
@@ -71,6 +72,7 @@ const MIN_ROADSIDE_DWELL_SECONDS = 15;
 const activeDwells = new Map<string, ActiveDwellState>();
 const lastDwellRedisCheckMs = new Map<string, number>();
 const lastFlagsRedisCheckMs = new Map<string, number>();
+const recentStopDwells = new Map<string, { lastDepartedMs: number; dwellSeconds: number }>();
 
 function haversineMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const R = 6371e3;
@@ -84,7 +86,7 @@ function haversineMeters(lat1: number, lon1: number, lat2: number, lon2: number)
 
 /**
  * Persist completed dwell record to Supabase stop_dwell_logs asynchronously.
- * Never throws to the caller. Discards roadside halts < 15s.
+ * Never throws to the caller. Discards roadside halts < 15s and stops < 5s.
  */
 async function persistDwellRecord(dwell: ActiveDwellState, departedAtIso: string): Promise<void> {
   // Continuous zone residency duration while bus was inside the stop capture zone:
@@ -95,10 +97,23 @@ async function persistDwellRecord(dwell: ActiveDwellState, departedAtIso: string
   // so single-tick speed spikes (>5 km/h) never zero out or truncate the dwell.
   const dwellSeconds = Math.max(Math.round(dwell.dwellSeconds), residencySeconds);
 
+  // Filter out micro stop jitter < 5s
+  if (dwellSeconds < 5) {
+    return;
+  }
+
   // Filter out brief roadside traffic taps < 15s
   if (dwell.isRoadside && dwellSeconds < MIN_ROADSIDE_DWELL_SECONDS) {
     return;
   }
+
+  // Deduplicate named stop dwell records logged within 3 minutes for the same stop on the same trip (Fix 16)
+  const recentKey = `${dwell.tripId}:${dwell.stopId}`;
+  const recent = recentStopDwells.get(recentKey);
+  if (!dwell.isRoadside && recent && (Date.now() - recent.lastDepartedMs < 180_000)) {
+    return;
+  }
+  recentStopDwells.set(recentKey, { lastDepartedMs: Date.now(), dwellSeconds });
 
   try {
     const supabase = getSupabaseServer();
@@ -177,22 +192,31 @@ export async function trackStopDwell(input: StopDwellInput): Promise<void> {
         }
         active.lastTickMs = currentMs;
         activeDwells.set(busId, active);
-        setRedisActiveDwell(busId, active).catch(() => {});
+
+        // Throttle Redis setRedisActiveDwell: once every 15s thereafter (Fix 6)
+        const lastWrite = active.lastRedisWriteMs || active.arrivedAtMs || 0;
+        if (currentMs - lastWrite >= 15_000) {
+          active.lastRedisWriteMs = currentMs;
+          await setRedisActiveDwell(busId, active).catch(() => { });
+        }
         return;
       }
 
       if (distToActive > STOP_EXIT_RADIUS_METERS) {
         // Exited stop radius — conclude dwell
         activeDwells.delete(busId);
-        clearRedisActiveDwell(busId).catch(() => {});
+        await clearRedisActiveDwell(busId).catch(() => { });
         const departedAt = new Date(currentMs).toISOString();
-        // Fire-and-forget async write
-        persistDwellRecord(active, departedAt).catch(() => {});
+        await persistDwellRecord(active, departedAt).catch(() => { });
       } else {
         // Between 80m and 100m hysteresis buffer — update tick time
         active.lastTickMs = currentMs;
         activeDwells.set(busId, active);
-        setRedisActiveDwell(busId, active).catch(() => {});
+        const lastWrite = active.lastRedisWriteMs || active.arrivedAtMs || 0;
+        if (currentMs - lastWrite >= 15_000) {
+          active.lastRedisWriteMs = currentMs;
+          await setRedisActiveDwell(busId, active).catch(() => { });
+        }
         return;
       }
     }
@@ -234,9 +258,10 @@ export async function trackStopDwell(input: StopDwellInput): Promise<void> {
             lastTickMs: currentMs,
             dwellSeconds: 0,
             isRoadside: false,
+            lastRedisWriteMs: currentMs,
           };
           activeDwells.set(busId, newDwell);
-          setRedisActiveDwell(busId, newDwell).catch(() => {});
+          await setRedisActiveDwell(busId, newDwell).catch(() => { });
           enteredNamedStop = true;
           break; // Only anchor to closest stop
         }
@@ -266,9 +291,10 @@ export async function trackStopDwell(input: StopDwellInput): Promise<void> {
           lastTickMs: currentMs,
           dwellSeconds: 0,
           isRoadside: true,
+          lastRedisWriteMs: currentMs,
         };
         activeDwells.set(busId, roadsideDwell);
-        setRedisActiveDwell(busId, roadsideDwell).catch(() => {});
+        await setRedisActiveDwell(busId, roadsideDwell).catch(() => { });
       }
     }
   } catch (err: any) {
@@ -299,11 +325,16 @@ export async function processWaitingFlagsOnGpsTick(input: {
       await setRedisFlagsHydrated(busId);
       try {
         const supabase = getSupabaseServer();
-        const { data: dbFlags } = await supabase
+        let query = supabase
           .from('waiting_flags')
           .select('id, student_uid, student_name, stop_name, lat, lng, stop_lat, stop_lng, route_progress_meters, ack_sent, shift, bus_id, route_id, trip_id, created_at')
           .eq('bus_id', busId)
           .in('status', ['waiting', 'raised', 'acknowledged']);
+
+        if (query && typeof (query as any).gt === 'function') {
+          query = (query as any).gt('expires_at', new Date().toISOString());
+        }
+        const { data: dbFlags } = await query;
 
         if (dbFlags && dbFlags.length > 0) {
           for (const dbf of dbFlags) {
@@ -345,6 +376,13 @@ export async function processWaitingFlagsOnGpsTick(input: {
     const busProgress = busCorridor.routeProgressMeters;
 
     for (const flag of flags) {
+      // Expiration check: evict flags older than 90 minutes (Fix 15)
+      if (flag.createdAt && flag.createdAt + 90 * 60 * 1000 < Date.now()) {
+        await removeRedisActiveFlag(busId, flag.flagId).catch(() => { });
+        invalidateBusTripSnapshot(busId);
+        continue;
+      }
+
       // Direction-Aware Route Progress:
       // In outbound (Morning, 0 -> L): student is ahead of bus (flagProgress > busProgress).
       // In return (Evening, L -> 0): student is ahead of bus (busProgress > flagProgress).
@@ -365,8 +403,19 @@ export async function processWaitingFlagsOnGpsTick(input: {
           autoAck: true,
           distanceMeters: Math.round(signedAheadMeters),
         };
-        emitEvent(`waiting_flags_${busId}`, 'waiting_flag_acknowledged', ackPayload).catch(() => {});
-        emitEvent(`student_${flag.studentUid}`, 'waiting_flag_acknowledged', ackPayload).catch(() => {});
+        emitEvent(`waiting_flags_${busId}`, 'waiting_flag_acknowledged', ackPayload).catch(() => { });
+        emitEvent(`student_${flag.studentUid}`, 'waiting_flag_acknowledged', ackPayload).catch(() => { });
+        // Non-blocking PostgreSQL update to maintain DB consistency across cache rehydrations (Fix 5)
+        try {
+          const supabase = getSupabaseServer();
+          Promise.resolve(
+            supabase
+              .from('waiting_flags')
+              .update({ status: 'acknowledged', ack_sent: true })
+              .eq('id', flag.flagId)
+              .in('status', ['raised', 'waiting'])
+          ).catch(() => { });
+        } catch { /* best-effort non-blocking */ }
         appLogger.info('gps', 'waiting_flag_auto_acknowledged', {
           busId,
           flagId: flag.flagId,
@@ -385,10 +434,11 @@ export async function processWaitingFlagsOnGpsTick(input: {
           busId,
           reason: 'bus_passed',
         };
-        emitEvent(`waiting_flags_${busId}`, 'waiting_flag_removed', removePayload).catch(() => {});
-        emitEvent(`student_${flag.studentUid}`, 'waiting_flag_removed', removePayload).catch(() => {});
+        emitEvent(`waiting_flags_${busId}`, 'waiting_flag_removed', removePayload).catch(() => { });
+        emitEvent(`student_${flag.studentUid}`, 'waiting_flag_removed', removePayload).catch(() => { });
 
-        // Single non-blocking async cleanup to update/expire flag in PostgreSQL
+        // Single non-blocking async cleanup to update/expire flag in PostgreSQL.
+        // Constrain with .in('status', ['raised', 'waiting', 'acknowledged']) so boarded/cancelled are NEVER overwritten (Fix 5)
         try {
           const supabase = getSupabaseServer();
           Promise.resolve(
@@ -396,6 +446,7 @@ export async function processWaitingFlagsOnGpsTick(input: {
               .from('waiting_flags')
               .update({ status: 'expired' })
               .eq('id', flag.flagId)
+              .in('status', ['raised', 'waiting', 'acknowledged'])
           ).catch((err: any) => {
             appLogger.warn('gps', 'waiting_flag_pass_cleanup_failed', { flagId: flag.flagId, error: err?.message });
           });
@@ -426,7 +477,7 @@ export async function flushStopDwellOnTripEnd(busId: string): Promise<void> {
   if (!active) return;
 
   activeDwells.delete(busId);
-  clearRedisActiveDwell(busId).catch(() => {});
+  clearRedisActiveDwell(busId).catch(() => { });
   const nowIso = new Date().toISOString();
   await persistDwellRecord(active, nowIso);
 }
@@ -438,7 +489,8 @@ export function clearStopDwellState(busId: string): void {
   activeDwells.delete(busId);
   lastDwellRedisCheckMs.delete(busId);
   lastFlagsRedisCheckMs.delete(busId);
-  clearRedisActiveDwell(busId).catch(() => {});
+  recentStopDwells.clear();
+  clearRedisActiveDwell(busId).catch(() => { });
 }
 
 /**

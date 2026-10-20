@@ -93,10 +93,12 @@ export const POST = withSecurity(
       speed: speed !== undefined ? Number(speed) : undefined,
       timestamp: timestamp ? String(timestamp) : new Date().toISOString(),
       correlationId: requestId,
-    });
+      shift: (body as any).shift,
+    } as any);
 
     if (!result.accepted) {
-      return NextResponse.json({ error: result.reason }, { status: 400 });
+      const isUnavailable = result.errorClass === 'DATABASE_UNAVAILABLE' || result.reason?.toLowerCase().includes('unavailable');
+      return NextResponse.json({ error: result.reason }, { status: isUnavailable ? 503 : 400 });
     }
 
     // Non-blocking broadcast via WebSocket.
@@ -126,11 +128,13 @@ export const POST = withSecurity(
 
     if (shouldWriteHeartbeat(busId, nowMs)) {
       const extendedExpiresAt = new Date(nowMs + 600 * 1000).toISOString();
+      const currentLock = getPositiveTripLock(driverUid, busId);
       setActiveTripCache(busId, {
-        tripId: norm?.tripId || tripId || 'unknown_trip',
+        tripId: norm?.tripId || tripId || currentLock?.tripId || 'unknown_trip',
         driverId: driverUid,
-        routeId,
-        deviceId: requestDeviceId || undefined,
+        routeId: routeId || currentLock?.routeId || norm?.routeId,
+        shift: (body as any).shift || norm?.shift || currentLock?.shift,
+        deviceId: requestDeviceId || currentLock?.deviceId || undefined,
         expiresAtMs: nowMs + 600 * 1000,
       });
       writePromises.push(
@@ -154,6 +158,8 @@ export const POST = withSecurity(
               .from('device_sessions')
               .update({
                 last_active_at: new Date(nowMs).toISOString(),
+                last_active: new Date(nowMs).toISOString(),
+                expires_at: new Date(nowMs + 24 * 60 * 60 * 1000).toISOString(),
               })
               .eq('user_id', driverUid)
               .eq('device_id', requestDeviceId)

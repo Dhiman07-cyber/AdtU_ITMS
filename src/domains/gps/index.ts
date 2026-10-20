@@ -1,5 +1,5 @@
 export { checkActiveTrip, setActiveTripCache, invalidateActiveTripCache, getPositiveTripLock, type PositiveTripLock } from './services/gps-persistence.service';
-export { getRedisTripLock } from './services/gps-redis-guard';
+export { getRedisTripLock, getStudentTripFlagCount, incrementStudentTripFlagCount } from './services/gps-redis-guard';
 export {
 	clearHistory,
 	getLastLocationForBus,
@@ -10,6 +10,8 @@ export {
 	flushStopDwellOnTripEnd,
 	clearStopDwellState,
 	getActiveDwellState,
+	getBusIdVariations,
+	isMatchingBusId,
 } from './services/gps.service';
 export type {
 	GPSCoordinate,GPSFilterResult,GPSLocation,GPSUpdate,

@@ -8,6 +8,7 @@ export function normalizeLocationUpdate(raw: LocationUpdate): LocationUpdateNorm
     tripId: raw.tripId,
     busId: raw.busId,
     routeId: raw.routeId,
+    shift: raw.shift,
     lat: roundTo(raw.lat, 6),
     lng: roundTo(raw.lng, 6),
     accuracy: raw.accuracy != null && Number.isFinite(raw.accuracy) ? raw.accuracy : null,

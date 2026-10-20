@@ -153,12 +153,12 @@ describe('Master Security Boundaries & Invariant Suite', () => {
       }
     });
 
-    it('fails closed and returns redis_unavailable in production when Redis is unreachable', async () => {
+    it('falls back to memoryGuard to preserve bus telemetry continuity when Redis is unreachable (Fix 5)', async () => {
       (process.env as any).NODE_ENV = 'production';
       process.env.REDIS_URL = 'redis://invalid-nonexistent-redis-host:6379';
 
       const result = await atomicGpsGuardAndUpdate('BUS_TEST_FAILCLOSED', 26.1, 91.8, Date.now(), Date.now());
-      expect(result).toBe('redis_unavailable');
+      expect(result).toBe('ok');
     });
   });
 

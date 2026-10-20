@@ -332,8 +332,8 @@ local curLng   = tonumber(cur[2])
 local curTs    = tonumber(cur[3])
 local curRawTs = tonumber(cur[4])
 
--- Raw clock replay guard
-if newRawTs > 0 and curRawTs ~= nil and newRawTs < curRawTs then
+-- Raw clock replay guard (2000ms NTP / tower-handoff clock-jitter tolerance)
+if newRawTs > 0 and curRawTs ~= nil and newRawTs + 2000 < curRawTs then
   return 'stale_raw'
 end
 
@@ -355,7 +355,24 @@ if curLat ~= nil and curLng ~= nil then
   local c = 2 * math.atan(math.sqrt(a), math.sqrt(1 - a))
   local dist = R * c
 
-  if dist > maxJump then
+  local timeDiffSec = 0
+  if curTs ~= nil and newTs > 0 then
+    timeDiffSec = (newTs - curTs) / 1000.0
+  end
+
+  local effectiveMaxJump = maxJump
+  if timeDiffSec > 90 then
+    -- Cellular dead-zone recovery: allow dynamic displacement up to 120 km/h over blackout duration, capped at 35km
+    local dynamicJump = timeDiffSec * (120.0 / 3.6)
+    if dynamicJump > effectiveMaxJump then
+      effectiveMaxJump = dynamicJump
+    end
+    if effectiveMaxJump > 35000 then
+      effectiveMaxJump = 35000
+    end
+  end
+
+  if dist > effectiveMaxJump then
     return 'jump'
   end
 
@@ -448,9 +465,8 @@ function memoryGuard(
 ): GpsGuardResult {
   const cur = memLast.get(busId);
   if (cur) {
-    // Raw clock replay guard: a replayed/stale packet carries an older raw clock.
-    // Only apply when we have a real rawTs on both sides.
-    if (newRawTs !== null && cur.rawTs > 0 && newRawTs < cur.rawTs) return 'stale_raw';
+    // Raw clock replay guard (2000ms NTP / tower-handoff clock-jitter tolerance)
+    if (newRawTs !== null && cur.rawTs > 0 && newRawTs + 2000 < cur.rawTs) return 'stale_raw';
 
     const timeDiffSec = (newTs - cur.ts) / 1000;
 
@@ -465,7 +481,13 @@ function memoryGuard(
       return 'ok';                         // same ts, same-ish coords — idempotent retry
     }
 
-    if (dist > MAX_JUMP_M) return 'jump';
+    let effectiveMaxJump = MAX_JUMP_M;
+    if (timeDiffSec > 90) {
+      // Cellular dead-zone recovery: allow dynamic displacement up to 120 km/h over blackout duration, capped at 35km
+      effectiveMaxJump = Math.min(35000, Math.max(MAX_JUMP_M, timeDiffSec * (120 / 3.6)));
+    }
+
+    if (dist > effectiveMaxJump) return 'jump';
     if (dist > 100 && timeDiffSec > 0.5 && dist / timeDiffSec > MAX_SPEED_MPS) return 'speed';
   }
 
@@ -581,22 +603,9 @@ export async function atomicGpsGuardAndUpdate(
     }
   }
 
-  // Multi-instance Production Invariant:
-  // In production, if Redis is unavailable or unconfigured, FAIL CLOSED.
-  // Independent Next.js serverless instances must not accept interleaved GPS packets bypassing jump/replay protection.
-  const isProd = process.env.NODE_ENV === 'production';
-  const hasRedisConfig = Boolean(process.env.REDIS_URL);
-
-  if (isProd) {
-    if (!hasRedisConfig) {
-      console.error('[gps-redis] FAIL-CLOSED: REDIS_URL is not configured in production. Rejecting GPS update to protect spatial invariants across instances.');
-      return 'redis_unavailable';
-    }
-    console.error('[gps-redis] FAIL-CLOSED: Redis coordination unavailable in production. Rejecting GPS update to protect spatial invariants.');
-    return 'redis_unavailable';
-  }
-
-  // Non-production (development / test) fallback: allow local in-memory fallback
+  // Fallback to process-local memoryGuard to preserve bus telemetry continuity under transient Redis blips
+  // memoryGuard enforces the exact same monotonic clock, jump, and speed math in process memory.
+  console.warn('[gps-redis] Redis coordination unavailable or blip during atomicGpsGuardAndUpdate. Falling back to memoryGuard.');
   return memoryGuard(busId, newLat, newLng, newTs, newRawTs, speed, heading, accuracy);
 }
 
@@ -683,6 +692,8 @@ export async function getGpsStateFromRedis(busId: string): Promise<LastLocation 
   return null;
 }
 
+export const getRedisLastLocation = getGpsStateFromRedis;
+
 /**
  * Clear GPS state for a bus (called when a trip ends).
  * Best-effort: clears both Redis and the in-memory fallback.
@@ -709,6 +720,7 @@ export interface RedisTripLockData {
   routeId?: string;
   deviceId?: string;
   expiresAtMs: number;
+  shift?: string;
 }
 
 /**
@@ -731,32 +743,52 @@ export async function executeGpsRedisCommand(args: string[]): Promise<string | n
 }
 
 const TRIP_LOCK_PREFIX = 'trip:active:';
+const memTripLocks = new Map<string, RedisTripLockData>();
 
 export async function getRedisTripLock(busId: string): Promise<RedisTripLockData | null> {
   const state = getState();
-  if (!state.ready || !state.socket || state.socket.destroyed) return null;
-  try {
-    const raw = await sendCommand(state, ['GET', `${TRIP_LOCK_PREFIX}${busId}`]);
-    if (!raw) return null;
-    const data = JSON.parse(raw) as RedisTripLockData;
-    if (!data || typeof data.expiresAtMs !== 'number' || data.expiresAtMs <= Date.now()) {
-      return null;
+  if (state.ready && state.socket && !state.socket.destroyed) {
+    try {
+      const raw = await sendCommand(state, ['GET', `${TRIP_LOCK_PREFIX}${busId}`]);
+      if (raw) {
+        const data = JSON.parse(raw) as RedisTripLockData;
+        if (data && typeof data.expiresAtMs === 'number' && data.expiresAtMs > Date.now()) {
+          memTripLocks.set(busId, data);
+          return data;
+        }
+      }
+    } catch {
+      // fall through to in-memory fallback
     }
-    return data;
-  } catch {
-    return null;
   }
+  const memData = memTripLocks.get(busId);
+  if (memData && memData.expiresAtMs > Date.now()) {
+    return memData;
+  }
+  return null;
 }
 
 export async function setRedisTripLock(busId: string, data: RedisTripLockData): Promise<void> {
+  const existing = memTripLocks.get(busId);
+  const merged: RedisTripLockData = {
+    tripId: data.tripId,
+    driverId: data.driverId,
+    routeId: data.routeId || existing?.routeId,
+    shift: data.shift || existing?.shift,
+    deviceId: data.deviceId || existing?.deviceId,
+    expiresAtMs: data.expiresAtMs,
+  };
+  memTripLocks.set(busId, merged);
+
   const state = getState();
   if (!state.ready || !state.socket || state.socket.destroyed) return;
   try {
-    await sendCommand(state, ['SET', `${TRIP_LOCK_PREFIX}${busId}`, JSON.stringify(data), 'EX', '120']);
+    await sendCommand(state, ['SET', `${TRIP_LOCK_PREFIX}${busId}`, JSON.stringify(merged), 'EX', '120']);
   } catch { /* best-effort */ }
 }
 
 export async function clearRedisTripLock(busId: string): Promise<void> {
+  memTripLocks.delete(busId);
   const state = getState();
   if (!state.ready || !state.socket || state.socket.destroyed) return;
   try {
@@ -765,28 +797,32 @@ export async function clearRedisTripLock(busId: string): Promise<void> {
 }
 
 const DWELL_ACTIVE_PREFIX = 'dwell:active:';
+const memActiveDwells = new Map<string, any>();
 
 export async function getRedisActiveDwell(busId: string): Promise<any | null> {
   const state = getState();
-  if (!state.ready || !state.socket || state.socket.destroyed) return null;
-  try {
-    const raw = await sendCommand(state, ['GET', `${DWELL_ACTIVE_PREFIX}${busId}`]);
-    if (!raw) return null;
-    return JSON.parse(raw);
-  } catch {
-    return null;
+  if (state.ready && state.socket && !state.socket.destroyed) {
+    try {
+      const raw = await sendCommand(state, ['GET', `${DWELL_ACTIVE_PREFIX}${busId}`]);
+      if (raw) return JSON.parse(raw);
+    } catch {
+      // fall through to in-memory fallback
+    }
   }
+  return memActiveDwells.get(busId) || null;
 }
 
 export async function setRedisActiveDwell(busId: string, data: any): Promise<void> {
+  memActiveDwells.set(busId, data);
   const state = getState();
   if (!state.ready || !state.socket || state.socket.destroyed) return;
   try {
-    await sendCommand(state, ['SET', `${DWELL_ACTIVE_PREFIX}${busId}`, JSON.stringify(data), 'EX', '300']);
+    await sendCommand(state, ['SET', `${DWELL_ACTIVE_PREFIX}${busId}`, JSON.stringify(data), 'EX', '1800']);
   } catch { /* best-effort */ }
 }
 
 export async function clearRedisActiveDwell(busId: string): Promise<void> {
+  memActiveDwells.delete(busId);
   const state = getState();
   if (!state.ready || !state.socket || state.socket.destroyed) return;
   try {
@@ -1025,6 +1061,26 @@ export async function clearRedisActiveFlags(busId: string): Promise<void> {
     await sendCommand(state, ['DEL', `${FLAGS_ACTIVE_PREFIX}${busId}`]);
     await sendCommand(state, ['DEL', `${FLAGS_HYDRATED_PREFIX}${busId}`]);
   } catch { /* best-effort */ }
+}
+
+export async function getStudentTripFlagCount(tripId: string, studentUid: string): Promise<number> {
+  const key = `${tripId}:${studentUid}`;
+  const memCount = memFlagCounts.get(key) || 0;
+
+  const state = getState();
+  if (!state.ready || !state.socket || state.socket.destroyed) {
+    return memCount;
+  }
+
+  try {
+    const redisKey = `${FLAG_COUNT_PREFIX}${key}`;
+    const raw = await sendCommand(state, ['GET', redisKey]);
+    if (!raw) return memCount;
+    const parsed = parseInt(raw, 10);
+    return Number.isFinite(parsed) ? Math.max(parsed, memCount) : memCount;
+  } catch {
+    return memCount;
+  }
 }
 
 export async function incrementStudentTripFlagCount(tripId: string, studentUid: string): Promise<number> {

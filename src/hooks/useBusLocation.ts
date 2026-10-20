@@ -71,13 +71,14 @@ export const useBusLocation = (busId: string, token?: string | null, externalCli
     };
 
     setCurrentLocation(cleanLocation);
-    historyRef.current = [...historyRef.current, cleanLocation].slice(-50);
+    // Fix 12: Cap sliding window ring buffer to 100 points for 24-hour continuous trip endurance
+    historyRef.current = [...historyRef.current, cleanLocation].slice(-100);
     setLoading(false);
     // E2E observability hook (dev only): mirrors the post-guard state the map
     // effect consumes, so automated tests can assert the marker would move.
     if (typeof window !== 'undefined') {
       (window as any).__itmsLastBusLocation = { ...cleanLocation, appliedAtMs: Date.now() };
-      (window as any).__itmsBusLocationHistory = ((window as any).__itmsBusLocationHistory || []).concat([cleanLocation]).slice(-50);
+      (window as any).__itmsBusLocationHistory = ((window as any).__itmsBusLocationHistory || []).concat([cleanLocation]).slice(-100);
     }
   };
 

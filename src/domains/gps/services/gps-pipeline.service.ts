@@ -62,7 +62,7 @@ function haversine(lat1: number, lon1: number, lat2: number, lon2: number): numb
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-function validateJump(n: LocationUpdateNormalized, last: LastLocation): string | null {
+export function validateJump(n: LocationUpdateNormalized, last: LastLocation): string | null {
   const lastTime = new Date(last.timestamp).getTime();
   const timeDiff = (n.timestamp.getTime() - lastTime) / 1000;
 
@@ -78,7 +78,13 @@ function validateJump(n: LocationUpdateNormalized, last: LastLocation): string |
 
   const distance = haversine(Number(last.lat), Number(last.lng), n.lat, n.lng);
 
-  if (distance > MAX_JUMP_METERS) return `Location jump too large (${Math.round(distance)}m)`;
+  let effectiveMaxJump = MAX_JUMP_METERS;
+  if (timeDiff > 90) {
+    // Cellular dead-zone recovery: allow dynamic displacement up to 120 km/h over blackout duration, capped at 35km
+    effectiveMaxJump = Math.min(35000, Math.max(MAX_JUMP_METERS, timeDiff * (120 / 3.6)));
+  }
+
+  if (distance > effectiveMaxJump) return `Location jump too large (${Math.round(distance)}m)`;
 
   if (distance > 100 && timeDiff > 0.5) {
     const calculatedSpeedMps = distance / timeDiff;
@@ -113,6 +119,8 @@ export function getBusIdVariations(busId: string): string[] {
   if (!busId) return [];
   return busId.startsWith('bus_') ? [busId, busId.replace('bus_', '')] : [busId, `bus_${busId}`];
 }
+
+export { isMatchingBusId } from '@/lib/utils';
 
 /**
  * Clear process-local GPS state for a bus and also evict from Redis.
@@ -209,14 +217,20 @@ export async function processLocationUpdate(raw: LocationUpdate): Promise<Pipeli
           ? ErrorClass.GPS_OUT_OF_REGION
           : ErrorClass.GPS_INVALID_COORDINATES;
     appLogger.warn('gps', 'location_rejected', { ...logCtx, reason: boundsError, errorClass, latencyMs: Date.now() - start });
-    return { accepted: false, reason: boundsError, normalized };
+    return { accepted: false, reason: boundsError, errorClass, normalized };
   }
 
   const session = await checkActiveTrip(normalized.driverId, normalized.busId, normalized.tripId);
   if (!session.valid) {
-    appLogger.warn('gps', 'location_rejected', { ...logCtx, reason: session.reason, errorClass: ErrorClass.GPS_NO_ACTIVE_TRIP, latencyMs: Date.now() - start });
-    return { accepted: false, reason: session.reason, normalized };
+    const errorClass = ErrorClass.GPS_NO_ACTIVE_TRIP;
+    appLogger.warn('gps', 'location_rejected', { ...logCtx, reason: session.reason, errorClass, latencyMs: Date.now() - start });
+    return { accepted: false, reason: session.reason, errorClass, normalized };
   }
+
+  // Enrich authoritative tripId and routeId from session lock if omitted in raw packet (Fix 6)
+  normalized.tripId = normalized.tripId || session.tripId || '';
+  normalized.routeId = normalized.routeId || session.routeId || '';
+  normalized.shift = normalized.shift || session.shift || '';
 
   // ── Multi-instance-safe jump/replay guard ──────────────────────────────────
   // atomicGpsGuardAndUpdate executes a Lua script in Redis that atomically
@@ -231,6 +245,9 @@ export async function processLocationUpdate(raw: LocationUpdate): Promise<Pipeli
     normalized.lng,
     normalized.timestamp.getTime(),
     rawTime,
+    normalized.speed,
+    normalized.heading,
+    normalized.accuracy,
   );
 
   if (guardResult !== 'ok') {
@@ -253,7 +270,7 @@ export async function processLocationUpdate(raw: LocationUpdate): Promise<Pipeli
     const reason = reasonMap[guardResult] || `GPS packet rejected: ${guardResult}`;
     const errorClass = errorClassMap[guardResult] || ErrorClass.GPS_INVALID_COORDINATES;
     appLogger.warn('gps', 'location_rejected', { ...logCtx, reason, errorClass, guardResult, latencyMs: Date.now() - start });
-    return { accepted: false, reason, normalized };
+    return { accepted: false, reason, errorClass, normalized };
   }
 
   // Keep the process-local cache in sync so getLastLocationForBus() returns
@@ -288,7 +305,7 @@ export async function processLocationUpdate(raw: LocationUpdate): Promise<Pipeli
     routeId: normalized.routeId,
     lat: normalized.lat,
     lng: normalized.lng,
-    shift: (raw as any).shift,
+    shift: (raw as any).shift || session.shift,
   }).catch(() => {});
 
   appLogger.debug('gps', 'location_accepted', { ...logCtx, lat: normalized.lat, lng: normalized.lng, latencyMs: Date.now() - start });
