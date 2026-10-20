@@ -61,14 +61,6 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SET search_path = public;
 
--- Authorization helper used inside RLS policies
-CREATE OR REPLACE FUNCTION public.user_has_role(p_uid TEXT, p_role TEXT)
-RETURNS BOOLEAN LANGUAGE sql SECURITY DEFINER SET search_path = public STABLE AS $$
-    SELECT EXISTS (
-        SELECT 1 FROM users WHERE uid = p_uid AND role = p_role
-    );
-$$;
-
 -- =============================================================================
 -- 3. CORE TABLES (19 Active Domain Tables)
 -- =============================================================================
@@ -84,6 +76,16 @@ CREATE TABLE IF NOT EXISTS users (
     updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     last_login_at TIMESTAMPTZ
 );
+
+-- Authorization helper used inside RLS policies
+CREATE OR REPLACE FUNCTION public.user_has_role(p_uid TEXT, p_role TEXT)
+RETURNS BOOLEAN LANGUAGE plpgsql SECURITY DEFINER SET search_path = public STABLE AS $$
+BEGIN
+    RETURN EXISTS (
+        SELECT 1 FROM users WHERE uid = p_uid AND role = p_role
+    );
+END;
+$$;
 
 CREATE TABLE IF NOT EXISTS student_profiles (
     uid               TEXT PRIMARY KEY,
@@ -138,34 +140,63 @@ CREATE TABLE IF NOT EXISTS driver_profiles (
     joining_date       TEXT,
     dob                TEXT,
     approved_by        TEXT,
+    bus_id             TEXT,
+    route_id           TEXT,
     status             TEXT CHECK (status IN ('active', 'inactive', 'suspended', 'reserved')),
     is_reserved        BOOLEAN DEFAULT FALSE,
+    trip_active        BOOLEAN DEFAULT FALSE,
+    active_trip_id     TEXT,
     created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS moderator_profiles (
-    uid          TEXT PRIMARY KEY,
-    email        TEXT,
-    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    uid                    TEXT PRIMARY KEY,
+    email                  TEXT,
+    full_name              TEXT,
+    phone                  TEXT,
+    employee_id            TEXT,
+    team_name              TEXT,
+    status                 TEXT,
+    profile_photo_url      TEXT,
+    role                   TEXT,
+    created_by             TEXT,
+    faculty                TEXT,
+    permissions            JSONB DEFAULT '{}'::jsonb,
+    permissions_updated_at TIMESTAMPTZ,
+    permissions_updated_by TEXT,
+    created_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at             TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS admin_profiles (
-    uid          TEXT PRIMARY KEY,
-    email        TEXT,
-    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    uid               TEXT PRIMARY KEY,
+    email             TEXT,
+    full_name         TEXT,
+    phone             TEXT,
+    employee_id       TEXT,
+    role              TEXT,
+    years_of_service  TEXT,
+    alt_phone         TEXT,
+    dob               TEXT,
+    profile_photo_url TEXT,
+    username          TEXT,
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS unauth_users (
-    uid          TEXT PRIMARY KEY,
-    email        TEXT,
-    name         TEXT,
-    role         TEXT NOT NULL DEFAULT 'student',
-    status       TEXT NOT NULL DEFAULT 'pending',
-    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    uid               TEXT PRIMARY KEY,
+    email             TEXT,
+    display_name      TEXT,
+    name              TEXT,
+    role              TEXT NOT NULL DEFAULT 'student',
+    status            TEXT NOT NULL DEFAULT 'pending',
+    photo_url         TEXT,
+    needs_application BOOLEAN DEFAULT TRUE,
+    last_login_at     TIMESTAMPTZ,
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- ── 3.2 Fleet Domain ──────────────────────────────────────────────────────────
@@ -181,6 +212,10 @@ CREATE TABLE IF NOT EXISTS buses (
     year            INTEGER,
     route_id        TEXT,
     route_name      TEXT,
+    driver_uid      TEXT,
+    driver_name     TEXT,
+    primary_driver_uid TEXT,
+    shift           TEXT DEFAULT 'Both',
     last_started_at TIMESTAMPTZ,
     last_ended_at   TIMESTAMPTZ,
     status          TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'maintenance')),
@@ -486,6 +521,11 @@ CREATE TABLE IF NOT EXISTS waiting_flags (
   stop_name TEXT,
   stop_lat DOUBLE PRECISION,
   stop_lng DOUBLE PRECISION,
+  lat DOUBLE PRECISION,
+  lng DOUBLE PRECISION,
+  route_progress_meters DOUBLE PRECISION,
+  ack_sent BOOLEAN NOT NULL DEFAULT FALSE,
+  shift TEXT,
   status TEXT NOT NULL DEFAULT 'raised' CHECK (status IN ('raised', 'acknowledged', 'waiting', 'boarded', 'expired', 'cancelled', 'removed')),
   message TEXT,
   trip_id TEXT,
@@ -584,6 +624,8 @@ CREATE TABLE IF NOT EXISTS public.reassignment_logs (
   driver_id TEXT,
   route_id TEXT,
   can_rollback BOOLEAN NOT NULL DEFAULT true,
+  rolled_back_at TIMESTAMPTZ,
+  rolled_back_by TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -591,27 +633,46 @@ CREATE TABLE IF NOT EXISTS public.reassignment_logs (
 CREATE TABLE IF NOT EXISTS public.fcm_tokens (
     token       TEXT PRIMARY KEY,
     user_id     TEXT NOT NULL,
-    role        TEXT NOT NULL,
-    device_type TEXT NOT NULL,
+    role        TEXT,
+    device_type TEXT,
+    id          TEXT,
+    token_hash  TEXT,
+    platform    TEXT,
+    last_seen   TIMESTAMPTZ,
+    valid       BOOLEAN DEFAULT TRUE,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS notifications (
-    id              TEXT PRIMARY KEY,
-    title           TEXT NOT NULL,
-    message         TEXT NOT NULL,
-    type            TEXT NOT NULL,
-    priority        TEXT NOT NULL DEFAULT 'normal',
-    target_role     TEXT NOT NULL,
-    recipient_ids   TEXT[] DEFAULT '{}',
-    sender_user_id  TEXT,
-    sender_name     TEXT,
-    sender_role     TEXT,
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    read_by         TEXT[] DEFAULT '{}',
-    data            JSONB DEFAULT '{}'
+    id                          TEXT PRIMARY KEY,
+    title                       TEXT NOT NULL,
+    content                     TEXT NOT NULL,
+    message                     TEXT,
+    type                        TEXT NOT NULL,
+    priority                    TEXT NOT NULL DEFAULT 'normal',
+    target_role                 TEXT,
+    sender                      JSONB DEFAULT '{}'::jsonb,
+    sender_user_id              TEXT,
+    sender_name                 TEXT,
+    sender_role                 TEXT,
+    target                      JSONB DEFAULT '{}'::jsonb,
+    recipient_ids               TEXT[] DEFAULT '{}',
+    auto_injected_recipient_ids TEXT[] DEFAULT '{}',
+    read_by_user_ids            TEXT[] DEFAULT '{}',
+    read_by                     TEXT[] DEFAULT '{}',
+    hidden_for_user_ids         TEXT[] DEFAULT '{}',
+    is_edited                   BOOLEAN DEFAULT FALSE,
+    is_deleted_globally         BOOLEAN DEFAULT FALSE,
+    is_deleted                  BOOLEAN DEFAULT FALSE,
+    deleted_by_user_id          TEXT,
+    deleted_at                  TIMESTAMPTZ,
+    created_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at                  TIMESTAMPTZ,
+    edit_history                JSONB DEFAULT '[]'::jsonb,
+    metadata                    JSONB DEFAULT '{}'::jsonb,
+    data                        JSONB DEFAULT '{}'::jsonb
 );
 
 CREATE TABLE IF NOT EXISTS public.system_settings (
@@ -928,6 +989,13 @@ WHERE status = 'Completed';
 CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_unique_razorpay_payment_id
 ON payments(razorpay_payment_id)
 WHERE razorpay_payment_id IS NOT NULL;
+
+-- Prevent reuse of the same offline bank transaction reference on active/completed payments
+CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_unique_offline_tx_id
+ON public.payments (LOWER(TRIM(offline_transaction_id)))
+WHERE offline_transaction_id IS NOT NULL
+  AND TRIM(offline_transaction_id) <> ''
+  AND status IN ('Completed', 'Pending');
 
 -- Enforce that Completed payments must have non-null session start and end years
 DO $$
@@ -1248,7 +1316,8 @@ BEGIN
     SET processing_lock = p_approver_uid, processing_started_at = NOW(),
         processing_lease_expires_at = NOW() + (p_lease_minutes || ' minutes')::INTERVAL,
         processing_result = NULL, processing_completed_at = NULL
-    WHERE application_id = p_application_id AND state = 'submitted'
+    WHERE application_id = p_application_id
+      AND state IN ('submitted', 'pending_seat_allocation')
       AND (processing_lock IS NULL OR processing_lease_expires_at < NOW())
     RETURNING to_jsonb(applications.*) INTO v_app;
     RETURN v_app;
@@ -1613,20 +1682,69 @@ BEGIN
     WHERE bus_id = p_bus_id AND driver_id = p_driver_id AND status = 'active';
     IF FOUND THEN RETURN jsonb_build_object('success', true, 'tripId', v_existing.trip_id::text, 'alreadyActive', true); END IF;
 
-    -- Authority for bus validity (mirrors tripStartPreflight): the bus must
-    -- exist and not be inactive. Locked FOR UPDATE so a deactivation racing
-    -- the start cannot slip between preflight and insert (TOCTOU).
+    -- Authority for bus validity: must exist and not be inactive or maintenance
     SELECT status INTO v_bus_status FROM buses WHERE id = p_bus_id FOR UPDATE;
     IF NOT FOUND THEN RETURN jsonb_build_object('success', false, 'error', 'Bus not found'); END IF;
-    IF v_bus_status = 'inactive' THEN RETURN jsonb_build_object('success', false, 'error', 'Bus is inactive'); END IF;
+    IF v_bus_status IN ('inactive', 'maintenance') THEN
+        RETURN jsonb_build_object('success', false, 'error', 'Bus is currently ' || v_bus_status || ' and cannot start a trip');
+    END IF;
 
-    DELETE FROM active_trips
-    WHERE status = 'active' AND (bus_id = p_bus_id OR driver_id = p_driver_id)
-      AND last_heartbeat < v_now - INTERVAL '600 seconds';
+    -- Automatic Shift Handover on Stale Opposite-Shift Locks:
+    -- If Driver A drove Morning shift and left active trip 4+ hours ago,
+    -- Driver B scanning for Evening shift archives stale trip and acquires the lock.
+    FOR v_existing IN
+        SELECT trip_id, bus_id, driver_id, route_id, shift, start_time
+        FROM active_trips
+        WHERE bus_id = p_bus_id AND status = 'active'
+          AND LOWER(shift) <> LOWER(p_shift)
+          AND start_time < v_now - INTERVAL '4 hours'
+    LOOP
+        INSERT INTO driver_trip_history (
+            trip_id, bus_id, driver_id, route_id, shift, status, ended_reason, start_time, end_time, duration_seconds
+        ) VALUES (
+            v_existing.trip_id, v_existing.bus_id, v_existing.driver_id, v_existing.route_id, v_existing.shift,
+            'completed', 'completed_stale', v_existing.start_time, v_now,
+            GREATEST(0, EXTRACT(EPOCH FROM (v_now - v_existing.start_time))::INTEGER)
+        ) ON CONFLICT (trip_id) DO NOTHING;
+
+        UPDATE driver_profiles
+        SET trip_active = false, active_trip_id = NULL, updated_at = v_now
+        WHERE uid = v_existing.driver_id;
+
+        DELETE FROM active_trips WHERE trip_id = v_existing.trip_id;
+    END LOOP;
+
+    -- Clean up and archive heartbeat-expired stale locks for bus or driver (600s timeout)
+    FOR v_existing IN
+        SELECT trip_id, bus_id, driver_id, route_id, shift, start_time
+        FROM active_trips
+        WHERE status = 'active' AND (bus_id = p_bus_id OR driver_id = p_driver_id)
+          AND last_heartbeat < v_now - INTERVAL '600 seconds'
+    LOOP
+        INSERT INTO driver_trip_history (
+            trip_id, bus_id, driver_id, route_id, shift, status, ended_reason, start_time, end_time, duration_seconds
+        ) VALUES (
+            v_existing.trip_id, v_existing.bus_id, v_existing.driver_id, v_existing.route_id, v_existing.shift,
+            'completed', 'completed_stale', v_existing.start_time, v_now,
+            GREATEST(0, EXTRACT(EPOCH FROM (v_now - v_existing.start_time))::INTEGER)
+        ) ON CONFLICT (trip_id) DO NOTHING;
+
+        UPDATE driver_profiles
+        SET trip_active = false, active_trip_id = NULL, updated_at = v_now
+        WHERE uid = v_existing.driver_id;
+
+        DELETE FROM active_trips WHERE trip_id = v_existing.trip_id;
+    END LOOP;
 
     BEGIN
         INSERT INTO active_trips (trip_id, bus_id, driver_id, route_id, shift, status, start_time, last_heartbeat, expires_at)
         VALUES (p_trip_id::uuid, p_bus_id, p_driver_id, p_route_id, p_shift, 'active', v_now, v_now, v_expires_at);
+
+        -- Update driver_profiles active trip pointer
+        UPDATE driver_profiles
+        SET trip_active = true, active_trip_id = p_trip_id, updated_at = v_now
+        WHERE uid = p_driver_id;
+
         RETURN jsonb_build_object('success', true, 'tripId', p_trip_id, 'alreadyActive', false);
     EXCEPTION WHEN unique_violation THEN
         SELECT trip_id, driver_id INTO v_existing FROM active_trips WHERE bus_id = p_bus_id AND status = 'active' LIMIT 1;
@@ -1660,9 +1778,15 @@ BEGIN
     DELETE FROM active_trips
     WHERE trip_id = p_trip_id::uuid AND bus_id = p_bus_id AND driver_id = p_driver_id AND status = 'active';
     GET DIAGNOSTICS v_updated = ROW_COUNT;
+
+    UPDATE driver_profiles
+    SET trip_active = false, active_trip_id = NULL, updated_at = NOW()
+    WHERE uid = p_driver_id;
+
     RETURN jsonb_build_object('success', true, 'released', v_updated > 0);
 END;
 $$;
+
 
 CREATE OR REPLACE FUNCTION public.acquire_fcm_lock(p_trip_id TEXT, p_bus_id TEXT, p_lock_type TEXT)
 RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
@@ -1708,12 +1832,40 @@ DECLARE
     v_bus_rec JSONB; v_driver_rec JSONB; v_is_reserved BOOLEAN;
     v_updated_buses TEXT[] := '{}'; v_updated_drivers TEXT[] := '{}';
 BEGIN
-    -- NOTE (2026-09): static bus↔driver binding columns (buses.driver_uid,
-    -- driver_profiles.bus_id/route_id) were dropped by design — driver↔bus
-    -- binding is dynamic via active_trips (QR scan + trip lock). This RPC now
-    -- commits the reservation side (is_reserved/status) atomically and
-    -- validates that referenced buses still exist. Bus-side driver_uid intent
-    -- is preserved in reassignment_logs audit only.
+    -- Active Trip Guard: check if any target bus is actively running a trip
+    FOR v_bus_rec IN SELECT * FROM jsonb_array_elements(p_bus_updates) LOOP
+        IF EXISTS (
+            SELECT 1 FROM active_trips
+            WHERE (bus_id = v_bus_rec->>'bus_id'
+               OR bus_id = REPLACE(v_bus_rec->>'bus_id', 'bus_', '')
+               OR bus_id = 'bus_' || REPLACE(v_bus_rec->>'bus_id', 'bus_', ''))
+              AND status IN ('active', 'SCHEDULED', 'IN_TRANSIT', 'started', 'in_progress')
+              AND expires_at > NOW()
+        ) THEN
+            RETURN jsonb_build_object(
+                'success', false,
+                'error', 'Cannot reassign bus or driver while an active trip is in progress. Please wait for the trip to end.',
+                'status', 409
+            );
+        END IF;
+    END LOOP;
+
+    -- Active Trip Guard: check if any target driver is actively running a trip
+    FOR v_driver_rec IN SELECT * FROM jsonb_array_elements(p_driver_updates) LOOP
+        IF EXISTS (
+            SELECT 1 FROM active_trips
+            WHERE driver_id = v_driver_rec->>'driver_uid'
+              AND status IN ('active', 'SCHEDULED', 'IN_TRANSIT', 'started', 'in_progress')
+              AND expires_at > NOW()
+        ) THEN
+            RETURN jsonb_build_object(
+                'success', false,
+                'error', 'Cannot reassign bus or driver while an active trip is in progress. Please wait for the trip to end.',
+                'status', 409
+            );
+        END IF;
+    END LOOP;
+
     FOR v_bus_rec IN SELECT * FROM jsonb_array_elements(p_bus_updates) LOOP
         PERFORM 1 FROM buses WHERE id = v_bus_rec->>'bus_id' FOR UPDATE;
         IF NOT FOUND THEN
@@ -1721,13 +1873,23 @@ BEGIN
         END IF;
     END LOOP;
 
+    -- Update buses with primary driver attribution
     FOR v_bus_rec IN SELECT * FROM jsonb_array_elements(p_bus_updates) LOOP
+        UPDATE buses SET
+            primary_driver_uid = v_bus_rec->>'new_driver_uid',
+            driver_uid = v_bus_rec->>'new_driver_uid',
+            driver_name = v_bus_rec->>'new_driver_name',
+            updated_at = NOW()
+        WHERE id = v_bus_rec->>'bus_id';
         v_updated_buses := array_append(v_updated_buses, v_bus_rec->>'bus_id');
     END LOOP;
 
+    -- Update driver profiles with bus/route and reserved relief pool status
     FOR v_driver_rec IN SELECT * FROM jsonb_array_elements(p_driver_updates) LOOP
         v_is_reserved := COALESCE((v_driver_rec->>'is_reserved')::boolean, false);
         UPDATE driver_profiles SET
+            bus_id = v_driver_rec->>'new_bus_id',
+            route_id = v_driver_rec->>'new_route_id',
             is_reserved = v_is_reserved,
             status = CASE WHEN v_is_reserved THEN 'reserved' ELSE 'active' END,
             updated_at = NOW()
@@ -1743,6 +1905,24 @@ CREATE OR REPLACE FUNCTION assign_routes_atomically(p_bus_updates JSONB)
 RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE v_bus_rec JSONB; v_current TEXT; v_updated_buses TEXT[] := '{}';
 BEGIN
+    -- Active Trip Guard: check if any target bus is actively running a trip
+    FOR v_bus_rec IN SELECT * FROM jsonb_array_elements(p_bus_updates) LOOP
+        IF EXISTS (
+            SELECT 1 FROM active_trips
+            WHERE (bus_id = v_bus_rec->>'bus_id'
+               OR bus_id = REPLACE(v_bus_rec->>'bus_id', 'bus_', '')
+               OR bus_id = 'bus_' || REPLACE(v_bus_rec->>'bus_id', 'bus_', ''))
+              AND status IN ('active', 'SCHEDULED', 'IN_TRANSIT', 'started', 'in_progress')
+              AND expires_at > NOW()
+        ) THEN
+            RETURN jsonb_build_object(
+                'success', false,
+                'error', 'Cannot reassign bus or driver while an active trip is in progress. Please wait for the trip to end.',
+                'status', 409
+            );
+        END IF;
+    END LOOP;
+
     FOR v_bus_rec IN SELECT * FROM jsonb_array_elements(p_bus_updates) LOOP
         SELECT route_id INTO v_current FROM buses WHERE id = v_bus_rec->>'bus_id' FOR UPDATE;
         IF NOT FOUND THEN
@@ -1756,6 +1936,13 @@ BEGIN
     FOR v_bus_rec IN SELECT * FROM jsonb_array_elements(p_bus_updates) LOOP
         UPDATE buses SET route_id = v_bus_rec->>'new_route_id', route_name = v_bus_rec->>'new_route_name', updated_at = NOW()
         WHERE id = v_bus_rec->>'bus_id';
+
+        -- FIX 9: Synchronize student_profiles route_id with their bus's new route
+        UPDATE student_profiles
+        SET route_id = v_bus_rec->>'new_route_id',
+            updated_at = NOW()
+        WHERE bus_id = v_bus_rec->>'bus_id';
+
         v_updated_buses := array_append(v_updated_buses, v_bus_rec->>'bus_id');
     END LOOP;
 
@@ -1805,6 +1992,10 @@ BEGIN
     )
     ON CONFLICT (trip_id) DO NOTHING;
 
+    UPDATE driver_profiles
+    SET trip_active = false, active_trip_id = NULL, updated_at = NOW()
+    WHERE uid = v_trip.driver_id;
+
     DELETE FROM public.active_trips
     WHERE active_trips.trip_id = v_trip.trip_id;
     
@@ -1823,8 +2014,9 @@ DROP FUNCTION IF EXISTS public.end_trip_atomically(TEXT, TEXT, TEXT);
 CREATE OR REPLACE FUNCTION public.end_trip_atomically(
   p_trip_id TEXT,
   p_bus_id  TEXT,
-  p_driver_id TEXT,
-  p_min_duration_seconds INTEGER DEFAULT 0
+  p_driver_id TEXT DEFAULT NULL,
+  p_min_duration_seconds INTEGER DEFAULT 0,
+  p_ended_reason TEXT DEFAULT 'completed'
 )
 RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE
@@ -1832,14 +2024,14 @@ DECLARE
   v_now     TIMESTAMPTZ := NOW();
   v_dur_sec INTEGER;
   v_status  TEXT := 'completed';
-  v_reason  TEXT := 'completed';
+  v_reason  TEXT := COALESCE(NULLIF(p_ended_reason, ''), 'completed');
 BEGIN
   SELECT trip_id, bus_id, driver_id, route_id, shift, start_time
     INTO v_trip
     FROM active_trips
    WHERE trip_id    = p_trip_id::uuid
      AND bus_id     = p_bus_id
-     AND driver_id  = p_driver_id
+     AND (p_driver_id IS NULL OR p_driver_id = '' OR driver_id = p_driver_id)
      AND status     = 'active'
      FOR UPDATE;
 
@@ -1852,8 +2044,15 @@ BEGIN
   -- Remove the active lock atomically within the single transaction
   DELETE FROM active_trips WHERE trip_id = v_trip.trip_id;
 
-  -- Represent short trips as terminated_early / short_trip rather than deleting historical fact
-  IF p_min_duration_seconds > 0 AND v_dur_sec < p_min_duration_seconds THEN
+  -- Sync driver_profiles active trip pointer
+  UPDATE driver_profiles
+  SET trip_active = false, active_trip_id = NULL, updated_at = v_now
+  WHERE uid = v_trip.driver_id;
+
+  -- If force_ended, record status as terminated_early (satisfies driver_trip_history_status_check); otherwise check short trip threshold
+  IF v_reason = 'force_ended' THEN
+    v_status := 'terminated_early';
+  ELSIF p_min_duration_seconds > 0 AND v_dur_sec < p_min_duration_seconds THEN
     v_status := 'terminated_early';
     v_reason := 'short_trip';
   END IF;
@@ -1865,7 +2064,11 @@ BEGIN
     v_trip.trip_id, v_trip.bus_id, v_trip.driver_id, v_trip.route_id, v_trip.shift,
     v_status, v_reason, v_trip.start_time, v_now, v_dur_sec
   )
-  ON CONFLICT (trip_id) DO NOTHING;
+  ON CONFLICT (trip_id) DO UPDATE SET
+    status = EXCLUDED.status,
+    ended_reason = EXCLUDED.ended_reason,
+    end_time = EXCLUDED.end_time,
+    duration_seconds = EXCLUDED.duration_seconds;
 
   RETURN jsonb_build_object(
     'success', true,
@@ -2159,16 +2362,17 @@ GRANT EXECUTE ON FUNCTION public.increment_expiry_reminder_count(TEXT) TO servic
 -- Args: p_application_id, p_approver_uid, p_student_uid, p_bus_id, p_shift,
 --       p_valid_until, p_session_end_year, p_session_duration, p_soft_block, p_hard_block
 CREATE OR REPLACE FUNCTION public.approve_renewal_with_seat(
-    p_application_id  TEXT,
-    p_approver_uid    TEXT,
-    p_student_uid     TEXT,
-    p_bus_id          TEXT,
-    p_shift           TEXT,
-    p_valid_until     TIMESTAMPTZ,
-    p_session_end_year INTEGER,
-    p_session_duration TEXT,
-    p_soft_block      TIMESTAMPTZ DEFAULT NULL,
-    p_hard_block      TIMESTAMPTZ DEFAULT NULL
+    p_application_id    TEXT,
+    p_student_uid       TEXT,
+    p_bus_id            TEXT,
+    p_shift             TEXT,
+    p_valid_until       TIMESTAMPTZ,
+    p_session_end_year  INTEGER,
+    p_session_duration  TEXT,
+    p_approver_uid      TEXT DEFAULT NULL,
+    p_approved_by       TEXT DEFAULT NULL,
+    p_soft_block        TIMESTAMPTZ DEFAULT NULL,
+    p_hard_block        TIMESTAMPTZ DEFAULT NULL
 )
 RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE
@@ -2179,7 +2383,10 @@ DECLARE
     v_new_evening      INTEGER;
     v_student_updated  INTEGER;
     v_app_updated      INTEGER;
+    v_effective_actor  TEXT;
 BEGIN
+    v_effective_actor := COALESCE(p_approver_uid, p_approved_by, 'system');
+
     -- 1. Validate shift
     v_normalized_shift := LOWER(TRIM(COALESCE(p_shift, 'Morning')));
     IF v_normalized_shift NOT IN ('morning', 'evening', 'both') THEN
@@ -2201,8 +2408,9 @@ BEGIN
     SELECT id, capacity, morning_load, evening_load
     INTO v_bus
     FROM buses
-    WHERE id = p_bus_id
-    FOR UPDATE;
+    WHERE id = p_bus_id OR bus_number = p_bus_id
+    FOR UPDATE
+    LIMIT 1;
 
     IF NOT FOUND THEN
         RETURN jsonb_build_object('success', false, 'error', 'Bus ' || p_bus_id || ' not found');
@@ -2231,10 +2439,13 @@ BEGIN
 
     -- 5. Increment bus capacity
     UPDATE buses
-    SET morning_load = v_new_morning, evening_load = v_new_evening, current_members = v_new_morning + v_new_evening, updated_at = NOW()
-    WHERE id = p_bus_id;
+    SET morning_load = v_new_morning,
+        evening_load = v_new_evening,
+        current_members = v_new_morning + v_new_evening,
+        updated_at = NOW()
+    WHERE id = v_bus.id;
 
-    -- 6. Update student profile (re-activate, extend validity)
+    -- 6. Update student profile (re-activate, extend validity, clear seat_released_at)
     UPDATE student_profiles SET
         status           = 'active',
         valid_until      = p_valid_until,
@@ -2251,29 +2462,31 @@ BEGIN
     IF v_student_updated <> 1 THEN
         -- Compensate bus capacity
         UPDATE buses
-        SET morning_load = v_bus.morning_load, evening_load = v_bus.evening_load, current_members = v_bus.morning_load + v_bus.evening_load, updated_at = NOW()
-        WHERE id = p_bus_id;
+        SET morning_load = v_bus.morning_load,
+            evening_load = v_bus.evening_load,
+            current_members = v_bus.morning_load + v_bus.evening_load,
+            updated_at = NOW()
+        WHERE id = v_bus.id;
         RETURN jsonb_build_object('success', false, 'error', 'Student profile not found or not updated: ' || p_student_uid);
     END IF;
 
-    -- 7. Finalize application → approved (preserve for audit trail)
-    UPDATE applications SET
+    -- 7. Finalize application → approved using the actual application schema
+    UPDATE public.applications SET
         state                       = 'approved',
         approved_at                 = NOW(),
-        approved_by                 = p_approver_uid,
-        approved_by_id              = p_approver_uid,
+        approved_by                 = v_effective_actor,
+        approved_by_id              = v_effective_actor,
         processing_lock             = NULL,
         processing_started_at       = NULL,
         processing_lease_expires_at = NULL,
         processing_result           = 'success',
         processing_completed_at     = NOW(),
         updated_at                  = NOW()
-    WHERE application_id = p_application_id
-      AND processing_lock = p_approver_uid;
+    WHERE application_id = p_application_id;
     GET DIAGNOSTICS v_app_updated = ROW_COUNT;
 
     IF v_app_updated <> 1 THEN
-        -- Compensate both student and bus restoring exact original values
+        -- Rollback compensation: restore exact previous values
         UPDATE student_profiles SET
             status                        = v_student.status,
             valid_until                   = v_student.valid_until,
@@ -2285,29 +2498,193 @@ BEGIN
             last_processed_application_id = v_student.last_processed_application_id,
             updated_at                    = NOW()
         WHERE uid = p_student_uid;
+
         UPDATE buses
-        SET morning_load = v_bus.morning_load, evening_load = v_bus.evening_load, current_members = v_bus.morning_load + v_bus.evening_load, updated_at = NOW()
-        WHERE id = p_bus_id;
-        RETURN jsonb_build_object('success', false, 'error', 'Application lock expired or not found: ' || p_application_id);
+        SET morning_load = v_bus.morning_load,
+            evening_load = v_bus.evening_load,
+            current_members = v_bus.morning_load + v_bus.evening_load,
+            updated_at = NOW()
+        WHERE id = v_bus.id;
+
+        RETURN jsonb_build_object('success', false, 'error', 'Application not found or update failed: ' || p_application_id);
     END IF;
 
     RETURN jsonb_build_object(
-        'success',     true,
-        'studentUid',  p_student_uid,
-        'busId',       p_bus_id,
-        'shift',       p_shift,
+        'success',        true,
+        'studentUid',     p_student_uid,
+        'busId',          v_bus.id,
+        'shift',          p_shift,
         'newMorningLoad', v_new_morning,
         'newEveningLoad', v_new_evening,
-        'capacity',    v_bus.capacity
+        'capacity',       v_bus.capacity
     );
 EXCEPTION WHEN OTHERS THEN
     RAISE;
 END;
 $$;
 
-REVOKE EXECUTE ON FUNCTION public.approve_renewal_with_seat(TEXT,TEXT,TEXT,TEXT,TEXT,TIMESTAMPTZ,INTEGER,TEXT,TIMESTAMPTZ,TIMESTAMPTZ) FROM public;
-REVOKE EXECUTE ON FUNCTION public.approve_renewal_with_seat(TEXT,TEXT,TEXT,TEXT,TEXT,TIMESTAMPTZ,INTEGER,TEXT,TIMESTAMPTZ,TIMESTAMPTZ) FROM authenticated;
-GRANT  EXECUTE ON FUNCTION public.approve_renewal_with_seat(TEXT,TEXT,TEXT,TEXT,TEXT,TIMESTAMPTZ,INTEGER,TEXT,TIMESTAMPTZ,TIMESTAMPTZ) TO service_role;
+REVOKE EXECUTE ON FUNCTION public.approve_renewal_with_seat(TEXT, TEXT, TEXT, TEXT, TIMESTAMPTZ, INTEGER, TEXT, TEXT, TEXT, TIMESTAMPTZ, TIMESTAMPTZ) FROM public;
+REVOKE EXECUTE ON FUNCTION public.approve_renewal_with_seat(TEXT, TEXT, TEXT, TEXT, TIMESTAMPTZ, INTEGER, TEXT, TEXT, TEXT, TIMESTAMPTZ, TIMESTAMPTZ) FROM authenticated;
+GRANT  EXECUTE ON FUNCTION public.approve_renewal_with_seat(TEXT, TEXT, TEXT, TEXT, TIMESTAMPTZ, INTEGER, TEXT, TEXT, TEXT, TIMESTAMPTZ, TIMESTAMPTZ) TO service_role;
+
+
+-- ── 8.5.2B recalculate_academic_lifecycle_dates ─────────────────────────────────
+-- Caller: /api/settings/deadline-config (syncSystemConfigDates)
+-- Atomic cascade update for student_profiles and applications on academic calendar change.
+CREATE OR REPLACE FUNCTION public.recalculate_academic_lifecycle_dates(
+    p_start_month INTEGER,
+    p_start_day   INTEGER
+)
+RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+    v_pg_month          INTEGER;
+    v_student           RECORD;
+    v_app               RECORD;
+    v_students_updated  INTEGER := 0;
+    v_apps_updated      INTEGER := 0;
+    v_year              INTEGER;
+    v_day               INTEGER;
+    v_hard_year         INTEGER;
+    v_hard_day          INTEGER;
+    v_soft_block        TIMESTAMPTZ;
+    v_expiry            TIMESTAMPTZ;
+    v_hard_block        TIMESTAMPTZ;
+    v_app_year          INTEGER;
+    v_app_day           INTEGER;
+    v_app_soft_block    TIMESTAMPTZ;
+    v_app_eligible      TIMESTAMPTZ;
+    v_is_leap           BOOLEAN;
+    v_is_hard_leap      BOOLEAN;
+    v_is_app_leap       BOOLEAN;
+BEGIN
+    -- Validate month and day (p_start_month is 0-indexed: 0 = Jan, 6 = Jul, 11 = Dec)
+    IF p_start_month < 0 OR p_start_month > 11 THEN
+        RETURN jsonb_build_object('success', false, 'error', 'Invalid start_month: must be 0-11');
+    END IF;
+    IF p_start_day < 1 OR p_start_day > 31 THEN
+        RETURN jsonb_build_object('success', false, 'error', 'Invalid start_day: must be 1-31');
+    END IF;
+
+    -- PostgreSQL months are 1-indexed (1..12)
+    v_pg_month := p_start_month + 1;
+
+    -- 1. Cascade update to student_profiles
+    FOR v_student IN
+        SELECT uid, session_end_year
+        FROM public.student_profiles
+        WHERE session_end_year IS NOT NULL
+          AND session_end_year > 2000
+          AND status IN ('active', 'soft_blocked')
+        FOR UPDATE
+    LOOP
+        v_year := v_student.session_end_year;
+        v_day := p_start_day;
+
+        -- Leap year normalization for Feb 29
+        IF v_pg_month = 2 AND p_start_day = 29 THEN
+            v_is_leap := ((v_year % 4 = 0 AND v_year % 100 != 0) OR (v_year % 400 = 0));
+            IF NOT v_is_leap THEN
+                v_day := 28;
+            END IF;
+        END IF;
+
+        -- Soft block is start of next session (e.g. 2026-12-01 00:00:00 UTC)
+        v_soft_block := make_timestamptz(v_year, v_pg_month, v_day, 0, 0, 0, 'UTC');
+
+        -- Expiry is 1 millisecond before soft block (e.g. 2026-11-30 23:59:59.999 UTC)
+        v_expiry := v_soft_block - INTERVAL '1 millisecond';
+
+        -- Hard delete / hard block is effectiveYear + 2
+        v_hard_year := v_year + 2;
+        v_hard_day := p_start_day;
+        IF v_pg_month = 2 AND p_start_day = 29 THEN
+            v_is_hard_leap := ((v_hard_year % 4 = 0 AND v_hard_year % 100 != 0) OR (v_hard_year % 400 = 0));
+            IF NOT v_is_hard_leap THEN
+                v_hard_day := 28;
+            END IF;
+        END IF;
+        v_hard_block := make_timestamptz(v_hard_year, v_pg_month, v_hard_day, 0, 0, 0, 'UTC');
+
+        -- Update student profile
+        IF v_expiry > (NOW() + INTERVAL '90 days') THEN
+            UPDATE public.student_profiles
+            SET valid_until = v_expiry,
+                soft_block = v_soft_block,
+                hard_block = v_hard_block,
+                expiry_reminder_count = 0,
+                last_expiry_reminder_sent_at = NULL,
+                updated_at = NOW()
+            WHERE uid = v_student.uid;
+        ELSE
+            UPDATE public.student_profiles
+            SET valid_until = v_expiry,
+                soft_block = v_soft_block,
+                hard_block = v_hard_block,
+                updated_at = NOW()
+            WHERE uid = v_student.uid;
+        END IF;
+
+        v_students_updated := v_students_updated + 1;
+    END LOOP;
+
+    -- 2. Cascade update to applications
+    FOR v_app IN
+        SELECT application_id, session_start_year, target_session, form_data
+        FROM public.applications
+        WHERE state IN ('submitted', 'verified_upcoming', 'pending_seat_allocation')
+          AND (
+            application_type = 'future'
+            OR session_start_year IS NOT NULL
+            OR target_session IS NOT NULL
+            OR (form_data->>'sessionStartYear') IS NOT NULL
+            OR (form_data->>'startYear') IS NOT NULL
+          )
+        FOR UPDATE
+    LOOP
+        v_app_year := COALESCE(
+            v_app.session_start_year,
+            (v_app.target_session->>'startYear')::INTEGER,
+            (v_app.target_session->>'start_year')::INTEGER,
+            (v_app.form_data->>'sessionStartYear')::INTEGER,
+            (v_app.form_data->>'startYear')::INTEGER,
+            (v_app.form_data->'sessionInfo'->>'sessionStartYear')::INTEGER,
+            (v_app.form_data->'sessionInfo'->>'startYear')::INTEGER
+        );
+
+        IF v_app_year IS NOT NULL AND v_app_year > 2000 THEN
+            v_app_day := p_start_day;
+            IF v_pg_month = 2 AND p_start_day = 29 THEN
+                v_is_app_leap := ((v_app_year % 4 = 0 AND v_app_year % 100 != 0) OR (v_app_year % 400 = 0));
+                IF NOT v_is_app_leap THEN
+                    v_app_day := 28;
+                END IF;
+            END IF;
+
+            v_app_soft_block := make_timestamptz(v_app_year, v_pg_month, v_app_day, 0, 0, 0, 'UTC');
+            -- eligible_approval = soft_block + 1 day
+            v_app_eligible := v_app_soft_block + INTERVAL '1 day';
+
+            UPDATE public.applications
+            SET eligible_approval = v_app_eligible,
+                updated_at = NOW()
+            WHERE application_id = v_app.application_id;
+
+            v_apps_updated := v_apps_updated + 1;
+        END IF;
+    END LOOP;
+
+    RETURN jsonb_build_object(
+        'success', true,
+        'students_updated', v_students_updated,
+        'applications_updated', v_apps_updated
+    );
+END;
+$$;
+
+REVOKE EXECUTE ON FUNCTION public.recalculate_academic_lifecycle_dates(INTEGER, INTEGER) FROM public;
+REVOKE EXECUTE ON FUNCTION public.recalculate_academic_lifecycle_dates(INTEGER, INTEGER) FROM authenticated;
+GRANT  EXECUTE ON FUNCTION public.recalculate_academic_lifecycle_dates(INTEGER, INTEGER) TO service_role;
+
 
 
 -- ── 8.5.3 get_student_profile_counts ────────────────────────────────────────
@@ -2674,12 +3051,16 @@ DECLARE
     v_student_id     TEXT;
     v_from_bus_id    TEXT;
     v_to_bus_id      TEXT;
+    v_bus_id_item    TEXT;
     v_processed      INTEGER := 0;
     v_cap_result     JSONB;
     v_affected_buses TEXT[] := ARRAY[]::TEXT[];
+    v_morning_load   INTEGER;
+    v_evening_load   INTEGER;
+    v_bus_capacity   INTEGER;
 BEGIN
-    -- 1. Pre-lock all affected buses in strict ascending order (ORDER BY id ASC FOR UPDATE)
-    -- This guarantees a global lock acquisition hierarchy, mathematically eliminating PostgreSQL 40P01 deadlocks!
+    -- 1. Pre-lock all affected buses in strict ascending lexical order (ORDER BY id ASC FOR UPDATE)
+    -- This guarantees a global lock acquisition hierarchy, eliminating PostgreSQL 40P01 deadlocks!
     SELECT ARRAY_AGG(id ORDER BY id ASC)
     INTO v_affected_buses
     FROM buses
@@ -2703,8 +3084,8 @@ BEGIN
 
         IF v_student_id IS NULL OR v_student_id = '' THEN CONTINUE; END IF;
 
-        -- Read student (lock row to prevent concurrent modification)
-        SELECT uid, shift, bus_id, stop_name
+        -- Lock target student row FOR UPDATE
+        SELECT uid, shift, bus_id, stop_name, seat_released_at
         INTO v_student
         FROM student_profiles
         WHERE uid = v_student_id
@@ -2712,13 +3093,18 @@ BEGIN
 
         IF NOT FOUND THEN CONTINUE; END IF;
 
-        -- Resolve old shift for decrement (student's current shift)
+        -- Resolve old shift for decrement (students are strictly Morning or Evening)
         v_old_shift := LOWER(TRIM(COALESCE(v_student.shift, 'Morning')));
-        IF v_old_shift NOT IN ('morning', 'evening', 'both') THEN v_old_shift := 'morning'; END IF;
+        IF v_old_shift NOT IN ('morning', 'evening') THEN v_old_shift := 'morning'; END IF;
 
-        -- Resolve new shift for increment (plan override > student record)
+        -- Resolve new shift for increment
         v_new_shift := LOWER(TRIM(COALESCE(v_plan->>'studentShift', v_plan->>'shift', v_student.shift, 'Morning')));
-        IF v_new_shift NOT IN ('morning', 'evening', 'both') THEN v_new_shift := 'morning'; END IF;
+        IF v_new_shift = 'both' THEN
+            RAISE EXCEPTION 'INVALID_SHIFT: Student shift cannot be ''Both'' during reassignment. Students must be assigned strictly to ''Morning'' or ''Evening''.';
+        END IF;
+        IF v_new_shift NOT IN ('morning', 'evening') THEN
+            RAISE EXCEPTION 'INVALID_SHIFT: Shift must be ''Morning'' or ''Evening'', received: %', v_new_shift;
+        END IF;
 
         -- Fetch target bus route_id
         SELECT route_id INTO v_target_route_id
@@ -2743,12 +3129,12 @@ BEGIN
         v_stop_name := COALESCE(v_plan->>'stopName', v_plan->>'stop_name', v_student.stop_name);
 
         -- Update student record (bus_id, route_id, shift, stop_name)
+        -- Invariant: Preserve existing seat_released_at (do not blindly NULL out soft-blocked status)
         UPDATE student_profiles SET
             bus_id          = v_to_bus_id,
             route_id        = COALESCE(v_target_route_id, route_id),
             shift           = INITCAP(v_new_shift),
             stop_name       = v_stop_name,
-            seat_released_at = NULL,
             updated_at      = NOW()
         WHERE uid = v_student_id;
 
@@ -2757,20 +3143,35 @@ BEGIN
 
     -- Recalculate bus load counts for all affected buses in deterministic ascending order
     IF v_affected_buses IS NOT NULL AND array_length(v_affected_buses, 1) > 0 THEN
-        FOR v_to_bus_id IN SELECT DISTINCT x FROM unnest(v_affected_buses) AS x ORDER BY x ASC LOOP
-            UPDATE buses b SET
-                (morning_load, evening_load, current_members, updated_at) = (
-                    SELECT 
-                        COUNT(*) FILTER (WHERE LOWER(sp.shift) IN ('morning', 'both')),
-                        COUNT(*) FILTER (WHERE LOWER(sp.shift) IN ('evening', 'both')),
-                        COUNT(*),
-                        NOW()
-                    FROM student_profiles sp
-                    WHERE (sp.bus_id = b.id OR sp.bus_id = b.bus_number)
-                      AND sp.seat_released_at IS NULL
-                      AND sp.status IN ('active', 'soft_blocked', 'pending_deletion')
-                )
-            WHERE b.id = v_to_bus_id OR b.bus_number = v_to_bus_id;
+        FOR v_bus_id_item IN SELECT DISTINCT x FROM unnest(v_affected_buses) AS x ORDER BY x ASC LOOP
+            SELECT
+                COUNT(*) FILTER (WHERE LOWER(sp.shift) = 'morning'),
+                COUNT(*) FILTER (WHERE LOWER(sp.shift) = 'evening')
+            INTO v_morning_load, v_evening_load
+            FROM student_profiles sp
+            WHERE (sp.bus_id = v_bus_id_item)
+              AND sp.seat_released_at IS NULL
+              AND sp.status IN ('active', 'soft_blocked', 'pending_deletion');
+
+            SELECT capacity INTO v_bus_capacity
+            FROM buses
+            WHERE id = v_bus_id_item;
+
+            IF v_bus_capacity IS NOT NULL AND v_bus_capacity > 0 THEN
+                IF v_morning_load > v_bus_capacity THEN
+                    RAISE EXCEPTION 'CAPACITY_EXCEEDED on bus % during reassignment for morning shift (%/%)', v_bus_id_item, v_morning_load, v_bus_capacity;
+                END IF;
+                IF v_evening_load > v_bus_capacity THEN
+                    RAISE EXCEPTION 'CAPACITY_EXCEEDED on bus % during reassignment for evening shift (%/%)', v_bus_id_item, v_evening_load, v_bus_capacity;
+                END IF;
+            END IF;
+
+            UPDATE buses SET
+                morning_load   = v_morning_load,
+                evening_load   = v_evening_load,
+                current_members = v_morning_load + v_evening_load,
+                updated_at     = NOW()
+            WHERE id = v_bus_id_item;
         END LOOP;
     END IF;
 
@@ -2834,29 +3235,32 @@ CREATE OR REPLACE FUNCTION public.execute_reassignment_rollback(
 )
 RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE
-    v_orig_status TEXT;
-    v_orig_changes JSONB;
-    v_changes_array JSONB;
-    v_change JSONB;
-    v_collection TEXT;
-    v_doc_id TEXT;
-    v_before JSONB;
-    v_after JSONB;
-    v_student_row RECORD;
+    v_orig_status     TEXT;
+    v_orig_changes    JSONB;
+    v_changes_array   JSONB;
+    v_change          JSONB;
+    v_collection      TEXT;
+    v_doc_id          TEXT;
+    v_before          JSONB;
+    v_after           JSONB;
+    v_student_row     RECORD;
     v_target_route_id TEXT;
-    v_reverted_docs TEXT[] := ARRAY[]::TEXT[];
-    v_affected_buses TEXT[] := ARRAY[]::TEXT[];
-    v_bus_id_item TEXT;
-    v_row_updated INTEGER;
+    v_reverted_docs   TEXT[] := ARRAY[]::TEXT[];
+    v_affected_buses  TEXT[] := ARRAY[]::TEXT[];
+    v_bus_id_item     TEXT;
+    v_row_updated     INTEGER;
+    v_morning_load    INTEGER;
+    v_evening_load    INTEGER;
+    v_bus_capacity    INTEGER;
+    v_rolled_back_count INTEGER := 0;
 BEGIN
-    -- Handle case where p_changes might be passed as JSON string or JSON array
     IF jsonb_typeof(p_changes) = 'string' THEN
         v_changes_array := (p_changes#>>'{}')::jsonb;
     ELSE
         v_changes_array := p_changes;
     END IF;
 
-    -- 1. Check original log status and lock it
+    -- 1. Check original log status and lock it FOR UPDATE
     SELECT status, changes INTO v_orig_status, v_orig_changes
     FROM public.reassignment_logs
     WHERE operation_id = p_operation_id
@@ -2874,101 +3278,134 @@ BEGIN
         RETURN jsonb_build_object('success', false, 'error', 'Only committed reassignments can be rolled back');
     END IF;
 
-    -- 2. Verify all entities exist and validate preconditions
+    -- 2. Collect all affected bus IDs across before and after snapshots
+    FOR v_change IN SELECT jsonb_array_elements(v_changes_array) LOOP
+        v_before := v_change->'before';
+        v_after := v_change->'after';
+        IF v_before ? 'busId' OR v_before ? 'bus_id' THEN
+            v_affected_buses := array_append(v_affected_buses, COALESCE(v_before->>'busId', v_before->>'bus_id'));
+        END IF;
+        IF v_after ? 'busId' OR v_after ? 'bus_id' THEN
+            v_affected_buses := array_append(v_affected_buses, COALESCE(v_after->>'busId', v_after->>'bus_id'));
+        END IF;
+    END LOOP;
+
+    -- 3. Pre-lock all affected buses in strict ascending order (ORDER BY id ASC FOR UPDATE)
+    IF v_affected_buses IS NOT NULL AND array_length(v_affected_buses, 1) > 0 THEN
+        PERFORM id
+        FROM buses
+        WHERE id IN (SELECT DISTINCT x FROM unnest(v_affected_buses) AS x WHERE x IS NOT NULL AND x <> '')
+        ORDER BY id ASC
+        FOR UPDATE;
+    END IF;
+
+    -- 4. Verify preconditions for all target students
     FOR v_change IN SELECT jsonb_array_elements(v_changes_array) LOOP
         v_collection := v_change->>'collection';
         v_doc_id := v_change->>'docId';
         v_after := v_change->'after';
-        
+
         IF v_collection = 'students' THEN
-            SELECT bus_id, shift INTO v_student_row 
-            FROM public.student_profiles 
-            WHERE uid = v_doc_id 
+            SELECT bus_id, shift INTO v_student_row
+            FROM public.student_profiles
+            WHERE uid = v_doc_id
             FOR UPDATE;
-            
+
             IF NOT FOUND THEN
                 RETURN jsonb_build_object('success', false, 'error', 'Precondition failed: Student ' || v_doc_id || ' no longer exists');
             END IF;
-            
+
             IF (v_after ? 'busId' OR v_after ? 'bus_id') AND COALESCE(v_student_row.bus_id, '') <> COALESCE(v_after->>'busId', v_after->>'bus_id', '') THEN
                 RETURN jsonb_build_object('success', false, 'error', 'Precondition failed: Student ' || v_doc_id || ' busId has changed since the reassignment');
             END IF;
         END IF;
     END LOOP;
 
-    -- 3. Perform atomic rollback
+    -- 5. Perform rollback on student records
     FOR v_change IN SELECT jsonb_array_elements(v_changes_array) LOOP
         v_collection := v_change->>'collection';
         v_doc_id := v_change->>'docId';
         v_before := v_change->'before';
         v_after := v_change->'after';
-        
+
         IF v_collection = 'students' THEN
             v_target_route_id := NULL;
             IF (v_before ? 'busId' OR v_before ? 'bus_id') AND COALESCE(v_before->>'busId', v_before->>'bus_id') <> '' THEN
-                SELECT route_id INTO v_target_route_id FROM buses WHERE id = COALESCE(v_before->>'busId', v_before->>'bus_id') OR bus_number = COALESCE(v_before->>'busId', v_before->>'bus_id') LIMIT 1;
-            END IF;
-
-            IF v_before ? 'busId' OR v_before ? 'bus_id' THEN
-                v_affected_buses := array_append(v_affected_buses, COALESCE(v_before->>'busId', v_before->>'bus_id'));
-            END IF;
-            IF v_after ? 'busId' OR v_after ? 'bus_id' THEN
-                v_affected_buses := array_append(v_affected_buses, COALESCE(v_after->>'busId', v_after->>'bus_id'));
+                SELECT route_id INTO v_target_route_id FROM buses WHERE id = COALESCE(v_before->>'busId', v_before->>'bus_id') LIMIT 1;
             END IF;
 
             UPDATE public.student_profiles SET
                 bus_id = CASE WHEN v_before ? 'busId' THEN v_before->>'busId' WHEN v_before ? 'bus_id' THEN v_before->>'bus_id' ELSE bus_id END,
                 route_id = COALESCE(v_target_route_id, CASE WHEN v_before ? 'routeId' THEN v_before->>'routeId' WHEN v_before ? 'route_id' THEN v_before->>'route_id' ELSE route_id END),
-                shift = CASE WHEN v_before ? 'shift' THEN INITCAP(v_before->>'shift') ELSE shift END,
+                shift = CASE
+                    WHEN v_before ? 'shift' AND LOWER(v_before->>'shift') IN ('morning', 'evening') THEN INITCAP(v_before->>'shift')
+                    ELSE shift
+                END,
                 stop_name = CASE WHEN v_before ? 'stopName' THEN v_before->>'stopName' WHEN v_before ? 'stop_name' THEN v_before->>'stop_name' ELSE stop_name END,
-                seat_released_at = NULL,
                 updated_at = NOW()
             WHERE uid = v_doc_id;
-            
+
             GET DIAGNOSTICS v_row_updated = ROW_COUNT;
             IF v_row_updated <> 1 THEN
-                RAISE EXCEPTION 'Failed to update student profile %', v_doc_id;
+                RAISE EXCEPTION 'Failed to restore student profile %', v_doc_id;
             END IF;
-            
+
             v_reverted_docs := array_append(v_reverted_docs, v_change->>'docPath');
+            v_rolled_back_count := v_rolled_back_count + 1;
         END IF;
     END LOOP;
 
-    -- 4. Recalculate bus load counts for all affected buses in deterministic order
-    FOR v_bus_id_item IN SELECT DISTINCT x FROM unnest(v_affected_buses) AS x ORDER BY x ASC LOOP
-        UPDATE buses b SET
-            (morning_load, evening_load, current_members, updated_at) = (
-                SELECT 
-                    COUNT(*) FILTER (WHERE LOWER(sp.shift) = 'morning'),
-                    COUNT(*) FILTER (WHERE LOWER(sp.shift) = 'evening'),
-                    COUNT(*),
-                    NOW()
-                FROM student_profiles sp
-                WHERE (sp.bus_id = b.id OR sp.bus_id = b.bus_number)
-                  AND sp.seat_released_at IS NULL
-                  AND sp.status IN ('active', 'soft_blocked', 'pending_deletion')
-            )
-        WHERE b.id = v_bus_id_item OR b.bus_number = v_bus_id_item;
-    END LOOP;
+    -- 6. Recalculate bus load counts for all affected buses in deterministic ascending order
+    IF v_affected_buses IS NOT NULL AND array_length(v_affected_buses, 1) > 0 THEN
+        FOR v_bus_id_item IN SELECT DISTINCT x FROM unnest(v_affected_buses) AS x WHERE x IS NOT NULL AND x <> '' ORDER BY x ASC LOOP
+            SELECT
+                COUNT(*) FILTER (WHERE LOWER(sp.shift) = 'morning'),
+                COUNT(*) FILTER (WHERE LOWER(sp.shift) = 'evening')
+            INTO v_morning_load, v_evening_load
+            FROM student_profiles sp
+            WHERE (sp.bus_id = v_bus_id_item)
+              AND sp.seat_released_at IS NULL
+              AND sp.status IN ('active', 'soft_blocked', 'pending_deletion');
 
-    -- 5. Mark log as rolled back
+            SELECT capacity INTO v_bus_capacity
+            FROM buses
+            WHERE id = v_bus_id_item;
+
+            IF v_bus_capacity IS NOT NULL AND v_bus_capacity > 0 THEN
+                IF v_morning_load > v_bus_capacity THEN
+                    RAISE EXCEPTION 'CAPACITY_EXCEEDED on bus % during rollback for morning shift (%/%)', v_bus_id_item, v_morning_load, v_bus_capacity;
+                END IF;
+                IF v_evening_load > v_bus_capacity THEN
+                    RAISE EXCEPTION 'CAPACITY_EXCEEDED on bus % during rollback for evening shift (%/%)', v_bus_id_item, v_evening_load, v_bus_capacity;
+                END IF;
+            END IF;
+
+            UPDATE buses SET
+                morning_load   = v_morning_load,
+                evening_load   = v_evening_load,
+                current_members = v_morning_load + v_evening_load,
+                updated_at     = NOW()
+            WHERE id = v_bus_id_item;
+        END LOOP;
+    END IF;
+
+    -- 7. Update reassignment_logs table
     UPDATE public.reassignment_logs SET
         status = 'rolled_back',
+        rolled_back_at = NOW(),
+        rolled_back_by = p_actor_id,
         meta = jsonb_set(COALESCE(meta, '{}'::jsonb), '{rolledBackAt}', to_jsonb(NOW()))
     WHERE operation_id = p_operation_id;
 
     RETURN jsonb_build_object(
         'success', true,
         'message', 'Rollback executed successfully',
+        'operation_id', p_operation_id,
+        'rolled_back_count', v_rolled_back_count,
         'reverted_docs', to_jsonb(v_reverted_docs)
     );
 END;
 $$;
-
-REVOKE EXECUTE ON FUNCTION public.reassign_students_atomically(JSONB) FROM public;
-REVOKE EXECUTE ON FUNCTION public.reassign_students_atomically(JSONB) FROM authenticated;
-REVOKE EXECUTE ON FUNCTION public.reassign_students_atomically(JSONB) FROM anon;
-GRANT  EXECUTE ON FUNCTION public.reassign_students_atomically(JSONB) TO service_role;
 
 REVOKE EXECUTE ON FUNCTION public.execute_reassignment_rollback(TEXT, TEXT, TEXT, JSONB) FROM public;
 REVOKE EXECUTE ON FUNCTION public.execute_reassignment_rollback(TEXT, TEXT, TEXT, JSONB) FROM authenticated;
@@ -3292,203 +3729,8 @@ COMMENT ON TABLE public.waiting_flags IS 'Student waiting signals at bus stops';
 COMMENT ON TABLE public.active_trips IS 'Multi-driver lock system - Live trip records with heartbeat for exclusive bus operation';
 
 -- =============================================================================
--- 12. PAYMENT IMMUTABILITY, CONSTRAINTS & ANALYTICS AGGREGATES
+-- 12. ATOMIC CUMULATIVE PAYMENT REFUND & SEAT RECOVERY
 -- =============================================================================
-
-CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_unique_razorpay_payment_id
-ON public.payments(razorpay_payment_id)
-WHERE razorpay_payment_id IS NOT NULL;
-
-CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_one_completed_per_session
-ON public.payments(student_uid, session_start_year, session_end_year)
-WHERE status = 'Completed';
-
-CREATE OR REPLACE FUNCTION public.protect_completed_payments()
-RETURNS TRIGGER AS $$
-BEGIN
-    -- 1. DELETE PROTECTION: Forbid deleting any finalized, duplicate, unresolved, refunded, refund-denied, or rejected payment record
-    IF TG_OP = 'DELETE' THEN
-        IF OLD.status IN ('Completed', 'Duplicate_Pending_Refund', 'Captured_Pending_Review', 'Refunded', 'Refund_Denied', 'Rejected') THEN
-            RAISE EXCEPTION 'Cannot delete finalized or audit payment record %', OLD.payment_id;
-        END IF;
-        RETURN OLD;
-    ELSIF TG_OP = 'UPDATE' THEN
-        -- 2. IMMUTABILITY OF IDENTITY & FINANCIAL FIELDS FOR FINALIZED / AUDIT RECORDS
-        -- Uses NULL-safe IS DISTINCT FROM comparison for all fields including nullable provider identifiers
-        IF OLD.status IN ('Completed', 'Duplicate_Pending_Refund', 'Refunded', 'Refund_Denied', 'Rejected') AND (
-            NEW.amount IS DISTINCT FROM OLD.amount OR
-            NEW.currency IS DISTINCT FROM OLD.currency OR
-            NEW.method IS DISTINCT FROM OLD.method OR
-            NEW.student_uid IS DISTINCT FROM OLD.student_uid OR
-            NEW.student_id IS DISTINCT FROM OLD.student_id OR
-            NEW.payment_id IS DISTINCT FROM OLD.payment_id OR
-            NEW.razorpay_payment_id IS DISTINCT FROM OLD.razorpay_payment_id OR
-            NEW.razorpay_order_id IS DISTINCT FROM OLD.razorpay_order_id OR
-            NEW.session_start_year IS DISTINCT FROM OLD.session_start_year OR
-            NEW.session_end_year IS DISTINCT FROM OLD.session_end_year
-        ) THEN
-            RAISE EXCEPTION 'Cannot mutate financial or identity fields of finalized/audit payment record % (current status: %)', OLD.payment_id, OLD.status;
-        ELSIF OLD.status = 'Captured_Pending_Review' THEN
-            -- Financial, method, and transaction identifiers are strictly immutable on Captured_Pending_Review
-            IF (
-                NEW.amount IS DISTINCT FROM OLD.amount OR
-                NEW.currency IS DISTINCT FROM OLD.currency OR
-                NEW.method IS DISTINCT FROM OLD.method OR
-                NEW.student_uid IS DISTINCT FROM OLD.student_uid OR
-                NEW.payment_id IS DISTINCT FROM OLD.payment_id OR
-                NEW.razorpay_payment_id IS DISTINCT FROM OLD.razorpay_payment_id OR
-                NEW.razorpay_order_id IS DISTINCT FROM OLD.razorpay_order_id
-            ) THEN
-                RAISE EXCEPTION 'Cannot mutate financial or provider identity fields of Captured_Pending_Review payment record %', OLD.payment_id;
-            END IF;
-
-            -- If remaining in Captured_Pending_Review, session years cannot be mutated without a formal status transition
-            IF NEW.status = 'Captured_Pending_Review' AND (
-                NEW.session_start_year IS DISTINCT FROM OLD.session_start_year OR
-                NEW.session_end_year IS DISTINCT FROM OLD.session_end_year
-            ) THEN
-                RAISE EXCEPTION 'Cannot alter session fields of Captured_Pending_Review record % without reconciling to Completed', OLD.payment_id;
-            END IF;
-        END IF;
-
-        -- 3. LIFECYCLE TRANSITION CONSTRAINTS
-        -- A. Completed transition constraints:
-        -- Completed may ONLY transition to 'Refunded' when a verified full refund is recorded with complete audit evidence.
-        -- Any other status change is strictly forbidden.
-        IF OLD.status = 'Completed' AND NEW.status IS DISTINCT FROM OLD.status THEN
-            IF NEW.status = 'Refunded' THEN
-                -- Explicit safe refund transition requirements:
-                -- 1. Authorized actor recorded
-                IF NEW.approved_by IS NULL THEN
-                    RAISE EXCEPTION 'Cannot transition Completed payment % to Refunded without authorized actor (approved_by)', OLD.payment_id;
-                END IF;
-                -- 2. Timestamp recorded
-                IF NEW.approved_at IS NULL THEN
-                    RAISE EXCEPTION 'Cannot transition Completed payment % to Refunded without refund timestamp (approved_at)', OLD.payment_id;
-                END IF;
-                -- 3. External refund reference in metadata
-                IF NEW.metadata IS NULL OR (
-                    (NEW.metadata->>'refund_id' IS NULL OR TRIM(NEW.metadata->>'refund_id') = '') AND
-                    (NEW.metadata->>'external_refund_ref' IS NULL OR TRIM(NEW.metadata->>'external_refund_ref') = '') AND
-                    (NEW.metadata->>'razorpay_refund_id' IS NULL OR TRIM(NEW.metadata->>'razorpay_refund_id') = '')
-                ) THEN
-                    RAISE EXCEPTION 'Cannot transition Completed payment % to Refunded without external refund reference in metadata', OLD.payment_id;
-                END IF;
-                -- 4. Cumulative refunded amount must equal or exceed original captured amount
-                IF NEW.metadata IS NULL OR NEW.metadata->>'refunded_amount' IS NULL OR
-                   (NEW.metadata->>'refunded_amount')::NUMERIC < (OLD.amount - 0.01) THEN
-                    RAISE EXCEPTION 'Cannot transition Completed payment % to Refunded: cumulative refunded amount (%) must equal or exceed original captured amount (%)',
-                        OLD.payment_id, COALESCE(NEW.metadata->>'refunded_amount', '0'), OLD.amount;
-                END IF;
-            ELSE
-                RAISE EXCEPTION 'Cannot mutate status of Completed payment record %: permitted transition is only to Refunded upon verified full refund (attempted: %)', OLD.payment_id, NEW.status;
-            END IF;
-        END IF;
-
-        -- B. Duplicate_Pending_Refund may only transition to 'Refunded' or 'Refund_Denied' (manual audit outcomes)
-        IF OLD.status = 'Duplicate_Pending_Refund' AND NEW.status IS DISTINCT FROM OLD.status THEN
-            IF NEW.status NOT IN ('Refunded', 'Refund_Denied') THEN
-                RAISE EXCEPTION 'Invalid status transition for Duplicate_Pending_Refund record %: permitted transitions are only Refunded or Refund_Denied (attempted: %)', OLD.payment_id, NEW.status;
-            END IF;
-        END IF;
-
-        -- C. Captured_Pending_Review reconciliation transition:
-        -- Permitted transitions are only: Completed, Duplicate_Pending_Refund, Refunded, or Refund_Denied
-        IF OLD.status = 'Captured_Pending_Review' AND NEW.status IS DISTINCT FROM OLD.status THEN
-            IF NEW.status = 'Completed' THEN
-                -- Explicit safe reconciliation operation requirements:
-                -- 1. Valid session bounds: start < end
-                IF NEW.session_start_year IS NULL OR NEW.session_end_year IS NULL OR NEW.session_start_year >= NEW.session_end_year THEN
-                    RAISE EXCEPTION 'Cannot resolve Captured_Pending_Review % to Completed without valid session boundaries (start < end)', OLD.payment_id;
-                END IF;
-                -- 2. Authorized actor recorded
-                IF NEW.approved_by IS NULL THEN
-                    RAISE EXCEPTION 'Cannot reconcile Captured_Pending_Review % to Completed without authorized actor (approved_by)', OLD.payment_id;
-                END IF;
-                -- 3. Timestamp recorded
-                IF NEW.approved_at IS NULL THEN
-                    RAISE EXCEPTION 'Cannot reconcile Captured_Pending_Review % to Completed without reconciliation timestamp (approved_at)', OLD.payment_id;
-                END IF;
-                -- 4. Audit evidence documented in metadata
-                IF NEW.metadata IS NULL OR NEW.metadata->>'reconciliation_evidence' IS NULL OR TRIM(NEW.metadata->>'reconciliation_evidence') = '' THEN
-                    RAISE EXCEPTION 'Cannot reconcile Captured_Pending_Review % to Completed without documented reconciliation_evidence in metadata', OLD.payment_id;
-                END IF;
-            ELSIF NEW.status NOT IN ('Duplicate_Pending_Refund', 'Refunded', 'Refund_Denied') THEN
-                RAISE EXCEPTION 'Invalid status transition for Captured_Pending_Review record %: permitted transitions are Completed (with valid session and audit evidence), Duplicate_Pending_Refund, Refunded, or Refund_Denied (attempted: %)', OLD.payment_id, NEW.status;
-            END IF;
-        END IF;
-
-        -- D. External refund verification requirement: transition to Refunded requires external refund reference and authorized actor
-        IF NEW.status = 'Refunded' AND OLD.status <> 'Refunded' THEN
-            IF NEW.approved_by IS NULL THEN
-                RAISE EXCEPTION 'Cannot mark payment % as Refunded without authorized actor (approved_by)', OLD.payment_id;
-            END IF;
-            IF NEW.metadata IS NULL OR (
-                (NEW.metadata->>'refund_id' IS NULL OR TRIM(NEW.metadata->>'refund_id') = '') AND
-                (NEW.metadata->>'external_refund_ref' IS NULL OR TRIM(NEW.metadata->>'external_refund_ref') = '') AND
-                (NEW.metadata->>'razorpay_refund_id' IS NULL OR TRIM(NEW.metadata->>'razorpay_refund_id') = '')
-            ) THEN
-                RAISE EXCEPTION 'Cannot mark payment % as Refunded without external refund reference in metadata (refund_id, external_refund_ref, or razorpay_refund_id)', OLD.payment_id;
-            END IF;
-        END IF;
-
-        -- E. Refund denial audit requirement: transition to Refund_Denied requires denial reason and authorized actor
-        IF NEW.status = 'Refund_Denied' AND OLD.status <> 'Refund_Denied' THEN
-            IF NEW.approved_by IS NULL THEN
-                RAISE EXCEPTION 'Cannot mark payment % as Refund_Denied without authorized actor (approved_by)', OLD.payment_id;
-            END IF;
-            IF NEW.metadata IS NULL OR (NEW.metadata->>'denial_reason' IS NULL OR TRIM(NEW.metadata->>'denial_reason') = '') THEN
-                RAISE EXCEPTION 'Cannot mark payment % as Refund_Denied without documented denial_reason in metadata', OLD.payment_id;
-            END IF;
-        END IF;
-
-        -- F. Refunded, Refund_Denied and Rejected are terminal: once marked, status cannot change
-        IF OLD.status IN ('Refunded', 'Refund_Denied', 'Rejected') AND NEW.status IS DISTINCT FROM OLD.status THEN
-            RAISE EXCEPTION 'Cannot mutate status of terminal payment record % (status: %)', OLD.payment_id, OLD.status;
-        END IF;
-    END IF;
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-DROP TRIGGER IF EXISTS protect_completed_payments_trigger ON public.payments;
-CREATE TRIGGER protect_completed_payments_trigger
-    BEFORE UPDATE OR DELETE ON public.payments
-    FOR EACH ROW
-    EXECUTE FUNCTION public.protect_completed_payments();
-
-CREATE OR REPLACE FUNCTION public.get_payment_analytics_aggregates()
-RETURNS TABLE (
-  total_payments BIGINT,
-  completed_payments BIGINT,
-  pending_payments BIGINT,
-  duplicate_refund_count BIGINT,
-  unresolved_review_count BIGINT,
-  refund_denied_count BIGINT,
-  total_revenue NUMERIC,
-  online_payments BIGINT,
-  offline_payments BIGINT
-) AS $$
-BEGIN
-  RETURN QUERY
-  SELECT
-    COUNT(*)::BIGINT AS total_payments,
-    COUNT(*) FILTER (WHERE status = 'Completed' OR LOWER(status) = 'completed')::BIGINT AS completed_payments,
-    COUNT(*) FILTER (WHERE status = 'Pending' OR LOWER(status) = 'pending')::BIGINT AS pending_payments,
-    COUNT(*) FILTER (WHERE status = 'Duplicate_Pending_Refund' OR LOWER(status) = 'duplicate_pending_refund')::BIGINT AS duplicate_refund_count,
-    COUNT(*) FILTER (WHERE status = 'Captured_Pending_Review' OR LOWER(status) = 'captured_pending_review')::BIGINT AS unresolved_review_count,
-    COUNT(*) FILTER (WHERE status = 'Refund_Denied' OR LOWER(status) = 'refund_denied')::BIGINT AS refund_denied_count,
-    COALESCE(SUM(amount) FILTER (WHERE status = 'Completed' OR LOWER(status) = 'completed'), 0)::NUMERIC AS total_revenue,
-    COUNT(*) FILTER (WHERE (status = 'Completed' OR LOWER(status) = 'completed') AND (method = 'Online' OR LOWER(method) = 'online'))::BIGINT AS online_payments,
-    COUNT(*) FILTER (WHERE (status = 'Completed' OR LOWER(status) = 'completed') AND (method = 'Offline' OR LOWER(method) = 'offline'))::BIGINT AS offline_payments
-  FROM public.payments;
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
-
-REVOKE EXECUTE ON FUNCTION public.get_payment_analytics_aggregates() FROM public;
-REVOKE EXECUTE ON FUNCTION public.get_payment_analytics_aggregates() FROM anon;
-REVOKE EXECUTE ON FUNCTION public.get_payment_analytics_aggregates() FROM authenticated;
-GRANT EXECUTE ON FUNCTION public.get_payment_analytics_aggregates() TO service_role;
 
 -- 6. Atomic Cumulative Refund Function
 CREATE OR REPLACE FUNCTION public.process_payment_refund_atomic(
@@ -3501,6 +3743,7 @@ CREATE OR REPLACE FUNCTION public.process_payment_refund_atomic(
 RETURNS JSONB AS $$
 DECLARE
     v_payment RECORD;
+    v_student_rec RECORD;
     v_original_paise BIGINT;
     v_existing_history JSONB;
     v_trimmed_ref TEXT;
@@ -3514,6 +3757,7 @@ DECLARE
     v_now_iso TEXT := to_char(v_now AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"');
     v_updated_metadata JSONB;
     v_actor JSONB;
+    v_other_completed INTEGER := 0;
 BEGIN
     -- Input sanitation
     v_trimmed_ref := TRIM(COALESCE(p_refund_id, ''));
@@ -3551,7 +3795,9 @@ BEGIN
                         'success', true,
                         'is_partial', false,
                         'cumulative_refunded', COALESCE((v_payment.metadata->>'refunded_amount')::NUMERIC, v_payment.amount),
-                        'already_processed', true
+                        'already_processed', true,
+                        'prior_status', v_payment.status,
+                        'student_uid', v_payment.student_uid
                     );
                 END IF;
             END LOOP;
@@ -3588,7 +3834,6 @@ BEGIN
         IF v_elem->>'refund_id' = v_trimmed_ref AND v_elem->>'status' = 'processed' THEN
             v_already_processed := TRUE;
         ELSE
-            -- Add to updated history preserving non-matching items
             v_updated_history := v_updated_history || jsonb_build_array(v_elem);
             IF v_elem->>'status' = 'processed' THEN
                 IF v_elem ? 'amount_paise' AND (v_elem->>'amount_paise') IS NOT NULL THEN
@@ -3605,7 +3850,9 @@ BEGIN
             'success', true,
             'is_partial', (COALESCE((v_payment.metadata->>'refunded_amount')::NUMERIC, 0) < v_payment.amount),
             'cumulative_refunded', COALESCE((v_payment.metadata->>'refunded_amount')::NUMERIC, v_payment.amount),
-            'already_processed', true
+            'already_processed', true,
+            'prior_status', v_payment.status,
+            'student_uid', v_payment.student_uid
         );
     END IF;
 
@@ -3663,6 +3910,60 @@ BEGIN
             approved_at = v_now,
             metadata = v_updated_metadata
         WHERE payment_id = p_payment_id;
+
+        -- SEAM FIX 4: If payment was Completed, check if student has any other valid Completed payment covering active transit
+        IF v_payment.status = 'Completed' AND v_payment.student_uid IS NOT NULL THEN
+            SELECT COUNT(*) INTO v_other_completed
+            FROM public.payments
+            WHERE student_uid = v_payment.student_uid
+              AND payment_id <> p_payment_id
+              AND status = 'Completed'
+              AND (
+                  valid_until > v_now
+                  OR (session_start_year = v_payment.session_start_year AND session_end_year = v_payment.session_end_year)
+              );
+
+            IF v_other_completed = 0 THEN
+                SELECT uid, bus_id, shift, status, seat_released_at
+                INTO v_student_rec
+                FROM public.student_profiles
+                WHERE uid = v_payment.student_uid
+                FOR UPDATE;
+
+                IF FOUND THEN
+                    UPDATE public.student_profiles
+                    SET status = 'soft_blocked',
+                        soft_block = COALESCE(soft_block, v_now),
+                        seat_released_at = COALESCE(seat_released_at, v_now),
+                        updated_at = v_now
+                    WHERE uid = v_payment.student_uid;
+
+                    IF v_student_rec.seat_released_at IS NULL AND v_student_rec.bus_id IS NOT NULL THEN
+                        PERFORM public.bus_decrement_capacity(v_student_rec.bus_id, COALESCE(v_student_rec.shift, 'Morning'));
+                    END IF;
+                END IF;
+            ELSE
+                -- Student still holds another valid Completed pass (e.g. current session). Restore profile validity to that payment.
+                SELECT valid_until, session_end_year INTO v_student_rec
+                FROM public.payments
+                WHERE student_uid = v_payment.student_uid
+                  AND payment_id <> p_payment_id
+                  AND status = 'Completed'
+                  AND valid_until > v_now
+                ORDER BY valid_until DESC
+                LIMIT 1;
+
+                IF FOUND THEN
+                    UPDATE public.student_profiles
+                    SET valid_until = COALESCE(v_student_rec.valid_until, valid_until),
+                        session_end_year = COALESCE(v_student_rec.session_end_year, session_end_year),
+                        status = 'active',
+                        updated_at = v_now
+                    WHERE uid = v_payment.student_uid;
+                END IF;
+            END IF;
+        END IF;
+
     ELSE
         -- Partial refund: retain existing status
         UPDATE public.payments
@@ -3671,10 +3972,15 @@ BEGIN
     END IF;
 
     RETURN jsonb_build_object(
-        'success', true,
-        'is_partial', NOT v_is_fully_refunded,
-        'cumulative_refunded', (v_new_cumulative_paise::NUMERIC / 100),
-        'cumulative_refunded_paise', v_new_cumulative_paise
+        'success',                   true,
+        'is_partial',                NOT v_is_fully_refunded,
+        'cumulative_refunded',       (v_new_cumulative_paise::NUMERIC / 100),
+        'cumulative_refunded_paise', v_new_cumulative_paise,
+        'prior_status',              v_payment.status,
+        'student_uid',               v_payment.student_uid,
+        'student_soft_blocked',      (v_is_fully_refunded AND v_payment.status = 'Completed' AND v_other_completed = 0),
+        'session_start_year',        v_payment.session_start_year,
+        'session_end_year',          v_payment.session_end_year
     );
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
