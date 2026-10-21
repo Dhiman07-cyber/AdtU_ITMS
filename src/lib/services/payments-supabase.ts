@@ -73,6 +73,8 @@ export interface CreatePaymentInput {
     razorpayOrderId?: string;
     purpose?: string;
     notes?: string;
+    busId?: string;
+    routeId?: string;
     metadata?: Record<string, unknown>;
     approvedBy?: {
         type?: string;
@@ -282,8 +284,8 @@ class PaymentsSupabaseService {
 
                 // ENCRYPTED PII FIELDS - stored in existing columns
                 student_name: input.studentName ? encryptData(input.studentName) : null,
-                student_id: input.studentId ? encryptData(input.studentId) : null,
-                offline_transaction_id: input.offlineTransactionId ? encryptData(input.offlineTransactionId) : null,
+                // Plaintext offline transaction reference to support unique index enforcement (idx_payments_unique_offline_tx_id)
+                offline_transaction_id: input.offlineTransactionId ? input.offlineTransactionId.trim() : null,
 
                 // NOT encrypted - needed for Razorpay reconciliation/lookup
                 razorpay_payment_id: input.razorpayPaymentId,
@@ -296,8 +298,12 @@ class PaymentsSupabaseService {
             if (input.purpose) {
                 record.purpose = input.purpose;
             }
-            if (input.metadata) {
-                record.metadata = input.metadata;
+            if (input.metadata || input.busId || input.routeId) {
+                record.metadata = {
+                    ...(input.metadata || {}),
+                    ...(input.busId ? { bus_id: input.busId, allocated_bus_id: input.busId } : {}),
+                    ...(input.routeId ? { route_id: input.routeId, allocated_route_id: input.routeId } : {}),
+                };
             }
 
             if (documentSignature) {
@@ -470,7 +476,7 @@ class PaymentsSupabaseService {
                 transaction_date: transactionDateIso,
                 student_name: input.studentName ? encryptData(input.studentName) : null,
                 student_id: input.studentId ? encryptData(input.studentId) : null,
-                offline_transaction_id: input.offlineTransactionId ? encryptData(input.offlineTransactionId) : null,
+                offline_transaction_id: input.offlineTransactionId ? input.offlineTransactionId.trim() : null,
                 razorpay_payment_id: input.razorpayPaymentId,
                 razorpay_order_id: input.razorpayOrderId,
                 approved_by: approvedBy,
@@ -485,12 +491,12 @@ class PaymentsSupabaseService {
             // ATOMIC TRANSITION: If a pending payment record already exists for this order
             // (e.g. created at checkout initiation), transition it atomically to Completed
             // with the final captured payment_id and provider identifiers.
-            if (input.razorpayOrderId) {
+            if (input.razorpayOrderId && input.status === 'Completed') {
                 try {
                     const { data: pendingRow } = await this.supabase
                         .from('payments')
                         .select('payment_id, status')
-                        .eq('razorpay_order_id', input.razorpayOrderId)
+                        .or(`razorpay_order_id.eq.${input.razorpayOrderId},payment_id.eq.${input.razorpayOrderId}`)
                         .eq('status', 'Pending')
                         .maybeSingle();
 
@@ -523,6 +529,10 @@ class PaymentsSupabaseService {
                     const errorDetail = String((error as any).details || (error as any).message || '');
 
                     // Fast-path: Check explicit constraint names in PostgreSQL error message
+                    if (errorDetail.includes('idx_payments_unique_offline_tx_id')) {
+                        throw new Error('DUPLICATE_OFFLINE_TRANSACTION_ID');
+                    }
+
                     if (
                         errorDetail.includes('idx_payments_unique_razorpay_payment_id') ||
                         errorDetail.includes('payments_razorpay_payment_id_key')
@@ -1051,6 +1061,44 @@ class PaymentsSupabaseService {
 
             const res = rpcData as any;
             if (res.success) {
+                // SEAM FIX 4: If an unapproved application is linked to this refunded payment, cancel/reject it
+                try {
+                    const { data: linkedApps } = await this.supabase
+                        .from('applications')
+                        .select('application_id, state')
+                        .or(`payment_id.eq.${paymentId},application_id.eq.online_${paymentId}`)
+                        .in('state', ['submitted', 'verified_upcoming', 'payment_pending']);
+
+                    if (linkedApps && linkedApps.length > 0) {
+                        for (const linkedApp of linkedApps) {
+                            await this.supabase
+                                .from('applications')
+                                .update({
+                                    state: 'rejected',
+                                    rejection_reason: 'Payment refunded by finance administrator',
+                                    rejected_at: now,
+                                })
+                                .eq('application_id', linkedApp.application_id);
+                        }
+                    }
+                } catch (appCleanupErr) {
+                    console.warn('[PaymentsSupabaseService] Linked application refund cleanup warning:', appCleanupErr);
+                }
+
+                if (!res.is_partial && (res.prior_status === 'Completed' || res.student_uid)) {
+                    const targetStudentUid = res.student_uid;
+                    if (targetStudentUid) {
+                        try {
+                            const { invalidateStudentAssignmentCache, cancelStudentActiveWaitingFlags } = await import('@/domains/student');
+                            await invalidateStudentAssignmentCache(targetStudentUid);
+                            if (res.student_soft_blocked) {
+                                await cancelStudentActiveWaitingFlags(targetStudentUid, 'payment_refunded');
+                            }
+                        } catch (cacheErr) {
+                            console.warn('[PaymentsSupabaseService] Post-refund cache invalidation warning:', cacheErr);
+                        }
+                    }
+                }
                 return {
                     success: true,
                     isPartial: Boolean(res.is_partial),
@@ -1304,21 +1352,26 @@ class PaymentsSupabaseService {
             });
         }
 
-        // Batch query all missing profile UIDs in a single SQL query
+        // Batch query all missing profile UIDs in chunks of 200 to prevent PostgREST URL length overflow
         const profileMap = new Map<string, { full_name?: string; enrollment_id?: string; valid_until?: string }>();
-        try {
-            const { data: profiles } = await this.supabase
-                .from('student_profiles')
-                .select('uid, full_name, enrollment_id, valid_until')
-                .in('uid', Array.from(uidsNeedingEnrichment));
+        const uidList = Array.from(uidsNeedingEnrichment);
+        const CHUNK_SIZE = 200;
+        for (let i = 0; i < uidList.length; i += CHUNK_SIZE) {
+            const chunk = uidList.slice(i, i + CHUNK_SIZE);
+            try {
+                const { data: profiles } = await this.supabase
+                    .from('student_profiles')
+                    .select('uid, full_name, enrollment_id, valid_until')
+                    .in('uid', chunk);
 
-            if (profiles) {
-                for (const prof of profiles) {
-                    profileMap.set(prof.uid, prof);
+                if (profiles) {
+                    for (const prof of profiles) {
+                        profileMap.set(prof.uid, prof);
+                    }
                 }
+            } catch {
+                // Ignore batch query error
             }
-        } catch {
-            // Ignore batch query error
         }
 
         return decryptedRecords.map(decrypted => {
@@ -1953,10 +2006,16 @@ class PaymentsSupabaseService {
                 return false;
             }
 
-            // CRITICAL INVARIANT: An already-active (healed) entitlement must NEVER be downgraded
+            // CRITICAL INVARIANT: An already-active (healed) entitlement must NEVER be downgraded by recovery sweeps.
+            // Explicit transitions (e.g. application rejection marking unconsumed) are permitted.
             const currentStatus = current.metadata?.entitlement_status;
             const newStatus = metadataUpdates.entitlement_status;
-            if (currentStatus === 'active' && newStatus && newStatus !== 'active') {
+            const allowTransition = Boolean(
+                (options as any)?.allowEntitlementStatusTransition ||
+                newStatus === 'application_rejected_unconsumed'
+            );
+
+            if (currentStatus === 'active' && newStatus && newStatus !== 'active' && !allowTransition) {
                 console.warn(`[PaymentsSupabaseService] Refusing to downgrade active entitlement for ${paymentId} to ${newStatus}`);
                 return false;
             }
@@ -1978,9 +2037,9 @@ class PaymentsSupabaseService {
                 .update({ metadata: updatedMetadata })
                 .eq('payment_id', current.payment_id);
 
-            // DB-level guard: If not setting to active, never overwrite a row that became active concurrently.
+            // DB-level guard: If not setting to active and not explicit transition, never overwrite a row that became active concurrently.
             // NULL-safe: permits rows where metadata is NULL or entitlement_status is NULL or non-active.
-            if (newStatus && newStatus !== 'active') {
+            if (newStatus && newStatus !== 'active' && !allowTransition) {
                 query = query.or('metadata.is.null,metadata->>entitlement_status.is.null,metadata->>entitlement_status.neq.active');
             }
 

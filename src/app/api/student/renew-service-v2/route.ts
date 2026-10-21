@@ -42,6 +42,18 @@ export const POST = withSecurity<RenewServiceBody>(
     }
 
     if (paymentMode === 'online') {
+      const currentSessionEnd = Number((student as any).sessionEndYear || 0);
+      const currentYear = new Date().getUTCFullYear();
+      const existingValidUntil = (student as any).validUntil;
+      let baseYear = currentYear;
+      if (existingValidUntil && new Date(existingValidUntil) > new Date() && currentSessionEnd > 0) {
+        baseYear = currentSessionEnd;
+      } else if (currentSessionEnd > 0) {
+        baseYear = currentSessionEnd;
+      }
+      const trustedSessionStartYear = baseYear;
+      const trustedSessionEndYear = baseYear + durationYears;
+
       const receipt = `renewal_${enrollmentId || userId}_${Date.now()}`;
       const order = await createRazorpayOrder(totalFee, receipt, {
         userId,
@@ -49,8 +61,42 @@ export const POST = withSecurity<RenewServiceBody>(
         enrollmentId,
         studentName,
         durationYears: durationYears.toString(),
+        sessionStartYear: String(trustedSessionStartYear),
+        sessionEndYear: String(trustedSessionEndYear),
         type: 'renewal',
+        purpose: 'renewal',
       });
+
+      // Persist the pre-checkout Pending row in public.payments (matching create-order/route.ts)
+      const { paymentsSupabaseService } = await import('@/lib/services/payments-supabase');
+      try {
+        await paymentsSupabaseService.upsertPayment({
+          paymentId: order.id,
+          studentUid: userId,
+          studentId: enrollmentId,
+          studentName,
+          amount: totalFee,
+          method: 'Online',
+          status: 'Pending',
+          sessionStartYear: trustedSessionStartYear,
+          sessionEndYear: trustedSessionEndYear,
+          durationYears,
+          razorpayOrderId: order.id,
+          purpose: 'Order created for renewal. Awaiting checkout capture.',
+          metadata: {
+            order_type: 'renewal',
+            receipt_id: receipt,
+            checkout_initiated_at: new Date().toISOString(),
+            entitlement_status: 'pending_checkout',
+          },
+        });
+      } catch (dbErr: any) {
+        console.error('[renew-service-v2] Database write failure for pending payment:', dbErr);
+        return NextResponse.json(
+          { error: 'Database service failure: Unable to initiate renewal registration. Please try again.' },
+          { status: 500 }
+        );
+      }
 
       return NextResponse.json({
         success: true,
@@ -62,6 +108,48 @@ export const POST = withSecurity<RenewServiceBody>(
     }
 
     if (paymentMode === 'offline') {
+      const cleanTxId = transactionId ? transactionId.trim() : '';
+      if (cleanTxId) {
+        const { getSupabaseServer } = await import('@/lib/supabase-server');
+        const supabase = getSupabaseServer();
+
+        // 1. Check if transaction ID was already used in public.payments
+        const { data: existingPay } = await supabase
+          .from('payments')
+          .select('payment_id')
+          .ilike('offline_transaction_id', cleanTxId)
+          .in('status', ['Completed', 'Pending'])
+          .limit(1);
+
+        if (existingPay && existingPay.length > 0) {
+          return NextResponse.json(
+            { error: 'This bank transaction reference ID has already been used.' },
+            { status: 409 }
+          );
+        }
+
+        // 2. Check if transaction ID was already submitted in active public.applications
+        const { data: existingApps } = await supabase
+          .from('applications')
+          .select('application_id, form_data')
+          .not('state', 'in', '("rejected","cancelled","expired")')
+          .limit(100);
+
+        if (existingApps) {
+          const match = existingApps.find(a => {
+            const fd = a.form_data || {};
+            const ref = fd.paymentInfo?.paymentReference || fd.transactionId;
+            return typeof ref === 'string' && ref.trim().toLowerCase() === cleanTxId.toLowerCase();
+          });
+          if (match) {
+            return NextResponse.json(
+              { error: 'This bank transaction reference ID has already been used.' },
+              { status: 409 }
+            );
+          }
+        }
+      }
+
       // D8: Insert renewal application into PostgreSQL instead of Firestore.
       // Deterministic ID for deduplication: same student + same day = same ID.
       const dailyBucket = new Date().toISOString().slice(0, 10);

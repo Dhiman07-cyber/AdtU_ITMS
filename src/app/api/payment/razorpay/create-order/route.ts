@@ -1,4 +1,4 @@
-import { getSystemConfig } from '@/domains/admin';
+import { getSystemConfig, invalidateConfigCache } from '@/domains/admin';
 import { getByUid as getStudentByUid } from '@/domains/student';
 import { getCurrentBusFee } from '@/lib/bus-fee-service';
 import { createRazorpayOrder, generateReceiptId } from '@/lib/payment/razorpay.service';
@@ -29,14 +29,35 @@ export const POST = withSecurity<CreateOrderBody>(
             getStudentByUid(trustedUserId).catch(() => null),
         ]);
 
-        const busFeeAmount = Number(busFeeResult?.amount ?? systemConfigResult.data.busFee?.amount ?? 0);
-        const expectedAmount = busFeeAmount * trustedDurationYears;
+        let busFeeAmount = Number(busFeeResult?.amount ?? systemConfigResult.data.busFee?.amount ?? 0);
+        let expectedAmount = busFeeAmount * trustedDurationYears;
 
         if (!busFeeAmount || busFeeAmount <= 0 || !amountsMatch(amount, expectedAmount)) {
-            return NextResponse.json(
-                { success: false, error: 'Payment amount does not match the official bus fee' },
-                { status: 400 }
-            );
+            // Zero-Redis-Load Multi-Node Cache Self-Healing:
+            // If an Admin updated the bus fee on Instance A while Instance B's 5-minute configMemoryCache
+            // is still warm, invalidate local L1 cache and re-read fresh from PostgreSQL before rejecting.
+            invalidateConfigCache('config');
+            const [freshBusFeeResult, freshSystemConfigResult] = await Promise.all([
+                getCurrentBusFee().catch(() => null),
+                getSystemConfig().catch(() => null),
+            ]);
+
+            const freshBusFeeAmount = Number(freshBusFeeResult?.amount ?? freshSystemConfigResult?.data?.busFee?.amount ?? 0);
+            const freshExpectedAmount = freshBusFeeAmount * trustedDurationYears;
+
+            if (!freshBusFeeAmount || freshBusFeeAmount <= 0 || !amountsMatch(amount, freshExpectedAmount)) {
+                return NextResponse.json(
+                    {
+                        success: false,
+                        error: 'Payment amount does not match the official bus fee',
+                        currentFee: freshExpectedAmount,
+                    },
+                    { status: 400 }
+                );
+            }
+
+            busFeeAmount = freshBusFeeAmount;
+            expectedAmount = freshExpectedAmount;
         }
 
         const studentData = student as any;

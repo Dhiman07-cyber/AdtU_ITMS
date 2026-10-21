@@ -1,8 +1,8 @@
 import * as Application from '@/domains/application';
-import { getUserById } from '@/domains/identity';
 import { deleteAsset,extractPublicId } from '@/lib/cloudinary-server';
-import { adminAuth } from '@/lib/firebase-admin';
+import { verifyApiAuth } from '@/lib/security/api-auth';
 import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
+import { RateLimits, checkRateLimit, createRateLimitId } from '@/lib/security/rate-limiter';
 import { NextRequest,NextResponse } from 'next/server';
 
 /**
@@ -20,15 +20,22 @@ import { NextRequest,NextResponse } from 'next/server';
  */
 export async function POST(request: NextRequest) {
   try {
-    const token = request.headers.get('Authorization')?.replace('Bearer ', '');
+    const auth = await verifyApiAuth(request, ['admin', 'moderator']);
+    if (!auth.authenticated) return auth.response;
 
-    if (!token) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const rateLimitId = createRateLimitId(auth.uid, 'renewal:reject');
+    const rateCheck = checkRateLimit(rateLimitId, RateLimits.UPDATE.maxRequests, RateLimits.UPDATE.windowMs);
+    if (!rateCheck.allowed) {
+      return NextResponse.json(
+        { error: 'Too many requests. Please wait before rejecting again.' },
+        {
+          status: 429,
+          headers: { 'Retry-After': String(Math.ceil(rateCheck.resetIn / 1000)) },
+        }
+      );
     }
 
-    const decodedToken = await adminAuth.verifyIdToken(token);
-    const uid = decodedToken.uid;
-
+    const uid = auth.uid;
     const body = await request.json();
     const { requestId, reason } = body;
 
@@ -36,18 +43,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Missing required fields: requestId, reason' }, { status: 400 });
     }
 
-    // Verify user is admin or moderator
-    const userProfile = await getUserById(uid);
-    if (!userProfile || !['admin', 'moderator'].includes(userProfile.role)) {
-      return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 });
-    }
-
     const permissionDenied = await requireModeratorPermission(
       {
         uid,
-        email: decodedToken.email || '',
-        role: userProfile.role,
-        name: userProfile.fullName || userProfile.name || '',
+        email: auth.email || '',
+        role: auth.role,
+        name: auth.name || '',
       },
       'payments',
       'canRejectOfflinePayment'
@@ -76,8 +77,8 @@ export async function POST(request: NextRequest) {
       requestId,
       {
         uid,
-        name: userProfile.fullName || userProfile.name || uid,
-        role: userProfile.role,
+        name: auth.name || uid,
+        role: auth.role,
       },
       reason
     );

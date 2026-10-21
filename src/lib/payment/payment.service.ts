@@ -492,7 +492,7 @@ async function executeProcessCapturedPayment(paymentDetails: {
             }
 
             let newValidUntil = calculateValidUntilDate(baseYear, durationYears, deadlineConfig);
-            let newSessionStartYear = existingSessionStartYear;
+            let newSessionStartYear = baseYear;
             let newSessionEndYear = baseYear + durationYears;
             let totalDurationYears = existingDurationYears + durationYears;
 
@@ -569,24 +569,34 @@ async function executeProcessCapturedPayment(paymentDetails: {
                         paymentId,
                         razorpayOrderId: orderId,
                         paymentStatus: 'paid',
+                        paymentInfo: {
+                            paymentMode: 'online',
+                            razorpayPaymentId: paymentId,
+                            razorpayOrderId: orderId,
+                            amountPaid: amount,
+                            paymentStatus: 'paid',
+                        },
                         requestedValidUntil: newValidUntil.toISOString(),
                         phoneNumber: studentPhone,
                         shift: studentData?.shift || 'Morning',
                         busId: studentData?.busId || '',
                         routeId: studentData?.routeId || '',
                         stop_name: studentData?.stop_name || studentData?.stopName || '',
-                        sessionStartYear: studentData?.sessionEndYear || baseYear,
-                        sessionEndYear: (studentData?.sessionEndYear || baseYear) + durationYears,
+                        sessionStartYear: baseYear,
+                        sessionEndYear: baseYear + durationYears,
                     },
                     {
                         applicationId,
                         applicationType: 'renewal',
+                        paymentId,
+                        paymentMode: 'online',
+                        amountPaid: amount,
                         shift: studentData?.shift || 'Morning',
                         busId: studentData?.busId || '',
                         routeId: studentData?.routeId || '',
                         stop_name: studentData?.stop_name || studentData?.stopName || '',
-                        sessionStartYear: studentData?.sessionEndYear || baseYear,
-                        sessionEndYear: (studentData?.sessionEndYear || baseYear) + durationYears,
+                        sessionStartYear: baseYear,
+                        sessionEndYear: baseYear + durationYears,
                     }
                 );
                 if (renewalSubmitRes && !renewalSubmitRes.success) {
@@ -610,6 +620,14 @@ async function executeProcessCapturedPayment(paymentDetails: {
                     application_id: applicationId,
                     activated_at: new Date().toISOString(),
                 }).catch(() => null);
+            }
+
+            // Cross-process entitlement cache invalidation
+            try {
+                const { invalidateStudentAssignmentCache } = await import('@/domains/student');
+                await invalidateStudentAssignmentCache(studentUid);
+            } catch (cacheErr) {
+                console.warn('[processCapturedPayment] Post-capture cache invalidation warning:', cacheErr);
             }
 
                 // Send notification to staff

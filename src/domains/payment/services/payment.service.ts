@@ -72,6 +72,9 @@ export async function upsertApprovalPayment(input: {
   razorpayPaymentId?: string;
   razorpayOrderId?: string;
   approvedAt?: Date;
+  busId?: string;
+  routeId?: string;
+  metadata?: Record<string, unknown>;
 }): Promise<string | null> {
   return paymentsSupabaseService.upsertPayment(input);
 }
@@ -83,7 +86,35 @@ export async function upsertApprovalPayment(input: {
  */
 export async function rejectApplicationPayment(
   paymentId: string,
-  rejectorInfo: { userId: string; name: string; empId?: string; role: string }
+  rejectorInfo: { userId: string; name: string; empId?: string; role: string },
+  rejectionReason?: string,
+  applicationId?: string
 ): Promise<boolean> {
-  return paymentsSupabaseService.updatePaymentStatus(paymentId, 'Rejected', rejectorInfo);
+  if (!paymentId) return false;
+  const payment = (await paymentsSupabaseService.getPaymentById(paymentId)) ||
+                  (await paymentsSupabaseService.getPaymentByRazorpayId(paymentId));
+  if (!payment) return false;
+
+  if (payment.status === 'Pending') {
+    return paymentsSupabaseService.updatePaymentStatus(payment.payment_id, 'Rejected', rejectorInfo);
+  }
+
+  if (payment.status === 'Completed') {
+    // SEAM FIX 3: Real captured money: never mutate Completed to Rejected (forbidden by DB trigger).
+    // Mark entitlement as unconsumed and flag for refund review so student can re-bind without double paying.
+    return paymentsSupabaseService.updatePaymentMetadata(
+      payment.payment_id,
+      {
+        entitlement_status: 'application_rejected_unconsumed',
+        requires_refund_review: true,
+        rejected_application_id: applicationId || null,
+        rejection_reason: rejectionReason || null,
+        rejected_by: rejectorInfo,
+        rejected_at: new Date().toISOString(),
+      },
+      { allowEntitlementStatusTransition: true } as any
+    );
+  }
+
+  return false;
 }

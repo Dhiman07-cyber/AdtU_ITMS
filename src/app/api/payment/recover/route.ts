@@ -142,6 +142,24 @@ export const GET = withSecurity(
             if (p.razorpay_order_id) allowedOrderIds.add(p.razorpay_order_id);
         });
 
+        // SEAM FIX 3: Check if student has a Completed payment from a rejected application that can be re-bound
+        const unconsumedPayment = studentPayments.find(p => 
+            p.status === 'Completed' && 
+            p.metadata?.entitlement_status === 'application_rejected_unconsumed'
+        );
+        if (unconsumedPayment && (!queryPaymentId || queryPaymentId === unconsumedPayment.payment_id)) {
+            return NextResponse.json({
+                success: true,
+                status: 'unconsumed_payment_available',
+                paymentId: unconsumedPayment.payment_id,
+                orderId: unconsumedPayment.razorpay_order_id,
+                amount: unconsumedPayment.amount,
+                sessionStartYear: unconsumedPayment.session_start_year,
+                sessionEndYear: unconsumedPayment.session_end_year,
+                message: 'You have an existing completed payment from a previous application that will be applied to your submission.'
+            });
+        }
+
         // Strict Security Ownership Verification:
         // Disallow clients trying to verify order/payment IDs that do not belong to targetUid
         if (queryPaymentId && !allowedPaymentIds.has(queryPaymentId)) {
@@ -157,11 +175,18 @@ export const GET = withSecurity(
         let resolvedPaymentId = queryPaymentId || appPaymentId || renewalPaymentId || '';
         let resolvedOrderId = queryOrderId || appOrderId || renewalOrderId || '';
 
+        let matchedPendingOnline: any = null;
         if (!resolvedOrderId && !resolvedPaymentId) {
-            const pendingOnline = studentPayments.find(p => p.status === 'Pending' && p.method === 'Online');
-            if (pendingOnline) {
-                resolvedOrderId = pendingOnline.razorpay_order_id || '';
-                resolvedPaymentId = pendingOnline.razorpay_payment_id || '';
+            matchedPendingOnline = studentPayments.find(p => {
+                if (p.status !== 'Pending') return false;
+                const createdAt = p.created_at ? new Date(p.created_at).getTime() : 0;
+                return (Date.now() - createdAt) <= 72 * 60 * 60 * 1000;
+            });
+            if (matchedPendingOnline) {
+                resolvedOrderId = matchedPendingOnline.razorpay_order_id || (matchedPendingOnline.payment_id?.startsWith('order_') ? matchedPendingOnline.payment_id : '');
+                resolvedPaymentId = matchedPendingOnline.razorpay_payment_id || '';
+                if (resolvedOrderId) allowedOrderIds.add(resolvedOrderId);
+                if (resolvedPaymentId) allowedPaymentIds.add(resolvedPaymentId);
             }
         }
 
@@ -265,14 +290,27 @@ export const GET = withSecurity(
 
                 if (status === 'captured') {
                     // Scenario A: Captured -> process it canonical style
-                    const notes = razorpayPayment.notes || {};
+                    let mergedNotes = { ...(razorpayPayment.notes || {}) };
+                    if ((!mergedNotes.sessionStartYear || !mergedNotes.userId) && (resolvedOrderId || razorpayPayment.order_id)) {
+                        try {
+                            const orderInfo = await withTimeout(fetchOrderDetails(resolvedOrderId || razorpayPayment.order_id), RAZORPAY_TIMEOUT_MS);
+                            if (orderInfo?.notes) {
+                                mergedNotes = { ...orderInfo.notes, ...mergedNotes };
+                            }
+                        } catch (e) {
+                            console.warn('[recover] Order notes fetch warning:', e);
+                        }
+                    }
+                    if (matchedPendingOnline?.metadata) {
+                        mergedNotes = { ...(matchedPendingOnline.metadata as any), ...mergedNotes };
+                    }
                     console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] recover: captured. Invoking processCapturedPayment...`);
                     const completion = await processCapturedPayment({
                         paymentId: resolvedPaymentId,
                         orderId: resolvedOrderId || razorpayPayment.order_id,
                         amount: Number(razorpayPayment.amount) / 100,
                         method: razorpayPayment.method || 'Online',
-                        notes,
+                        notes: mergedNotes,
                         source: 'recovery'
                     });
                     console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] recover: processCapturedPayment returned:`, JSON.stringify(completion));
@@ -299,7 +337,7 @@ export const GET = withSecurity(
                         });
                     }
 
-                    const rawPurpose = String(notes.type || notes.purpose || '');
+                    const rawPurpose = String(mergedNotes.type || mergedNotes.purpose || '');
                     const isRenewal = !rawPurpose.toLowerCase().includes('registration') && rawPurpose.toLowerCase() !== 'new_registration';
                     if (isRenewal) {
                         return NextResponse.json({

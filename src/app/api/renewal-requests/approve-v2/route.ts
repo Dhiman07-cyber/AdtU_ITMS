@@ -1,52 +1,50 @@
 import * as Application from '@/domains/application';
-import { deleteAsset,extractPublicId } from '@/lib/cloudinary-server';
-import { verifyToken } from '@/lib/firebase-admin';
+import { deleteAsset, extractPublicId } from '@/lib/cloudinary-server';
+import { getDeadlineConfig } from '@/lib/deadline-config-service';
+import { verifyApiAuth } from '@/lib/security/api-auth';
 import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
+import { checkRateLimit, createRateLimitId, RateLimits } from '@/lib/security/rate-limiter';
 import { safeErrorMessage } from '@/lib/security/safe-error';
-import { NextRequest,NextResponse } from 'next/server';
+import { calculateValidUntilDate } from '@/lib/utils/date-utils';
+import { NextRequest, NextResponse } from 'next/server';
 
 /**
  * POST /api/renewal-requests/approve-v2
  *
  * D8: Renewal approval migrated from Firestore transaction to Application domain API.
- * The Application.approve() method orchestrates:
- *   1. RPC validate + lock
- *   2. Student.update() (renewal path)
- *   3. Seat.assignSeat() (if renewal_after_soft_block)
- *   4. Payment (idempotent)
- *   5. Audit (idempotent)
- *   6. Notification (idempotent)
- *   7. RPC finalize (preserve as approved for renewal)
- *
- * Post-commit side effects (notifications, Cloudinary cleanup, email) remain here.
+ * Standardized auth via verifyApiAuth and RateLimits.UPDATE rate limiting.
  */
 export async function POST(request: NextRequest) {
   try {
-    const token = request.headers.get('Authorization')?.replace('Bearer ', '');
-    if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const auth = await verifyApiAuth(request, ['admin', 'moderator']);
+    if (!auth.authenticated) return auth.response;
+
+    const rateLimitId = createRateLimitId(auth.uid, 'renewal:approve-v2');
+    const rateCheck = checkRateLimit(rateLimitId, RateLimits.UPDATE.maxRequests, RateLimits.UPDATE.windowMs);
+    if (!rateCheck.allowed) {
+      return NextResponse.json(
+        { error: 'Too many requests. Please wait before approving again.' },
+        {
+          status: 429,
+          headers: { 'Retry-After': String(Math.ceil(rateCheck.resetIn / 1000)) },
+        }
+      );
+    }
 
     const body = await request.json();
-    const { requestId } = body;
+    const { requestId, overrideBusId } = body;
     if (typeof requestId !== 'string' || !requestId.trim() || requestId.length > 100) {
       return NextResponse.json({ error: 'Request ID required' }, { status: 400 });
     }
 
-    const decodedToken = await verifyToken(token);
-    const approverUserId = decodedToken.uid;
-
-    // Auth check — read approver profile from Identity domain
-    const { getUserById } = await import('@/domains/identity');
-    const approverProfile = await getUserById(approverUserId);
-    if (!approverProfile || !['admin', 'moderator'].includes(approverProfile.role)) {
-      return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 });
-    }
+    const approverUserId = auth.uid;
 
     const permissionDenied = await requireModeratorPermission(
       {
         uid: approverUserId,
-        email: decodedToken.email || '',
-        role: approverProfile.role,
-        name: approverProfile.fullName || approverProfile.name || '',
+        email: auth.email || '',
+        role: auth.role,
+        name: auth.name || 'Admin',
       },
       'payments',
       'canApproveOfflinePayment'
@@ -72,30 +70,36 @@ export async function POST(request: NextRequest) {
       requestId,
       {
         uid: approverUserId,
-        name: approverProfile.fullName || approverProfile.name || 'Admin',
-        role: approverProfile.role,
-      }
+        name: auth.name || 'Admin',
+        role: auth.role,
+      },
+      undefined,
+      overrideBusId ? { busId: overrideBusId } : undefined
     );
 
     if (!result.success) {
-      return NextResponse.json({ error: result.error }, { status: result.status || 500 });
+      return NextResponse.json({
+        error: result.error,
+        needsCapacityReview: (result as any).needsCapacityReview,
+      }, { status: result.status || 500 });
     }
 
     // ── Post-commit side effects (non-critical) ──────────────────────
+    // Note: Cloudinary receipt image is PRESERVED intact on approval for financial audit compliance (Fix 11).
     const postTasks = [
-      // Cloudinary cleanup
-      (async () => {
-        if (receiptImageUrl) {
-          const publicId = extractPublicId(receiptImageUrl);
-          if (publicId) await deleteAsset(publicId);
-        }
-      })(),
-
       // Email notification
       (async () => {
         const studentEmail = fd.studentEmail || app.email || app.applicantEmail;
         if (studentEmail) {
           try {
+            const deadlineConfig = await getDeadlineConfig().catch(() => null);
+            const endYear = ((app.formData as any)?.sessionEndYear as number) || (new Date().getFullYear() + 1);
+            const durationYears = Number((app.formData as any)?.durationYears || 1);
+            const startYear = endYear - durationYears;
+            const computedValidUntil = deadlineConfig
+              ? calculateValidUntilDate(startYear, durationYears, deadlineConfig)
+              : new Date(Date.UTC(endYear, 5, 30));
+
             const { sendApplicationApprovedNotification } = await import('@/lib/services/admin-email.service');
             await sendApplicationApprovedNotification({
               studentName,
@@ -103,7 +107,7 @@ export async function POST(request: NextRequest) {
               busNumber: (app.formData?.busId as string)?.replace('bus_', 'Bus-') || 'Assigned Bus',
               routeName: 'Service Renewal',
               shift: (app.formData?.shift as string) || 'Assigned Shift',
-              validUntil: new Date(Date.UTC(((app.formData as any)?.sessionEndYear as number) || (new Date().getFullYear() + 1), 5, 30)).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }),
+              validUntil: computedValidUntil.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }),
             });
           } catch (err) { console.error('Email notify failed:', err); }
         }
