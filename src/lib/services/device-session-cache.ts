@@ -31,6 +31,12 @@ export function setCachedDeviceSession(userId: string, deviceId: string, lastAct
     lastActiveAtMs,
     cachedAtMs: Date.now(),
   });
+
+  // Bound cache size to prevent unbounded memory growth in long-running processes
+  if (sessionCache.size > 500) {
+    const oldestKey = sessionCache.keys().next().value;
+    if (oldestKey) sessionCache.delete(oldestKey);
+  }
 }
 
 export function invalidateCachedDeviceSession(userId: string): void {

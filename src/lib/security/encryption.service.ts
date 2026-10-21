@@ -54,13 +54,23 @@ const PAYMENT_TOKEN_EXPIRY_MS = 60 * 60 * 1000; // 1 hour for payment tokens
 // Key derivation LRU cache to prevent event-loop lockup on repeated field decryptions
 const derivedKeyCache = new Map<string, Buffer>();
 const MAX_KEY_CACHE_SIZE = 5000;
+const secretHashCache = new Map<string, string>();
+
+function getSecretHash(secret: string): string {
+    let hash = secretHashCache.get(secret);
+    if (!hash) {
+        hash = crypto.createHash('sha256').update(secret).digest('hex').slice(0, 16);
+        secretHashCache.set(secret, hash);
+    }
+    return hash;
+}
 
 /**
  * Derive a cryptographic key from the master secret using PBKDF2 with LRU caching
  */
 function deriveKey(salt: Buffer, secret: string = ENCRYPTION_KEY): Buffer {
     checkKeys();
-    const cacheKey = salt.toString('hex') + ':' + secret;
+    const cacheKey = `${salt.toString('hex')}:${getSecretHash(secret)}`;
     const cached = derivedKeyCache.get(cacheKey);
     if (cached) {
         // Refresh LRU position
@@ -72,10 +82,9 @@ function deriveKey(salt: Buffer, secret: string = ENCRYPTION_KEY): Buffer {
     const derived = crypto.pbkdf2Sync(secret, salt, ITERATION_COUNT, KEY_LENGTH, 'sha256');
 
     if (derivedKeyCache.size >= MAX_KEY_CACHE_SIZE) {
-        let evicted = 0;
-        for (const key of derivedKeyCache.keys()) {
-            derivedKeyCache.delete(key);
-            if (++evicted >= 1000) break;
+        const oldest = derivedKeyCache.keys().next().value;
+        if (oldest) {
+            derivedKeyCache.delete(oldest);
         }
     }
     derivedKeyCache.set(cacheKey, derived);
@@ -216,7 +225,7 @@ export function decryptQRCodeData(token: string): QRCodePayload | null {
         hmac.update(combinedWithoutSig);
         const expectedSignature = hmac.digest().subarray(0, sigLength);
 
-        if (!crypto.timingSafeEqual(signatureFromToken, expectedSignature)) {
+        if (signatureFromToken.length !== expectedSignature.length || !crypto.timingSafeEqual(signatureFromToken, expectedSignature)) {
             console.warn('QR token signature verification failed - possible tampering');
             return null;
         }
@@ -272,6 +281,7 @@ export function quickValidateQRToken(token: string): boolean {
         hmac.update(combinedWithoutSig);
         const expectedSignature = hmac.digest().subarray(0, sigLength);
 
+        if (signatureFromToken.length !== expectedSignature.length) return false;
         return crypto.timingSafeEqual(signatureFromToken, expectedSignature);
     } catch {
         return false;
@@ -349,10 +359,9 @@ export function verifySecurePaymentReference(reference: string): SecurePaymentDa
         if (sigLen !== 16 && sigLen !== 32) return null;
         const expectedSignature = fullExpected.substring(0, sigLen);
 
-        if (!crypto.timingSafeEqual(
-            Buffer.from(signature),
-            Buffer.from(expectedSignature)
-        )) {
+        const bufSig = Buffer.from(signature);
+        const bufExpected = Buffer.from(expectedSignature);
+        if (bufSig.length !== bufExpected.length || !crypto.timingSafeEqual(bufSig, bufExpected)) {
             console.warn('Payment reference signature mismatch');
             return null;
         }
@@ -390,9 +399,12 @@ export function hashSensitiveData(data: string): string {
 export function verifyHashedData(data: string, storedHash: string): boolean {
     try {
         const [saltHex, hashHex] = storedHash.split(':');
+        if (!saltHex || !hashHex) return false;
         const salt = Buffer.from(saltHex, 'hex');
         const hash = crypto.pbkdf2Sync(data, salt, ITERATION_COUNT, 32, 'sha256');
-        return crypto.timingSafeEqual(hash, Buffer.from(hashHex, 'hex'));
+        const expected = Buffer.from(hashHex, 'hex');
+        if (hash.length !== expected.length) return false;
+        return crypto.timingSafeEqual(hash, expected);
     } catch {
         return false;
     }

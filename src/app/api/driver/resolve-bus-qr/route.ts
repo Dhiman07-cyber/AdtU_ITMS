@@ -2,6 +2,7 @@ import { parseQRPayload } from '@/domains/trip';
 import { withSecurity } from '@/lib/security/api-security';
 import { RateLimits } from '@/lib/security/rate-limiter';
 import { getSupabaseServer } from '@/lib/supabase-server';
+import { getBusIdVariations } from '@/lib/utils';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 
@@ -26,10 +27,23 @@ export const POST = withSecurity(
     }
 
     if (!busId) {
+      const trimmedQr = qrData.trim();
+      const qrVariations = Array.from(new Set([
+        ...getBusIdVariations(trimmedQr),
+        ...(/^\d+$/.test(trimmedQr.replace(/^bus_/, ''))
+          ? [
+              trimmedQr.replace(/^bus_/, '').padStart(2, '0'),
+              `bus_${trimmedQr.replace(/^bus_/, '').padStart(2, '0')}`,
+              String(parseInt(trimmedQr.replace(/^bus_/, ''), 10)),
+              `bus_${parseInt(trimmedQr.replace(/^bus_/, ''), 10)}`
+            ]
+          : [])
+      ]));
       const busByNumber = await supabase
         .from('buses')
         .select('id')
-        .eq('bus_number', qrData.trim())
+        .in('bus_number', qrVariations)
+        .limit(1)
         .maybeSingle();
 
       if (busByNumber.data) {
@@ -41,19 +55,32 @@ export const POST = withSecurity(
       return NextResponse.json({ found: false, error: 'No bus found for this QR code' }, { status: 404 });
     }
 
+    const busVariations = Array.from(new Set([
+      ...getBusIdVariations(busId),
+      ...(/^\d+$/.test(busId.replace(/^bus_/, ''))
+        ? [
+            busId.replace(/^bus_/, '').padStart(2, '0'),
+            `bus_${busId.replace(/^bus_/, '').padStart(2, '0')}`,
+            String(parseInt(busId.replace(/^bus_/, ''), 10)),
+            `bus_${parseInt(busId.replace(/^bus_/, ''), 10)}`
+          ]
+        : [])
+    ]));
     const now = new Date().toISOString();
     const [busResult, activeTripResult] = await Promise.all([
       supabase
         .from('buses')
         .select('id, bus_number, status, route_id, route_name')
-        .eq('id', busId)
+        .in('id', busVariations)
+        .limit(1)
         .maybeSingle(),
       supabase
         .from('active_trips')
         .select('trip_id, driver_id')
-        .eq('bus_id', busId)
+        .in('bus_id', busVariations)
         .eq('status', 'active')
         .gt('expires_at', now)
+        .limit(1)
         .maybeSingle(),
     ]);
 

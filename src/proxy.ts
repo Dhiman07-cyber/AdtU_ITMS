@@ -255,7 +255,13 @@ export function validateOrigin(request: NextRequest): boolean {
     const referer = request.headers.get('referer');
 
     // Webhooks and cron jobs have independent signature/secret auth
-    if (request.nextUrl.pathname.includes('/webhook/') || isCronRoute(request.nextUrl.pathname)) {
+    const pathname = request.nextUrl.pathname;
+    if (
+        pathname.startsWith('/api/payment/webhook') ||
+        pathname.startsWith('/api/webhooks/') ||
+        pathname.startsWith('/api/cron/') ||
+        isCronRoute(pathname)
+    ) {
         return true;
     }
 

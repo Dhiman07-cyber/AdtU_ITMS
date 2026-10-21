@@ -79,12 +79,21 @@ if (typeof setInterval !== 'undefined' && !(globalThis as any).__roleCacheRedisB
 /**
  * Get cached role data for a user.
  * Returns null if not cached or expired.
+ * Maintains true LRU ordering by re-inserting on hit, and evicts expired entries on read.
  */
 export function getCachedRole(uid: string): { role: string; name: string; employeeId: string } | null {
     const cached = _roleCache.get(uid);
-    if (cached && Date.now() < cached.expiresAt) {
+    if (!cached) return null;
+
+    if (Date.now() < cached.expiresAt) {
+        // True LRU: Delete and re-insert to position at tail of Map
+        _roleCache.delete(uid);
+        _roleCache.set(uid, cached);
         return { role: cached.role, name: cached.name, employeeId: cached.employeeId };
     }
+
+    // Expired entry eviction on read
+    _roleCache.delete(uid);
     return null;
 }
 
@@ -126,8 +135,10 @@ export async function resolveUserRole(uid: string): Promise<{ role: string; name
  * Handles LRU eviction when cache reaches max size.
  */
 export function setCachedRole(uid: string, entry: { role: string; name: string; employeeId: string }): void {
-    // Evict oldest if at capacity
-    if (_roleCache.size >= ROLE_CACHE_MAX) {
+    if (_roleCache.has(uid)) {
+        _roleCache.delete(uid);
+    } else if (_roleCache.size >= ROLE_CACHE_MAX) {
+        // Evict least-recently-used entry
         const firstKey = _roleCache.keys().next().value;
         if (firstKey) _roleCache.delete(firstKey);
     }

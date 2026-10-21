@@ -1,6 +1,7 @@
 import { getDriverById,getUserById } from '@/domains/identity';
 import { getModeratorPermissions } from '@/lib/security/moderator-permissions';
 import { getSupabaseServer } from '@/lib/supabase-server';
+import { getBusIdVariations } from '@/lib/utils';
 import { NextResponse } from 'next/server';
 
 type ScannerAuth = {
@@ -37,7 +38,11 @@ export function scannerBusMatchesStudent(scannerBusId: unknown, busId: unknown):
     return true;
   }
   if (typeof busId !== 'string' || !busId.trim()) return false;
-  return String(scannerBusId).trim().toLowerCase() === busId.trim().toLowerCase();
+  const sStr = String(scannerBusId).trim().toLowerCase();
+  const bStr = busId.trim().toLowerCase();
+  if (sStr === bStr) return true;
+  const sVariations = getBusIdVariations(sStr).map(v => v.toLowerCase());
+  return sVariations.includes(bStr);
 }
 
 export async function validateStudentScannerContext(
@@ -99,3 +104,130 @@ export async function validateStudentScannerContext(
 
   return null;
 }
+
+export interface ResolvedScannerContext {
+  scannerBusId: string | null;
+  activeTripId: string | null;
+  tripShift: string | null;
+  isTripStale: boolean;
+}
+
+const SCANNER_BUS_CACHE_TTL_MS = 15 * 1000; // 15 seconds
+const MAX_SCANNER_BUS_CACHE = 500;
+
+interface CachedScannerBus {
+  context: ResolvedScannerContext;
+  expiresAtMs: number;
+}
+
+const scannerBusCache = new Map<string, CachedScannerBus>();
+
+export function invalidateScannerBusCache(driverUid?: string): void {
+  if (driverUid) {
+    scannerBusCache.delete(driverUid);
+    for (const k of Array.from(scannerBusCache.keys())) {
+      if (k.startsWith(`${driverUid}:`)) {
+        scannerBusCache.delete(k);
+      }
+    }
+  } else {
+    scannerBusCache.clear();
+  }
+}
+
+export async function resolveScannerBusId(
+  auth: { uid: string; role: string },
+  inputScannerBusId?: string | null
+): Promise<ResolvedScannerContext> {
+  const normalizedInput = typeof inputScannerBusId === 'string' && inputScannerBusId.trim()
+    ? inputScannerBusId.trim()
+    : null;
+
+  // 1. Non-driver role (desk verification / admin / moderator)
+  if (auth.role !== 'driver') {
+    return {
+      scannerBusId: normalizedInput,
+      activeTripId: null,
+      tripShift: null,
+      isTripStale: false,
+    };
+  }
+
+  // 2. Driver role: check L1 15-second cache
+  const cacheKey = `${auth.uid}:${normalizedInput || 'auto'}`;
+  const now = Date.now();
+  const cached = scannerBusCache.get(cacheKey);
+  if (cached && now < cached.expiresAtMs) {
+    return cached.context;
+  }
+
+  const supabase = getSupabaseServer();
+  let scannerBusId: string | null = normalizedInput;
+  let activeTripId: string | null = null;
+  let tripShift: string | null = null;
+  let isTripStale = false;
+
+  try {
+    const { data: driverActiveTrip } = await supabase
+      .from('active_trips')
+      .select('trip_id, bus_id, status, created_at, shift, expires_at')
+      .eq('driver_id', auth.uid)
+      .eq('status', 'active')
+      .gt('expires_at', new Date().toISOString())
+      .maybeSingle();
+
+    if (driverActiveTrip?.bus_id) {
+      scannerBusId = driverActiveTrip.bus_id;
+      const createdAt = new Date(driverActiveTrip.created_at).getTime();
+      const isExpired = Date.now() - createdAt > 12 * 60 * 60 * 1000;
+      if (isExpired) {
+        isTripStale = true;
+      } else {
+        activeTripId = driverActiveTrip.trip_id;
+        tripShift = driverActiveTrip.shift || null;
+      }
+    }
+  } catch (e) {
+    console.warn('Failed to resolve active trip for driver scanner:', e);
+  }
+
+  // Fallback: If no active trip, check primary bus
+  if (!scannerBusId) {
+    try {
+      const { data: driverBus } = await supabase
+        .from('buses')
+        .select('id')
+        .or(`primary_driver_uid.eq.${auth.uid},driver_uid.eq.${auth.uid}`)
+        .maybeSingle();
+
+      if (driverBus?.id) {
+        scannerBusId = driverBus.id;
+      } else {
+        const { data: driverProfile } = await supabase
+          .from('driver_profiles')
+          .select('bus_id, assigned_bus_id')
+          .eq('uid', auth.uid)
+          .maybeSingle();
+        scannerBusId = driverProfile?.bus_id || driverProfile?.assigned_bus_id || null;
+      }
+    } catch (e) {
+      console.warn('Failed to resolve driver primary bus fallback for scanner:', e);
+    }
+  }
+
+  const result: ResolvedScannerContext = {
+    scannerBusId,
+    activeTripId,
+    tripShift,
+    isTripStale,
+  };
+
+  if (scannerBusCache.size >= MAX_SCANNER_BUS_CACHE) {
+    const oldestKey = scannerBusCache.keys().next().value;
+    if (oldestKey) scannerBusCache.delete(oldestKey);
+  }
+  scannerBusCache.set(cacheKey, { context: result, expiresAtMs: now + SCANNER_BUS_CACHE_TTL_MS });
+
+  return result;
+}
+
