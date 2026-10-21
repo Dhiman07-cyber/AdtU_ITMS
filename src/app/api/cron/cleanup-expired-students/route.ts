@@ -1,8 +1,9 @@
 import { verifyCronAuth } from '@/lib/security/cron-auth';
 import { upsertMarker } from '@/domains/admin';
 import { createAuditEvent, SYSTEM_ACTOR, type AuditEventInsert } from '@/domains/audit';
-import { getStudentById, getStudentsByStatusesPaged, updateStudent } from '@/domains/identity';
+import { getStudentById, getStudentsByStatusesPaged, getUserById, updateStudent } from '@/domains/identity';
 import * as Notification from '@/domains/notification';
+import { invalidateStudentAssignment } from '@/domains/student';
 import { deleteUserAndData } from '@/lib/cleanup-helpers';
 import { isSeatReleaseAtSoftBlockEnabled, wasSeatReleased } from '@/lib/config/capacity-flags';
 import { getDeadlineConfig } from '@/lib/deadline-config-service';
@@ -67,7 +68,9 @@ export async function GET(request: NextRequest) {
             pagesProcessed: 0,
             truncated: false,
             lastProcessedUid: null as string | null,
-            errors: [] as string[]
+            errors: [] as string[],
+            softBlockErrors: [] as string[],
+            hardDeleteErrors: [] as string[],
         };
 
         let lastUid: string | undefined = undefined;
@@ -206,7 +209,15 @@ export async function GET(request: NextRequest) {
                     }
                     
                     // SAFETY CHECK: Don't delete if student was recently active (last 30 days)
-                    const lastActiveAt = studentData.lastActiveAt || studentData.lastLoginAt || studentData.updatedAt;
+                    // Note: student_profiles does not store last_login_at; verify against users table.
+                    // DO NOT use studentData.updatedAt as proxy for login activity.
+                    let lastActiveAt = studentData.lastActiveAt || studentData.lastLoginAt;
+                    if (!lastActiveAt) {
+                        try {
+                            const userRecord = await getUserById(uid);
+                            lastActiveAt = userRecord?.lastLoginAt || (userRecord as any)?.last_login_at;
+                        } catch {}
+                    }
                     if (lastActiveAt) {
                         const lastActiveDate = new Date(lastActiveAt);
                         const daysSinceActive = Math.floor((today.getTime() - lastActiveDate.getTime()) / (1000 * 60 * 60 * 24));
@@ -226,7 +237,9 @@ export async function GET(request: NextRequest) {
 
                     if (!result.success) {
                         console.error(`❌ Automated hard delete failed for student ${uid}:`, result.error);
-                        results.errors.push(`Hard delete failed for student ${uid}`);
+                        const msg = `Hard delete failed for student ${uid}: ${result.error}`;
+                        results.hardDeleteErrors.push(msg);
+                        results.errors.push(msg);
                         continue;
                     }
 
@@ -264,6 +277,7 @@ export async function GET(request: NextRequest) {
                     void createAuditEvent(auditEvent);
 
                     console.log(`   ✅ Hard-deleted student ${uid} successfully`);
+                    await invalidateStudentAssignment(uid).catch(() => {});
                     results.hardDeleted++;
                     continue; // Skip soft block check since user is gone
                 }
@@ -331,7 +345,7 @@ export async function GET(request: NextRequest) {
                                     target_type: 'student',
                                     target_name: sbFullName,
                                     category: 'system',
-                                    summary: (releaseSeat ? 'Student soft-blocked (seat released): ' : 'Student soft-blocked: ') + sbFullName,
+                                    summary: (releaseSeat ? 'Dashboard & live bus tracking access restricted due to expired service (bus seat released): ' : 'Service expired — access to dashboard and live bus tracking restricted until renewal: ') + sbFullName,
                                     severity: 'high',
                                     metadata: {
                                         before: { status: 'active', busId: sbBusId, shift: sbShift || null },
@@ -347,18 +361,25 @@ export async function GET(request: NextRequest) {
                         }
                         if (didBlock) {
                             if (auditEvent) void createAuditEvent(auditEvent);
+                            await invalidateStudentAssignment(uid).catch(() => {});
                             results.softBlocked++;
                             console.log(`   ✅ Soft-blocked ${uid}${releaseSeat ? ' (seat released)' : ''}`);
                         }
-                    } catch (sbErr) {
+                    } catch (sbErr: any) {
                         console.warn(`   ⚠️ Soft-block failed for ${uid} — will retry next run:`, sbErr);
-                        results.errors.push(`Soft-block failed for ${uid}`);
+                        const msg = `Soft-block failed for ${uid}: ${sbErr?.message || sbErr}`;
+                        results.softBlockErrors.push(msg);
+                        results.errors.push(msg);
                     }
                 }
 
                 } catch (err: any) {
                     console.error(`❌ Error processing student ${uid}:`, err);
-                    results.errors.push(`Error processing student ${uid}`);
+                    const msg = `Error processing student ${uid}: ${err?.message || err}`;
+                    results.errors.push(msg);
+                    if (studentData.status === 'active') {
+                        results.softBlockErrors.push(msg);
+                    }
                 }
             }
 
@@ -503,10 +524,11 @@ export async function GET(request: NextRequest) {
             metadata: { results, upcomingApplications: upcomingResults, reconciliation, reason: 'scheduled_run' },
         });
 
-        // Write the Soft Block Completion Marker to allow session activation to proceed
-        // Guard (Finding F-07): Do NOT write the completion marker if cleanup encountered unhandled errors.
-        if (results.errors.length > 0) {
-            console.warn(`⚠️ Soft Block completion marker NOT written due to ${results.errors.length} errors during cleanup.`);
+        // Write the Soft Block Completion Marker to allow session activation to proceed.
+        // As long as softBlockErrors is 0 and pagination was not truncated, soft-block completion succeeded
+        // and seats are freed. Hard delete errors do not block seat allocation or session activation.
+        if (results.softBlockErrors.length > 0 || results.truncated) {
+            console.warn(`⚠️ Soft Block completion marker NOT written due to ${results.softBlockErrors.length} soft-block error(s) or truncated run.`);
         } else {
             try {
                 const config = await getDeadlineConfig();

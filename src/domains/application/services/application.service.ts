@@ -165,8 +165,8 @@ export async function submitFinal(
   uid: string,
   email: string,
   formData: Record<string, any>,
-  body: Record<string, any>
-): Promise<{ success: boolean; applicationId?: string; error?: string }> {
+  body: Record<string, any> = {}
+): Promise<{ success: boolean; applicationId?: string; error?: string; status?: number }> {
   const now = new Date().toISOString();
   const isRenewal = body.applicationType === 'renewal' || body.applicationType === 'renewal_after_soft_block';
 
@@ -179,6 +179,63 @@ export async function submitFinal(
   if (existing && LIVE_STATES.includes(existing.state)) {
     if (!isRenewal || existing.state === 'submitted') {
       return { success: false, error: 'An application is already in progress' };
+    }
+  }
+
+  // Preflight check for offline payment transaction reference anti-replay
+  const offlineTxId = String(
+    formData.transactionId ||
+    formData.paymentInfo?.paymentReference ||
+    body.transactionId ||
+    ''
+  ).trim();
+
+  const paymentMode =
+    body.paymentMode ||
+    formData.paymentMode ||
+    formData.paymentInfo?.paymentMode ||
+    'offline';
+
+  if (paymentMode === 'offline' && offlineTxId) {
+    const db = getSupabaseServer();
+    const normalizedTx = offlineTxId.toLowerCase();
+
+    // 1. Check existing payments
+    const { data: existingPay } = await db
+      .from('payments')
+      .select('payment_id, offline_transaction_id')
+      .ilike('offline_transaction_id', normalizedTx)
+      .in('status', ['Completed', 'Pending'])
+      .limit(1);
+
+    if (existingPay && existingPay.length > 0) {
+      return {
+        success: false,
+        error: 'This bank transaction reference ID has already been used.',
+        status: 409,
+      };
+    }
+
+    // 2. Check existing active/pending applications
+    const { data: existingApps } = await db
+      .from('applications')
+      .select('application_id, form_data')
+      .not('state', 'in', '("rejected","cancelled","expired")')
+      .limit(300);
+
+    if (existingApps) {
+      const isDup = existingApps.some(a => {
+        const fd = (a.form_data || {}) as any;
+        const tx = String(fd.transactionId || fd.paymentInfo?.paymentReference || '').trim().toLowerCase();
+        return tx === normalizedTx && a.application_id !== (body.applicationId || uid);
+      });
+      if (isDup) {
+        return {
+          success: false,
+          error: 'This bank transaction reference ID has already been used.',
+          status: 409,
+        };
+      }
     }
   }
 
@@ -325,8 +382,8 @@ export async function approve(
   applicationId: string,
   approverData: { uid: string; name: string; role: string },
   notes?: string,
-  overrides?: { busId?: string; startYear?: number; endYear?: number }
-): Promise<{ success: boolean; studentUid?: string; error?: string; status?: number }> {
+  overrides?: { busId?: string; startYear?: number; endYear?: number; queueForSeat?: boolean }
+): Promise<{ success: boolean; studentUid?: string; error?: string; status?: number; queuedForSeat?: boolean; needsCapacityReview?: boolean }> {
   const db = getSupabaseServer();
 
   // ── Step 1: Application RPC — validate + lock + return payload ────
@@ -347,7 +404,8 @@ export async function approve(
 
   // Intercept upcoming applications: verifying an upcoming application MUST NOT create a student
   // profile or consume bus capacity. It transitions state to 'verified_upcoming' only.
-  if (isUpcomingApplication(app) && app.state === 'submitted') {
+  const deadlineConfig = await getDeadlineConfig().catch(() => undefined);
+  if (isUpcomingApplication(app, new Date(), deadlineConfig) && app.state === 'submitted') {
     try {
       await db.rpc('release_application_lock', { p_application_id: applicationId });
     } catch {}
@@ -358,6 +416,62 @@ export async function approve(
     return {
       success: true,
       studentUid: app.applicant_uid,
+    };
+  }
+
+  // FIX 7: Support queueing for seat (waitlist) when bus is full or admin chooses to waitlist
+  if (overrides?.queueForSeat === true) {
+    try {
+      await db.rpc('release_application_lock', { p_application_id: applicationId });
+    } catch {}
+
+    const nowIso = new Date().toISOString();
+    const { error: queueErr } = await db
+      .from('applications')
+      .update({
+        state: 'pending_seat_allocation',
+        pending_seat_allocation_at: nowIso,
+        updated_at: nowIso,
+        processing_lock: null,
+        processing_lease_expires_at: null,
+      })
+      .eq('application_id', applicationId);
+
+    if (queueErr) {
+      return { success: false, error: queueErr.message, status: 500 };
+    }
+
+    void createAuditEvent({
+      action: 'application_pending_seat_allocation',
+      actor_id: approverData.uid,
+      actor_name: approverData.name,
+      actor_role: approverData.role as any,
+      target_id: applicationId,
+      target_type: 'application',
+      target_name: app.form_data?.fullName || app.applicant_email || '',
+      category: 'applications',
+      summary: `Application queued for seat allocation by ${approverData.name}`,
+      severity: 'medium',
+      metadata: {
+        application_id: applicationId,
+        applicant_uid: app.applicant_uid,
+        bus_id: app.bus_id,
+        shift: app.shift,
+      },
+    }).catch(e => console.error('Queue audit error:', e));
+
+    void Notification.createNotification(
+      { userId: approverData.uid, userName: approverData.name, userRole: (approverData.role as any) || 'admin' },
+      { type: 'specific_users', specificUserIds: [app.applicant_uid] },
+      'Your application has been verified. You have been placed on the transport seat waitlist. You will be assigned a seat once capacity becomes available.',
+      'Application Verified — Queued for Seat Allocation',
+      { applicationId, statusPage: '/student/application-status' }
+    ).catch(e => console.error('Queue notification error:', e));
+
+    return {
+      success: true,
+      studentUid: app.applicant_uid,
+      queuedForSeat: true,
     };
   }
 
@@ -418,6 +532,7 @@ const finalSessionEndYear = ((student as any).sessionEndYear && (student as any)
         const { data: rpcResult, error: rpcError } = await db.rpc('approve_renewal_with_seat', {
           p_application_id: applicationId,
           p_approver_uid: approverData.uid,
+          p_approved_by: approverData.uid,
           p_student_uid: app.applicant_uid,
           p_bus_id: renewalBusId,
           p_shift: studentShift,
@@ -429,7 +544,18 @@ const finalSessionEndYear = ((student as any).sessionEndYear && (student as any)
         });
 
         if (rpcError || !rpcResult?.success) {
-          throw new Error(rpcResult?.error || rpcError?.message || 'Renewal with seat assignment failed');
+          const rawErr = rpcResult?.error || rpcError?.message || 'Renewal with seat assignment failed';
+          const isCapacity = rawErr.includes('CAPACITY_FULL') || rpcResult?.error === 'CAPACITY_FULL';
+          const capacityErr: any = new Error(
+            isCapacity
+              ? 'CAPACITY_FULL: Assigned bus is at full capacity for this shift. Please select an alternative bus (overrideBusId) to approve this renewal.'
+              : rawErr
+          );
+          if (isCapacity) {
+            capacityErr.status = 409;
+            capacityErr.needsCapacityReview = true;
+          }
+          throw capacityErr;
         }
         // RPC succeeded — student updated, capacity incremented, application finalized
         // No need to call finalize_application_approval separately
@@ -481,12 +607,26 @@ const finalSessionEndYear = ((student as any).sessionEndYear && (student as any)
 
       if (atomicError) {
         console.error('identity_activate_student_with_capacity RPC error:', atomicError);
-        throw new Error(`Student activation with capacity failed: ${atomicError.message || atomicError.code}`);
+        const errMsg = atomicError.message || atomicError.code || '';
+        if (/full capacity|CAPACITY_FULL/i.test(errMsg)) {
+          const err: any = new Error('CAPACITY_FULL: Assigned bus is at full capacity for this shift. Please select an alternative bus (overrideBusId) or move to waitlist.');
+          err.status = 409;
+          err.needsCapacityReview = true;
+          throw err;
+        }
+        throw new Error(`Student activation with capacity failed: ${errMsg}`);
       }
 
       if (!atomicResult?.success) {
         console.error('identity_activate_student_with_capacity returned failure:', atomicResult?.error);
-        throw new Error(atomicResult?.error || 'Student activation with capacity failed');
+        const errMsg = atomicResult?.error || 'Student activation with capacity failed';
+        if (/full capacity|CAPACITY_FULL/i.test(errMsg)) {
+          const err: any = new Error('CAPACITY_FULL: Assigned bus is at full capacity for this shift. Please select an alternative bus (overrideBusId) or move to waitlist.');
+          err.status = 409;
+          err.needsCapacityReview = true;
+          throw err;
+        }
+        throw new Error(errMsg);
       }
 
       seatCompensation = { busId: targetBusId, studentId: app.applicant_uid, shift: studentShift };
@@ -547,18 +687,37 @@ const finalSessionEndYear = ((student as any).sessionEndYear && (student as any)
 
   return { success: true, studentUid: app.applicant_uid };
 
-} catch (error: any) {
-  // C4: Compensating rollback — release seat if it was assigned before the failure
-  if (seatCompensation) {
-    await Seat.releaseSeat(seatCompensation.busId, seatCompensation.studentId, seatCompensation.shift)
-      .catch(releaseErr => {
-        console.error(`CRITICAL: Seat compensation failed for ${seatCompensation?.busId}/${seatCompensation?.studentId}:`, releaseErr);
-      });
+  } catch (error: any) {
+    // C4: Compensating rollback — release seat if it was assigned before the failure
+    if (seatCompensation) {
+      // FIX 2: Set seat_released_at = NOW() on student_profiles so subsequent retries
+      // will not see an active student with seat_released_at IS NULL (which would skip incrementing bus load)
+      try {
+        await db.from('student_profiles')
+          .update({ seat_released_at: new Date().toISOString() })
+          .eq('uid', seatCompensation.studentId);
+      } catch (markErr) {
+        console.error('Failed to mark seat_released_at during compensation:', markErr);
+      }
+
+      await Seat.releaseSeat(seatCompensation.busId, seatCompensation.studentId, seatCompensation.shift)
+        .catch(releaseErr => {
+          console.error(`CRITICAL: Seat compensation failed for ${seatCompensation?.busId}/${seatCompensation?.studentId}:`, releaseErr);
+        });
+    }
+    // Release lock — application still exists
+    try {
+      await db.rpc('release_application_lock', { p_application_id: applicationId });
+    } catch {
+      // Best-effort lock release
+    }
+    return {
+      success: false,
+      error: error.message,
+      status: error.status || 500,
+      ...(error.needsCapacityReview ? { needsCapacityReview: true } : {}),
+    };
   }
-  // Release lock — application still exists
-  await db.rpc('release_application_lock', { p_application_id: applicationId });
-  return { success: false, error: error.message, status: 500 };
-}
 }
 
 /**
@@ -568,8 +727,8 @@ const finalSessionEndYear = ((student as any).sessionEndYear && (student as any)
 export async function approveUnauth(
   studentUid: string,
   moderatorData: { uid: string; name: string; role: string },
-  overrides?: { busId?: string; startYear?: number; endYear?: number }
-): Promise<{ success: boolean; studentUid?: string; error?: string; status?: number }> {
+  overrides?: { busId?: string; startYear?: number; endYear?: number; queueForSeat?: boolean }
+): Promise<{ success: boolean; studentUid?: string; error?: string; status?: number; queuedForSeat?: boolean; needsCapacityReview?: boolean }> {
   // Delegate to approve — the Application RPC handles the same validation
   return approve(studentUid, moderatorData, undefined, overrides);
 }
@@ -624,17 +783,30 @@ export async function reject(
 
     // Step 3a: Payment cleanup (idempotent, only after DB finalization)
     // H2: Payment operations go through Payment domain public API.
-    if (app.payment_id) {
+    const paymentId = app.payment_id || 
+      app.paymentId || 
+      app.form_data?.paymentId || 
+      app.form_data?.paymentInfo?.razorpayPaymentId || 
+      (typeof app.application_id === 'string' && app.application_id.startsWith('online_') 
+        ? app.application_id.replace(/^online_/, '') 
+        : null);
+
+    if (paymentId) {
       try {
         const { rejectApplicationPayment } = await import('@/domains/payment');
-        await rejectApplicationPayment(app.payment_id, {
-          userId: rejectorData.uid,
-          name: rejectorData.name,
-          empId: '',
-          role: rejectorData.role,
-        });
+        await rejectApplicationPayment(
+          paymentId,
+          {
+            userId: rejectorData.uid,
+            name: rejectorData.name,
+            empId: '',
+            role: rejectorData.role,
+          },
+          reason,
+          applicationId
+        );
       } catch (paymentError) {
-        console.error('Failed to reject pending payment record:', paymentError);
+        console.error('Failed to reject/preserve application payment record:', paymentError);
       }
     }
 
@@ -872,72 +1044,128 @@ async function postCommitApprovalSideEffects(
 
   // Payment (online: idempotent via upsertPayment; offline: session-level duplicate check via createPayment)
   // H2: All payment operations go through Payment domain public API — no internal implementation leakage.
-  const amount = Number(
+  let amount = Number(
     app.amount_paid ||
     app.form_data?.paymentInfo?.amountPaid ||
     app.form_data?.totalFee ||
     app.form_data?.amount ||
     0
   );
-  if (amount > 0) {
-    const paymentMode =
-      app.payment_mode ||
-      app.form_data?.paymentInfo?.paymentMode ||
-      app.form_data?.paymentMode ||
-      'offline';
-    const studentIdVal = app.form_data?.enrollmentId || app.enrollment_id || app.enrollmentId || studentData.enrollmentId;
-    const studentNameVal = app.form_data?.fullName || app.full_name || studentData.fullName;
 
-    if (paymentMode === 'online') {
-      tasks.push(
-        import('@/domains/payment').then(({ upsertApprovalPayment }) =>
-          upsertApprovalPayment({
-            paymentId: app.payment_id || app.form_data?.paymentInfo?.razorpayPaymentId || `pay_${Date.now()}`,
-            studentId: studentIdVal,
-            studentUid: app.applicant_uid,
-            studentName: studentNameVal,
-            amount,
-            method: 'Online',
-            status: 'Completed',
-            sessionStartYear: studentData.sessionStartYear,
-            sessionEndYear: studentData.sessionEndYear,
-            durationYears: studentData.durationYears,
-            validUntil: studentData.validUntil
-              ? new Date(studentData.validUntil)
-              : new Date(Date.UTC(studentData.sessionEndYear || (new Date().getFullYear() + 1), 5, 30, 23, 59, 59, 999)),
-            razorpayPaymentId: app.form_data?.paymentInfo?.razorpayPaymentId || app.payment_id,
-            razorpayOrderId: app.form_data?.paymentInfo?.razorpayOrderId,
-            approvedAt: new Date(),
-          })
-        ).catch(err => { console.error('Payment upsert failed:', err); })
-      );
-    } else {
-      tasks.push(
-        import('@/domains/payment').then(({ createOfflinePaymentAtApproval }) =>
-          createOfflinePaymentAtApproval({
-            studentId: studentIdVal,
-            studentUid: app.applicant_uid,
-            studentName: studentNameVal,
-            amount,
-            durationYears: studentData.durationYears,
-            sessionStartYear: studentData.sessionStartYear,
-            sessionEndYear: studentData.sessionEndYear,
-            validUntil: studentData.validUntil || new Date(Date.UTC(studentData.sessionEndYear || (new Date().getFullYear() + 1), 5, 30, 23, 59, 59, 999)).toISOString(),
-            transactionId: app.form_data?.paymentInfo?.paymentReference || app.form_data?.transactionId || '',
-            paidAt: app.form_data?.paymentInfo?.paidAt || app.form_data?.paidAt
-              ? new Date(app.form_data?.paymentInfo?.paidAt || app.form_data?.paidAt)
-              : new Date(),
-            receipt: app.form_data?.paymentInfo?.paymentEvidenceUrl || app.form_data?.receiptImageUrl || '',
-            approverUserId: approverData.uid,
-            approverName: approverData.name,
-            approverEmpId: '',
-            approverRole: approverData.role,
-            purpose,
-          })
-        ).catch(err => { console.error('Payment creation failed:', err); })
-      );
-    }
+  const paymentMode =
+    app.payment_mode ||
+    app.form_data?.paymentInfo?.paymentMode ||
+    app.form_data?.paymentMode ||
+    'offline';
+  const studentIdVal = app.form_data?.enrollmentId || app.enrollment_id || app.enrollmentId || studentData.enrollmentId;
+  const studentNameVal = app.form_data?.fullName || app.full_name || studentData.fullName;
+  const deadlineConfig = await getDeadlineConfig().catch(() => null);
+  const startYear = studentData.sessionStartYear ||
+    (studentData.sessionEndYear ? studentData.sessionEndYear - (studentData.durationYears || 1) : new Date().getFullYear());
+  const duration = studentData.durationYears || 1;
+  const fallbackValidUntilDate = deadlineConfig
+    ? calculateValidUntilDate(startYear, duration, deadlineConfig)
+    : new Date(Date.UTC(studentData.sessionEndYear || (new Date().getFullYear() + 1), 5, 30, 23, 59, 59, 999));
+
+  if (paymentMode === 'online') {
+    const resolvedPaymentId =
+      app.payment_id ||
+      app.form_data?.paymentId ||
+      app.form_data?.paymentInfo?.razorpayPaymentId ||
+      (typeof app.application_id === 'string' && app.application_id.startsWith('online_')
+        ? app.application_id.replace(/^online_/, '')
+        : null);
+
+    tasks.push(
+      (async () => {
+        const { paymentsSupabaseService } = await import('@/lib/services/payments-supabase');
+        if (resolvedPaymentId) {
+          const existingPayment = await paymentsSupabaseService.getPaymentById(resolvedPaymentId);
+          if (existingPayment && existingPayment.status === 'Completed') {
+            await paymentsSupabaseService.updatePaymentMetadata(resolvedPaymentId, {
+              entitlement_status: 'active',
+              approved_by: approverData.name || approverData.uid,
+              application_id: app.application_id,
+              approved_at: new Date().toISOString(),
+            }).catch(() => null);
+            return;
+          }
+        }
+
+        const { upsertApprovalPayment } = await import('@/domains/payment');
+        await upsertApprovalPayment({
+          paymentId: resolvedPaymentId || `pay_${Date.now()}`,
+          studentId: studentIdVal,
+          studentUid: app.applicant_uid,
+          studentName: studentNameVal,
+          amount: amount > 0 ? amount : 50000,
+          method: 'Online',
+          status: 'Completed',
+          sessionStartYear: studentData.sessionStartYear,
+          sessionEndYear: studentData.sessionEndYear,
+          durationYears: studentData.durationYears,
+          validUntil: studentData.validUntil
+            ? new Date(studentData.validUntil)
+            : fallbackValidUntilDate,
+          razorpayPaymentId: resolvedPaymentId || app.form_data?.paymentInfo?.razorpayPaymentId || app.payment_id,
+          razorpayOrderId: app.form_data?.paymentInfo?.razorpayOrderId,
+          approvedAt: new Date(),
+        });
+      })().catch(err => { console.error('Payment upsert failed:', err); })
+    );
+  } else {
+    tasks.push(
+      (async () => {
+        let finalAmount = amount;
+        if (finalAmount <= 0) {
+          try {
+            const { getCurrentBusFee } = await import('@/lib/bus-fee-service');
+            const feeConfig = await getCurrentBusFee();
+            finalAmount = (feeConfig?.amount || 0) * (studentData.durationYears || 1);
+          } catch {
+            finalAmount = 0;
+          }
+        }
+
+        const { createOfflinePaymentAtApproval } = await import('@/domains/payment');
+        const paymentPayload = {
+          studentId: studentIdVal,
+          studentUid: app.applicant_uid,
+          studentName: studentNameVal,
+          amount: finalAmount,
+          durationYears: studentData.durationYears,
+          sessionStartYear: studentData.sessionStartYear,
+          sessionEndYear: studentData.sessionEndYear,
+          validUntil: studentData.validUntil || fallbackValidUntilDate.toISOString(),
+          transactionId: app.form_data?.paymentInfo?.paymentReference || app.form_data?.transactionId || '',
+          paidAt: app.form_data?.paymentInfo?.paidAt || app.form_data?.paidAt
+            ? new Date(app.form_data?.paymentInfo?.paidAt || app.form_data?.paidAt)
+            : new Date(),
+          receipt: app.form_data?.paymentInfo?.paymentEvidenceUrl || app.form_data?.receiptImageUrl || '',
+          approverUserId: approverData.uid,
+          approverName: approverData.name,
+          approverEmpId: '',
+          approverRole: approverData.role,
+          purpose,
+        };
+
+        try {
+          await createOfflinePaymentAtApproval(paymentPayload);
+        } catch (errFirst) {
+          console.warn('Initial createOfflinePaymentAtApproval failed, retrying once...', errFirst);
+          await createOfflinePaymentAtApproval(paymentPayload);
+        }
+      })().catch(err => { console.error('Offline payment creation failed after retry:', err); })
+    );
   }
+
+  // Cross-process entitlement cache invalidation (L1 memory + L2 Redis student:assign:<uid> + WS1 broadcast)
+  tasks.push(
+    (async () => {
+      const { invalidateStudentAssignmentCache } = await import('@/domains/student');
+      await invalidateStudentAssignmentCache(app.applicant_uid);
+    })().catch(err => { console.error('Student assignment cache invalidation failed:', err); })
+  );
 
   // Audit (idempotent)
   tasks.push(

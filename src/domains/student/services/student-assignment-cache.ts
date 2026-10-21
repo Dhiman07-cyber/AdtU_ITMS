@@ -23,6 +23,9 @@ import { publishRoleInvalidation } from '@/lib/security/role-cache-redis';
 export interface CachedStudentAssignment {
   uid: string;
   fullName: string;
+  enrollmentId?: string | null;
+  gender?: string | null;
+  profilePhotoUrl?: string | null;
   busId: string | null;
   routeId: string | null;
   shift: string | null;
@@ -91,7 +94,7 @@ export async function getCachedStudentAssignment(rawUid: string): Promise<Cached
       const supabase = getSupabaseServer();
       const { data, error } = await supabase
         .from('student_profiles')
-        .select('uid, full_name, bus_id, route_id, shift, stop_name, status, soft_block, valid_until, hard_block')
+        .select('uid, full_name, enrollment_id, gender, profile_photo_url, bus_id, route_id, shift, stop_name, status, soft_block, valid_until, hard_block')
         .or(`uid.eq.${uid},enrollment_id.eq.${uid}`)
         .maybeSingle();
 
@@ -107,6 +110,9 @@ export async function getCachedStudentAssignment(rawUid: string): Promise<Cached
       const assignment: CachedStudentAssignment = {
         uid: data.uid || uid,
         fullName: data.full_name || 'Student',
+        enrollmentId: data.enrollment_id || null,
+        gender: data.gender || null,
+        profilePhotoUrl: data.profile_photo_url || null,
         busId: data.bus_id || null,
         routeId: data.route_id || null,
         shift: data.shift || null,
@@ -150,12 +156,75 @@ export async function getCachedStudentAssignment(rawUid: string): Promise<Cached
 }
 
 /**
+ * SEAM FIX 2: Cancel active waiting flags for a student whose bus/shift/entitlement changed,
+ * evict from Redis flags:active:<busId>, and broadcast removal so Driver HUD does not show ghost flags.
+ */
+export async function cancelStudentActiveWaitingFlags(
+  studentUid: string,
+  reason: string = 'assignment_or_entitlement_changed'
+): Promise<void> {
+  const uid = cleanUid(studentUid);
+  if (!uid || uid === '*') return;
+
+  try {
+    const supabase = getSupabaseServer();
+    const { data: activeFlags, error } = await supabase
+      .from('waiting_flags')
+      .update({ status: 'cancelled' })
+      .eq('student_uid', uid)
+      .in('status', ['raised', 'waiting', 'acknowledged'])
+      .select('id, bus_id');
+
+    if (error || !activeFlags || activeFlags.length === 0) return;
+
+    const { removeRedisActiveFlag } = await import('@/domains/gps/services/gps-redis-guard');
+    const { invalidateBusTripSnapshot } = await import('@/lib/services/trip-snapshot-cache');
+    const { emitEvent } = await import('@/domains/realtime/event-emitter');
+
+    for (const flag of activeFlags) {
+      if (flag.bus_id) {
+        await removeRedisActiveFlag(flag.bus_id, flag.id).catch(() => {});
+        invalidateBusTripSnapshot(flag.bus_id);
+        emitEvent(`waiting_flags_${flag.bus_id}`, 'waiting_flag_removed', {
+          flagId: flag.id,
+          studentUid: uid,
+          reason,
+        }).catch(() => {});
+      }
+      emitEvent(`student_${uid}`, 'waiting_flag_removed', {
+        flagId: flag.id,
+        studentUid: uid,
+        reason,
+      }).catch(() => {});
+    }
+  } catch (err) {
+    console.warn(`[student-assignment-cache] Failed to cancel active waiting flags for ${uid}:`, err);
+  }
+}
+
+/**
  * Invalidate cached student assignment metadata across L1 memory and Redis.
  * Must be called whenever an admin/moderator reassigns, approves, or soft-blocks a student.
  */
 export async function invalidateStudentAssignment(rawUid: string): Promise<void> {
   const uid = cleanUid(rawUid);
   if (!uid) return;
+
+  if (uid === '*') {
+    assignmentL1Cache.clear();
+    inFlightFetches.clear();
+    try {
+      await executeGpsRedisCommand(['PUBLISH', 'student_assign_invalidate', '*']);
+    } catch {
+      // Best-effort Redis publish
+    }
+    try {
+      publishRoleInvalidation('*');
+    } catch {
+      // Best-effort role cache publish
+    }
+    return;
+  }
 
   assignmentL1Cache.delete(uid);
   inFlightFetches.delete(uid);
@@ -172,7 +241,16 @@ export async function invalidateStudentAssignment(rawUid: string): Promise<void>
   } catch {
     // Best-effort role cache publish
   }
+
+  try {
+    await cancelStudentActiveWaitingFlags(uid);
+  } catch {
+    // Non-blocking
+  }
 }
+
+/** Alias for invalidateStudentAssignment */
+export const invalidateStudentAssignmentCache = invalidateStudentAssignment;
 
 /**
  * Clear all local L1 assignment cache entries (testing / maintenance).

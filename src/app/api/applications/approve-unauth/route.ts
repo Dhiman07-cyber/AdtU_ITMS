@@ -1,7 +1,7 @@
 import { approveUnauth } from '@/domains/application';
-import { adminAuth } from '@/lib/firebase-admin';
+import { verifyApiAuth } from '@/lib/security/api-auth';
 import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
-import { resolveUserRole } from '@/lib/security/role-cache';
+import { RateLimits, checkRateLimit, createRateLimitId } from '@/lib/security/rate-limiter';
 import { safeErrorMessage } from '@/lib/security/safe-error';
 import { getUpdaterInfo } from '@/lib/utils/updatedBy';
 import { NextRequest,NextResponse } from 'next/server';
@@ -18,11 +18,22 @@ function asString(value: unknown): string {
 
 export async function POST(request: NextRequest) {
   try {
-    const token = request.headers.get('Authorization')?.replace('Bearer ', '');
-    if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const auth = await verifyApiAuth(request, ['admin', 'moderator']);
+    if (!auth.authenticated) return auth.response;
 
-    const decodedToken = await adminAuth.verifyIdToken(token);
-    const moderatorUid = decodedToken.uid;
+    const rateLimitId = createRateLimitId(auth.uid, 'app:approve-unauth');
+    const rateCheck = checkRateLimit(rateLimitId, RateLimits.UPDATE.maxRequests, RateLimits.UPDATE.windowMs);
+    if (!rateCheck.allowed) {
+      return NextResponse.json(
+        { error: 'Too many requests. Please wait before approving again.' },
+        {
+          status: 429,
+          headers: { 'Retry-After': String(Math.ceil(rateCheck.resetIn / 1000)) },
+        }
+      );
+    }
+
+    const moderatorUid = auth.uid;
     const body = asRecord(await request.json());
     const applicationId = asString(body.applicationId || body.studentUid);
 
@@ -30,18 +41,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Missing application ID' }, { status: 400 });
     }
 
-    const userRole = await resolveUserRole(moderatorUid);
-    if (!userRole.role) {
-      return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 });
-    }
     const updaterInfo = await getUpdaterInfo(moderatorUid);
 
     const permissionDenied = await requireModeratorPermission(
       {
         uid: moderatorUid,
-        email: decodedToken.email || '',
-        role: userRole.role,
-        name: updaterInfo.name,
+        email: auth.email || '',
+        role: auth.role,
+        name: updaterInfo.name || auth.name,
       },
       'applications',
       'canApprove'
@@ -52,13 +59,14 @@ export async function POST(request: NextRequest) {
       applicationId,
       {
         uid: moderatorUid,
-        name: updaterInfo.name || 'Approver',
-        role: userRole.role,
+        name: updaterInfo.name || auth.name || 'Approver',
+        role: auth.role,
       },
       {
         busId: body.overrideBusId ? asString(body.overrideBusId) : undefined,
         startYear: body.sessionStartYear ? Number(body.sessionStartYear) : undefined,
         endYear: body.sessionEndYear ? Number(body.sessionEndYear) : undefined,
+        queueForSeat: Boolean(body.queueForSeat),
       }
     );
 

@@ -30,8 +30,12 @@ const {
   const mockSelectFn = vi.fn().mockReturnValue({
     eq: mockEqFn,
   });
+  const mockUpdateFn = vi.fn().mockReturnValue({
+    eq: vi.fn().mockResolvedValue({ data: null, error: null }),
+  });
   const mockFromFn = vi.fn().mockReturnValue({
     select: mockSelectFn,
+    update: mockUpdateFn,
   });
 
   return {

@@ -8,6 +8,8 @@
  */
 
 import { createAuditEvent,type AuditActorRole } from '@/domains/audit';
+import { invalidateBusCache } from '@/domains/fleet';
+import { invalidateStudentAssignmentCache } from '@/domains/student';
 import { withSecurity } from '@/lib/security/api-security';
 import { RateLimits } from '@/lib/security/rate-limiter';
 import { getSupabaseServer } from '@/lib/supabase-server';
@@ -303,7 +305,11 @@ export const POST = withSecurity(
             revertedDocs.push(...(rpcResult.reverted_docs || []));
             for (const change of reverts) {
                 rollbackChanges.push({ ...change, before: change.after, after: change.before });
+                if (change.collection === 'students' && change.docId) {
+                    void invalidateStudentAssignmentCache(change.docId).catch(() => {});
+                }
             }
+            invalidateBusCache();
         } catch (err: unknown) {
             const message = err instanceof RollbackConflictError
                 ? err.message

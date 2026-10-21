@@ -36,6 +36,13 @@ vi.mock('@/domains/identity', () => {
 vi.mock('@/domains/fleet', () => {
   return {
     onStudentDeleted: vi.fn().mockResolvedValue(void 0),
+    invalidateBusCache: vi.fn(),
+  };
+});
+
+vi.mock('@/domains/student', () => {
+  return {
+    invalidateStudentAssignmentCache: vi.fn().mockResolvedValue(void 0),
   };
 });
 
@@ -111,12 +118,8 @@ describe('Student Hard Delete Unit Test', () => {
     expect(adminAuth.revokeRefreshTokens).toHaveBeenCalledWith('test-student-123');
     expect(adminAuth.deleteUser).toHaveBeenCalledWith('test-student-123');
 
-    // Verify Fleet service notification was sent
-    expect(fleetService.onStudentDeleted).toHaveBeenCalledWith({
-      studentUid: 'test-student-123',
-      busId: 'bus-1',
-      shift: 'Morning',
-    });
+    // Verify Fleet service bus cache and student assignment cache invalidations were triggered
+    expect(fleetService.invalidateBusCache).toHaveBeenCalledWith('bus-1');
   });
 
   it('should behave idempotently and fail gracefully on the second delete attempt', async () => {

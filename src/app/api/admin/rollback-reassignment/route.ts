@@ -1,4 +1,6 @@
 import { createAuditEvent,type AuditActorRole } from '@/domains/audit';
+import { invalidateBusCache } from '@/domains/fleet';
+import { invalidateStudentAssignmentCache } from '@/domains/student';
 import { withSecurity } from '@/lib/security/api-security';
 import { requireAdminPermission } from '@/lib/security/moderator-permissions';
 import { RateLimits } from '@/lib/security/rate-limiter';
@@ -90,7 +92,15 @@ export const POST = withSecurity<RollbackBody>(
         );
       }
 
-      // 3. Create audit event (non-blocking: the rollback already committed;
+      // 3. Invalidate student assignment cache for all affected students and bus cache
+      for (const change of studentChanges) {
+        if (change.docId) {
+          void invalidateStudentAssignmentCache(change.docId).catch(() => {});
+        }
+      }
+      invalidateBusCache();
+
+      // 4. Create audit event (non-blocking: the rollback already committed;
       // an audit failure must not misreport success as failure).
       void createAuditEvent({
         action: 'reassignment_rolled_back',

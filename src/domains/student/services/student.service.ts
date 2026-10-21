@@ -130,14 +130,61 @@ export async function applyPaymentValidity(
 
 
 import { invalidateStudentAssignment } from './student-assignment-cache';
+import { decrementBusCapacity, incrementBusCapacity } from '@/domains/fleet';
+
+export async function create(student: Partial<Student>): Promise<void> {
+  await studentRepository.insert(student);
+  const uid = student.uid || student.id;
+  if (uid) {
+    invalidateStudentAssignment(uid).catch(() => {});
+  }
+}
 
 export async function update(id: string, data: Partial<Student>): Promise<void> {
+  const existing = (await getById(id)) || (await getByUid(id));
+
+  if (existing) {
+    // LC-01 GUARD: If student seat was released during soft-block,
+    // reactivating directly via update({ status: 'active' }) is strictly forbidden.
+    if (data.status === 'active' && (existing as any).seatReleasedAt) {
+      throw new SeatReclaimRequiredError(existing.uid || id, String((existing as any).seatReleasedAt));
+    }
+
+    // Capacity management on bus or shift changes for active seated students
+    const isActiveSeated = existing.status === 'active' && !(existing as any).seatReleasedAt;
+    if (isActiveSeated) {
+      const oldBusId = existing.busId;
+      const newBusId = data.busId;
+      const oldShift = existing.shift;
+      const newShift = data.shift;
+
+      if (newBusId && oldBusId && newBusId !== oldBusId) {
+        // Bus transfer: decrement old bus, increment new bus
+        await decrementBusCapacity(oldBusId, oldShift || undefined).catch(() => {});
+        await incrementBusCapacity(newBusId, newShift || oldShift || undefined).catch(() => {});
+        const { invalidateBusTripSnapshot } = await import('@/lib/services/trip-snapshot-cache');
+        invalidateBusTripSnapshot(oldBusId);
+        invalidateBusTripSnapshot(newBusId);
+      } else if (newShift && oldShift && newShift !== oldShift && oldBusId) {
+        // Shift change on same bus: decrement old shift, increment new shift
+        await decrementBusCapacity(oldBusId, oldShift).catch(() => {});
+        await incrementBusCapacity(oldBusId, newShift).catch(() => {});
+        const { invalidateBusTripSnapshot } = await import('@/lib/services/trip-snapshot-cache');
+        invalidateBusTripSnapshot(oldBusId);
+      }
+    }
+  }
+
   await studentRepository.update(id, data);
   invalidateStudentAssignment(id).catch(() => {});
 }
 
 export async function remove(id: string): Promise<void> {
+  const existing = (await getById(id)) || (await getByUid(id));
   await studentRepository.remove(id);
+  if (existing?.busId && existing.status === 'active' && !(existing as any).seatReleasedAt) {
+    decrementBusCapacity(existing.busId, existing.shift || undefined).catch(() => {});
+  }
   invalidateStudentAssignment(id).catch(() => {});
 }
 

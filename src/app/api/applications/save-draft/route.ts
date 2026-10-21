@@ -1,16 +1,28 @@
 import { saveDraft } from '@/domains/application';
-import { adminAuth } from '@/lib/firebase-admin';
+import { verifyTokenOnly } from '@/lib/security/api-auth';
+import { RateLimits, checkRateLimit, createRateLimitId } from '@/lib/security/rate-limiter';
 import { NextRequest,NextResponse } from 'next/server';
 
 export async function POST(request: NextRequest) {
   try {
-    const token = request.headers.get('Authorization')?.replace('Bearer ', '');
-    if (!token) {
+    const user = await verifyTokenOnly(request);
+    if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const decodedToken = await adminAuth.verifyIdToken(token);
-    const uid = decodedToken.uid;
+    const uid = user.uid;
+
+    const rateLimitId = createRateLimitId(uid, 'app:save-draft');
+    const rateCheck = checkRateLimit(rateLimitId, RateLimits.CREATE.maxRequests, RateLimits.CREATE.windowMs);
+    if (!rateCheck.allowed) {
+      return NextResponse.json(
+        { error: 'Too many requests. Please wait before saving draft again.' },
+        {
+          status: 429,
+          headers: { 'Retry-After': String(Math.ceil(rateCheck.resetIn / 1000)) },
+        }
+      );
+    }
 
     const body = await request.json();
     const { applicationId, formData } = body;

@@ -67,10 +67,12 @@ export interface ReconcileSummary {
 
 /** Marker-aware seat-ownership predicate. Mirrors the live counter semantics. */
 function occupiesSeat(s: Record<string, any>): boolean {
-  if (s.seatReleasedAt) return false; // seat released — never occupies
+  if (s.seatReleasedAt || s.seat_released_at) return false; // seat released — never occupies
   const status = s.status;
   if (status === 'active') return true;
-  if (status === 'soft_blocked' || status === 'pending_deletion') return true; // legacy, not yet released
+  if ((status === 'soft_blocked' || status === 'pending_deletion') && !(s.seatReleasedAt || s.seat_released_at)) {
+    return true; // transitional before seat release procedure executed
+  }
   return false;
 }
 
@@ -106,14 +108,14 @@ export async function adminReconcileBusLoads(options: ReconcileOptions = {}): Pr
 
   for (const s of candidateStudents) {
     if (!occupiesSeat(s)) continue;
-    const busId = s.busId || s.currentBusId || s.busId;
+    const busId = s.busId || s.currentBusId || s.bus_id;
     if (!busId || !targetBusIds.has(busId)) continue; // orphan / other bus — not in scope of this run
     const c = counts.get(busId)!;
-    c.currentMembers += 1; // every occupying student counts toward the canonical total
     const contrib = shiftContribution(s.shift);
     if (contrib.morning) c.morningCount += 1;
     if (contrib.evening) c.eveningCount += 1;
     if (!contrib.valid) c.invalidShift += 1;
+    c.currentMembers = c.morningCount + c.eveningCount;
   }
 
   // 3. Per-bus transactional correction.

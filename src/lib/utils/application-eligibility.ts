@@ -1,6 +1,7 @@
 import { Application, ApplicationFormData, ApplicationType, TargetSession } from '@/lib/types/application';
 import { DeadlineConfig } from '@/lib/types/deadline-config';
 import { computeBlockDatesFromValidUntil } from '@/lib/utils/deadline-computation';
+import { getCachedActiveConfig } from '@/domains/calendar';
 
 export type ApplicationCandidate = (Partial<Omit<Application, 'formData'>> & {
   formData?: Partial<ApplicationFormData> | Record<string, any>;
@@ -44,13 +45,7 @@ export function computeFutureEligibleApproval(
   const anchorMonth = config.academicYear.anchorMonth;
   const anchorDay = config.academicYear.anchorDay;
   const proxyValidUntil = new Date(
-    targetStartYear,
-    anchorMonth,
-    anchorDay,
-    23,
-    59,
-    59,
-    999
+    Date.UTC(targetStartYear, anchorMonth, anchorDay, 23, 59, 59, 999)
   ).toISOString();
 
   const { softBlock } = computeBlockDatesFromValidUntil(proxyValidUntil, config);
@@ -60,22 +55,11 @@ export function computeFutureEligibleApproval(
   return eligible.toISOString();
 }
 
-/**
- * Resolve an application's type, defaulting legacy/absent values to 'fresh'.
- * Legacy applications created before Phase 2 carry no discriminator and are, by
- * definition, current-session fresh applications.
- */
-export function resolveApplicationType(app: ApplicationCandidate): ApplicationType {
-  if (!app) return 'fresh';
+export function extractApplicationStartYear(app: ApplicationCandidate): number {
+  if (!app) return 0;
   const formData = (app.formData || app.form_data || {}) as Record<string, any>;
-  const explicitType = app.applicationType || app.application_type || formData.applicationType || formData.application_type;
-  if (explicitType === 'future' || explicitType === 'renewal' || explicitType === 'renewal_after_soft_block' || explicitType === 'fresh') {
-    return explicitType as ApplicationType;
-  }
-
-  const currentYear = new Date().getFullYear();
   const sessionInfo = formData.sessionInfo || formData.session_info || {};
-  const startYear = Number(
+  return Number(
     app.sessionStartYear ||
     app.session_start_year ||
     app.targetSession?.startYear ||
@@ -90,7 +74,57 @@ export function resolveApplicationType(app: ApplicationCandidate): ApplicationTy
     sessionInfo.start_year ||
     0
   );
-  if (startYear > currentYear) {
+}
+
+export function calculateAcademicSessionStartYear(
+  now: Date = new Date(),
+  config?: DeadlineConfig | { academicSessionStart?: { month?: number; day?: number } }
+): number {
+  const cached = !config ? getCachedActiveConfig() : null;
+  const effectiveConfig = config || cached;
+  const startMonth = effectiveConfig?.academicSessionStart?.month ?? 6; // Configured month or July (0-indexed default)
+  const startDay = effectiveConfig?.academicSessionStart?.day ?? 1;
+  const thisYear = now.getUTCFullYear();
+  const sessionStartThisYear = new Date(Date.UTC(thisYear, startMonth, startDay, 0, 0, 0, 0));
+  return now.getTime() >= sessionStartThisYear.getTime() ? thisYear : thisYear - 1;
+}
+
+/**
+ * Resolve an application's type, defaulting legacy/absent values to 'fresh'.
+ * Legacy applications created before Phase 2 carry no discriminator and are, by
+ * definition, current-session fresh applications.
+ */
+export function resolveApplicationType(
+  app: ApplicationCandidate,
+  now: Date = new Date(),
+  config?: DeadlineConfig
+): ApplicationType {
+  if (!app) return 'fresh';
+  const formData = (app.formData || app.form_data || {}) as Record<string, any>;
+  const explicitType = app.applicationType || app.application_type || formData.applicationType || formData.application_type;
+
+  const startYear = extractApplicationStartYear(app);
+  const currentSessionStartYear = calculateAcademicSessionStartYear(now, config);
+
+  const eligibleApprovalTime = app.eligibleApproval ? new Date(app.eligibleApproval).getTime() : 0;
+  const isEligibleApprovalInFuture = eligibleApprovalTime > 0 && eligibleApprovalTime > now.getTime();
+
+  // If the application state is submitted, draft, or unapproved, and its target session has arrived
+  // (startYear <= currentSessionStartYear) and eligibleApproval has arrived, it must resolve to fresh
+  // so it is no longer trapped in 'future' mode.
+  const isUnactivatedState = !app.state || app.state === 'submitted' || app.state === 'draft';
+  if (isUnactivatedState && startYear > 0 && startYear <= currentSessionStartYear && !isEligibleApprovalInFuture) {
+    if (explicitType === 'renewal' || explicitType === 'renewal_after_soft_block') {
+      return explicitType as ApplicationType;
+    }
+    return 'fresh';
+  }
+
+  if (explicitType === 'future' || explicitType === 'renewal' || explicitType === 'renewal_after_soft_block' || explicitType === 'fresh') {
+    return explicitType as ApplicationType;
+  }
+
+  if (startYear > currentSessionStartYear || isEligibleApprovalInFuture) {
     return 'future';
   }
 
@@ -146,35 +180,48 @@ export function getUpcomingStatus(
  * Whether an application is a future-session ("upcoming") application.
  * Centralised so UI and server agree on the single discriminator.
  */
-export function isUpcomingApplication(app: ApplicationCandidate): boolean {
+export function isUpcomingApplication(
+  app: ApplicationCandidate,
+  now: Date = new Date(),
+  config?: DeadlineConfig
+): boolean {
   if (!app) return false;
+
+  // SEAM FIX 1: Renewals are for existing students extending service.
+  // They must NEVER be hijacked into verified_upcoming!
+  const formData = (app.formData || app.form_data || {}) as Record<string, any>;
+  const explicitType = app.applicationType || app.application_type || formData.applicationType || formData.application_type;
+  if (explicitType === 'renewal' || explicitType === 'renewal_after_soft_block') {
+    return false;
+  }
+  const resolvedType = resolveApplicationType(app, now, config);
+  if (resolvedType === 'renewal' || resolvedType === 'renewal_after_soft_block') {
+    return false;
+  }
+
   if (app.state === 'verified_upcoming' || app.state === 'pending_seat_allocation') {
     return true;
   }
-  if (resolveApplicationType(app) === 'future') {
+
+  const startYear = extractApplicationStartYear(app);
+  const currentSessionStartYear = calculateAcademicSessionStartYear(now, config);
+  const eligibleApprovalTime = app.eligibleApproval ? new Date(app.eligibleApproval).getTime() : 0;
+  const isEligibleApprovalInFuture = eligibleApprovalTime > 0 && eligibleApprovalTime > now.getTime();
+
+  // Once the target session start date/year has arrived (startYear <= currentSessionStartYear and eligibleApproval <= now),
+  // an application in state 'submitted' or 'draft' is no longer upcoming. Application.approve must activate immediately!
+  if (startYear > 0 && startYear <= currentSessionStartYear && !isEligibleApprovalInFuture) {
+    return false;
+  }
+
+  if (resolveApplicationType(app, now, config) === 'future') {
     return true;
   }
-  const currentYear = new Date().getFullYear();
-  const formData = (app.formData || app.form_data || {}) as Record<string, any>;
-  const sessionInfo = formData.sessionInfo || formData.session_info || {};
-  const startYear = Number(
-    app.sessionStartYear ||
-    app.session_start_year ||
-    app.targetSession?.startYear ||
-    app.target_session?.start_year ||
-    formData.sessionStartYear ||
-    formData.startYear ||
-    formData.session_start_year ||
-    formData.start_year ||
-    sessionInfo.sessionStartYear ||
-    sessionInfo.startYear ||
-    sessionInfo.session_start_year ||
-    sessionInfo.start_year ||
-    0
-  );
-  if (startYear > currentYear) {
+
+  if (startYear > currentSessionStartYear || isEligibleApprovalInFuture) {
     return true;
   }
+
   return false;
 }
 
@@ -216,12 +263,7 @@ export function deriveCreationCategorisation(
   nowIso: string
 ): { applicationType: ApplicationType; targetSession: TargetSession; eligibleApproval: string } {
   const now = new Date(nowIso);
-  const anchorMonth = config.academicYear.anchorMonth; // 0-indexed (e.g. 6 = July)
-  // Current session start year: if we are at/after the July anchor, the session
-  // that started this calendar year is current; before July, last year's session
-  // is still current.
-  const currentSessionStartYear =
-    now.getMonth() >= anchorMonth ? now.getFullYear() : now.getFullYear() - 1;
+  const currentSessionStartYear = calculateAcademicSessionStartYear(now, config);
 
   const targetSession: TargetSession = { startYear: sessionStartYear, endYear: sessionEndYear };
   const applicationType: ApplicationType =

@@ -209,6 +209,14 @@ export const POST = withSecurity<ReassignStudentsBody>(
 
             await reassignStudentsAtomically(rpcPlans);
 
+            // Invalidate student assignment caches for all reassigned students
+            try {
+                const { invalidateStudentAssignmentCache } = await import('@/domains/student');
+                await Promise.allSettled(rpcPlans.map(p => invalidateStudentAssignmentCache(p.studentId)));
+            } catch (cacheErr) {
+                console.warn('[reassign-students] Post-reassign cache invalidation warning:', cacheErr);
+            }
+
             // ── Phase 4: PostgreSQL student profile updates (now handled by RPC) ──
             // The RPC already updated student_profiles (bus_id, route_id, shift).
             // No further student updates needed here.

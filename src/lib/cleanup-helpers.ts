@@ -10,9 +10,12 @@ import { deleteUserTokens } from '@/lib/services/fcm-token-service';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import { deleteAsset,extractPublicId } from './cloudinary-server';
 import { wasSeatReleased } from './config/capacity-flags';
-import { adminAuth,adminDb } from './firebase-admin';
-
+import { adminAuth } from './firebase-admin';
+import { invalidateStudentAssignmentCache } from '@/domains/student';
 import { invalidateCachedRole } from '@/lib/security/role-cache';
+import { invalidateModeratorPermissionCache } from '@/lib/security/moderator-permissions';
+import { getBusIdVariations } from '@/lib/utils';
+import { invalidateBusTripSnapshot } from '@/lib/services/trip-snapshot-cache';
 
 /**
  * Delete profile image from Cloudinary
@@ -133,10 +136,16 @@ export async function deleteUserAndData(
       }
     }
 
-    // Invalidate role cache immediately
+    // Invalidate role cache and permissions immediately
     invalidateCachedRole(userId);
+    if (userType === 'moderator') {
+      invalidateModeratorPermissionCache(userId);
+    }
     if (firebaseAuthUid && firebaseAuthUid !== userId) {
       invalidateCachedRole(firebaseAuthUid);
+      if (userType === 'moderator') {
+        invalidateModeratorPermissionCache(firebaseAuthUid);
+      }
     }
 
     // 3. Firebase Auth User Deletion & JWT Revocation (External)
@@ -150,28 +159,20 @@ export async function deleteUserAndData(
       }
     }
 
-    // 4. FCM & Request Cleanup (External)
+    // 4. FCM & Cache Cleanup (External)
     if (userType === 'student') {
+      // Invalidate student assignment cache across L1 memory and Redis
+      try {
+        await invalidateStudentAssignmentCache(userId);
+      } catch (cacheErr: any) {
+        console.warn('Student assignment cache invalidation warning:', cacheErr.message);
+      }
+
       // Delete FCM tokens from Firestore subcollection
       try {
         await deleteUserTokens(userId);
       } catch (fcmErr: any) {
         console.warn('FCM tokens subcollection delete warning:', fcmErr.message);
-      }
-
-      // Delete profile update requests
-      try {
-        const profileRequestsSnapshot = await adminDb.collection('profile_update_requests')
-          .where('studentUid', '==', userId)
-          .limit(400)
-          .get();
-        if (!profileRequestsSnapshot.empty) {
-          const batch = adminDb.batch();
-          profileRequestsSnapshot.docs.forEach(doc => batch.delete(doc.ref));
-          await batch.commit();
-        }
-      } catch (requestsError: any) {
-        console.warn('Profile update requests delete warning:', requestsError.message);
       }
     } else if (userType === 'driver') {
       console.log(`ℹ️ Preserving trip history logs and operational notifications for deleted driver: ${userId.substring(0,8)}...`);
@@ -196,16 +197,15 @@ export async function deleteUserAndData(
     }
 
     // 6. Fleet Domain Delegation (Post-commit)
-    if (userType === 'student' && shouldDecrement && busId) {
+    // Note: Database capacity counters are decremented atomically inside delete_student_cascade_v1.
+    // Invalidate bus and student assignment caches to ensure fresh reads without double-decrementing.
+    if (userType === 'student' && busId) {
       try {
-        await fleetService.onStudentDeleted({
-          studentUid: userId,
-          busId,
-          shift: userData?.shift,
-        });
-        console.log(`✅ Fleet notified of student deletion (capacity update delegated)`);
+        fleetService.invalidateBusCache(busId);
+        await invalidateStudentAssignmentCache(userId);
+        console.log(`✅ Fleet and student caches invalidated for deleted student`);
       } catch (fleetErr: any) {
-        console.error(`⚠️ Fleet capacity update delegation failed:`, fleetErr.message);
+        console.error(`⚠️ Fleet/student cache invalidation failed:`, fleetErr.message);
       }
     }
 
@@ -245,38 +245,89 @@ export async function deleteBusAndData(
       return { success: false, error: 'Bus not found' };
     }
 
-    // 1. Clean student references in PostgreSQL
+    const db = getSupabaseServer();
+
+    // 1. Active Trip Guard (Cannot delete bus during active trip)
+    const busVariations = getBusIdVariations(busId);
+    const { data: activeTrips } = await db
+      .from('active_trips')
+      .select('id, status')
+      .in('bus_id', busVariations)
+      .in('status', ['active', 'SCHEDULED', 'IN_TRANSIT', 'started', 'in_progress'])
+      .gt('expires_at', new Date().toISOString())
+      .limit(1);
+
+    if (activeTrips && activeTrips.length > 0) {
+      return { success: false, error: 'Cannot delete bus while an active trip is in progress. End the trip first.' };
+    }
+
+    // 2. Active Enrolled Students Guard (Cannot delete bus with active seat-holding students)
+    const students = (await getStudentsByBusIds(busVariations)) || [];
+    const activeStudents = students.filter(s => s.status === 'active' && !wasSeatReleased(s));
+    if (activeStudents.length > 0) {
+      return {
+        success: false,
+        error: `Cannot delete bus while ${activeStudents.length} active seat-holding student(s) are assigned to it. Reassign students first.`
+      };
+    }
+
+    // 3. Clean student references for remaining inactive/seat-released students (batch update, no N+1 loops)
     try {
-      const students = await getStudentsByBusIds([busId]);
-      for (const student of students) {
-        await updateStudent(student.uid, {
-          busId: null,
-          routeId: null,
-          stop_name: null
-        });
+      const { data: updatedStudents, error: studErr } = await db
+        .from('student_profiles')
+        .update({
+          bus_id: null,
+          route_id: null,
+          stop_name: null,
+          updated_at: new Date().toISOString(),
+        })
+        .in('bus_id', busVariations)
+        .select('uid');
+
+      if (studErr) {
+        console.error('Error clearing student bus assignments in PostgreSQL:', studErr);
       }
-      console.log(`Cleared busId/routeId/stop_name from ${students.length} students in PostgreSQL`);
+
+      const affectedStudentUids = new Set<string>([
+        ...students.map((s) => s.uid),
+        ...(updatedStudents || []).map((s: { uid: string }) => s.uid),
+      ]);
+
+      for (const sUid of affectedStudentUids) {
+        invalidateStudentAssignmentCache(sUid);
+      }
+      console.log(`Cleared busId/routeId/stop_name from ${affectedStudentUids.size} students in PostgreSQL`);
     } catch (pgStudErr) {
       console.error('Error clearing student bus assignments in PostgreSQL:', pgStudErr);
     }
 
-    // 2. Unassign bus from drivers in PostgreSQL
+    // 4. Unassign bus from drivers in PostgreSQL (batch update, no N+1 loops)
     try {
-      const drivers = await getAllDrivers();
-      const assignedDrivers = drivers.filter(d => d.busId === busId);
-      for (const driver of assignedDrivers) {
-        await updateDriver(driver.uid, {
-          busId: null,
-        });
+      const { data: updatedDrivers, error: driverErr } = await db
+        .from('driver_profiles')
+        .update({
+          bus_id: null,
+          updated_at: new Date().toISOString(),
+        })
+        .in('bus_id', busVariations)
+        .select('uid');
+
+      if (driverErr) {
+        console.error('Error unassigning bus from drivers in PostgreSQL:', driverErr);
+      } else {
+        console.log(`Unassigned bus ${busId} from ${updatedDrivers?.length || 0} drivers in PostgreSQL`);
       }
-      console.log(`Unassigned bus ${busId} from ${assignedDrivers.length} drivers in PostgreSQL`);
     } catch (pgDriverErr) {
       console.error('Error unassigning bus from drivers in PostgreSQL:', pgDriverErr);
     }
 
-    // 3. Delete bus from PostgreSQL
+    // 5. Delete bus from PostgreSQL and invalidate all caches
     try {
       await fleetService.removeBus(busId);
+      for (const bVar of busVariations) {
+        fleetService.invalidateBusCache(bVar);
+        invalidateBusTripSnapshot(bVar);
+      }
       console.log('Deleted bus from PostgreSQL:', busId);
     } catch (pgBusErr) {
       console.error('Error deleting bus from PostgreSQL:', pgBusErr);
@@ -305,6 +356,10 @@ export async function deleteRouteAndData(
 
     if (error) throw new Error(error.message);
     if (!data?.success) throw new Error('RPC returned failure');
+
+    const { invalidateRouteCache } = await import('@/domains/route');
+    invalidateRouteCache(routeId);
+    fleetService.invalidateBusCache();
 
     console.log(`Route ${routeId} deleted: ${data.busesCleaned} buses, ${data.studentsCleaned} students cleaned`);
     return { success: true };
