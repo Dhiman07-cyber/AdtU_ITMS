@@ -8,21 +8,20 @@ This section contains the authoritative forensic audit, real-browser Playwright 
 
 ## 📑 Documents in This Directory
 
-### 1. [ADTU_ITMS_GPS_FORENSIC_AUDIT_FINAL_REPORT.md](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/07-gps-and-location-integrity/ADTU_ITMS_GPS_FORENSIC_AUDIT_FINAL_REPORT.md)
-* **Author:** **Ruth** (Lead Forensic Engineering & Verification Agent)
-* **Classification:** Canonical Master Report & Architectural Proof
-* **Contents:**
-  - Executive summary and verification verdicts
-  - Complete 10-step Source-to-Screen GPS pipeline
-  - Individual answers with measured data for **Sir's 10 Questions**
-  - Real authenticated Playwright browser simulation results
-  - Waiting flag trust boundaries, abuse testing, and geofence findings
-  - Admin & Moderator live fleet map architecture and verification
-  - Docker optimization analysis (fixing the 857 MB build context bottleneck)
-  - Phone to dedicated onboard GPS hardware readiness roadmap
+### 1. [01-telematics-ingestion-and-kalman-pipeline.md](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/07-gps-and-location-integrity/01-telematics-ingestion-and-kalman-pipeline.md)
+* Low-Level Design of the telematics ingestion pipeline, Assam bounding box, velocity checks, Kalman filtering, and atomic Redis Lua guards.
 
-### 2. [ADTU_ITMS_BUS_MARKER_ROUTE_ALIGNMENT_FINAL_REPORT.md](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/07-gps-and-location-integrity/ADTU_ITMS_BUS_MARKER_ROUTE_ALIGNMENT_FINAL_REPORT.md)
-* Comprehensive report detailing the MapLibre bus marker route alignment, interpolation dynamics, easing curves, and client-side telemetry smoothing.
+### 2. [02-stop-dwell-audit-proof-engine.md](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/07-gps-and-location-integrity/02-stop-dwell-audit-proof-engine.md)
+* Low-Level Design of the stop dwell audit proof engine, geofenced proximity, `stop_dwell_logs` schema, and throttled Redis synchronization (>85% write reduction).
+
+### 3. [03-trip-lifecycle-and-route-corridor-hardening-lld.md](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/07-gps-and-location-integrity/03-trip-lifecycle-and-route-corridor-hardening-lld.md)
+* Comprehensive Low-Level Design detailing trip lifecycle transitions, corridor boundaries, and fail-closed state machines.
+
+### 4. [ADTU_ITMS_GPS_FORENSIC_AUDIT_FINAL_REPORT.md](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/07-gps-and-location-integrity/ADTU_ITMS_GPS_FORENSIC_AUDIT_FINAL_REPORT.md)
+* Canonical Master Report with measured latency, Playwright browser simulations, and answers to faculty architectural questions.
+
+### 5. [ADTU_ITMS_BUS_MARKER_ROUTE_ALIGNMENT_FINAL_REPORT.md](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/docs/07-gps-and-location-integrity/ADTU_ITMS_BUS_MARKER_ROUTE_ALIGNMENT_FINAL_REPORT.md)
+* Report detailing MapLibre bus marker route alignment, interpolation dynamics, easing curves, and client-side telemetry smoothing.
 
 ---
 
