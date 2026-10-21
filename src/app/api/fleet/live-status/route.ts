@@ -77,12 +77,12 @@ async function getCoalescedFleetStatus(showAll: boolean): Promise<FleetStatusRes
           .select('id, route_name, stops, total_stops'),
         supabase
           .from('active_trips')
-          .select('trip_id, bus_id, driver_id, route_id, shift, status, start_time, end_time, last_heartbeat, expires_at')
+          .select('trip_id, bus_id, driver_id, route_id, shift, status, start_time, last_heartbeat, expires_at')
           .eq('status', 'active'),
         supabase
           .from('driver_profiles')
-          .select('uid, full_name, phone, bus_id, route_id, shift, trip_active, active_trip_id')
-          .eq('trip_active', true),
+          .select('uid, full_name, phone, status')
+          .neq('status', 'inactive'),
       ]);
 
       if (busesRes.error) {
@@ -107,10 +107,10 @@ async function getCoalescedFleetStatus(showAll: boolean): Promise<FleetStatusRes
         }
       }
 
-      const activeDriverMap = new Map<string, any>();
+      const driverProfileByUid = new Map<string, any>();
       for (const d of activeDrivers) {
-        if (d.bus_id) {
-          activeDriverMap.set(d.bus_id, d);
+        if (d.uid) {
+          driverProfileByUid.set(d.uid, d);
         }
       }
 
@@ -121,9 +121,7 @@ async function getCoalescedFleetStatus(showAll: boolean): Promise<FleetStatusRes
             const busNumber = b.bus_number;
             return (
               activeTripMap.has(busId) ||
-              activeTripMap.has(busNumber) ||
-              activeDriverMap.has(busId) ||
-              activeDriverMap.has(busNumber)
+              activeTripMap.has(busNumber)
             );
           });
 
@@ -134,8 +132,9 @@ async function getCoalescedFleetStatus(showAll: boolean): Promise<FleetStatusRes
       const enrichedBuses: FleetBusLiveStatus[] = await Promise.all(targetBuses.map(async (b: any) => {
         const busId = b.id;
         const activeTrip = activeTripMap.get(busId) || activeTripMap.get(b.bus_number);
-        const activeDriver = activeDriverMap.get(busId) || activeDriverMap.get(b.bus_number);
-        const isTripActive = Boolean(activeTrip || activeDriver);
+        const resolvedDriverUid = activeTrip?.driver_id || b.driver_uid || null;
+        const driverProfile = resolvedDriverUid ? driverProfileByUid.get(resolvedDriverUid) : null;
+        const isTripActive = Boolean(activeTrip);
 
         const chosenLoc: any = (await getLastLocationForBusAsync(busId)) || (await getLastLocationForBusAsync(b.bus_number)) || null;
 
@@ -189,7 +188,7 @@ async function getCoalescedFleetStatus(showAll: boolean): Promise<FleetStatusRes
           }
         }
 
-        const assignedRouteId = activeTrip?.route_id || activeDriver?.route_id || b.route_id;
+        const assignedRouteId = activeTrip?.route_id || b.route_id;
         const matchedRoute = assignedRouteId ? routeMap.get(assignedRouteId) : null;
 
         return {
@@ -202,11 +201,11 @@ async function getCoalescedFleetStatus(showAll: boolean): Promise<FleetStatusRes
           routeName: matchedRoute?.route_name || b.route_name || 'Unassigned Route',
           stops: matchedRoute?.stops || null,
           tripStatus: isTripActive ? 'active' : 'inactive',
-          tripId: activeTrip?.trip_id || activeDriver?.active_trip_id || null,
-          driverId: activeTrip?.driver_id || activeDriver?.uid || b.driver_uid || null,
-          driverName: activeDriver?.full_name || b.driver_name || 'Assigned Driver',
-          driverPhone: activeDriver?.phone || null,
-          shift: activeTrip?.shift || activeDriver?.shift || null,
+          tripId: activeTrip?.trip_id || null,
+          driverId: resolvedDriverUid || null,
+          driverName: driverProfile?.full_name || b.driver_name || (isTripActive ? 'Active Driver' : 'Assigned Driver'),
+          driverPhone: driverProfile?.phone || null,
+          shift: activeTrip?.shift || b.shift || null,
           startTime: activeTrip?.start_time || null,
           locationStatus,
           location: locationObj,

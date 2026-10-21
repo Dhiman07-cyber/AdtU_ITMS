@@ -89,7 +89,8 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
     const result = await deleteBusAndData(id);
 
     if (!result.success) {
-      return NextResponse.json({ error: result.error || 'Failed to delete bus' }, { status: 500 });
+      const isConflict = result.error?.includes('active trip') || result.error?.includes('assigned to it');
+      return NextResponse.json({ error: result.error || 'Failed to delete bus' }, { status: isConflict ? 409 : 500 });
     }
 
     const { invalidateBusCache } = await import('@/domains/fleet/services/fleet.service');

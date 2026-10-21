@@ -1,7 +1,9 @@
-﻿import { createAuditEvent,type AuditActorRole } from '@/domains/audit';
+import { createAuditEvent,type AuditActorRole } from '@/domains/audit';
+import { invalidateBusCache } from '@/domains/fleet';
 import { verifyApiAuth } from '@/lib/security/api-auth';
 import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
 import { getSupabaseServer } from '@/lib/supabase-server';
+import { getBusIdVariations } from '@/lib/utils';
 import crypto from 'crypto';
 import { NextRequest,NextResponse } from 'next/server';
 
@@ -80,6 +82,30 @@ export async function POST(req: NextRequest) {
                         message: `Driver ${df.driverName} has been deleted`,
                     }, { status: 409 });
                 }
+            }
+        }
+
+        // ── Phase 1b: Active Trip Guard (Buses & Drivers) ──
+        const allBusVariations = [...new Set(netChanges.flatMap(c => getBusIdVariations(c.busId)))];
+        const driverUids = driverFinalState.map(d => d.driverId);
+
+        const { data: activeTrips } = await supabase
+            .from('active_trips')
+            .select('id, bus_id, driver_id, status')
+            .in('status', ['active', 'SCHEDULED', 'IN_TRANSIT', 'started', 'in_progress'])
+            .gt('expires_at', new Date().toISOString());
+
+        if (activeTrips && activeTrips.length > 0) {
+            const hasConflict = activeTrips.some(t =>
+                (t.bus_id && allBusVariations.includes(t.bus_id)) ||
+                (t.driver_id && driverUids.includes(t.driver_id))
+            );
+            if (hasConflict) {
+                return NextResponse.json({
+                    success: false,
+                    message: 'Cannot reassign bus or driver while an active trip is in progress. Please wait for the trip to end.',
+                    conflictDetails: 'Active trip in progress',
+                }, { status: 409 });
             }
         }
 
@@ -181,6 +207,8 @@ export async function POST(req: NextRequest) {
             severity: 'medium',
             metadata: { updatedBuses, updatedDrivers },
         });
+
+        invalidateBusCache();
 
         return NextResponse.json({ success: true, updatedBuses, updatedDrivers });
 

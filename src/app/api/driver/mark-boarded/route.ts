@@ -4,6 +4,9 @@ import { RateLimits } from '@/lib/security/rate-limiter';
 import { MarkBoardedSchema } from '@/lib/security/validation-schemas';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import { isWaitingFlagExpired } from '@/lib/waiting-flag-helpers';
+import { removeRedisActiveFlag } from '@/domains/gps/services/gps-redis-guard';
+import { invalidateBusTripSnapshot } from '@/lib/services/trip-snapshot-cache';
+import { isMatchingBusId } from '@/lib/utils';
 import { NextResponse } from 'next/server';
 
 /**
@@ -33,7 +36,7 @@ export const POST = withSecurity(
         }
 
         const activeTrip = tripRes.data;
-        if (!activeTrip || activeTrip.bus_id !== flagData.bus_id) {
+        if (!activeTrip || !isMatchingBusId(activeTrip.bus_id, flagData.bus_id)) {
             return NextResponse.json(
                 { error: 'Driver is not assigned to this bus' },
                 { status: 403 }
@@ -70,6 +73,10 @@ export const POST = withSecurity(
         if (!updatedData || updatedData.length === 0) {
             return NextResponse.json({ success: true, message: 'Student already boarded or processed', data: { flagId, studentUid: flagData.student_uid } });
         }
+
+        // Evict from Redis active waiting flags and invalidate bus snapshot cache (Fix 5)
+        await removeRedisActiveFlag(flagData.bus_id, flagId).catch(() => {});
+        invalidateBusTripSnapshot(flagData.bus_id);
 
         // 3. Parallel Broadcasts via WebSocket
         const ts = new Date().toISOString();

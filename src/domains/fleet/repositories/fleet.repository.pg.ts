@@ -56,6 +56,9 @@ const BUS_FIELD_MAP: Record<string, string> = {
   model: 'model',
   year: 'year',
   capacity: 'capacity',
+  primaryDriverUid: 'primary_driver_uid',
+  driverUID: 'driver_uid',
+  driverName: 'driver_name',
   routeId: 'route_id',
   routeName: 'route_name',
   status: 'status',
@@ -68,7 +71,7 @@ const BUS_FIELD_MAP: Record<string, string> = {
   updatedAt: 'updated_at',
 };
 
-const BUS_COLUMNS = 'id, bus_number, model, year, capacity, route_id, route_name, status, current_members, morning_load, evening_load, last_started_at, last_ended_at, created_at, updated_at';
+const BUS_COLUMNS = 'id, bus_number, model, year, capacity, primary_driver_uid, driver_uid, driver_name, route_id, route_name, status, current_members, morning_load, evening_load, last_started_at, last_ended_at, created_at, updated_at';
 
 const VIRTUAL_BUS_FIELDS = new Set(['busId', 'currentPassengerCount', 'routeRef']);
 
@@ -101,10 +104,18 @@ function busDomainToRow(data: Partial<Bus>): Record<string, any> {
     }
   }
 
+  // Synchronize primary_driver_uid and driver_uid aliases
+  if (row.primary_driver_uid && !row.driver_uid) {
+    row.driver_uid = row.primary_driver_uid;
+  } else if (row.driver_uid && !row.primary_driver_uid) {
+    row.primary_driver_uid = row.driver_uid;
+  }
+
   return row;
 }
 
 function pgRowToBus(row: Record<string, any>): Bus {
+  const primaryDriver = row.primary_driver_uid || row.driver_uid || null;
   const bus: Bus = {
     id: row.id,
     busId: row.id,
@@ -112,8 +123,9 @@ function pgRowToBus(row: Record<string, any>): Bus {
     model: row.model,
     year: row.year,
     capacity: row.capacity ?? 0,
-    driverUID: null,
-    driverName: null,
+    primaryDriverUid: primaryDriver,
+    driverUID: primaryDriver,
+    driverName: row.driver_name || null,
     routeId: row.route_id,
     routeName: row.route_name,
     status: row.status || 'inactive',
@@ -143,6 +155,7 @@ async function enrichWithDriverUid(bus: Bus): Promise<Bus> {
 
   if (activeTrip?.driver_id) {
     bus.driverUID = activeTrip.driver_id;
+    bus.isLiveDriver = true;
   }
   return bus;
 }
@@ -157,7 +170,11 @@ async function enrichBusListWithDriverUid(buses: Bus[]): Promise<Bus[]> {
 
   const map = new Map((activeTrips || []).map(t => [t.bus_id, t.driver_id]));
   for (const bus of buses) {
-    bus.driverUID = map.get(bus.id) ?? null;
+    const liveDriver = map.get(bus.id);
+    if (liveDriver) {
+      bus.driverUID = liveDriver;
+      bus.isLiveDriver = true;
+    }
   }
   return buses;
 }

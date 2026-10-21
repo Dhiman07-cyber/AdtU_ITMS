@@ -1,5 +1,6 @@
 import { getAllBuses,getBusById } from '@/domains/fleet';
 import { getStudentById,updateStudent } from '@/domains/identity';
+import { invalidateStudentAssignment } from '@/domains/student';
 import { db as adminDb } from '@/lib/firebase-admin';
 import { withSecurity } from '@/lib/security/api-security';
 import { RateLimits } from '@/lib/security/rate-limiter';
@@ -143,6 +144,7 @@ export const POST = withSecurity(
         fullName: requestData.newName,
         pendingProfileUpdate: null
       });
+      invalidateStudentAssignment(requestData.studentUid).catch(() => {});
 
       console.log(`Profile update approved for student ${requestData.studentUid}: ${requestId}`);
 
@@ -177,6 +179,7 @@ export const POST = withSecurity(
       await updateStudent(requestData.studentUid, {
         pendingProfileUpdate: null
       });
+      invalidateStudentAssignment(requestData.studentUid).catch(() => {});
 
       // Update request status in Firestore
       try {

@@ -1,7 +1,10 @@
 import { createAuditEvent,type AuditActorRole } from '@/domains/audit';
+import { invalidateBusCache } from '@/domains/fleet';
+import { clearStudentAssignmentMemoryCache } from '@/domains/student';
 import { verifyApiAuth } from '@/lib/security/api-auth';
 import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
 import { getSupabaseServer } from '@/lib/supabase-server';
+import { getBusIdVariations } from '@/lib/utils';
 import crypto from 'crypto';
 import { NextRequest,NextResponse } from 'next/server';
 
@@ -72,6 +75,23 @@ export async function POST(req: NextRequest) {
                     message: `Route ${change.newRouteName} is not active`,
                 }, { status: 400 });
             }
+        }
+
+        // ── Phase 1b: Active Trip Guard (Buses) ──
+        const allBusVariations = [...new Set(netChanges.flatMap(c => getBusIdVariations(c.busId)))];
+        const { data: activeTrips } = await supabase
+            .from('active_trips')
+            .select('id, bus_id, status')
+            .in('bus_id', allBusVariations)
+            .in('status', ['active', 'SCHEDULED', 'IN_TRANSIT', 'started', 'in_progress'])
+            .gt('expires_at', new Date().toISOString())
+            .limit(1);
+
+        if (activeTrips && activeTrips.length > 0) {
+            return NextResponse.json({
+                success: false,
+                message: 'Cannot reassign route while an active trip is in progress. Please wait for the trip to end.',
+            }, { status: 409 });
         }
 
         // ── Phase 2: Atomic commit via RPC ──
@@ -153,6 +173,30 @@ export async function POST(req: NextRequest) {
             severity: 'medium',
             metadata: { updatedBuses },
         });
+
+        invalidateBusCache();
+        clearStudentAssignmentMemoryCache();
+
+        try {
+            const { invalidateBusTripSnapshot } = await import('@/lib/services/trip-snapshot-cache');
+            for (const bId of updatedBuses) {
+                invalidateBusTripSnapshot(bId);
+            }
+        } catch (tripSnapErr) {
+            console.warn('[assign-routes] Bus snapshot invalidation warning:', tripSnapErr);
+        }
+        try {
+            const { invalidateRouteCache } = await import('@/domains/route');
+            invalidateRouteCache();
+        } catch (routeErr) {
+            console.warn('[assign-routes] Route cache invalidation warning:', routeErr);
+        }
+        try {
+            const { invalidateStudentAssignmentCache } = await import('@/domains/student');
+            await invalidateStudentAssignmentCache('*');
+        } catch (assignErr) {
+            console.warn('[assign-routes] Wildcard student cache invalidation warning:', assignErr);
+        }
 
         return NextResponse.json({ success: true, updatedBuses });
 

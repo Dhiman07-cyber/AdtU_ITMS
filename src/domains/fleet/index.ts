@@ -5,7 +5,7 @@ export {
 
 	checkBusCapacity,createBus,decrementBusCapacity,getAllBuses,
 	getBusById,
-	getBusesByRouteId,incrementBusCapacity,onStudentDeleted,
+	getBusesByRouteId,incrementBusCapacity,invalidateBusCache,onStudentDeleted,
 	reassignStudentsAtomically,removeBus,unassignRoute,
 	updateBus
 } from './services/fleet.service';
