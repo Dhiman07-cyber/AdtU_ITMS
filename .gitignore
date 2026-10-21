@@ -81,3 +81,8 @@ temp/
 security-tools/
 strix_runs/
 .strix/
+
+# Cadence Batch Push tooling & prompts
+CADENCE_BATCH_PUSH_PROMPT.md
+orchestrate-batch-push.js
+batch-push-*.js
