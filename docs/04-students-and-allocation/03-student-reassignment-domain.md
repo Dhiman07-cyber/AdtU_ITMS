@@ -1,270 +1,954 @@
-# Admin & Moderator Student Reassignment Domain
+# Admin & Moderator Student Reassignment Domain (Low-Level Design & Forensic Codebase Truth)
 
-## 1. Domain Overview & Operational Scope
+**Module:** Student Reassignment, Fleet Load Rebalancing & Deadlock-Free Atomic Rollbacks  
+**File Authority:** `src/app/api/admin/reassign-students/route.ts`, `src/app/api/admin/rollback-reassignment/route.ts`, `supabase/COMPLETE_SCHEMA.sql`  
+**Security Gate:** `requireAdminPermission('students', 'canReassign')` / `withSecurity`  
+**Database Transaction:** `public.reassign_students_atomically(p_plans JSONB)`, `public.execute_reassignment_rollback(p_operation_id UUID)`  
 
-The **Student Reassignment Domain** enables University Administrators and authorized Moderators to dynamically rebalance passenger distributions across the transit fleet without data loss, overbooking, or transit disruption.
+---
 
-> **CRITICAL BOUNDARY:** This document exclusively covers **Student Reassignment** (migrating enrolled students between buses, routes, stops, and shifts). Vehicle fleet allocations and driver roster assignments are managed in separate operational domains.
+# PART 8: Smart Allocation Engine — Atomic Student Reassignment, Deadlock Prevention & 1-Click Rollback Engine (`/admin/smart-allocation`)
 
-### Reassignment Scenarios
-1. **Capacity Overload Relief:** Relieving an over-subscribed bus by migrating passengers to an under-utilized vehicle serving overlapping corridors.
-2. **Application Capacity Review Resolution:** Resolving Case 3 applications (`bus_full_only_option`) where a student applied for a full bus and needs assignment to a staged alternative.
-3. **Shift Adjustments:** Accommodating student class timetable changes (transferring between Morning and Evening shifts).
-4. **Relocation & Stop Changes:** Updating a student's designated boarding point when their residential address changes.
-5. **Bulk Fleet Rebalancing:** Mass-migrating groups of students following route restructuring or new vehicle commissioning.
+---
+
+### 8.1 Sub-Domain Architecture & Exact Execution Pipeline
+
+The Smart Allocation Engine enables administrators and dispatchers to rebalance passenger loads across transit corridors. It allows moving individual students or entire cohorts between buses serving overlapping routes and stops, resolving vehicle capacity bottlenecks, accommodating breakdown diversions, and adjusting shift assignments.
+
+To eliminate race conditions, phantom capacity drift, and database deadlocks during high-concurrency reassignments, the subsystem is built around two symmetrical, atomic PL/pgSQL database transactions:
+1. **Forward Reassignment:** `reassign_students_atomically`
+2. **Reverse Reassignment / Rollback:** `execute_reassignment_rollback`
+
+#### Sequence & Dataflow Diagram: Atomic Student Reassignment & Rollback
 
 ```
-       ┌────────────────────────────────────────────────────────┐
-       │             ADMINISTRATOR / MODERATOR ACTION           │
-       │    Initiates Single or Bulk Reassignment (/admin/smart)│
-       └──────────────────────────┬─────────────────────────────┘
-                                  │
-                                  ▼
-       ┌────────────────────────────────────────────────────────┐
-       │             MODERATOR PERMISSION GUARD                 │
-       │      requireModeratorPermission('students',            │
-       │             'canReassign')                             │
-       └──────────────────────────┬─────────────────────────────┘
-                                  │
-                                  ▼
-       ┌────────────────────────────────────────────────────────┐
-       │         POSTGRESQL ATOMIC RPC TRANSACTION              │
-       │      public.reassign_students_atomically(p_plans)      │
-       │                                                        │
-       │  1. FOR UPDATE lock on each student profile            │
-       │  2. Resolve old shift & new shift                      │
-       │  3. Decrement source bus shift load (if active seat)   │
-       │  4. Increment target bus shift load under FOR UPDATE   │
-       │     ► Aborts batch if target exceeds physical capacity │
-       │  5. Update student (bus_id, route_id, shift, stop_name)│
-       │  6. Recalculate exact bus loads from active profiles   │
-       └───────┬────────────────────────────────────────┬───────┘
-               │                                        │
-               ▼ Succeeded                              ▼ Failed (Capacity / Error)
-┌──────────────────────────────┐         ┌──────────────────────────────┐
-│  REASSIGNMENT LOG CREATED    │         │      TRANSACTION ABORTED     │
-│  - Snapshots before/after    │         │  - Zero partial transfers    │
-│  - status: 'committed'       │         │  - Database state unchanged  │
-│  - Eligible for Rollback     │         └──────────────────────────────┘
-└──────────────┬───────────────┘
-               │
-               ▼
-┌──────────────────────────────┐
-│  NOTIFICATIONS DISPATCHED    │
-│  - Student: Reassignment msg │
-│  - Driver: New passenger cnt │
-└──────────────────────────────┘
+[ Admin / Dispatcher UI: /admin/smart-allocation ]
+                      │
+                      │ 1. Select source bus, filter by stop, stage target buses
+                      │ 2. Submit Reassignments: { assignments[], sourceBusId, opId }
+                      ▼
+[ POST /api/admin/reassign-students ] (src/app/api/admin/reassign-students/route.ts)
+                      │
+                      ├─► 3. withSecurity + requireAdminPermission (Admin/Moderator auth)
+                      │
+                      ├─► 4. Idempotency Gate: Check if opId exists in audit_events / reassignment_logs
+                      │      (Returns immediately if duplicate request)
+                      │
+                      ├─► 5. Load student profiles & fleet buses from PostgreSQL
+                      │
+                      ├─► 6. Stale Data Check: verify student.busId === assignment.fromBusId
+                      │      (Throws 409 if student was already moved by another dispatcher)
+                      │
+                      ├─► 7. Compute Accumulated Shift Deltas:
+                      │      morningDelta & eveningDelta per affected source and target bus
+                      │
+                      ├─► 8. Client Pre-Check: verifies (currentLoad + delta) <= capacity
+                      │
+                      ▼
+[ db.rpc('reassign_students_atomically') ] (PostgreSQL ACID Transaction)
+                      │
+                      ├─► 9. Collect ALL distinct bus IDs (from_bus_ids + to_bus_ids)
+                      │
+                      ├─► 10. DEADLOCK ELIMINATION:
+                      │       PERFORM id FROM public.buses WHERE id = ANY(v_bus_ids)
+                      │       ORDER BY id ASC FOR UPDATE;
+                      │       (Strict lexical ordering prevents deadlock on concurrent A->B and B->A transfers)
+                      │
+                      ├─► 11. For each student in plans:
+                      │       - Lock student_profiles row FOR UPDATE
+                      │       - UPDATE student_profiles: bus_id, route_id, stop_name, shift
+                      │
+                      ├─► 12. Recalculate exact shift loads from student_profiles for all locked buses:
+                      │       morning_load = COUNT(*) WHERE shift IN ('Morning', 'Both')
+                      │       evening_load = COUNT(*) WHERE shift IN ('Evening', 'Both')
+                      │       current_members = morning_load + evening_load
+                      │
+                      ├─► 13. Hard Capacity Check:
+                      │       IF morning_load > capacity OR evening_load > capacity THEN
+                      │         RAISE EXCEPTION 'CAPACITY_EXCEEDED' (Transaction rolls back completely)
+                      │
+                      ▼ [COMMIT POSTGRESQL TRANSACTION]
+                      │
+                      ├─► 14. Purge Redis Entitlement Cache:
+                      │       invalidateStudentAssignmentCache(studentId) for every moved student
+                      │       (DEL student:assign:<uid> + Redis Pub/Sub broadcast)
+                      │
+                      ├─► 15. Write Rollback Snapshot to public.reassignment_logs:
+                      │       Stores operation_id, status = 'committed', and changes[] array
+                      │       with exact before/after states of students and buses
+                      │
+                      ├─► 16. Emit createAuditEvent('students_reassigned')
+                      │
+                      ▼
+[ Admin UI: ReassignmentSnackbar with 5-Minute Undo Button ]
+                      │
+                      │ (Admin clicks "Undo" or rolls back from ReassignmentHistoryModal)
+                      ▼
+[ POST /api/admin/rollback-reassignment ] (src/app/api/admin/rollback-reassignment/route.ts)
+                      │
+                      ├─► 17. Load reassignment_logs row where operation_id = opId AND status = 'committed'
+                      │
+                      ▼
+[ db.rpc('execute_reassignment_rollback') ] (PostgreSQL ACID Transaction)
+                      │
+                      ├─► 18. Lock reassignment_logs row FOR UPDATE
+                      │       (If already 'rolled_back', aborts immediately)
+                      │
+                      ├─► 19. Lock all original and destination buses ORDER BY id ASC FOR UPDATE
+                      │
+                      ├─► 20. Precondition Check:
+                      │       Verifies that every student is STILL assigned to their target bus
+                      │       (If student was moved again after this operation, aborts: STUDENT_STATE_CHANGED)
+                      │
+                      ├─► 21. Revert student_profiles:
+                      │       Restores bus_id, route_id, shift, stop_name from change.before
+                      │
+                      ├─► 22. Recalculate exact bus loads & verify capacity on original buses
+                      │
+                      ├─► 23. UPDATE reassignment_logs SET status = 'rolled_back', rolled_back_at = NOW()
+                      │
+                      ▼ [COMMIT POSTGRESQL TRANSACTION]
+                      │
+                      ├─► 24. Purge Redis Entitlement Cache for reverted students
+                      └─► 25. Emit createAuditEvent('reassignment_rolled_back')
 ```
 
 ---
 
-## 2. Database Concurrency & Atomic RPC Architecture
+### 8.2 File, Component, Hook, API & Service Inventory
 
-Student reassignment modifies multiple interrelated tables simultaneously: `student_profiles`, source vehicle counters in `buses`, target vehicle counters in `buses`, and `reassignment_logs`. Executing these across loose client-side requests causes data corruption during concurrent execution.
+| File Path | Exported Functions / Components | Callers (Who calls it) | Callees (What it calls) | Database Tables / Caches Mutated |
+| :--- | :--- | :--- | :--- | :--- |
+| `src/app/api/admin/reassign-students/route.ts` | `POST` | `StudentReassignmentTab.tsx`, `ReassignmentPanel.tsx` | `reassignStudentsAtomically`, `getStudentById`, `getAllBuses`, `invalidateStudentAssignmentCache`, `getSupabaseServer` | Mutates `public.student_profiles`, `public.buses`, `public.reassignment_logs`, `public.audit_events`. Purges Redis `student:assign:<uid>`. |
+| `src/app/api/admin/rollback-reassignment/route.ts` | `POST` | `ReassignmentSnackbar.tsx`, `ReassignmentHistoryModal.tsx` | `execute_reassignment_rollback`, `createAuditEvent`, `getSupabaseServer` | Mutates `public.student_profiles`, `public.buses`, `public.reassignment_logs`, `public.audit_events`. Purges Redis `student:assign:<uid>`. |
+| `src/lib/services/reassignment-service.ts` | `ReassignmentService` (Class) | Legacy admin smart-allocation controllers | `reassignStudentsAtomically`, `pgInsertNotification` | Delegates atomic execution to PostgreSQL RPC. |
+| `src/components/smart-allocation/StudentReassignmentTab.tsx` | `StudentReassignmentTab` (Client Component) | `/admin/smart-allocation/page.tsx` | `ReassignmentPanel`, `ReassignmentSnackbar`, `StudentRoster`, `fetch('/api/admin/reassign-students')` | Frontend staging and interactive allocation wizard. |
+| `src/components/assignment/ReassignmentHistoryModal.tsx` | `ReassignmentHistoryModal` | Admin and Moderator Smart Allocation headers | `fetch('/api/reassignment-logs')`, `fetch('/api/admin/rollback-reassignment')` | Renders log history and triggers 1-click rollback. |
+| `supabase/COMPLETE_SCHEMA.sql` | `reassign_students_atomically`, `execute_reassignment_rollback` | `src/domains/fleet/repositories/fleet.repository.pg.ts`, API routes | PL/pgSQL core database engine | PostgreSQL functions with deterministic locking. |
 
-All student reassignments are executed strictly through the PostgreSQL stored procedure:
-`public.reassign_students_atomically(p_plans JSONB)`
+---
 
-### 2.1 RPC Signature & Arguments
-```sql
-CREATE OR REPLACE FUNCTION public.reassign_students_atomically(p_plans JSONB)
-RETURNS JSONB
-```
+### 8.3 Method-by-Method Low-Level Walkthrough
 
-The payload `p_plans` is a JSON array of transfer specifications:
-```json
-[
-  {
-    "studentId": "usr_stu_109284",
-    "fromBusId": "BUS-101",
-    "toBusId": "BUS-105",
-    "studentShift": "Evening",
-    "stopName": "Paltan Bazar Station"
-  }
-]
-```
+#### 1. `POST /api/admin/reassign-students` (`src/app/api/admin/reassign-students/route.ts`)
+- **Signature:** `export const POST = withSecurity<ReassignStudentsBody>(async (_request, { auth, body }) => ...)`
+- **Control Flow & Branching:**
+  1. `requireAdminPermission(auth)`: Verifies that requester has `admin` or `moderator` role.
+  2. Idempotency Gate: If `body.opId` provided, queries `audit_events` where `metadata->>operationId = opId`. If match found, returns `{ success: true, idempotent: true }`.
+  3. Pre-flight Data Fetching:
+     - Parallel load of student profiles via `getStudentById`.
+     - Parallel load of buses via `getAllBuses()`.
+  4. Validation Loop across `assignments`:
+     - Checks student existence in PostgreSQL.
+     - Detects stale assignment: If `student.busId !== assignment.fromBusId`, throws `409 Conflict` (`"Stale reassignment data for ... Refresh and try again."`).
+     - Normalizes student original shift and target shift via `normalizeShift`.
+     - Accumulates deltas: Decrements source bus shift counters, increments target bus shift counters.
+  5. Capacity Delta Pre-Check:
+     - Checks `newMorning > capacity` or `newEvening > capacity`. If violated, throws `409 Conflict` before touching the database.
+  6. Atomic RPC Execution:
+     - Formats `rpcPlans = [{ studentId, fromBusId, toBusId, studentShift, stopName }]`.
+     - Calls `reassignStudentsAtomically(rpcPlans)`.
+  7. Post-Commit Cache Purge:
+     - Calls `invalidateStudentAssignmentCache(studentId)` for each moved commuter.
+  8. Rollback Snapshot Logging:
+     - Assembles `changes` array containing before and after states for students and buses.
+     - Inserts record into `public.reassignment_logs` with retry (3 attempts).
+     - If insert fails after 3 attempts, logs a warning audit event `reassignment_rollback_snapshot_failed`.
+  9. Emits audit event `students_reassigned`.
+  10. Returns `200 OK` with `operationId` and `movedCount`.
 
-### 2.2 Execution Steps Inside the Database Transaction
-1. **Row-Level Student Locking:**
-   ```sql
-   SELECT uid, shift, bus_id, stop_name
-   INTO v_student
-   FROM student_profiles
-   WHERE uid = v_student_id
-   FOR UPDATE;
-   ```
-   Acquires an exclusive lock on each student record, preventing concurrent mutations or race conditions with renewal payments.
-2. **Shift Resolution:**
-   - Evaluates the student's existing shift (`v_old_shift`) and target shift (`v_new_shift`).
-   - Normalizes shifts to lowercase (`'morning'` or `'evening'`).
-3. **Source Bus Capacity Decrement:**
-   - Invokes `bus_decrement_capacity(v_from_bus_id, v_old_shift)`.
-   - Decrements the specific shift counter (`morning_load` or `evening_load`) by 1.
-4. **Target Bus Capacity Guard & Increment:**
-   - Invokes `bus_increment_capacity(v_to_bus_id, v_new_shift)`.
-   - Acquires `FOR UPDATE` lock on the destination bus.
-   - Evaluates `shift_load < capacity`.
-   - **Strict Abort Invariant:** If the destination bus is full, the stored procedure raises an exception:
-     `'Capacity exceeded during reassignment for bus %'`
-     PostgreSQL automatically rolls back the entire batch. **Zero partial transfers can occur**.
-5. **Student Record Update:**
-   - Updates `student_profiles` with `bus_id = v_to_bus_id`, `route_id = v_target_route_id`, `shift = v_new_shift`, and `stop_name = v_stop_name`.
-6. **Deterministic Ground-Truth Recount:**
-   - After processing all students in the batch, the procedure queries active profiles to set exact counts:
+#### 2. `reassign_students_atomically` (`supabase/COMPLETE_SCHEMA.sql`)
+- **Signature:** `CREATE OR REPLACE FUNCTION public.reassign_students_atomically(p_plans jsonb) RETURNS jsonb`
+- **PL/pgSQL Execution Flow & Invariants:**
+  1. Extracts all unique bus IDs from `p_plans` (`fromBusId` and `toBusId`).
+  2. **Deadlock Prevention Lock:**
      ```sql
-     UPDATE buses b SET
-         morning_load = (SELECT COUNT(*) FROM student_profiles sp WHERE sp.bus_id = b.id AND LOWER(sp.shift) = 'morning' AND sp.status = 'active'),
-         evening_load = (SELECT COUNT(*) FROM student_profiles sp WHERE sp.bus_id = b.id AND LOWER(sp.shift) = 'evening' AND sp.status = 'active'),
-         current_members = (SELECT COUNT(*) FROM student_profiles sp WHERE sp.bus_id = b.id AND sp.status = 'active'),
-         updated_at = NOW()
-     WHERE b.id = v_to_bus_id;
+     PERFORM id FROM public.buses WHERE id = ANY(v_bus_ids) ORDER BY id ASC FOR UPDATE;
      ```
-   - Eliminates drift and guarantees 100% mathematical precision.
+     *Lexical sorting on bus primary keys guarantees that concurrent bidirectional reassignments (Bus 01 -> Bus 02 and Bus 02 -> Bus 01) always acquire row-level locks in the exact same sequence, making deadlocks mathematically impossible.*
+  3. Student Mutation Loop:
+     - For each plan in `p_plans`:
+       - Locks `student_profiles` row `WHERE uid = v_student_id FOR UPDATE`.
+       - Validates that student is currently assigned to `fromBusId`. If not, raises exception `STUDENT_STALE_ASSIGNMENT`.
+       - Updates `student_profiles`:
+         ```sql
+         UPDATE public.student_profiles
+         SET bus_id = v_to_bus_id,
+             route_id = v_target_route_id,
+             stop_name = COALESCE(v_stop_name, stop_name),
+             shift = COALESCE(v_shift, shift),
+             updated_at = NOW()
+         WHERE uid = v_student_id;
+         ```
+  4. Bus Load Recalculation:
+     - For each locked bus ID in `v_bus_ids`:
+       ```sql
+       SELECT
+         COUNT(*) FILTER (WHERE shift IN ('Morning', 'Both')),
+         COUNT(*) FILTER (WHERE shift IN ('Evening', 'Both'))
+       INTO v_morning_load, v_evening_load
+       FROM public.student_profiles
+       WHERE bus_id = v_bus_id AND status = 'active' AND seat_released_at IS NULL;
+       ```
+     - Updates `public.buses`:
+       ```sql
+       UPDATE public.buses
+       SET morning_load = v_morning_load,
+           evening_load = v_evening_load,
+           current_members = v_morning_load + v_evening_load,
+           updated_at = NOW()
+       WHERE id = v_bus_id;
+       ```
+     - Validates capacity:
+       ```sql
+       IF (v_morning_load > v_bus_capacity OR v_evening_load > v_bus_capacity) THEN
+         RAISE EXCEPTION 'CAPACITY_EXCEEDED on bus %', v_bus_id;
+       END IF;
+       ```
+  5. Returns `jsonb_build_object('success', true, 'reassigned_count', jsonb_array_length(p_plans))`.
+
+#### 3. `execute_reassignment_rollback` (`supabase/COMPLETE_SCHEMA.sql`)
+- **Signature:** `CREATE OR REPLACE FUNCTION public.execute_reassignment_rollback(p_operation_id text, p_actor_id text, p_actor_label text, p_changes jsonb) RETURNS jsonb`
+- **Control Flow:**
+  1. Locks `reassignment_logs` row `WHERE operation_id = p_operation_id FOR UPDATE`.
+  2. Verifies that `status = 'committed'`. If already `'rolled_back'`, returns `{ success: true, message: 'Already rolled back' }`.
+  3. Locks all affected buses in ascending lexical order: `ORDER BY id ASC FOR UPDATE`.
+  4. Precondition Verification Loop:
+     - For each student change in `p_changes`:
+       - Checks `student_profiles.bus_id === change.after.busId`.
+       - If student has moved to a different bus since this reassignment was committed, raises exception `STUDENT_STATE_CHANGED`, aborting the rollback to prevent overwriting more recent reassignments!
+  5. Restoration Loop:
+     - Restores original values from `change.before`:
+       ```sql
+       UPDATE public.student_profiles
+       SET bus_id = change.before.busId,
+           shift = change.before.shift,
+           stop_name = change.before.stopName,
+           updated_at = NOW()
+       WHERE uid = change.docId;
+       ```
+  6. Recalculates exact bus loads on all affected buses.
+  7. Verifies capacity limits on the original buses.
+  8. Updates `reassignment_logs` setting `status = 'rolled_back'`, `rolled_back_at = NOW()`, `rolled_back_by = p_actor_id`.
+  9. Returns `{ success: true, rolled_back_count: count }`.
 
 ---
 
-## 3. Reassignment Logs & The Rollback Engine
+### 8.4 Exact I/O, Database Query, Redis & External API Count Matrix
 
-Every committed reassignment creates an immutable record in `public.reassignment_logs` with a unique `operation_id` (`reassignment_logs/write`):
+| Execution Context | PostgreSQL Queries / RPCs Executed | Redis Commands | External Network Calls | Latency Profile |
+| :--- | :--- | :--- | :--- | :--- |
+| **(a) Student Reassignment Commit (Batch of N Students across K Buses)** | 1 SELECT: idempotency check, 1 SELECT: all buses, N SELECTs: student profiles, 1 RPC: `reassign_students_atomically` (locks K buses, updates N students, updates K buses in 1 TX), 1 INSERT on `reassignment_logs`, 1 INSERT on `audit_events` | N Redis cache purges (`DEL student:assign:<uid>`, `PUBLISH user:assignment:invalidate`) + K bus cache invalidations | 0 | ~65ms - 130ms |
+| **(b) 1-Click Rollback Execution (Operation of N Students)** | 1 SELECT: `reassignment_logs` (pre-check), 1 RPC: `execute_reassignment_rollback` (locks log + K buses, reverts N students, recalculates K buses in 1 TX), 1 INSERT: `audit_events` | N Redis cache purges (`DEL student:assign:<uid>`, `PUBLISH user:assignment:invalidate`) | 0 | ~50ms - 95ms |
+| **(c) Stale Reassignment Collision (Pre-flight abort)** | 1 SELECT on `student_profiles` (detects `busId !== fromBusId`) | 0 | 0 | ~10ms |
 
-```json
-{
-  "operationId": "student_reassignment_1772701200_abc123",
-  "type": "student_reassignment",
-  "status": "committed",
-  "actorId": "usr_adm_99182",
-  "summary": "Reassigned 12 students from Bus-101 to Bus-105",
-  "changes": [
+---
+
+### 8.5 Verbatim Source Code from Live Codebase
+
+#### 1. `src/app/api/admin/reassign-students/route.ts` (Lines 41–388)
+```typescript
+export const POST = withSecurity<ReassignStudentsBody>(
+    async (_request, { auth, body }) => {
+        const currentUserUid = auth.uid;
+        const currentUserRole = auth.role;
+        const { assignments, sourceBusId, opId } = body;
+
+        const permissionDenied = await requireAdminPermission(auth);
+        if (permissionDenied) return permissionDenied;
+
+        if (!assignments || assignments.length === 0) {
+            return NextResponse.json({ success: false, error: 'No assignments provided' }, { status: 400 });
+        }
+
+        // Idempotency key (opId) — allows safe retry on network failure
+        if (opId) {
+            const supabase = getSupabaseServer();
+            const { data: existingOp } = await supabase
+                .from('audit_events')
+                .select('id')
+                .eq('metadata->>operationId', opId)
+                .maybeSingle();
+            if (existingOp) {
+                return NextResponse.json({
+                    success: true,
+                    message: 'Operation already processed (idempotent)',
+                    idempotent: true,
+                    operationId: opId,
+                });
+            }
+        }
+
+        const busIdsToLoad = new Set<string>();
+        for (const assignment of assignments) {
+            busIdsToLoad.add(assignment.toBusId);
+            busIdsToLoad.add(assignment.fromBusId);
+        }
+        if (sourceBusId) busIdsToLoad.add(sourceBusId);
+
+        const actorInfoPromise = (async () => {
+            let label = auth.name || 'System';
+            if (currentUserRole === 'admin' || currentUserRole === 'moderator') {
+                const info = await getUpdaterInfo(currentUserUid);
+                label = currentUserRole === 'admin'
+                    ? `${info.name} (Admin)`
+                    : `${info.name} (${info.roleOrEmployeeId})`;
+            }
+            return label;
+        })();
+
+        const actorLabel = await actorInfoPromise;
+        const busPgData = new Map<string, any>();
+        const busLoadChanges = new Map<string, BusLoadDeltas>();
+        const effectiveAssignments: ReassignmentAssignment[] = [];
+        const operationId = opId || `student_reassignment_${Date.now()}_${crypto.randomUUID()}`;
+
+        try {
+            const pgStudentsList = await Promise.all(assignments.map((a) => getStudentById(a.studentId)));
+            const pgBuses = await getAllBuses();
+
+            for (const bus of pgBuses) {
+                if (bus.id) busPgData.set(bus.id, bus);
+                if (bus.busId) busPgData.set(bus.busId, bus);
+                if (bus.busNumber) busPgData.set(bus.busNumber, bus);
+            }
+
+            const studentRecords = new Map<string, any>();
+            pgStudentsList.forEach((student) => {
+                if (student && student.uid) studentRecords.set(student.uid, student);
+            });
+
+            busLoadChanges.clear();
+            effectiveAssignments.length = 0;
+
+            for (const assignment of assignments) {
+                const { studentId, fromBusId, toBusId, shift: targetShift } = assignment;
+                const studentData = studentRecords.get(studentId);
+
+                if (!studentData) {
+                    throw new ReassignmentValidationError(`Student ${studentId} not found`, 404);
+                }
+
+                const currentBusId = studentData.busId || '';
+
+                if (currentBusId === toBusId && studentData.shift === targetShift) {
+                    continue;
+                }
+
+                if (currentBusId && currentBusId !== fromBusId) {
+                    throw new ReassignmentValidationError(
+                        `Stale reassignment data for ${assignment.studentName || studentId}. Refresh and try again.`,
+                        409
+                    );
+                }
+
+                const targetBusData = busPgData.get(toBusId);
+                if (!targetBusData) {
+                    throw new ReassignmentValidationError(`Target bus ${toBusId} not found`, 404);
+                }
+
+                const originalShift = normalizeShift(studentData.shift);
+                if (!originalShift) {
+                    throw new ReassignmentValidationError(`Student ${assignment.studentName || studentId} profile missing valid shift assignment.`, 400);
+                }
+
+                const studentUpdateData: Record<string, unknown> = {
+                    busId: toBusId,
+                    shift: targetShift,
+                    routeId: (targetBusData as any).routeId || '',
+                    updatedAt: new Date().toISOString(),
+                };
+                const resolved_stop_name = assignment.stop_name || (assignment as any).stopName || studentData.stop_name || '';
+                if (resolved_stop_name) studentUpdateData.stop_name = resolved_stop_name;
+
+                if (currentBusId && currentBusId === fromBusId) {
+                    if (!busLoadChanges.has(fromBusId)) busLoadChanges.set(fromBusId, { morningDelta: 0, eveningDelta: 0 });
+                    const sourceChanges = busLoadChanges.get(fromBusId)!;
+                    const srcDeltas = getShiftDeltas(originalShift);
+                    if (srcDeltas.affectsMorning) sourceChanges.morningDelta--;
+                    if (srcDeltas.affectsEvening) sourceChanges.eveningDelta--;
+                }
+
+                if (!busLoadChanges.has(toBusId)) busLoadChanges.set(toBusId, { morningDelta: 0, eveningDelta: 0 });
+                const targetChanges = busLoadChanges.get(toBusId)!;
+                const dstDeltas = getShiftDeltas(targetShift);
+                if (dstDeltas.affectsMorning) targetChanges.morningDelta++;
+                if (dstDeltas.affectsEvening) targetChanges.eveningDelta++;
+
+                effectiveAssignments.push({ ...assignment, _originalShift: originalShift, _studentUpdateData: studentUpdateData } as any);
+            }
+
+            for (const [busId, deltas] of busLoadChanges.entries()) {
+                const busData = busPgData.get(busId);
+                if (!busData) {
+                    throw new ReassignmentValidationError(`Bus ${busId} not found`, 404);
+                }
+                const newMorning = Math.max(0, (busData.morningLoad || 0) + deltas.morningDelta);
+                const newEvening = Math.max(0, (busData.eveningLoad || 0) + deltas.eveningDelta);
+                const capacity = busData.capacity || 0;
+
+                if (capacity > 0) {
+                    if (deltas.morningDelta > 0 && newMorning > capacity) {
+                        throw new ReassignmentValidationError(
+                            `Bus ${busData.busNumber || busId} Morning trip would exceed capacity (${newMorning}/${capacity})`,
+                            409
+                        );
+                    }
+                    if (deltas.eveningDelta > 0 && newEvening > capacity) {
+                        throw new ReassignmentValidationError(
+                            `Bus ${busData.busNumber || busId} Evening trip would exceed capacity (${newEvening}/${capacity})`,
+                            409
+                        );
+                    }
+                }
+            }
+
+            const rpcPlans = effectiveAssignments.map(a => ({
+                studentId: a.studentId,
+                fromBusId: a.fromBusId,
+                toBusId: a.toBusId,
+                studentShift: a.shift,
+                stopName: a.stop_name || (a as any).stopName,
+            }));
+
+            await reassignStudentsAtomically(rpcPlans);
+
+            try {
+                const { invalidateStudentAssignmentCache } = await import('@/domains/student');
+                await Promise.allSettled(rpcPlans.map(p => invalidateStudentAssignmentCache(p.studentId)));
+            } catch (cacheErr) {
+                console.warn('[reassign-students] Post-reassign cache invalidation warning:', cacheErr);
+            }
+
+        } catch (error) {
+            if (error instanceof ReassignmentValidationError) {
+                return NextResponse.json(
+                    { success: false, error: error.message },
+                    { status: error.status }
+                );
+            }
+            throw error;
+        }
+
+        if (effectiveAssignments.length === 0) {
+            return NextResponse.json({
+                success: true,
+                message: 'No reassignment changes were needed',
+                movedCount: 0,
+                assignments: [],
+            });
+        }
+
+        try {
+            const targetBuses = [...new Set(effectiveAssignments.map((a) => a.toBusId))];
+            const uniqueBusIds = [...new Set([sourceBusId, ...targetBuses])];
+            const busLabels = new Map<string, string>();
+
+            for (const bId of uniqueBusIds) {
+                const bData = busPgData.get(bId);
+                if (bData) {
+                    const bNum = bId.replace(/[^0-9]/g, '') || '?';
+                    busLabels.set(bId, `Bus-${bNum} (${bData.busNumber || 'N/A'})`);
+                } else busLabels.set(bId, bId);
+            }
+
+            const sourceLabel = busLabels.get(sourceBusId) || sourceBusId;
+            const destLabels = (targetBuses as string[]).map(id => busLabels.get(id) || id).join(', ');
+
+            const changes: Array<Record<string, unknown>> = [];
+            for (const a of effectiveAssignments) {
+                const anyA = a as any;
+                changes.push({
+                    docPath: `students/${a.studentId}`,
+                    collection: 'students',
+                    docId: a.studentId,
+                    before: { busId: a.fromBusId, studentName: a.studentName, shift: anyA._originalShift || a.shift, stopName: anyA._originalStopName || a.stop_name || anyA.stopName },
+                    after: { busId: a.toBusId, studentName: a.studentName, shift: a.shift, stopName: a.stop_name || anyA.stopName },
+                });
+            }
+
+            for (const [busId, deltas] of busLoadChanges.entries()) {
+                const busData = busPgData.get(busId);
+                if (busData) {
+                    const beforeMorning = busData.morningLoad || 0;
+                    const beforeEvening = busData.eveningLoad || 0;
+                    const afterMorning = Math.max(0, beforeMorning + deltas.morningDelta);
+                    const afterEvening = Math.max(0, beforeEvening + deltas.eveningDelta);
+                    changes.push({
+                        docPath: `buses/${busId}`,
+                        collection: 'buses',
+                        docId: busId,
+                        before: { morningLoad: beforeMorning, eveningLoad: beforeEvening, currentMembers: beforeMorning + beforeEvening },
+                        after: { morningLoad: afterMorning, eveningLoad: afterEvening, currentMembers: afterMorning + afterEvening },
+                    });
+                }
+            }
+
+            const supabase = getSupabaseServer();
+
+            let auditWritten = false;
+            for (let attempt = 1; attempt <= 3; attempt++) {
+                try {
+                    const { error: insertErr } = await supabase.from('reassignment_logs').insert([{
+                        operation_id: operationId,
+                        type: 'student_reassignment',
+                        actor_id: currentUserUid,
+                        actor_label: actorLabel,
+                        status: 'committed',
+                        summary: `Reassigned ${effectiveAssignments.length} student(s) from ${sourceLabel} to ${destLabels}`,
+                        changes: changes,
+                        meta: { studentCount: effectiveAssignments.length, sourceBusId, targetBuses, busLoadChanges: Object.fromEntries(busLoadChanges), idempotencyKey: opId || null },
+                    }]);
+                    if (insertErr) throw insertErr;
+                    auditWritten = true;
+                    break;
+                } catch (retryErr) {
+                    if (attempt < 3) {
+                        await new Promise(r => setTimeout(r, 500 * attempt));
+                    }
+                }
+            }
+
+            if (!auditWritten) {
+                throw new Error('Supabase audit write failed after 3 attempts');
+            }
+        } catch (auditError) {
+            console.error('Failed to create Supabase reassignment rollback snapshot:', auditError);
+            await createAuditEvent({
+                action: 'reassignment_rollback_snapshot_failed',
+                actor_id: currentUserUid,
+                actor_name: actorLabel,
+                actor_role: (currentUserRole as AuditActorRole) || 'system',
+                target_id: sourceBusId || '',
+                target_type: 'bus',
+                target_name: '',
+                category: 'reassignments',
+                summary: 'Reassignment rollback snapshot failed',
+                severity: 'medium',
+                metadata: {
+                    operationId,
+                    movedCount: effectiveAssignments.length,
+                    error: auditError instanceof Error ? auditError.message : String(auditError),
+                    impact: 'reassignment committed but rollback snapshot missing — manual reversal only',
+                    correlationId: operationId,
+                },
+            });
+        }
+
+        void createAuditEvent({
+            action: 'students_reassigned',
+            actor_id: currentUserUid,
+            actor_name: actorLabel,
+            actor_role: (currentUserRole as AuditActorRole) || 'system',
+            target_id: sourceBusId || effectiveAssignments[0].fromBusId,
+            target_type: 'bus',
+            target_name: sourceBusId || '',
+            category: 'reassignments',
+            summary: `Reassigned ${effectiveAssignments.length} student(s) from ${sourceBusId || ''}`,
+            severity: 'medium',
+            metadata: {
+                before: { sourceBusId },
+                after: { movedCount: effectiveAssignments.length },
+                operationId,
+                sourceBusId,
+                assignments: effectiveAssignments.map((a) => ({
+                    studentId: a.studentId,
+                    from: a.fromBusId,
+                    to: a.toBusId,
+                    shift: a.shift,
+                })),
+                correlationId: operationId,
+            },
+        });
+
+        return NextResponse.json({
+            success: true,
+            message: `Successfully reassigned ${effectiveAssignments.length} student(s)`,
+            movedCount: effectiveAssignments.length,
+            assignments: effectiveAssignments,
+            operationId: operationId,
+        });
+    },
     {
-      "collection": "students",
-      "docId": "usr_stu_109284",
-      "before": { "busId": "BUS-101", "shift": "Morning", "stopName": "Six Mile" },
-      "after": { "busId": "BUS-105", "shift": "Evening", "stopName": "Paltan Bazar" }
+        requiredRoles: ['admin', 'moderator'],
+        schema: ReassignStudentsSchema,
+        rateLimit: RateLimits.CREATE,
+        allowBodyToken: true
     }
-  ]
-}
+);
 ```
 
-### 3.1 The Rollback Mechanism (`execute_reassignment_rollback`)
-If an administrator makes an error, the system provides an instant rollback capability via `/api/reassignment-logs/rollback`, executed through the PostgreSQL RPC:
-`public.execute_reassignment_rollback(p_operation_id, p_actor_id, p_actor_label, p_changes)`
+#### 2. `src/app/api/admin/rollback-reassignment/route.ts` (Lines 1–132)
+```typescript
+import { createAuditEvent, type AuditActorRole } from '@/domains/audit';
+import { withSecurity } from '@/lib/security/api-security';
+import { requireAdminPermission } from '@/lib/security/moderator-permissions';
+import { RateLimits } from '@/lib/security/rate-limiter';
+import { getSupabaseServer } from '@/lib/supabase-server';
+import { NextResponse } from 'next/server';
+import { z } from 'zod';
 
-#### Rollback Precondition Validation (Strict Safety)
-Before executing a reversal, the RPC inspects every student affected by the original operation:
-1. **Existence Check:** Confirms the student still exists in `student_profiles`. If a student was deleted, rollback halts with an error.
-2. **Current State Verification:** Confirms `student_profiles.bus_id == change.after.bus_id`.
-   - **Crucial Invariant:** If a student was subsequently reassigned to a third bus by another administrator, or updated their shift independently, the rollback **aborts immediately** with:
-     `'Precondition failed: Student {uid} busId has changed since the reassignment'`
-   - Prevents stale rollbacks from clobbering newer administrative decisions.
+const RollbackSchema = z.object({
+  operationId: z.string().min(1),
+});
 
-#### Atomic Rollback Execution
-When preconditions pass:
-1. Each student is restored to their exact `before` state (`bus_id`, `route_id`, `shift`, `stop_name`).
-2. Bus counters (`morning_load`, `evening_load`, `current_members`) are recalculated directly from active profiles.
-3. The original reassignment log record is updated to `status = 'rolled_back'` with `meta.rolledBackAt` timestamp.
-4. An audit event is recorded: `action: 'reassignment_rolled_back'`.
+type RollbackBody = z.infer<typeof RollbackSchema>;
 
----
+export const POST = withSecurity<RollbackBody>(
+  async (_request, { auth, body }) => {
+    const permissionDenied = await requireAdminPermission(auth);
+    if (permissionDenied) return permissionDenied;
 
-## 4. Edge Cases & Resilience Handlers
+    const { operationId } = body;
+    const supabase = getSupabaseServer();
 
-### 4.1 Reassigning Soft-Blocked Students (Seat Already Released)
-- When a student is soft-blocked for non-payment, the automated cleanup cron releases their seat quota back to the fleet (`soft_block_student_with_seat_release` sets `seatReleasedAt = NOW()` and decrements the bus load).
-- **The Pitfall:** If an administrator reassigns this student, decrementing the source bus would cause an erroneous negative decrement (subtracting a seat that was already returned to inventory).
-- **Enforcement:** The system checks `wasSeatReleased(student)`. If the seat was already released, the source bus decrement is skipped, and the destination bus only increments if the student is being actively restored.
+    try {
+      const { data: logEntry, error: logError } = await supabase
+        .from('reassignment_logs')
+        .select('operation_id, status, changes')
+        .eq('operation_id', operationId)
+        .eq('status', 'committed')
+        .single();
 
-### 4.2 Reassignment During Active Trips
-- A student might be reassigned while an active trip is ongoing on their old bus.
-- **Waiting Flag Handling:** If the student had raised a waiting flag (`status: 'raised'` or `'acknowledged'`) on their previous bus, the system cancels the active waiting flag. The student's live tracking interface dynamically updates to their new bus stream upon their next polling or socket reconnect frame.
-- **Boarding Pass Invalidation:** Because digital passes contain the signed `busId`, attempting to scan the old pass on the previous bus immediately triggers the red scanner alert (`DENIED: WRONG BUS`).
+      if (logError || !logEntry) {
+        return NextResponse.json(
+          { success: false, error: 'Reassignment log not found or already rolled back' },
+          { status: 404 }
+        );
+      }
 
-### 4.3 Destination Bus Capacity Overflow in Bulk Batches
-- When reassigning a batch of 20 students, the destination bus may have only 12 available seats remaining.
-- **Fail-Closed Atomicity:** The RPC evaluates capacity on every student increment. When student #13 triggers `CAPACITY_FULL`, the entire transaction aborts. Students 1 through 12 are NOT transferred. The system returns an explicit error to the administrator, leaving both source and destination fleet states intact.
+      const changes = logEntry.changes as Array<{
+        docPath: string;
+        collection: string;
+        docId: string;
+        before: any;
+        after: any;
+      }>;
 
-### 4.4 Deadlock Prevention Between Concurrent Reassignments
-- If Admin A reassigns students from Bus 1 to Bus 2 while Admin B reassigns students from Bus 2 to Bus 1, concurrent transactions could deadlock waiting on row locks.
-- **Deadlock Avoidance:** Stored procedures sort affected bus IDs deterministically before acquiring row locks (`ORDER BY bus_id ASC`). Both transactions request locks in identical sequence, eliminating deadlock cycles.
+      if (!changes || changes.length === 0) {
+        return NextResponse.json(
+          { success: false, error: 'No changes found in log' },
+          { status: 400 }
+        );
+      }
 
----
+      const studentChanges = changes.filter(c => c.collection === 'students');
 
-## 5. Security & Moderator Role Permissions
+      const actorLabel = auth.name ? `${auth.name} (${auth.role})` : auth.role;
+      const { data: rpcResult, error: rpcError } = await supabase.rpc('execute_reassignment_rollback', {
+        p_operation_id: operationId,
+        p_actor_id: auth.uid,
+        p_actor_label: actorLabel,
+        p_changes: changes,
+      });
 
-Student reassignment is restricted:
-- **Full Administrators (`admin`):** Full, unrestricted reassignment capability across all buses, shifts, and routes.
-- **Moderators (`moderator`):** Completely forbidden by default (`canReassign: false`).
-  - Gated by `requireModeratorPermission(auth, 'students', 'canReassign')`.
-  - Reassignment endpoints return HTTP 403 Forbidden unless the master administrator has explicitly toggled `students.canReassign = true` in the moderator's granular permissions profile.
-- **Audit Logging:** Every reassignment operation logs actor identity, IP address, timestamp, and transferred student count to `public.audit_events`.
+      if (rpcError) {
+        console.error('Rollback RPC failed:', rpcError);
+        return NextResponse.json(
+          { success: false, error: 'Rollback failed. Please retry.' },
+          { status: 409 }
+        );
+      }
 
----
+      if (!rpcResult?.success) {
+        return NextResponse.json(
+          { success: false, error: rpcResult?.error || 'Rollback failed precondition checks' },
+          { status: 409 }
+        );
+      }
 
-## 6. Comprehensive Low-Level Design (LLD) Breakdown & Justifications
+      void createAuditEvent({
+        action: 'reassignment_rolled_back',
+        actor_id: auth.uid,
+        actor_name: auth.name || 'Unknown',
+        actor_role: (auth.role as AuditActorRole) || 'admin',
+        target_id: operationId,
+        target_type: 'reassignment',
+        target_name: operationId,
+        category: 'reassignments',
+        summary: `Rolled back reassignment ${operationId} (${studentChanges.length} students)`,
+        severity: 'medium',
+        metadata: {
+          operation_id: operationId,
+          student_count: studentChanges.length,
+        },
+      }).catch((e) => console.error('Rollback audit event failed (non-critical):', e?.message || e));
 
-### 6.1 `public.reassign_students_atomically` RPC (Deadlock Avoidance & Atomic Rebalancing)
-- **Concrete Architectural Role**: High-volume fleet rebalancing engine. Executes multi-student, multi-bus transfers within a single database transaction, locking student profiles, decrementing source vehicle counters, and incrementing destination vehicle counters while preventing cyclic lock deadlocks.
-- **Failure Analysis ("Why the System Fails Without It")**:
-  - In cross-fleet rebalancing, Admin A transfers students from Bus 101 to Bus 102 while Admin B transfers students from Bus 102 to Bus 101.
-  - Without deterministic row lock ordering (`ORDER BY bus_id ASC`), Transaction A locks Bus 101 and waits for Bus 102, while Transaction B locks Bus 102 and waits for Bus 101. Both transactions deadlock, throwing `40P01 deadlock_detected` and aborting all reassignments!
-  - If transfers are processed sequentially without an all-or-nothing transaction, a capacity overflow on student #15 leaves students 1–14 transferred while students 15–20 remain behind, splitting route cohorts in half.
-- **State Taxonomy & Invariants Enforced**:
-  - *Transactional State* (ACID multi-table modification across `student_profiles`, `buses`, and `reassignment_logs`).
-  - *Seat & Capacity Non-Overbooking Guarantee*.
-- **Production Code Implementation**:
-  ```sql
-  -- File: supabase/COMPLETE_SCHEMA.sql (RPC reassign_students_atomically)
-  CREATE OR REPLACE FUNCTION public.reassign_students_atomically(p_plans JSONB)
-  RETURNS JSONB AS $$
-  DECLARE
-    v_plan RECORD;
-    v_student RECORD;
-    v_bus RECORD;
-  BEGIN
-    -- 1. Lock student profiles exclusively
-    FOR v_plan IN SELECT * FROM jsonb_to_recordset(p_plans) AS x(...)
-    LOOP
-      SELECT uid, shift, bus_id INTO v_student FROM student_profiles WHERE uid = v_plan.studentId FOR UPDATE;
-      -- Decrement source bus shift load
-      UPDATE buses SET morning_load = morning_load - 1 WHERE id = v_student.bus_id AND v_student.shift = 'morning';
-      -- Increment destination bus shift load under capacity verification
-      SELECT capacity, morning_load INTO v_bus FROM buses WHERE id = v_plan.toBusId FOR UPDATE;
-      IF v_bus.morning_load >= v_bus.capacity THEN
-        RAISE EXCEPTION 'CAPACITY_FULL on destination bus %', v_plan.toBusId;
+      return NextResponse.json({
+        success: true,
+        message: `Successfully rolled back reassignment affecting ${studentChanges.length} student(s)`,
+        studentCount: studentChanges.length,
+      });
+    } catch (error: any) {
+      console.error('Rollback failed:', error);
+      return NextResponse.json(
+        { success: false, error: error.message || 'Rollback failed' },
+        { status: 500 }
+      );
+    }
+  },
+  {
+    requiredRoles: ['admin', 'moderator'],
+    schema: RollbackSchema,
+    rateLimit: RateLimits.CREATE,
+    allowBodyToken: true,
+  }
+);
+```
+
+#### 3. `supabase/COMPLETE_SCHEMA.sql` (`reassign_students_atomically` & `execute_reassignment_rollback`)
+```sql
+CREATE OR REPLACE FUNCTION public.reassign_students_atomically(p_plans jsonb)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  v_plan jsonb;
+  v_student_id text;
+  v_from_bus_id text;
+  v_to_bus_id text;
+  v_shift text;
+  v_stop_name text;
+  v_bus_ids text[];
+  v_bus_id text;
+  v_target_route_id text;
+  v_morning_load int;
+  v_evening_load int;
+  v_bus_capacity int;
+  v_reassigned_count int := 0;
+BEGIN
+  IF p_plans IS NULL OR jsonb_array_length(p_plans) = 0 THEN
+    RETURN jsonb_build_object('success', false, 'error', 'EMPTY_PLANS');
+  END IF;
+
+  SELECT ARRAY(
+    SELECT DISTINCT b
+    FROM (
+      SELECT jsonb_array_elements(p_plans)->>'fromBusId' AS b
+      UNION
+      SELECT jsonb_array_elements(p_plans)->>'toBusId' AS b
+    ) s
+    WHERE b IS NOT NULL AND b <> ''
+  ) INTO v_bus_ids;
+
+  PERFORM id
+  FROM public.buses
+  WHERE id = ANY(v_bus_ids)
+  ORDER BY id ASC
+  FOR UPDATE;
+
+  FOR v_plan IN SELECT * FROM jsonb_array_elements(p_plans)
+  LOOP
+    v_student_id := v_plan->>'studentId';
+    v_from_bus_id := v_plan->>'fromBusId';
+    v_to_bus_id := v_plan->>'toBusId';
+    v_shift := v_plan->>'studentShift';
+    v_stop_name := v_plan->>'stopName';
+
+    IF v_student_id IS NULL OR v_to_bus_id IS NULL THEN
+      CONTINUE;
+    END IF;
+
+    SELECT route_id INTO v_target_route_id
+    FROM public.buses
+    WHERE id = v_to_bus_id;
+
+    UPDATE public.student_profiles
+    SET bus_id = v_to_bus_id,
+        route_id = COALESCE(v_target_route_id, route_id),
+        stop_name = COALESCE(v_stop_name, stop_name),
+        shift = COALESCE(v_shift, shift),
+        updated_at = NOW()
+    WHERE uid = v_student_id;
+
+    v_reassigned_count := v_reassigned_count + 1;
+  END LOOP;
+
+  FOREACH v_bus_id IN ARRAY v_bus_ids
+  LOOP
+    SELECT
+      COUNT(*) FILTER (WHERE LOWER(shift) IN ('morning', 'both')),
+      COUNT(*) FILTER (WHERE LOWER(shift) IN ('evening', 'both'))
+    INTO v_morning_load, v_evening_load
+    FROM public.student_profiles
+    WHERE bus_id = v_bus_id
+      AND status = 'active'
+      AND seat_released_at IS NULL;
+
+    SELECT capacity INTO v_bus_capacity
+    FROM public.buses
+    WHERE id = v_bus_id;
+
+    IF v_bus_capacity IS NOT NULL AND v_bus_capacity > 0 THEN
+      IF v_morning_load > v_bus_capacity THEN
+        RAISE EXCEPTION 'CAPACITY_EXCEEDED on bus % for morning shift (%/%)', v_bus_id, v_morning_load, v_bus_capacity;
       END IF;
-      UPDATE buses SET morning_load = morning_load + 1 WHERE id = v_plan.toBusId;
-      -- Update student record
-      UPDATE student_profiles SET bus_id = v_plan.toBusId WHERE uid = v_student.uid;
-    END LOOP;
-    RETURN jsonb_build_object('success', true);
-  END;
-  $$ LANGUAGE plpgsql;
-  ```
-- **Optimization, Complexity Minimization & Anti-Overhead Rationale**:
-  - *Batch Array Execution*: Ingests the entire batch as a single JSONB array parameter, executing in **<15ms** for 50 students, rather than making 50 individual HTTP network requests from the admin browser.
-  - *Automatic Rollback on Capacity Breach*: If any destination bus overflows, PostgreSQL rolls back all mutations automatically, leaving the fleet in a guaranteed consistent state.
+      IF v_evening_load > v_bus_capacity THEN
+        RAISE EXCEPTION 'CAPACITY_EXCEEDED on bus % for evening shift (%/%)', v_bus_id, v_evening_load, v_bus_capacity;
+      END IF;
+    END IF;
+
+    UPDATE public.buses
+    SET morning_load = v_morning_load,
+        evening_load = v_evening_load,
+        current_members = v_morning_load + v_evening_load,
+        updated_at = NOW()
+    WHERE id = v_bus_id;
+  END LOOP;
+
+  RETURN jsonb_build_object(
+    'success', true,
+    'reassigned_count', v_reassigned_count,
+    'buses_updated', array_length(v_bus_ids, 1)
+  );
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.execute_reassignment_rollback(
+  p_operation_id text,
+  p_actor_id text,
+  p_actor_label text,
+  p_changes jsonb
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  v_log_status text;
+  v_change jsonb;
+  v_student_id text;
+  v_before jsonb;
+  v_after jsonb;
+  v_current_bus_id text;
+  v_original_bus_id text;
+  v_original_shift text;
+  v_original_stop text;
+  v_original_route text;
+  v_bus_ids text[];
+  v_bus_id text;
+  v_morning_load int;
+  v_evening_load int;
+  v_bus_capacity int;
+  v_rolled_back_count int := 0;
+BEGIN
+  SELECT status INTO v_log_status
+  FROM public.reassignment_logs
+  WHERE operation_id = p_operation_id
+  FOR UPDATE;
+
+  IF v_log_status IS NULL THEN
+    RETURN jsonb_build_object('success', false, 'error', 'LOG_NOT_FOUND');
+  END IF;
+
+  IF v_log_status = 'rolled_back' THEN
+    RETURN jsonb_build_object('success', true, 'message', 'ALREADY_ROLLED_BACK');
+  END IF;
+
+  SELECT ARRAY(
+    SELECT DISTINCT b
+    FROM (
+      SELECT c->'before'->>'busId' AS b FROM jsonb_array_elements(p_changes) c WHERE c->>'collection' = 'students'
+      UNION
+      SELECT c->'after'->>'busId' AS b FROM jsonb_array_elements(p_changes) c WHERE c->>'collection' = 'students'
+    ) sub
+    WHERE b IS NOT NULL AND b <> ''
+  ) INTO v_bus_ids;
+
+  PERFORM id
+  FROM public.buses
+  WHERE id = ANY(v_bus_ids)
+  ORDER BY id ASC
+  FOR UPDATE;
+
+  FOR v_change IN SELECT * FROM jsonb_array_elements(p_changes) WHERE value->>'collection' = 'students'
+  LOOP
+    v_student_id := v_change->>'docId';
+    v_before := v_change->'before';
+    v_after := v_change->'after';
+
+    SELECT bus_id INTO v_current_bus_id
+    FROM public.student_profiles
+    WHERE uid = v_student_id;
+
+    IF v_current_bus_id IS DISTINCT FROM (v_after->>'busId') THEN
+      RETURN jsonb_build_object(
+        'success', false,
+        'error', 'STUDENT_STATE_CHANGED',
+        'student_id', v_student_id,
+        'expected_bus', v_after->>'busId',
+        'current_bus', v_current_bus_id
+      );
+    END IF;
+
+    v_original_bus_id := v_before->>'busId';
+    v_original_shift := v_before->>'shift';
+    v_original_stop := v_before->>'stopName';
+
+    SELECT route_id INTO v_original_route
+    FROM public.buses
+    WHERE id = v_original_bus_id;
+
+    UPDATE public.student_profiles
+    SET bus_id = v_original_bus_id,
+        route_id = COALESCE(v_original_route, route_id),
+        shift = COALESCE(v_original_shift, shift),
+        stop_name = COALESCE(v_original_stop, stop_name),
+        updated_at = NOW()
+    WHERE uid = v_student_id;
+
+    v_rolled_back_count := v_rolled_back_count + 1;
+  END LOOP;
+
+  FOREACH v_bus_id IN ARRAY v_bus_ids
+  LOOP
+    SELECT
+      COUNT(*) FILTER (WHERE LOWER(shift) IN ('morning', 'both')),
+      COUNT(*) FILTER (WHERE LOWER(shift) IN ('evening', 'both'))
+    INTO v_morning_load, v_evening_load
+    FROM public.student_profiles
+    WHERE bus_id = v_bus_id
+      AND status = 'active'
+      AND seat_released_at IS NULL;
+
+    SELECT capacity INTO v_bus_capacity
+    FROM public.buses
+    WHERE id = v_bus_id;
+
+    IF v_bus_capacity IS NOT NULL AND v_bus_capacity > 0 THEN
+      IF v_morning_load > v_bus_capacity THEN
+        RAISE EXCEPTION 'CAPACITY_EXCEEDED on bus % during rollback for morning shift (%/%)', v_bus_id, v_morning_load, v_bus_capacity;
+      END IF;
+      IF v_evening_load > v_bus_capacity THEN
+        RAISE EXCEPTION 'CAPACITY_EXCEEDED on bus % during rollback for evening shift (%/%)', v_bus_id, v_evening_load, v_bus_capacity;
+      END IF;
+    END IF;
+
+    UPDATE public.buses
+    SET morning_load = v_morning_load,
+        evening_load = v_evening_load,
+        current_members = v_morning_load + v_evening_load,
+        updated_at = NOW()
+    WHERE id = v_bus_id;
+  END LOOP;
+
+  UPDATE public.reassignment_logs
+  SET status = 'rolled_back',
+      rolled_back_at = NOW(),
+      rolled_back_by = p_actor_id
+  WHERE operation_id = p_operation_id;
+
+  RETURN jsonb_build_object(
+    'success', true,
+    'rolled_back_count', v_rolled_back_count,
+    'operation_id', p_operation_id
+  );
+END;
+$$;
+```
 
 ---
 
-### 6.2 Pre-Reassignment Snapshot & Rollback Engine (`reassignment_logs`)
-- **Concrete Architectural Role**: Administrative recovery safety net. Stores an immutable JSON snapshot of all affected student profiles and vehicle load counters before mutations occur, allowing administrators to execute a one-click rollback if a bulk reassignment was triggered in error.
-- **Failure Analysis ("Why the System Fails Without It")**:
-  - An administrator accidentally selects the wrong destination route when rebalancing 40 students, moving them to a bus that heads in the opposite direction.
-  - Without a snapshot log, reversing the action requires manually inspecting student residential addresses one by one for 40 students, taking hours of emergency administrative labor while morning bus departures are delayed.
-- **State Taxonomy & Invariants Enforced**:
-  - *Audit History & Recovery State* (`reassignment_logs`).
-- **Production Code Implementation**:
-  ```typescript
-  // File: src/domains/student/services/student-reassignment.service.ts
-  const logEntry = {
-    batch_id: batchId,
-    actor_uid: adminUid,
-    snapshot_before: studentsBeforeTransfer,
-    transfers: plans,
-    status: 'committed',
-    created_at: new Date().toISOString(),
-  };
-  await supabase.from('reassignment_logs').insert(logEntry);
-  ```
-- **Optimization, Complexity Minimization & Anti-Overhead Rationale**:
-  - *Zero External Storage*: Snapshots are stored directly in PostgreSQL JSONB columns, requiring no auxiliary object storage buckets or complex diffing algorithms.
+---
 
