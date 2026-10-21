@@ -1,8 +1,8 @@
 {
   "version": "0.1.0",
   "appName": "ITMS ADTU Bus Services",
-  "buildTimestamp": "2026-10-17T07:35:38.258Z",
-  "gitCommitHash": "ee5bbd8",
+  "buildTimestamp": "2026-10-20T18:31:57.215Z",
+  "gitCommitHash": "17a095e",
   "gitBranch": "main",
   "environment": "production",
   "nodeVersion": "v26.2.0",

@@ -1,19 +1,45 @@
 import type { NextConfig } from "next";
 import path from "path";
 
+const isDev = process.env.NODE_ENV !== 'production';
+
+const customOrigins = (process.env.ALLOWED_ORIGINS || '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+const baseProductionOrigins = [
+  'adtu-itms.vercel.app',
+  'https://adtu-itms.vercel.app',
+];
+
+const devOnlyAllowedOrigins = [
+  '127.0.0.1',
+  'localhost',
+  '127.0.0.1:3000',
+  'localhost:3000',
+  '*.devtunnels.ms',
+  '2g747pzk-3000.inc1.devtunnels.ms',
+  'https://2g747pzk-3000.inc1.devtunnels.ms',
+];
+
+const resolvedAllowedDevOrigins = [
+  ...baseProductionOrigins,
+  ...(isDev ? devOnlyAllowedOrigins : []),
+  ...customOrigins,
+];
+
+const resolvedServerActionOrigins = [
+  'adtu-itms.vercel.app',
+  'https://adtu-itms.vercel.app',
+  ...(isDev ? ['localhost:3000', '*.devtunnels.ms', 'https://2g747pzk-3000.inc1.devtunnels.ms'] : []),
+  ...customOrigins,
+];
+
 const nextConfig: NextConfig = {
   /* config options here */
   output: process.env.VERCEL ? undefined : 'standalone',
-  allowedDevOrigins: [
-    '127.0.0.1',
-    'localhost',
-    '127.0.0.1:3000',
-    'localhost:3000',
-    'adtu-itms.vercel.app',
-    'https://adtu-itms.vercel.app',
-    '*.devtunnels.ms',
-    '2g747pzk-3000.inc1.devtunnels.ms',
-  ],
+  allowedDevOrigins: resolvedAllowedDevOrigins,
   // Performance optimizations
   // Next.js 16 Compiler automatic memoization
   reactCompiler: true,
@@ -55,13 +81,7 @@ const nextConfig: NextConfig = {
     // Faster builds in development
     serverActions: {
       bodySizeLimit: '10mb',
-      allowedOrigins: [
-        'adtu-itms.vercel.app',
-        'https://adtu-itms.vercel.app',
-        'localhost:3000',
-        '*.devtunnels.ms',
-        'https://2g747pzk-3000.inc1.devtunnels.ms',
-      ],
+      allowedOrigins: resolvedServerActionOrigins,
     },
 
     // Note: optimizeCss can cause issues with Turbopack, disable for dev

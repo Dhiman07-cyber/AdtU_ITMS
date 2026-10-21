@@ -1,162 +1,92 @@
-# Bus Fees, Pricing Engine & Financial Verification
+# Domain 08: Bus Fees, Dynamic Pricing & Fail-Closed Financial Configuration
 
-## 1. Architectural Philosophy: Server-Authoritative Pricing
+## 1. Executive Summary & Fee Architecture
 
-Financial integrity in Assam down town University (AdtU) ITMS requires that all fee calculations, order creations, and payment validations remain **100% server-authoritative**:
-- **Zero Client Trust:** Pricing is never accepted from client-side form payloads or frontend state.
-- **No Fallback Guarantee (`getCurrentBusFee`):** If bus fee configuration is missing or non-numeric in the database, the system throws an explicit error and fails closed. The system never falls back to hardcoded default values for financial transactions.
-- **Immutable Transaction Ledger:** Every fee settlement (online Razorpay or offline bank challan) produces an immutable record in `public.payments`.
+The Assam down town University bus fee is a strictly governed institutional financial parameter. Unlike commercial transit systems with dynamic surge pricing, university transit fees are fixed per semester or academic session, regulated by university executive committees.
 
-```
-        ┌────────────────────────────────────────────────────────┐
-        │            ADMIN CONFIG: `settings/config`             │
-        │      busFee: { amount: 8000, version: 3, ... }         │
-        └──────────────────────────┬─────────────────────────────┘
-                                   │
-                                   ▼
-        ┌────────────────────────────────────────────────────────┐
-        │          STUDENT RENEWAL / ADMISSION CHECKOUT          │
-        │           POST /api/student/renew-service-v2           │
-        └──────────────────────────┬─────────────────────────────┘
-                                   │
-                                   ▼
-        ┌────────────────────────────────────────────────────────┐
-        │             SERVER-SIDE PRICE CALCULATION              │
-        │        const busFee = await getCurrentBusFee();        │
-        │        const totalFee = busFee.amount * durationYears; │
-        └──────────────────────────┬─────────────────────────────┘
-                                   │
-                 ┌─────────────────┴─────────────────┐
-                 ▼                                   ▼
-       Online Payment Mode                  Offline Payment Mode
-        (Razorpay Gateway)                   (Challan / Receipt)
-                 │                                   │
-                 ▼                                   ▼
-    Razorpay Order Created:                 Application Held in Queue:
-    - Amount in paise (totalFee * 100)      - Uploads receipt image
-    - HMAC signature verified on webhook    - Moderator verifies bank ref
-                 │                                   │
-                 └─────────────────┬─────────────────┘
-                                   │
-                                   ▼
-        ┌────────────────────────────────────────────────────────┐
-        │              IMMUTABLE PAYMENT COMMIT                  │
-        │     PostgreSQL `payments` Table (Status: verified)     │
-        │     Student Pass Validity Extended via Domain API      │
-        └────────────────────────────────────────────────────────┘
+The ITMS platform manages fee configuration through `src/lib/bus-fee-service.ts` and PostgreSQL `public.system_settings`.
+
+```mermaid
+graph TD
+    ADMIN[SuperAdmin Portal / Fee Management] -->|PATCH /api/admin/settings/bus-fee| SVC[bus-fee-service.ts]
+    SVC -->|Validate Integer & Amount > 0| SANITIZE[stripUnsafeObjectKeys]
+    SANITIZE -->|Atomic Upsert| PG[(PostgreSQL system_settings: key='config')]
+    SVC -->|System-Wide Announcement| NOTIF[pgInsertNotification: type='announcement']
+    NOTIF --> STUDENTS[All Enrolled Commuters Pushed]
+
+    subgraph Student Checkout & Webhook
+        STUDENT[Student Renewal Wizard] -->|GET getCurrentBusFee| CHECKOUT[Razorpay Order Create]
+        CHECKOUT -->|Fail-Closed: Throws if fee unset| GATEWAY[Razorpay Gateway]
+    end
 ```
 
 ---
 
-## 2. Bus Fee Configuration Schema & Management
+## 2. Fail-Closed Fee Fetching (`getCurrentBusFee`)
 
-The authoritative bus fee is persisted in the Firestore `settings/config` document under `busFee`:
+A critical invariant of the financial subsystem is that **the platform must never fall back to hardcoded default prices** (such as INR 10,000 or INR 0) if the database is unreachable or the configuration is missing:
 
 ```typescript
-export interface BusFeeData {
-  amount: number;         // Current fee per academic session (e.g. 8000)
-  updatedAt: string;      // ISO 8601 timestamp of last revision
-  updatedBy: string;      // Admin UID who committed the change
-  version: number;        // Monotonically increasing revision counter
-  history?: Array<{      // Capped audit log of previous 3 rates
-    amount: number;
-    updatedAt: string;
-    updatedBy: string;
-    version: number;
-  }>;
+export async function getCurrentBusFee(): Promise<BusFeeData> {
+  try {
+    const systemConfigResult = await getSystemConfig();
+    const config = systemConfigResult.data;
+
+    const amount = config.busFee?.amount;
+
+    if (typeof amount !== 'number' || amount <= 0) {
+      throw new Error('Bus fee configuration is missing in settings database. Please configure settings and try again later.');
+    }
+
+    return {
+      amount: amount,
+      updatedAt: systemConfigResult.updatedAt || new Date().toISOString(),
+      updatedBy: systemConfigResult.updatedByUid || 'system',
+      version: config.version || 1
+    };
+  } catch (error: any) {
+    console.error('Error getting current bus fee:', error);
+    throw new Error(error.message || 'Unstable network detected, please try again later');
+  }
 }
 ```
 
-### 2.1 Updating Bus Fees (`POST /api/settings/bus-fees`)
-Only authenticated Administrators (`role: 'admin'`) can revise transit fees:
-1. **Schema Validation:** Evaluates payload against `BusFeeUpdateSchema` (`amount >= 1`).
-2. **Version Bump & History Truncation:**
-   - Previous rate is appended to `history`.
-   - The history array is capped at the 3 most recent adjustments to prevent document bloat.
-   - Increments `version = version + 1`.
-3. **Automated Announcement Broadcast (`notifyBusFeeChange`):**
-   - Automatically dispatches a system-wide announcement notification to all registered users:
-     `"The bus fee for the upcoming session has been revised from ₹{oldAmount} to ₹{newAmount}. Please update your payment plans accordingly."`
-   - Emits an audit event: `action: 'bus_fee_updated'`.
+### 2.1 Security Rationale
+If the system fell back to a default value during database instability, students might be charged an outdated or zero amount. Failing closed halts order creation immediately, protecting university revenue and preventing ledger reconciliation disputes.
 
 ---
 
-## 3. Online Razorpay Checkout Lifecycle
+## 3. Automated Institutional Announcement Broadcast
 
-When a student pays transit fees online:
-1. **Order Initialization (`/api/student/renew-service-v2` or `/api/payments/create-order`):**
-   - Fetches authoritative `currentBusFee` from database.
-   - Calculates `totalFee = currentBusFee * durationYears`.
-   - Generates Razorpay Order via `createRazorpayOrder(totalFee, receipt, { studentUid, ... })`.
-2. **Cryptographic Webhook & Signature Verification:**
-   - On payment capture, client submits `razorpay_payment_id`, `razorpay_order_id`, and `razorpay_signature`.
-   - Server validates HMAC-SHA256 signature using `RAZORPAY_KEY_SECRET`.
-   - Prevents client tampering with payment confirmation payloads.
-3. **Idempotent Settlement:**
-   - Database checks `payments.payment_id` for duplicate transactions.
-   - Records transaction in `public.payments` with `status = 'verified'`.
-   - Calls `applyPaymentValidity(studentUid, ...)` to extend pass validity.
+When an administrator updates the bus fee, `notifyBusFeeChange()` automatically constructs an immutable announcement record in `notifications`:
 
----
+```typescript
+export async function notifyBusFeeChange(
+  adminUid: string,
+  oldAmount: number,
+  newAmount: number
+): Promise<boolean> {
+  const adminData = await getAdminById(adminUid);
+  const adminName = adminData?.name || adminData?.fullName || 'Admin';
 
-## 4. Offline Payment Verification Workflow
+  const notificationContent = `The bus fee for the upcoming session has been revised from ₹${oldAmount.toLocaleString('en-IN')} to ₹${newAmount.toLocaleString('en-IN')}. ` +
+    `Please update your payment plans accordingly. For any queries, contact the administration office.`;
 
-Students paying through bank challan, NEFT/RTGS, or university cash counters submit offline applications:
-1. **Receipt Submission:**
-   - Student enters offline transaction reference ID and uploads a photograph of the bank receipt/challan.
-   - Application enters `submitted` state with `verifiedBy = 'system_offline_submission_bypass'`.
-2. **Moderator Verification & Permission Guard:**
-   - Offline verification is gated by `requireModeratorPermission(auth, 'payments', 'canApproveOffline')`.
-   - Default moderators cannot verify or approve offline payments.
-3. **Approval Execution:**
-   - Authorized reviewer cross-checks uploaded receipt against the university bank statement.
-   - On approval, creates a `payments` row with `payment_mode = 'offline'`, `verified_by = approverUid`, and `status = 'verified'`.
-   - If payment is rejected, the student is notified with the reason and prompted to re-upload.
-
----
-
-## 5. Comprehensive Low-Level Design (LLD) Breakdown & Justifications
-
-### 5.1 `getCurrentBusFee` & Server-Authoritative Pricing
-- **Concrete Architectural Role**: Authoritative price calculation engine. Resolves the current session bus fee from database configuration with **zero hardcoded fallback values**, throwing an explicit exception if configuration is missing.
-- **Failure Analysis ("Why the System Fails Without It")**:
-  - If the application allows client-side checkout payloads to specify `{ amount: 8000 }`, a student with basic web browser DevTools can tamper with the request to submit `{ amount: 1 }` or `{ amount: 0 }`, paying ₹1 for an annual ₹8,000 bus pass.
-  - If a system uses a hardcoded fallback (`amount || 5000`), when the university updates tuition fees to ₹8,500 and a database timeout occurs, the system silently charges the outdated ₹5,000 rate, leaking university revenue.
-- **State Taxonomy & Invariants Enforced**:
-  - *Durable Authoritative State* (`settings/config`).
-  - *Double-Entry Financial & Entitlement Integrity (Invariant 5)*.
-- **Production Code Implementation**:
-  ```typescript
-  // File: src/lib/pricing/bus-fee.service.ts
-  export async function getCurrentBusFee(): Promise<BusFeeData> {
-    const config = await getSystemConfig();
-    if (!config?.busFee || typeof config.busFee.amount !== 'number' || config.busFee.amount <= 0) {
-      throw new Error('Authoritative bus fee configuration missing or invalid. Refusing transaction.');
-    }
-    return config.busFee;
-  }
-  ```
-- **Optimization, Complexity Minimization & Anti-Overhead Rationale**:
-  - *Fail-Closed Architecture*: Financial transactions fail immediately if pricing integrity cannot be verified with 100% certainty.
-
----
-
-### 5.2 Versioned Fee Revision (`POST /api/settings/bus-fees`)
-- **Concrete Architectural Role**: Administrative price adjustment engine. Enforces admin-only authorization, monotonically bumps the pricing version counter, caps rate history to 3 entries to prevent document bloat, and broadcasts university-wide notifications.
-- **Failure Analysis ("Why the System Fails Without It")**:
-  - If tuition fees change while students have checkout orders in-flight, orders created under Version 2 could settle at Version 3 rates, causing chargeback disputes.
-  - Tracking explicit pricing versions guarantees orders settle at the exact rate in effect when the order was initialized.
-- **State Taxonomy & Invariants Enforced**:
-  - *Durable Authoritative & Audit State*.
-- **Production Code Implementation**:
-  ```typescript
-  // File: src/app/api/settings/bus-fees/route.ts
-  const newVersion = (currentConfig.busFee?.version || 0) + 1;
-  const history = [
-    ...(currentConfig.busFee?.history || []),
-    { amount: currentConfig.busFee.amount, updatedAt: new Date().toISOString(), updatedBy: auth.uid, version: currentConfig.busFee.version }
-  ].slice(-3); // Capped at 3 to prevent unbounded document bloat
-  ```
-- **Optimization, Complexity Minimization & Anti-Overhead Rationale**:
-  - *History Capping*: Slicing to the 3 most recent revisions preserves necessary audit context while preventing document size from exceeding Firestore and JSONB serialization budgets.
-
+  await pgInsertNotification({
+    title: '💰 Bus Fee Update - Important Notice',
+    content: notificationContent,
+    type: 'announcement',
+    sender: {
+      userId: adminUid,
+      userName: adminName,
+      userRole: 'admin',
+    },
+    target: {
+      type: 'all_users',
+    },
+    recipientIds: [],
+    readByUserIds: [],
+  });
+  return true;
+}
+```

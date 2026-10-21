@@ -24,7 +24,7 @@ const API_KEY = process.env.CLOUDINARY_API_KEY;
 const API_SECRET = process.env.CLOUDINARY_API_SECRET;
 
 if (!CLOUD_NAME || !API_KEY || !API_SECRET) {
-    if (process.env.NODE_ENV !== 'test' && !process.env.VITEST) {
+    if (process.env.NODE_ENV !== 'test' && !process.env.VITEST && process.env.NEXT_PHASE !== 'phase-production-build') {
         console.error(
             '[cloudinary-server] ⚠️ Missing env var(s): ' +
             'CLOUDINARY_CLOUD_NAME | CLOUDINARY_API_KEY | CLOUDINARY_API_SECRET'

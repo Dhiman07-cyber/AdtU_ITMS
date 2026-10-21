@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "engines": {
-    "node": ">=20.9.0"
+    "node": "22.x"
   },
   "scripts": {
     "dev": "tsx scripts/dev.ts",
@@ -12,10 +12,9 @@
     "dev:server": "tsx server/index.ts",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint",
+    "lint": "eslint .",
     "test": "vitest",
     "test:run": "vitest run",
-    "test:unit": "vitest run",
     "test:unit:watch": "vitest watch",
     "test:unit:coverage": "vitest run --coverage",
     "manifest": "tsx scripts/generate-release-manifest.ts",
@@ -59,7 +58,6 @@
     "test:e2e:responsive": "npx playwright test e2e/responsive-layout.spec.ts --config=e2e/playwright.config.ts",
     "test:e2e:gps-pipeline": "npx playwright test e2e/gps/gps-stale-packet.spec.ts --config=e2e/playwright.config.ts",
     "test:e2e:gps-realistic": "npx playwright test e2e/gps/gps-realistic-simulation.spec.ts --config=e2e/playwright.config.ts",
-    "test:e2e:all": "npx playwright test --config=e2e/playwright.config.ts",
     "profile:run": "tsx scripts/profiling/profiler.ts",
     "deploy:compose": "tsx scripts/deploy-compose.ts",
     "rollback:compose": "tsx scripts/rollback-compose.ts",
@@ -69,9 +67,11 @@
     "docker:build": "docker compose build",
     "docker:ps": "docker compose ps",
     "migrate:supabase": "supabase migration up",
-    "migrate:prod": "supabase migration up",
-    "websocket": "tsx server/index.ts",
     "websocket:prod": "NODE_ENV=production LOG_LEVEL=info tsx server/index.ts"
+  },
+  "allowScripts": {
+    "@firebase/util": true,
+    "core-js": true
   },
   "dependencies": {
     "@google-analytics/data": "^6.1.0",
