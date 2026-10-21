@@ -7,7 +7,7 @@
  * KEY RULES:
  * 1. Config stores month/day ONLY (no year)
  * 2. Year is derived from each student's sessionEndYear
- * 3. Hard delete ALWAYS occurs in sessionEndYear + 1 (next academic cycle)
+ * 3. Hard delete ALWAYS occurs in effectiveYear + 2 (two academic cycles after expiry)
  * 4. Simulation mode can override the year for testing
  */
 

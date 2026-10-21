@@ -1,18 +1,13 @@
 /**
- * D2 Calendar Repository — Firestore Implementation
+ * D2 Calendar Repository — PostgreSQL Implementation
  *
- * Persistence owner: Firestore (`settings/deadline` document).
+ * Persistence owner: PostgreSQL system_settings (`key = 'deadline'`).
  * Business computation (`deriveAcademicLifecycle`) stays in CalendarService / deadline-computation.
  */
 
-import { adminDb } from '@/lib/firebase-admin';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import type { DeadlineConfig } from '@/lib/types/deadline-config';
 import { deriveAcademicLifecycle } from '@/lib/utils/deadline-computation';
-
-const SETTINGS_COLLECTION = 'settings';
-const DEADLINE_DOC_ID = 'deadline';
-
 
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -40,6 +35,10 @@ export function setActiveConfigForTesting(config: DeadlineConfig): void {
   activeConfigCache = { data: config, expiresAt: Date.now() + CACHE_TTL_MS };
 }
 
+export function getCachedActiveConfig(): DeadlineConfig | null {
+  return activeConfigCache?.data || null;
+}
+
 export async function findActiveConfig(): Promise<DeadlineConfig> {
   if (activeConfigCache && Date.now() < activeConfigCache.expiresAt) {
     return activeConfigCache.data;
@@ -61,18 +60,7 @@ export async function findActiveConfig(): Promise<DeadlineConfig> {
       }
     }
   } catch {
-    // Fallback to Firestore below
-  }
-
-  if (Object.keys(firestoreData).length === 0 && adminDb) {
-    try {
-      const doc = await adminDb.collection(SETTINGS_COLLECTION).doc(DEADLINE_DOC_ID).get();
-      if (doc.exists) {
-        firestoreData = (doc.data() as Record<string, any>) || {};
-      }
-    } catch (err: any) {
-      console.warn('⚠️ [calendar] Failed to fetch settings/deadline from Firestore, using default:', err.message);
-    }
+    // Return standard defaults if DB is temporarily unreachable
   }
 
   const startMonth = typeof firestoreData.academicSessionStart?.month === 'number'
@@ -125,14 +113,14 @@ export async function findActiveConfig(): Promise<DeadlineConfig> {
     },
 
     softBlock: {
-      description: 'Soft block date (live tracking disabled)',
+      description: 'Service expiration date (dashboard & live tracking restricted until renewal)',
       month: lifecycle.softBlock.getUTCMonth(),
       monthName: MONTH_NAMES[lifecycle.softBlock.getUTCMonth()],
       day: lifecycle.softBlock.getUTCDate(),
       dayOrdinal: getOrdinal(lifecycle.softBlock.getUTCDate()),
       daysAfterDeadline: 15,
-      displayText: 'Soft block active — live tracking blocked',
-      warningText: firestoreData.softBlock?.warningText || "Student's access to Live Bus Tracking will be blocked after this date.",
+      displayText: 'Service expired — dashboard & live tracking restricted until renewal',
+      warningText: firestoreData.softBlock?.warningText || "Student's access to dashboard and live bus tracking will be restricted after this date.",
     },
 
     hardDelete: {
@@ -183,7 +171,7 @@ export async function findActiveConfig(): Promise<DeadlineConfig> {
         {
           id: 'soft_block',
           date: { month: lifecycle.softBlock.getUTCMonth(), day: lifecycle.softBlock.getUTCDate() },
-          label: 'Soft Block Applied',
+          label: 'Service Expired (Access Restricted)',
           color: 'orange',
           icon: 'alert-triangle',
         },
@@ -238,15 +226,6 @@ export async function saveConfig(config: DeadlineConfig, updatedByUid?: string):
     }
   } catch (err) {
     console.warn('[calendar.repository] Failed to persist deadline to PostgreSQL system_settings:', err);
-  }
-
-  // 2. Dual-write to Firestore if adminDb initialized
-  if (adminDb) {
-    try {
-      await adminDb.collection(SETTINGS_COLLECTION).doc(DEADLINE_DOC_ID).set(payload, { merge: true });
-    } catch (err: any) {
-      console.warn('[calendar.repository] Firestore write failed:', err.message);
-    }
   }
 
   invalidateActiveConfigCache();

@@ -1,10 +1,16 @@
+import { invalidateConfigCache } from '@/domains/admin';
+import { invalidateActiveConfigCache } from '@/domains/calendar';
+import { invalidateStudentAssignmentCache } from '@/domains/student';
 import { getUserById } from '@/domains/identity';
-import { getDeadlineConfig,updateDeadlineConfig } from '@/lib/deadline-config-service';
+import { getDeadlineConfig, updateDeadlineConfig } from '@/lib/deadline-config-service';
 import { adminAuth } from '@/lib/firebase-admin';
+import { verifyApiAuth } from '@/lib/security/api-auth';
 import { stripUnsafeObjectKeys } from '@/lib/security/object-safety';
+import { checkRateLimit, createRateLimitId, RateLimits } from '@/lib/security/rate-limiter';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import { DeadlineConfig } from '@/lib/types/deadline-config';
-import { NextRequest,NextResponse } from 'next/server';
+import { deriveAcademicLifecycle } from '@/lib/utils/deadline-computation';
+import { NextRequest, NextResponse } from 'next/server';
 
 /**
  * Check if dependent lifecycle records exist in the system (PostgreSQL)
@@ -17,7 +23,7 @@ async function checkDependencies(): Promise<boolean> {
         const [studentRes, upcomingRes, pendingSeatRes] = await Promise.all([
             supabase
                 .from('student_profiles')
-                .select('id', { count: 'exact', head: true })
+                .select('uid', { count: 'exact', head: true })
                 .limit(1),
             supabase
                 .from('applications')
@@ -68,28 +74,25 @@ export async function GET(req: NextRequest) {
 }
 
 /**
- * POST: Update deadline config in Firestore and sync dates to system-config
+ * POST: Update deadline config and cascade recalculation to students and applications
  */
 export async function POST(req: NextRequest) {
     try {
-        const authHeader = req.headers.get('Authorization');
-        if (!authHeader || !authHeader.startsWith('Bearer ')) {
-            return NextResponse.json(
-                { message: 'Unauthorized' },
-                { status: 401 }
-            );
-        }
+        const auth = await verifyApiAuth(req, ['admin']);
+        if (!auth.authenticated) return auth.response;
 
-        const token = authHeader.split('Bearer ')[1];
-        const decodedToken = await adminAuth.verifyIdToken(token);
-        const uid = decodedToken.uid;
+        const uid = auth.uid;
 
-        // Check if user is admin via PostgreSQL (canonical source of truth)
-        const user = await getUserById(uid);
-        if (!user || user.role !== 'admin') {
+        // Rate limiting: RateLimits.UPDATE
+        const rateLimitId = createRateLimitId(uid, 'deadline-config');
+        const rateCheck = checkRateLimit(rateLimitId, RateLimits.UPDATE.maxRequests, RateLimits.UPDATE.windowMs);
+        if (!rateCheck.allowed) {
             return NextResponse.json(
-                { message: 'Access denied. Admin only.' },
-                { status: 403 }
+                { message: 'Too many requests. Please wait before updating deadline configuration.' },
+                {
+                    status: 429,
+                    headers: { 'Retry-After': String(Math.ceil(rateCheck.resetIn / 1000)) },
+                }
             );
         }
 
@@ -112,11 +115,18 @@ export async function POST(req: NextRequest) {
             );
         }
 
-        // 1. Update Deadline Config in Firestore (infrastructure configuration stays in Firestore)
+        // 1. Update Deadline Config in PostgreSQL system_settings
         await updateDeadlineConfig(config, uid);
 
-        // 2. Sync concrete dates to System Config
+        // 2. Cascade recalculation to student_profiles and applications
         await syncSystemConfigDates(config as DeadlineConfig, uid);
+
+        // 3. Invalidate active config cache, config cache, and all student assignments
+        invalidateActiveConfigCache();
+        invalidateConfigCache('deadline');
+        invalidateConfigCache('config');
+        invalidateConfigCache();
+        await invalidateStudentAssignmentCache('*');
 
         return NextResponse.json({
             message: 'Deadline configuration updated and synced successfully.',
@@ -133,11 +143,108 @@ export async function POST(req: NextRequest) {
 }
 
 /**
- * Syncs the abstract rules from DeadlineConfig to concrete dates in SystemConfig
+ * Syncs the abstract rules from DeadlineConfig to concrete dates in student_profiles & applications
  */
-async function syncSystemConfigDates(deadlineConfig: DeadlineConfig, uid: string) {
-    // Concrete lifecycle dates are queried directly from canonical deadline config endpoint.
-    // syncSystemConfigDates is intentionally bypassed to maintain a single source of truth.
+export async function syncSystemConfigDates(deadlineConfig: DeadlineConfig, uid: string) {
+    const startMonth = deadlineConfig.academicSessionStart?.month ?? 6;
+    const startDay = deadlineConfig.academicSessionStart?.day ?? 1;
+
+    const supabase = getSupabaseServer();
+
+    // 1. Try atomic PL/pgSQL RPC first
+    try {
+        const { data: rpcData, error: rpcError } = await supabase.rpc('recalculate_academic_lifecycle_dates', {
+            p_start_month: startMonth,
+            p_start_day: startDay,
+        });
+
+        if (!rpcError && rpcData?.success) {
+            console.log(`[deadline-config] recalculate_academic_lifecycle_dates RPC executed successfully:`, rpcData);
+            await invalidateStudentAssignmentCache('*');
+            return;
+        }
+        if (rpcError) {
+            console.warn('[deadline-config] RPC recalculate_academic_lifecycle_dates unavailable, running TypeScript fallback:', rpcError.message);
+        }
+    } catch (err: any) {
+        console.warn('[deadline-config] Error invoking recalculate_academic_lifecycle_dates RPC, using TypeScript fallback:', err?.message || err);
+    }
+
+    // 2. TypeScript Fallback
+    try {
+        // A. Update student_profiles
+        const { data: students, error: studErr } = await supabase
+            .from('student_profiles')
+            .select('uid, session_end_year, valid_until')
+            .gt('session_end_year', 2000)
+            .in('status', ['active', 'soft_blocked']);
+
+        if (!studErr && students && students.length > 0) {
+            const nowMs = Date.now();
+            const ninetyDaysMs = 90 * 24 * 60 * 60 * 1000;
+
+            for (const s of students) {
+                const lifecycle = deriveAcademicLifecycle(startMonth, startDay, s.session_end_year);
+                const newExpiry = lifecycle.expiry;
+                const newSoftBlock = lifecycle.softBlock;
+                const newHardBlock = lifecycle.hardDelete;
+
+                const resetReminders = newExpiry.getTime() > nowMs + ninetyDaysMs;
+
+                const updatePayload: Record<string, any> = {
+                    valid_until: newExpiry.toISOString(),
+                    soft_block: newSoftBlock.toISOString(),
+                    hard_block: newHardBlock.toISOString(),
+                    updated_at: new Date().toISOString(),
+                };
+
+                if (resetReminders) {
+                    updatePayload.expiry_reminder_count = 0;
+                    updatePayload.last_expiry_reminder_sent_at = null;
+                }
+
+                await supabase
+                    .from('student_profiles')
+                    .update(updatePayload)
+                    .eq('uid', s.uid);
+            }
+        }
+
+        // B. Update applications
+        const { data: apps, error: appErr } = await supabase
+            .from('applications')
+            .select('application_id, session_start_year, target_session, form_data')
+            .in('state', ['submitted', 'verified_upcoming', 'pending_seat_allocation']);
+
+        if (!appErr && apps && apps.length > 0) {
+            for (const app of apps) {
+                const targetYear = app.session_start_year ||
+                    (app.target_session as any)?.startYear ||
+                    (app.target_session as any)?.start_year ||
+                    (app.form_data as any)?.sessionStartYear ||
+                    (app.form_data as any)?.startYear ||
+                    (app.form_data as any)?.sessionInfo?.sessionStartYear ||
+                    (app.form_data as any)?.sessionInfo?.startYear;
+
+                if (targetYear && Number(targetYear) > 2000) {
+                    const lifecycle = deriveAcademicLifecycle(startMonth, startDay, Number(targetYear));
+                    const newEligible = new Date(lifecycle.softBlock.getTime() + 24 * 60 * 60 * 1000);
+
+                    await supabase
+                        .from('applications')
+                        .update({
+                            eligible_approval: newEligible.toISOString(),
+                            updated_at: new Date().toISOString(),
+                        })
+                        .eq('application_id', app.application_id);
+                }
+            }
+        }
+
+        await invalidateStudentAssignmentCache('*');
+    } catch (fallbackErr: any) {
+        console.error('[deadline-config] TypeScript fallback recalculation failed:', fallbackErr);
+    }
 }
 
 /**

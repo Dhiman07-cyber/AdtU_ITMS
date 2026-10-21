@@ -16,6 +16,8 @@ export async function updateConfig(config: DeadlineConfig, updatedByUid?: string
   return calendarRepository.saveConfig(config, updatedByUid);
 }
 
+export { invalidateActiveConfigCache, getCachedActiveConfig, setActiveConfigForTesting } from '../repositories/calendar.repository';
+
 /**
  * Computes the derived AcademicSession lifecycle (expiry, reminders,
  * soft block, hard delete) for a given session end year, using the

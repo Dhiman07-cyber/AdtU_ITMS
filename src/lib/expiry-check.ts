@@ -32,15 +32,16 @@ export async function checkAndNotifyExpiringStudents(force: boolean = false): Pr
     // Derive dates for the current year
     const lifecycle = deriveAcademicLifecycle(startMonth, startDay, currentYear);
 
-    const isR1 = currentMonth === lifecycle.reminder1.getUTCMonth() && currentDay === lifecycle.reminder1.getUTCDate();
-    const isR2 = currentMonth === lifecycle.reminder2.getUTCMonth() && currentDay === lifecycle.reminder2.getUTCDate();
-    const isFinal = currentMonth === lifecycle.finalReminder.getUTCMonth() && currentDay === lifecycle.finalReminder.getUTCDate();
+    const nowMs = now.getTime();
+    const inR1Window = nowMs >= lifecycle.reminder1.getTime() && nowMs < lifecycle.reminder2.getTime();
+    const inR2Window = nowMs >= lifecycle.reminder2.getTime() && nowMs < lifecycle.finalReminder.getTime();
+    const inFinalWindow = nowMs >= lifecycle.finalReminder.getTime() && nowMs <= lifecycle.expiry.getTime();
 
-    let runR1 = force || isR1;
-    let runR2 = force || isR2;
-    let runFinal = force || isFinal;
+    const runR1 = force || inR1Window;
+    const runR2 = force || inR2Window;
+    const runFinal = force || inFinalWindow;
 
-    if (!force && !isR1 && !isR2 && !isFinal) {
+    if (!force && !inR1Window && !inR2Window && !inFinalWindow) {
       console.log(`⏭️ Expiry check skipped. Today: ${now.toDateString()}`);
       result.skipped = true;
       return result;
@@ -61,8 +62,7 @@ export async function checkAndNotifyExpiringStudents(force: boolean = false): Pr
       .from('student_profiles')
       .select('uid, status, valid_until, session_start_year, session_end_year, expiry_reminder_count')
       .eq('status', 'active')
-      .gte('valid_until', deadlineFirst.toISOString())
-      .lt('valid_until', deadlineNext.toISOString());
+      .or(`session_end_year.eq.${expYear},and(valid_until.gte.${deadlineFirst.toISOString()},valid_until.lt.${deadlineNext.toISOString()})`);
 
     if (pgErr) {
       throw new Error(`Failed to query expiring students: ${pgErr.message}`);

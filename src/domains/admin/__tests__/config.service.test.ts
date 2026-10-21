@@ -1,24 +1,26 @@
 /**
  * D11 Config Service — unit tests
  *
- * Tests business logic with mocked Firestore adminDb.
+ * Tests business logic with mocked PostgreSQL system_settings table.
  */
-import { beforeEach,describe,expect,it,vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-// ─── Mock adminDb ─────────────────────────────────────────────────────────
+process.env.NEXT_PUBLIC_SUPABASE_URL = 'https://mock.supabase.co';
 
-const mockGet = vi.fn();
-const mockSet = vi.fn();
+// ─── Mock Supabase Server ───────────────────────────────────────────────────
 
-vi.mock('@/lib/firebase-admin', () => ({
-  adminDb: {
-    collection: vi.fn((colName: string) => ({
-      doc: vi.fn((docId: string) => ({
-        get: mockGet,
-        set: mockSet,
-      })),
+const mockMaybeSingle = vi.fn();
+const mockUpsert = vi.fn();
+
+vi.mock('@/lib/supabase-server', () => ({
+  getSupabaseServer: () => ({
+    from: vi.fn(() => ({
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      maybeSingle: mockMaybeSingle,
+      upsert: mockUpsert,
     })),
-  },
+  }),
 }));
 
 vi.mock('@/lib/security/object-safety', () => ({
@@ -27,17 +29,17 @@ vi.mock('@/lib/security/object-safety', () => ({
 
 // ─── Import SUT after mocking ────────────────────────────────────────────────
 import {
-	findMarker,
-	getLandingConfig,
-	getLegalConfig,
-	getSystemConfig,
-	getUiConfig,
-	invalidateConfigCache,
-	updateLandingConfig,
-	updateLegalConfig,
-	updateSystemConfig,
-	updateUiConfig,
-	upsertMarker,
+  findMarker,
+  getLandingConfig,
+  getLegalConfig,
+  getSystemConfig,
+  getUiConfig,
+  invalidateConfigCache,
+  updateLandingConfig,
+  updateLegalConfig,
+  updateSystemConfig,
+  updateUiConfig,
+  upsertMarker,
 } from '../services/config.service';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
@@ -80,14 +82,18 @@ beforeEach(() => {
   invalidateConfigCache();
 });
 
-describe('Config Service', () => {
+describe('Config Service (PostgreSQL system_settings)', () => {
   // ── System Config ────────────────────────────────────────────────────────
 
   describe('getSystemConfig', () => {
-    it('returns ConfigResult with data and metadata from Firestore', async () => {
-      mockGet.mockResolvedValue({
-        exists: true,
-        data: () => SYSTEM_CONFIG_DATA,
+    it('returns ConfigResult with data and metadata from PostgreSQL', async () => {
+      mockMaybeSingle.mockResolvedValueOnce({
+        data: {
+          value: SYSTEM_CONFIG_DATA,
+          updated_at: '2026-07-14T12:00:00Z',
+          updated_by: 'admin-uid',
+        },
+        error: null,
       });
 
       const result = await getSystemConfig();
@@ -96,64 +102,78 @@ describe('Config Service', () => {
       expect(result.updatedByUid).toBe('admin-uid');
     });
 
-    it('returns default config when document does not exist', async () => {
-      mockGet.mockResolvedValue({
-        exists: false,
-        data: () => null,
+    it('returns default config when record does not exist', async () => {
+      mockMaybeSingle.mockResolvedValueOnce({
+        data: null,
+        error: null,
       });
 
       const result = await getSystemConfig();
       expect(result.data).toBeDefined();
+      expect(result.data.appName).toBe('AdtU Bus Services');
       expect(result.updatedAt).toBeNull();
     });
   });
 
   describe('updateSystemConfig', () => {
-    it('upserts merged config to Firestore', async () => {
-      mockGet.mockResolvedValue({
-        exists: false,
-        data: () => null,
+    it('upserts merged config to PostgreSQL system_settings', async () => {
+      mockMaybeSingle.mockResolvedValueOnce({
+        data: null,
+        error: null,
       });
-      mockSet.mockResolvedValue(undefined);
+      mockUpsert.mockResolvedValueOnce({ error: null });
 
       await updateSystemConfig(
         { appName: 'Test', busFee: { amount: 100 } },
         'admin-uid',
       );
 
-      expect(mockSet).toHaveBeenCalledTimes(1);
+      expect(mockUpsert).toHaveBeenCalledTimes(1);
+      const [payload] = mockUpsert.mock.calls[0];
+      expect(payload.key).toBe('config');
+      expect(payload.value.appName).toBe('Test');
+      expect(payload.value.busFee.amount).toBe(100);
+      expect(payload.updated_by).toBe('admin-uid');
     });
 
-    it('merges partial update with existing config', async () => {
-      mockGet.mockResolvedValue({
-        exists: true,
-        data: () => ({
-          appName: 'Original',
-          busFee: { amount: 5000, version: 1 },
-          renewalDeadline: '2027-08-01',
-        }),
+    it('merges partial update with existing config in PostgreSQL', async () => {
+      mockMaybeSingle.mockResolvedValueOnce({
+        data: {
+          value: {
+            appName: 'Original',
+            busFee: { amount: 5000, version: 1 },
+            renewalDeadline: '2027-08-01',
+          },
+          updated_at: '2026-07-14T12:00:00Z',
+          updated_by: 'admin-uid',
+        },
+        error: null,
       });
-      mockSet.mockResolvedValue(undefined);
+      mockUpsert.mockResolvedValueOnce({ error: null });
 
       await updateSystemConfig(
         { busFee: { amount: 5500 } },
         'admin-uid',
       );
 
-      expect(mockSet).toHaveBeenCalledTimes(1);
-      const [data] = mockSet.mock.calls[0];
-      expect(data.appName).toBe('Original');
-      expect(data.busFee.amount).toBe(5500);
+      expect(mockUpsert).toHaveBeenCalledTimes(1);
+      const [payload] = mockUpsert.mock.calls[0];
+      expect(payload.value.appName).toBe('Original');
+      expect(payload.value.busFee.amount).toBe(5500);
     });
   });
 
   // ── Landing Config ───────────────────────────────────────────────────────
 
   describe('getLandingConfig', () => {
-    it('returns ConfigResult with data merged with defaults', async () => {
-      mockGet.mockResolvedValue({
-        exists: true,
-        data: () => LANDING_CONFIG_DATA,
+    it('returns ConfigResult with data from PostgreSQL', async () => {
+      mockMaybeSingle.mockResolvedValueOnce({
+        data: {
+          value: LANDING_CONFIG_DATA,
+          updated_at: '2026-07-14T12:00:00Z',
+          updated_by: 'admin-uid',
+        },
+        error: null,
       });
 
       const result = await getLandingConfig();
@@ -161,10 +181,10 @@ describe('Config Service', () => {
       expect(result.data.email).toBe('test@example.com');
     });
 
-    it('returns defaults with null metadata when no config in Firestore', async () => {
-      mockGet.mockResolvedValue({
-        exists: false,
-        data: () => null,
+    it('returns defaults with null metadata when no config in PostgreSQL', async () => {
+      mockMaybeSingle.mockResolvedValueOnce({
+        data: null,
+        error: null,
       });
 
       const result = await getLandingConfig();
@@ -174,39 +194,46 @@ describe('Config Service', () => {
   });
 
   describe('updateLandingConfig', () => {
-    it('sets landing config in Firestore', async () => {
-      mockGet.mockResolvedValue({
-        exists: false,
-        data: () => null,
+    it('sets landing config in PostgreSQL', async () => {
+      mockMaybeSingle.mockResolvedValueOnce({
+        data: null,
+        error: null,
       });
-      mockSet.mockResolvedValue(undefined);
+      mockUpsert.mockResolvedValueOnce({ error: null });
 
       await updateLandingConfig(
         { email: 'new@example.com' },
         'admin-uid',
       );
 
-      expect(mockSet).toHaveBeenCalledTimes(1);
+      expect(mockUpsert).toHaveBeenCalledTimes(1);
+      const [payload] = mockUpsert.mock.calls[0];
+      expect(payload.key).toBe('landing');
+      expect(payload.value.email).toBe('new@example.com');
     });
   });
 
   // ── UI Config ────────────────────────────────────────────────────────────
 
   describe('getUiConfig', () => {
-    it('returns UI config when found', async () => {
-      mockGet.mockResolvedValue({
-        exists: true,
-        data: () => ({ version: '1.0.0' }),
+    it('returns UI config when found in PostgreSQL', async () => {
+      mockMaybeSingle.mockResolvedValueOnce({
+        data: {
+          value: { version: '1.0.0' },
+          updated_at: '2026-07-14T12:00:00Z',
+          updated_by: 'admin-uid',
+        },
+        error: null,
       });
 
       const result = await getUiConfig();
       expect(result?.data.version).toBe('1.0.0');
     });
 
-    it('returns null when no config', async () => {
-      mockGet.mockResolvedValue({
-        exists: false,
-        data: () => null,
+    it('returns null when no config in PostgreSQL', async () => {
+      mockMaybeSingle.mockResolvedValueOnce({
+        data: null,
+        error: null,
       });
 
       const result = await getUiConfig();
@@ -215,35 +242,42 @@ describe('Config Service', () => {
   });
 
   describe('updateUiConfig', () => {
-    it('updates UI config in Firestore', async () => {
-      mockGet.mockResolvedValue({
-        exists: false,
-        data: () => null,
+    it('updates UI config in PostgreSQL', async () => {
+      mockMaybeSingle.mockResolvedValueOnce({
+        data: null,
+        error: null,
       });
-      mockSet.mockResolvedValue(undefined);
+      mockUpsert.mockResolvedValueOnce({ error: null });
 
       await updateUiConfig({ version: '2.0.0' }, 'admin-uid');
-      expect(mockSet).toHaveBeenCalledTimes(1);
+      expect(mockUpsert).toHaveBeenCalledTimes(1);
+      const [payload] = mockUpsert.mock.calls[0];
+      expect(payload.key).toBe('ui');
+      expect(payload.value.version).toBe('2.0.0');
     });
   });
 
   // ── Legal Config ─────────────────────────────────────────────────────────
 
   describe('getLegalConfig', () => {
-    it('returns ConfigResult with privacy config', async () => {
-      mockGet.mockResolvedValue({
-        exists: true,
-        data: () => PRIVACY_CONFIG_DATA,
+    it('returns ConfigResult with privacy config from PostgreSQL', async () => {
+      mockMaybeSingle.mockResolvedValueOnce({
+        data: {
+          value: PRIVACY_CONFIG_DATA,
+          updated_at: '2026-07-14T12:00:00Z',
+          updated_by: 'admin-uid',
+        },
+        error: null,
       });
 
       const result = await getLegalConfig('privacy');
       expect(result.data.title).toBe('Privacy Policy');
     });
 
-    it('returns default privacy config when not in Firestore', async () => {
-      mockGet.mockResolvedValue({
-        exists: false,
-        data: () => null,
+    it('returns default privacy config when not in PostgreSQL', async () => {
+      mockMaybeSingle.mockResolvedValueOnce({
+        data: null,
+        error: null,
       });
 
       const result = await getLegalConfig('privacy');
@@ -252,25 +286,31 @@ describe('Config Service', () => {
   });
 
   describe('updateLegalConfig', () => {
-    it('upserts privacy config', async () => {
-      mockGet.mockResolvedValue({
-        exists: false,
-        data: () => null,
+    it('upserts privacy config in PostgreSQL', async () => {
+      mockMaybeSingle.mockResolvedValueOnce({
+        data: null,
+        error: null,
       });
-      mockSet.mockResolvedValue(undefined);
+      mockUpsert.mockResolvedValueOnce({ error: null });
 
       await updateLegalConfig('privacy', { title: 'New Privacy' }, 'admin-uid');
-      expect(mockSet).toHaveBeenCalledTimes(1);
+      expect(mockUpsert).toHaveBeenCalledTimes(1);
+      const [payload] = mockUpsert.mock.calls[0];
+      expect(payload.key).toBe('privacy');
+      expect(payload.value.title).toBe('New Privacy');
     });
   });
 
   // ── System Markers ───────────────────────────────────────────────────────
 
   describe('findMarker', () => {
-    it('returns marker data when found', async () => {
-      mockGet.mockResolvedValue({
-        exists: true,
-        data: () => ACTIVATION_MARKER,
+    it('returns marker data when found in PostgreSQL', async () => {
+      mockMaybeSingle.mockResolvedValueOnce({
+        data: {
+          value: ACTIVATION_MARKER,
+          updated_at: '2026-07-14T10:00:00Z',
+        },
+        error: null,
       });
 
       const result = await findMarker('activation_2027');
@@ -278,9 +318,9 @@ describe('Config Service', () => {
     });
 
     it('returns null when marker not found', async () => {
-      mockGet.mockResolvedValue({
-        exists: false,
-        data: () => null,
+      mockMaybeSingle.mockResolvedValueOnce({
+        data: null,
+        error: null,
       });
 
       const result = await findMarker('activation_2099');
@@ -289,11 +329,14 @@ describe('Config Service', () => {
   });
 
   describe('upsertMarker', () => {
-    it('upserts marker data in Firestore', async () => {
-      mockSet.mockResolvedValue(undefined);
+    it('upserts marker data in PostgreSQL', async () => {
+      mockUpsert.mockResolvedValueOnce({ error: null });
 
       await upsertMarker('activation_2027', ACTIVATION_MARKER);
-      expect(mockSet).toHaveBeenCalledTimes(1);
+      expect(mockUpsert).toHaveBeenCalledTimes(1);
+      const [payload] = mockUpsert.mock.calls[0];
+      expect(payload.key).toBe('marker:activation_2027');
+      expect(payload.value).toEqual(expect.objectContaining(ACTIVATION_MARKER));
     });
   });
 });

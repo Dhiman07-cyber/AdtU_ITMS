@@ -1,2 +1,1 @@
-// D2 Calendar — public surface. Only this file may be imported by other domains.
-export { computeSession,getActiveConfig,updateConfig } from './services/calendar.service';
+export { computeSession, getActiveConfig, getCachedActiveConfig, invalidateActiveConfigCache, setActiveConfigForTesting, updateConfig } from './services/calendar.service';
