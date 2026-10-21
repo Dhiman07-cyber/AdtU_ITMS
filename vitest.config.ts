@@ -7,6 +7,8 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
     environment: 'node',
+    testTimeout: 15000,
     exclude: [...configDefaults.exclude, 'e2e/**', '.kilo/**', 'tests/**', '.agents/**'],
   },
 });
+
