@@ -15,9 +15,9 @@ function validateEnvVars(): void {
   const missing = REQUIRED_ENV_VARS.filter(key => !process.env[key]);
   if (missing.length > 0) {
     const msg = `❌ Missing required Firebase Admin env vars: ${missing.join(', ')}`;
-    if (process.env.NODE_ENV === 'production') {
+    if (process.env.NODE_ENV === 'production' && process.env.NEXT_PHASE !== 'phase-production-build') {
       throw new Error(msg);
-    } else if (process.env.NODE_ENV !== 'test' && !process.env.VITEST) {
+    } else if (process.env.NODE_ENV !== 'test' && !process.env.VITEST && process.env.NEXT_PHASE !== 'phase-production-build') {
       console.warn(msg);
     }
   }
@@ -60,11 +60,13 @@ try {
     } catch (msgError: any) {
       console.warn('⚠️ Firebase Admin Messaging init failed:', msgError.message);
     }
-  } else if (!isProduction && !isTest) {
+  } else if (!isProduction && !isTest && process.env.NEXT_PHASE !== 'phase-production-build') {
     console.warn('⚠️ Firebase Admin credentials not found');
   }
 } catch (error: any) {
-  console.error('❌ Firebase Admin SDK initialization failed:', error.message);
+  if (process.env.NEXT_PHASE !== 'phase-production-build') {
+    console.error('❌ Firebase Admin SDK initialization failed:', error.message);
+  }
 }
 
 // Verify token function

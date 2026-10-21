@@ -38,7 +38,7 @@ const NotificationContext = createContext<NotificationContextType | undefined>(u
 // ============================================================================
 
 export function NotificationProvider({ children }: { children: ReactNode }) {
-    const { currentUser, userData } = useAuth();
+    const { currentUser, userData, needsApplication } = useAuth();
     const [notifications, setNotifications] = useState<UserNotificationView[]>([]);
     const [unreadCount, setUnreadCount] = useState<number>(0);
     const [loading, setLoading] = useState<boolean>(true);
@@ -58,7 +58,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     }, []);
 
     const fetchNotifications = async (signal?: AbortSignal) => {
-        if (!currentUser || !userData) {
+        if (!currentUser || !userData || needsApplication) {
             setNotifications([]);
             setUnreadCount(0);
             setLoading(false);
@@ -91,7 +91,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
 
     useEffect(() => {
         isMountedRef.current = true;
-        if (!currentUser || !userData) {
+        if (!currentUser || !userData || needsApplication) {
             setNotifications([]);
             setUnreadCount(0);
             setLoading(false);
@@ -119,7 +119,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
             controller.abort();
             clearInterval(pollIntervalId);
         };
-    }, [currentUser, userData?.role, refreshTrigger, isVisible]);
+    }, [currentUser, userData?.role, needsApplication, refreshTrigger, isVisible]);
 
     useEffect(() => {
         return () => {

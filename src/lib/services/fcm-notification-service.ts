@@ -119,6 +119,7 @@ export async function notifyRoute(params: {
   // If direct tokens exist, we notify them directly to prevent duplicate sends.
   // If 0 direct tokens exist, we fall back to topic push (route/bus topics).
   let directTokensCount = 0;
+  let deadTokensPruned = 0;
   let topicResult: { success: boolean; messageId?: string; error?: string } = { success: false };
 
   if (messaging) {
@@ -145,7 +146,16 @@ export async function notifyRoute(params: {
           : `Your bus trip for ${displayRouteName} has ended.`;
         const link = isStart ? '/student/track-bus' : '/student';
 
+        const tokenMetaMap = new Map<string, string>();
+        for (const tm of tokensWithMeta) {
+          if (tm.token && tm.studentId) {
+            tokenMetaMap.set(tm.token, tm.studentId);
+          }
+        }
+
         let totalInvalid = 0;
+        const deadTokensToPrune: { studentId?: string; token: string }[] = [];
+
         for (let i = 0; i < tokens.length; i += 500) {
           const batch = tokens.slice(i, i + 500);
           const batchResponse = await messaging.sendEachForMulticast({
@@ -164,13 +174,48 @@ export async function notifyRoute(params: {
               fcmOptions: { link },
             },
           });
+
+          batchResponse.responses.forEach((resp, idx) => {
+            if (!resp.success) {
+              totalInvalid++;
+              const errCode = resp.error?.code;
+              if (
+                errCode === 'messaging/registration-token-not-registered' ||
+                errCode === 'messaging/invalid-registration-token'
+              ) {
+                const deadToken = batch[idx];
+                const studentId = tokenMetaMap.get(deadToken);
+                deadTokensToPrune.push({ studentId, token: deadToken });
+              }
+            }
+          });
           const batchInvalid = batchResponse.responses.filter(r => !r.success).length;
-          totalInvalid += batchInvalid;
           console.log(`[notifyRoute] Batch ${Math.floor(i / 500) + 1}: ${batchResponse.successCount} sent, ${batchInvalid} failed`);
         }
 
+        if (deadTokensToPrune.length > 0) {
+          deadTokensPruned = deadTokensToPrune.length;
+          void (async () => {
+            try {
+              const { deleteFcmToken } = await import('@/domains/identity');
+              const { hashToken } = await import('@/lib/services/fcm-token-service');
+              for (const { studentId, token } of deadTokensToPrune) {
+                if (studentId) {
+                  await deleteFcmToken(studentId, hashToken(token)).catch(() => {});
+                } else {
+                  const supabase = getSupabaseServer();
+                  await supabase.from('fcm_tokens').delete().eq('token_hash', hashToken(token));
+                }
+              }
+              console.log(`[notifyRoute] Pruned ${deadTokensToPrune.length} unregistered FCM token(s)`);
+            } catch (pruneErr) {
+              console.warn('[notifyRoute] Dead token pruning error:', pruneErr);
+            }
+          })();
+        }
+
         directTokensCount = tokens.length;
-        console.log(`[notifyRoute] Direct multicast complete: ${tokens.length} tokens, ${totalInvalid} invalid`, logCtx);
+        console.log(`[notifyRoute] Direct multicast complete: ${tokens.length} tokens, ${totalInvalid} invalid, ${deadTokensPruned} pruned`, logCtx);
       }
     } catch (directErr) {
       console.error('[notifyRoute] Direct token multicast threw an error:', directErr, logCtx);
@@ -194,7 +239,7 @@ export async function notifyRoute(params: {
     failureCount: topicResult.success || directTokensCount > 0 ? 0 : 1,
     totalTokens: directTokensCount,
     batchCount,
-    invalidTokensRemoved: 0,
+    invalidTokensRemoved: deadTokensPruned,
     error: topicResult.error,
   };
 }

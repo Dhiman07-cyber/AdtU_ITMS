@@ -211,12 +211,13 @@ export async function markAsRead(userId: string, notificationId: string): Promis
   }
 
   // 2. Idempotency: already read
-  if (notification.readByUserIds?.includes(userId)) {
+  const existing = Array.isArray(notification.readByUserIds) ? notification.readByUserIds : [];
+  if (existing.includes(userId)) {
     return;
   }
 
-  // 3. Compose new array (business logic: append, not merge)
-  const newReadByUserIds = [...(notification.readByUserIds || []), userId];
+  // 3. Compose new deduplicated array (business logic: strict deduplication)
+  const newReadByUserIds = Array.from(new Set([...existing, userId]));
 
   // 4. Update PG
   await notificationRepository.update(notificationId, {
