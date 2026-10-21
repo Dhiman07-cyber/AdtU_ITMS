@@ -41,6 +41,7 @@ export default function BusPassScannerModal({ isOpen, onClose, onScanSuccess }: 
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const animationRef = useRef<number | null>(null);
     const isScanningRef = useRef<boolean>(false);
+    const cameraStreamRef = useRef<MediaStream | null>(null);
 
     const [isScanning, setIsScanning] = useState(false);
     const [cameraError, setCameraError] = useState<string | null>(null);
@@ -53,6 +54,11 @@ export default function BusPassScannerModal({ isOpen, onClose, onScanSuccess }: 
 
     const stopScanning = () => {
         isScanningRef.current = false;
+
+        if (cameraStreamRef.current) {
+            cameraStreamRef.current.getTracks().forEach(track => track.stop());
+            cameraStreamRef.current = null;
+        }
 
         if (cameraStream) {
             cameraStream.getTracks().forEach(track => track.stop());
@@ -101,6 +107,7 @@ export default function BusPassScannerModal({ isOpen, onClose, onScanSuccess }: 
             if (!stream) throw new Error('Unable to access camera.');
 
             setCameraStream(stream);
+            cameraStreamRef.current = stream;
 
             if (videoRef.current) {
                 videoRef.current.srcObject = stream;
@@ -320,7 +327,9 @@ export default function BusPassScannerModal({ isOpen, onClose, onScanSuccess }: 
         } else {
             stopScanning();
         }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
+        return () => {
+            stopScanning();
+        };
     }, [isOpen]);
 
     return (

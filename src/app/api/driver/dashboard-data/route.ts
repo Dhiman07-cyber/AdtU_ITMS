@@ -67,10 +67,37 @@ export const GET = withSecurity(
 
         const activeTrip = activeTripRes.data;
         const isTripActive = !!activeTrip;
-        // As per dynamic bus assignment model: no driver is permanently assigned to any bus.
-        // busId and routeId are ONLY bound when the driver has an active trip.
-        const busId = activeTrip?.bus_id || null;
-        const routeId = activeTrip?.route_id || null;
+
+        // 2-Tier Authority Resolution:
+        // Tier 1 (On-Duty Active Trip Authority):
+        // If an active trip exists, busId, routeId, and shift come 100% from active_trips.
+        let busId = activeTrip?.bus_id || null;
+        let routeId = activeTrip?.route_id || null;
+        let isPrimaryBus = false;
+        let isReliefPool = false;
+
+        // Tier 2 (Off-Duty Primary Bus Fallback):
+        if (!isTripActive) {
+            let primaryBusQuery = null;
+            if (driverProfile.bus_id) {
+                primaryBusQuery = await supabase.from('buses').select('id, route_id').eq('id', driverProfile.bus_id).maybeSingle();
+            }
+            if (!primaryBusQuery?.data) {
+                primaryBusQuery = await supabase
+                    .from('buses')
+                    .select('id, route_id')
+                    .or(`primary_driver_uid.eq.${uid},driver_uid.eq.${uid}`)
+                    .maybeSingle();
+            }
+
+            if (primaryBusQuery?.data) {
+                busId = primaryBusQuery.data.id;
+                routeId = primaryBusQuery.data.route_id;
+                isPrimaryBus = true;
+            } else {
+                isReliefPool = true;
+            }
+        }
 
         // 3. Fetch Bus details, Route details, Student counts, Active Waiting Flags, and Fleet Summary
         const now = new Date().toISOString();
@@ -157,10 +184,14 @@ export const GET = withSecurity(
                 fullName: driverProfile.full_name,
                 busId,
                 routeId,
+                isPrimaryBus,
+                isReliefPool,
             },
             bus: formattedBus,
             route: formattedRoute,
             studentCount,
+            isPrimaryBus,
+            isReliefPool,
             tripActive: isTripActive,
             fleetSummary: {
                 availableBusesCount,

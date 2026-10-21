@@ -54,11 +54,13 @@ import {
   Filter,
   MoreHorizontal,
   Plus,
+  QrCode,
   Route as RouteIcon,
   Search,
   Trash2,
   Users
 } from "lucide-react";
+import { BusQRStickerModal } from '@/components/bus/BusQRStickerModal';
 import { MobileActionFAB } from '@/components/layout/MobileActionFAB';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -153,6 +155,7 @@ export default function BusesPage() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [deleteItem, setDeleteItem] = useState<{ id: string; name: string } | null>(null);
+  const [qrStickerBus, setQrStickerBus] = useState<{ id: string; busNumber: string; routeName?: string; model?: string } | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   const isLoading = loadingBuses || loadingDrivers || loadingRoutes;
@@ -691,6 +694,16 @@ export default function BusesPage() {
                                   <Edit className="mr-2 h-3.5 w-3.5 text-yellow-400" />
                                   Edit Bus
                                 </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  className={cn(
+                                    "px-2 py-1.5 text-sm cursor-pointer",
+                                    theme === 'dark' ? "text-white hover:bg-gray-800 focus:bg-gray-800" : "text-[#111827] hover:bg-gray-100 focus:bg-gray-100"
+                                  )}
+                                  onClick={() => setQrStickerBus(bus as any)}
+                                >
+                                  <QrCode className="mr-2 h-3.5 w-3.5 text-cyan-400" />
+                                  Bus QR Sticker
+                                </DropdownMenuItem>
                                 <DropdownMenuSeparator className={cn(theme === 'dark' ? "bg-gray-600" : "bg-[#E5E7EB]")} />
                                 <DropdownMenuItem
                                   className={cn(
@@ -805,6 +818,18 @@ export default function BusesPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Bus QR Sticker Modal */}
+      <BusQRStickerModal
+        isOpen={Boolean(qrStickerBus)}
+        onClose={() => setQrStickerBus(null)}
+        bus={qrStickerBus ? {
+          id: qrStickerBus.id,
+          busNumber: qrStickerBus.busNumber,
+          routeName: getRouteNameForBus(qrStickerBus),
+          model: qrStickerBus.model,
+        } : null}
+      />
 
       {/* Mobile Floating Action Button */}
       <MobileActionFAB

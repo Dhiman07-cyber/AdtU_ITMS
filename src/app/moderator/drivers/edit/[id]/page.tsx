@@ -221,7 +221,7 @@ export default function EditDriverPage({ params }: { params: Promise<{ id: strin
     if (!formData.aadharNumber.trim()) newErrors.aadharNumber = "AADHAR number is required";
     if (!formData.dob) newErrors.dob = "Date of birth is required";
     if (!formData.joiningDate) newErrors.joiningDate = "Joining date is required";
-    if (!formData.routeId) newErrors.routeId = "Route assignment is required";
+    // Primary route/bus is optional for Operational Relief Pool drivers
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;

@@ -147,55 +147,36 @@ export default function DriverStudentsPage() {
       if (!currentUser?.uid) return;
 
       try {
-        // Fetch driver data
-        const driver = await getDriverByUid(currentUser.uid);
-        console.log('🔍 Driver data fetched:', driver);
+        const token = await currentUser.getIdToken();
+        const [manifestRes, driverRes] = await Promise.all([
+          fetch('/api/driver/students', {
+            headers: { 'Authorization': `Bearer ${token}` }
+          }).catch(() => null),
+          getDriverByUid(currentUser.uid).catch(() => null),
+        ]);
 
-        if (driver) {
-          let resolvedBusId = driver.busId;
-          if (!resolvedBusId) {
-            try {
-              const token = await currentUser.getIdToken();
-              const activeRes = await fetch('/api/driver/check-active-trip', {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'Authorization': `Bearer ${token}`
-                },
-                body: JSON.stringify({})
-              });
-              if (activeRes.ok) {
-                const activeData = await activeRes.json();
-                if (activeData?.hasActiveTrip && activeData?.tripData?.busId) {
-                  resolvedBusId = activeData.tripData.busId;
-                }
-              }
-            } catch (err) {
-              console.warn('Failed to check active trip for driver bus:', err);
-            }
-          }
-
-          const effectiveDriver = resolvedBusId ? { ...driver, busId: resolvedBusId } : driver;
-
-          // Fetch students on assigned bus
-          let busStudents: any[] = [];
-          if (resolvedBusId) {
-            console.log('🚌 Fetching students for bus ID:', resolvedBusId);
-            busStudents = await getStudentsByBusId(resolvedBusId);
-          } else {
-            console.log('⚠️ No assigned bus ID for driver:', driver);
-          }
-
-          startTransition(() => {
-            setDriverData(effectiveDriver);
-            if (busStudents.length > 0) {
-              setStudents(busStudents);
-            }
-          });
-        } else {
-          console.log('❌ Driver data not found');
-          setError("Driver data not found");
+        let manifestData: any = null;
+        if (manifestRes && manifestRes.ok) {
+          manifestData = await manifestRes.json();
         }
+
+        const driver = driverRes || { uid: currentUser.uid, fullName: userData?.name || 'Driver' };
+        const resolvedBusId = manifestData?.busId || driver.busId || null;
+        const effectiveDriver = {
+          ...driver,
+          busId: resolvedBusId,
+          routeId: manifestData?.routeId || driver.routeId,
+          isReliefPool: manifestData?.isReliefPool ?? !resolvedBusId,
+          isLiveTrip: manifestData?.isLiveTrip ?? false,
+          activeShift: manifestData?.shift || null,
+        };
+
+        const busStudents = manifestData?.students || (resolvedBusId ? await getStudentsByBusId(resolvedBusId) : []);
+
+        startTransition(() => {
+          setDriverData(effectiveDriver);
+          setStudents(busStudents);
+        });
       } catch (error) {
         console.error("Error fetching data:", error);
         setError("Failed to load data");

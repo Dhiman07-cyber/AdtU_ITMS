@@ -131,7 +131,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <>
-      <MapRuntimeBootstrap />
+      {Boolean(currentUser) && <MapRuntimeBootstrap />}
       <TooltipProvider delayDuration={0}>
         <SidebarContext.Provider value={{
           collapsed: sidebarCollapsed,
@@ -225,7 +225,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             )}
 
             {/* Floating Permission Banner (straddles bottom nav on mobile) - students/drivers only */}
-            {!authLoading && (userData?.role === 'student' || userData?.role === 'driver') && (
+            {!authLoading && Boolean(currentUser) && (userData?.role === 'student' || userData?.role === 'driver') && (
               <FloatingPermissionBanner />
             )}
 
@@ -233,7 +233,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             {isLandingPage && <PWAInstallPrompt />}
 
             {/* FCM Token Manager - Students only */}
-            {userData?.role === 'student' && <FCMTokenManager />}
+            {Boolean(currentUser) && userData?.role === 'student' && <FCMTokenManager />}
           </div>
           </ResponsiveLayoutRoot>
         </SidebarContext.Provider>

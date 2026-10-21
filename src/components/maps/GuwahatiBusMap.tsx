@@ -215,9 +215,8 @@ export default function GuwahatiBusMap({
                       const rawSpeed = speed !== undefined && speed !== null ? speed : (busLocation as any)?.speed;
                       if (!rawSpeed || isNaN(Number(rawSpeed)) || Number(rawSpeed) <= 0) return "0 km/h";
                       const numSpeed = Number(rawSpeed);
-                      // If rawSpeed is already > 45, it might be in km/h; otherwise convert m/s to km/h (* 3.6)
-                      const kmh = numSpeed > 45 ? Math.round(numSpeed) : Math.round(numSpeed * 3.6);
-                      return `${kmh} km/h`;
+                      const displaySpeedKmph = numSpeed > 1.5 ? Math.round(numSpeed) : 0;
+                      return `${displaySpeedKmph} km/h`;
                     })()}
                   </p>
                 </div>

@@ -18,7 +18,7 @@ import {
 	Sun
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect,useRef,useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 type Step = "select-bus" | "scan-qr" | "select-shift" | "confirming" | "done" | "error";
 
@@ -69,11 +69,14 @@ export default function StartTripPage() {
       setError(`Bus ${formatIdForDisplay(bus.bus_number || bus.id)} is currently operated by another driver. Please choose an available bus.`);
       return;
     }
-    if (bus.status === "inactive") {
-      setError(`Bus ${formatIdForDisplay(bus.bus_number || bus.id)} is currently inactive.`);
+    if (bus.status === "inactive" || bus.status === "maintenance") {
+      setError(`Bus ${formatIdForDisplay(bus.bus_number || bus.id)} is currently ${bus.status} and cannot start a trip.`);
       return;
     }
     setSelectedBus(bus);
+    const now = new Date();
+    const istHours = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" })).getHours();
+    setSelectedShift(istHours < 12 ? "Morning" : "Evening");
     setStep("select-shift");
   };
 
@@ -94,6 +97,10 @@ export default function StartTripPage() {
           setError(`Bus ${formatIdForDisplay(data.busNumber || data.busId)} is currently being operated by another driver.`);
           return;
         }
+        if (data.status === "inactive" || data.status === "maintenance") {
+          setError(`Bus ${formatIdForDisplay(data.busNumber || data.busId)} is currently ${data.status} and cannot start a trip.`);
+          return;
+        }
         setSelectedBus({
           id: data.busId,
           bus_number: data.busNumber,
@@ -103,6 +110,9 @@ export default function StartTripPage() {
           is_in_trip: data.isInTrip,
           is_operated_by_other: data.isOperatedByOther,
         });
+        const now = new Date();
+        const istHours = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" })).getHours();
+        setSelectedShift(istHours < 12 ? "Morning" : "Evening");
         setStep("select-shift");
       } else {
         const err = await res.json();
@@ -433,34 +443,56 @@ function QRScanner({
   const [scanning, setScanning] = useState(false);
   const [manualInput, setManualInput] = useState("");
 
-  const startCamera = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment" },
-      });
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.play();
-        setScanning(true);
-        scanFrame();
-      }
-    } catch {
-      setScanning(false);
-    }
-  };
+  const streamRef = useRef<MediaStream | null>(null);
 
-  const stopCamera = () => {
-    if (animationRef.current) cancelAnimationFrame(animationRef.current);
+  const stopCamera = useCallback(() => {
+    if (animationRef.current) {
+      cancelAnimationFrame(animationRef.current);
+      animationRef.current = null;
+    }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }
     if (videoRef.current?.srcObject) {
       const tracks = (videoRef.current.srcObject as MediaStream).getTracks();
       tracks.forEach((t) => t.stop());
+      videoRef.current.srcObject = null;
     }
-  };
+    setScanning(false);
+  }, []);
 
   useEffect(() => {
+    let cancelled = false;
+
+    const startCamera = async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "environment" },
+        });
+        if (cancelled) {
+          stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
+        streamRef.current = stream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          await videoRef.current.play();
+          setScanning(true);
+          scanFrame();
+        }
+      } catch {
+        if (!cancelled) setScanning(false);
+      }
+    };
+
     startCamera();
-    return stopCamera;
-  }, [startCamera, stopCamera]);
+
+    return () => {
+      cancelled = true;
+      stopCamera();
+    };
+  }, [stopCamera]);
 
   const scanFrame = () => {
     if (!videoRef.current || !canvasRef.current) {

@@ -293,10 +293,7 @@ export default function EditDriverPage({ params }: { params: Promise<{ id: strin
       newErrors.aadharNumber = "AADHAR number must be at least 8 digits";
     }
 
-    if (!formData.routeId) {
-      newErrors.routeId = "Route is required";
-    }
-
+    // Primary route/bus is optional for Operational Relief Pool drivers
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -412,25 +409,7 @@ export default function EditDriverPage({ params }: { params: Promise<{ id: strin
       return;
     }
 
-    if (e) {
-      const existingDriver = driversList.find(d => 
-        (d.busId === formData.busId || d.busId === formData.busId) && 
-        !d.isReserved && 
-        (d.driverId || d.id) !== driverId
-      );
-      
-      if (existingDriver) {
-        const eShift = (existingDriver.shift || '').toLowerCase();
-        const fShift = formData.shift.toLowerCase();
-        
-        // CONFLICT: Either already Both, or same shift
-        if (eShift === 'both' || eShift === fShift) {
-          setConflictDriver(existingDriver);
-          setShowConflictModal(true);
-          return; 
-        }
-      }
-    }
+    // In Operational Relief Pool, any driver can drive any bus dynamically via QR check-in
 
     setLoadingSubmit(true);
     setResult(null);

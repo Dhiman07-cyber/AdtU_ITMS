@@ -428,7 +428,7 @@ function DynamicStudentMap({
                       if (busLocation.speed === undefined || busLocation.speed === null) return "0 km/h";
                       const raw = Number(busLocation.speed);
                       if (isNaN(raw) || raw <= 0) return "0 km/h";
-                      const kmh = raw > 45 ? raw : raw * 3.6;
+                      const kmh = raw > 1.5 ? raw : 0;
                       return `${kmh.toFixed(1)} km/h`;
                     })()}
                   </span>

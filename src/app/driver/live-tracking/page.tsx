@@ -81,13 +81,13 @@ interface QueuedGpsPoint {
 }
 
 const OFFLINE_QUEUE_KEY = 'itms_driver_offline_gps_queue';
-const MAX_OFFLINE_QUEUE_POINTS = 50;
+const MAX_OFFLINE_QUEUE_POINTS = 20;
 const OFFLINE_POINT_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 function getOfflineQueue(activeTripId?: string | null): QueuedGpsPoint[] {
   if (typeof window === 'undefined') return [];
   try {
-    const raw = localStorage.getItem(OFFLINE_QUEUE_KEY);
+    const raw = localStorage.getItem(OFFLINE_QUEUE_KEY) || localStorage.getItem('itms_offline_gps_queue');
     if (!raw) return [];
     const list: QueuedGpsPoint[] = JSON.parse(raw);
     const now = Date.now();
@@ -115,6 +115,7 @@ function clearOfflineQueue() {
   if (typeof window === 'undefined') return;
   try {
     localStorage.removeItem(OFFLINE_QUEUE_KEY);
+    localStorage.removeItem('itms_offline_gps_queue');
   } catch {}
 }
 
@@ -154,6 +155,7 @@ export default function DriverLiveTrackingPage() {
   const wakeLockRef = useRef<any>(null); // Screen wake lock to prevent screen from turning off
   const [isNetworkOffline, setIsNetworkOffline] = useState(false);
   const latestOfflineCoordRef = useRef<QueuedGpsPoint | null>(null);
+  const inFlightLocationAbortRef = useRef<AbortController | null>(null);
 
   // Map Full Screen State - Automatically syncs with trip status
   const [isFullScreenMap, setIsFullScreenMap] = useState(false);
@@ -368,21 +370,23 @@ export default function DriverLiveTrackingPage() {
       navigator.geolocation.getCurrentPosition(
         (position) => {
           const { latitude, longitude, speed: gpsSpeed, accuracy: gpsAccuracy } = position.coords;
+          const speedKmh = gpsSpeed != null && gpsSpeed >= 0 ? Math.round(gpsSpeed * 3.6 * 10) / 10 : 0;
 
           setCurrentLocation({ lat: latitude, lng: longitude, accuracy: gpsAccuracy });
-          setSpeed(gpsSpeed || 0);
+          setSpeed(speedKmh);
           setAccuracy(gpsAccuracy);
 
-          console.log("✅ Location obtained (lower accuracy):", { gpsAccuracy });
+          console.log("✅ Location obtained (lower accuracy):", { gpsAccuracy, speedKmh });
           addToast("GPS tracking started (using network location)", "warning");
 
           // Start watching with lower accuracy
           watchIdRef.current = navigator.geolocation.watchPosition(
             (position) => {
               const { latitude, longitude, speed: gpsSpeed, accuracy: gpsAccuracy } = position.coords;
+              const speedKmh = gpsSpeed != null && gpsSpeed >= 0 ? Math.round(gpsSpeed * 3.6 * 10) / 10 : 0;
 
               setCurrentLocation({ lat: latitude, lng: longitude, accuracy: gpsAccuracy });
-              setSpeed((prev) => (Math.abs(prev - (gpsSpeed || 0)) > 0.2 ? (gpsSpeed || 0) : prev));
+              setSpeed((prev) => (Math.abs(prev - speedKmh) > 0.5 ? speedKmh : prev));
               setAccuracy((prev) => (Math.abs(prev - gpsAccuracy) > 3 ? gpsAccuracy : prev));
             },
             (error) => {
@@ -417,22 +421,24 @@ export default function DriverLiveTrackingPage() {
     navigator.geolocation.getCurrentPosition(
       (initialPosition) => {
         const { latitude, longitude, speed: gpsSpeed, accuracy: gpsAccuracy } = initialPosition.coords;
+        const speedKmh = gpsSpeed != null && gpsSpeed >= 0 ? Math.round(gpsSpeed * 3.6 * 10) / 10 : 0;
 
         // Set initial location (real device GPS)
         setCurrentLocation({ lat: latitude, lng: longitude, accuracy: gpsAccuracy, isFallback: false } as any);
-        setSpeed(gpsSpeed || 0);
+        setSpeed(speedKmh);
         setAccuracy(gpsAccuracy);
 
-        console.log("✅ Initial location obtained (high accuracy):", { gpsAccuracy });
+        console.log("✅ Initial location obtained (high accuracy):", { gpsAccuracy, speedKmh });
         addToast("GPS tracking started", "success");
 
         // Now start continuous tracking
         watchIdRef.current = navigator.geolocation.watchPosition(
           (position) => {
             const { latitude, longitude, speed: gpsSpeed, accuracy: gpsAccuracy, heading: gpsHeading } = position.coords;
+            const speedKmh = gpsSpeed != null && gpsSpeed >= 0 ? Math.round(gpsSpeed * 3.6 * 10) / 10 : 0;
 
             setCurrentLocation({ lat: latitude, lng: longitude, accuracy: gpsAccuracy, heading: gpsHeading ?? 0 } as any);
-            setSpeed((prev) => (Math.abs(prev - (gpsSpeed || 0)) > 0.2 ? (gpsSpeed || 0) : prev));
+            setSpeed((prev) => (Math.abs(prev - speedKmh) > 0.5 ? speedKmh : prev));
             setAccuracy((prev) => (Math.abs(prev - gpsAccuracy) > 3 ? gpsAccuracy : prev));
           },
           (error) => {
@@ -531,7 +537,13 @@ export default function DriverLiveTrackingPage() {
         const token = await currentUser.getIdToken();
         if (cancelled) return;
         const url = getClientWsUrl();
-        const client = new WebSocketClient({ url, token });
+        const client = new WebSocketClient({
+          url,
+          token,
+          getNewToken: async () => {
+            return (await currentUser.getIdToken(true)) || '';
+          },
+        });
         wsClientRef.current = client;
         setWsClientReady(true);
         client.connect();
@@ -1087,7 +1099,6 @@ export default function DriverLiveTrackingPage() {
         document.removeEventListener('visibilitychange', handleFlagsVisibility);
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wsClientReady, targetBusId, currentUser]);
 
   // Screen Wake Lock is actively managed by the wakeLock effect above when tripActive is true.
@@ -1125,22 +1136,26 @@ export default function DriverLiveTrackingPage() {
 
   const isFlushingRef = useRef(false);
 
-  // Flushes queued offline points in FIFO order upon network recovery
+  // Flushes queued offline points upon network recovery.
+  // Fix 1: Drop items on 4xx (400, 403, 404, 409) immediately to break infinite retry storms.
   const flushOfflineQueue = useCallback(async (activeTripId: string | null) => {
     if (!activeTripId || isFlushingRef.current || !currentUser) return;
     const queue = getOfflineQueue(activeTripId);
     if (queue.length === 0) return;
 
+    // Cap flush batch to at most MAX_OFFLINE_QUEUE_POINTS
+    const pointsToFlush = queue.slice(-MAX_OFFLINE_QUEUE_POINTS);
+
     isFlushingRef.current = true;
     try {
-      const idToken = await currentUser.getIdToken();
+      let idToken = await currentUser.getIdToken();
       const deviceId = currentDeviceId.current || getOrCreateDeviceId();
       const remaining: QueuedGpsPoint[] = [];
 
-      for (let i = 0; i < queue.length; i++) {
-        const item = queue[i];
+      for (let i = 0; i < pointsToFlush.length; i++) {
+        const item = pointsToFlush[i];
         try {
-          const res = await fetch("/api/location/update", {
+          let res = await fetch("/api/location/update", {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -1162,12 +1177,49 @@ export default function DriverLiveTrackingPage() {
               isFallback: false,
             }),
           });
-          if (!res.ok && res.status >= 500) {
-            remaining.push(...queue.slice(i));
-            break;
+
+          // Fix 11: Handle token expiration during offline queue replay
+          if (res.status === 401) {
+            idToken = await currentUser.getIdToken(true);
+            res = await fetch("/api/location/update", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${idToken}`,
+                "x-device-id": deviceId,
+              },
+              body: JSON.stringify({
+                idToken,
+                deviceId,
+                busId: item.busId,
+                routeId: item.routeId,
+                lat: item.lat,
+                lng: item.lng,
+                accuracy: item.accuracy,
+                speed: item.speed,
+                heading: item.heading,
+                timestamp: item.timestamp,
+                tripId: item.tripId,
+                isFallback: false,
+              }),
+            });
+          }
+
+          if (!res.ok) {
+            if (res.status >= 400 && res.status < 500) {
+              // 4xx client error (e.g. 400 stale_raw, 403, 404, 409) -> Drop point immediately, do NOT retry
+              console.warn(`[OfflineGPS] Dropping point due to ${res.status}:`, item.timestamp);
+              continue;
+            }
+            if (res.status >= 500) {
+              // 5xx server error -> Retain remaining items and retry next cycle
+              remaining.push(...pointsToFlush.slice(i));
+              break;
+            }
           }
         } catch {
-          remaining.push(...queue.slice(i));
+          // Network error during send -> retain remaining points
+          remaining.push(...pointsToFlush.slice(i));
           break;
         }
       }
@@ -1175,7 +1227,7 @@ export default function DriverLiveTrackingPage() {
         if (remaining.length > 0) {
           localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(remaining));
         } else {
-          localStorage.removeItem(OFFLINE_QUEUE_KEY);
+          clearOfflineQueue();
         }
       }
     } finally {
@@ -1201,13 +1253,25 @@ export default function DriverLiveTrackingPage() {
     const currentIsoTimestamp = new Date().toISOString();
     const currentRouteId = routeData?.routeId || routeData?.id || busData?.route_id || 'unassigned';
 
+    // Fix 14: Abort previous in-flight location request to prevent HTTP connection-pool starvation
+    if (inFlightLocationAbortRef.current) {
+      inFlightLocationAbortRef.current.abort();
+      inFlightLocationAbortRef.current = null;
+    }
+
+    const abortController = new AbortController();
+    inFlightLocationAbortRef.current = abortController;
+    const timeoutId = setTimeout(() => {
+      abortController.abort();
+    }, 4500);
+
     // Authoritative HTTP path for GPS pipeline, DB breadcrumbs, and PostgreSQL heartbeat
-    // (Bypassing direct WS location stream to prevent unvalidated duplicate broadcasts)
     try {
-      const idToken = await currentUser?.getIdToken();
+      let idToken = await currentUser?.getIdToken();
       const deviceId = currentDeviceId.current || getOrCreateDeviceId();
-      const response = await fetch("/api/location/update", {
+      let response = await fetch("/api/location/update", {
         method: "POST",
+        signal: abortController.signal,
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${idToken}`,
@@ -1231,6 +1295,35 @@ export default function DriverLiveTrackingPage() {
         }),
       });
 
+      // Fix 11: 24-hour continuous endurance - refresh token on 401 Unauthorized
+      if (response.status === 401 && currentUser) {
+        console.warn("⚠️ Token expired (401), force-refreshing Firebase ID token...");
+        idToken = await currentUser.getIdToken(true);
+        response = await fetch("/api/location/update", {
+          method: "POST",
+          signal: abortController.signal,
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${idToken}`,
+            "x-device-id": deviceId,
+          },
+          body: JSON.stringify({
+            idToken,
+            deviceId,
+            busId: resolvedBus,
+            routeId: currentRouteId,
+            lat: currentLocation.lat,
+            lng: currentLocation.lng,
+            accuracy: accuracy,
+            speed: speed,
+            heading: currentHeading,
+            timestamp: currentIsoTimestamp,
+            tripId: tripId,
+            isFallback: false,
+          }),
+        });
+      }
+
       if (!response.ok) {
         console.warn("⚠️ Location update failed:", response.status);
         if (response.status >= 500 || response.status === 429) {
@@ -1240,11 +1333,14 @@ export default function DriverLiveTrackingPage() {
         // Successful response - clear offline indicator and pending slot
         setIsNetworkOffline(false);
         latestOfflineCoordRef.current = null;
-        if (tripId) {
-          flushOfflineQueue(tripId);
-        }
+        // Fix 1: Live coordinate accepted; purge older queued points so stale ticks never fire 400
+        clearOfflineQueue();
       }
-    } catch (error) {
+    } catch (error: any) {
+      if (error?.name === 'AbortError') {
+        // Request aborted because next tick started or 4.5s timeout expired; do not buffer stale abort
+        return;
+      }
       console.warn("⚠️ Error broadcasting location (buffering offline):", error);
       setIsNetworkOffline(true);
       const point: QueuedGpsPoint = {
@@ -1264,8 +1360,13 @@ export default function DriverLiveTrackingPage() {
       if (tripId) {
         enqueueOfflinePoint(point);
       }
+    } finally {
+      clearTimeout(timeoutId);
+      if (inFlightLocationAbortRef.current === abortController) {
+        inFlightLocationAbortRef.current = null;
+      }
     }
-  }, [selectedBusId, flushOfflineQueue]);
+  }, [selectedBusId]);
 
   // Comprehensive Mobile App Resume & Lock/Unlock Auto-Recovery
   useEffect(() => {

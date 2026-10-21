@@ -277,7 +277,7 @@ export default function StudentDashboard() {
                       {studentData?.status === 'active' ? 'Active' :
                         studentData?.status === 'verified_upcoming' ? 'Verified (Upcoming Session)' :
                         studentData?.status === 'pending_seat_allocation' ? 'Seat Queue Active' :
-                        studentData?.status === 'soft_blocked' ? 'Soft blocked' :
+                        studentData?.status === 'soft_blocked' ? 'Service Expired (Restricted)' :
                         studentData?.status || 'Submitted'}
                     </Badge>
                     {studentData?.semester && (
@@ -556,7 +556,7 @@ export default function StudentDashboard() {
                     ? 'bg-gradient-to-r from-cyan-100 to-teal-100 text-cyan-700 dark:from-cyan-900/40 dark:to-teal-900/40 dark:text-cyan-400 border border-cyan-200 dark:border-cyan-800'
                     : 'bg-gradient-to-r from-gray-100 to-gray-200 text-gray-700 dark:from-gray-800 dark:to-gray-700 dark:text-gray-400 border border-gray-200 dark:border-gray-700'
                     }`}>
-                    {driverData ? 'Assigned' : 'Not Set'}
+                    {driverData ? (driverData.driverStatus === 'on_duty_live' ? '🟢 Live On-Duty' : driverData.driverStatus === 'off_duty_primary' ? 'Primary Driver' : driverData.driverStatus === 'relief_pool' ? 'Relief Pool' : 'Assigned') : 'Not Set'}
                   </div>
                 </CardContent>
               </Card>

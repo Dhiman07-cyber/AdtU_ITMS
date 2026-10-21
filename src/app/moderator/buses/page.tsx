@@ -55,11 +55,13 @@ import {
 	Filter,
 	MoreHorizontal,
 	Plus,
+	QrCode,
 	Route as RouteIcon,
 	Search,
 	Trash2,
 	Users
 } from "lucide-react";
+import { BusQRStickerModal } from '@/components/bus/BusQRStickerModal';
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from "react";
 // Migrated: Server-side API → PostgreSQL (no Firestore client reads)
@@ -154,6 +156,7 @@ export default function BusesPage() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [deleteItem, setDeleteItem] = useState<{ id: string; name: string } | null>(null);
+  const [qrStickerBus, setQrStickerBus] = useState<{ id: string; busNumber: string; routeName?: string; model?: string } | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   const isLoading = loadingBuses || loadingDrivers || loadingRoutes;
@@ -677,6 +680,13 @@ export default function BusesPage() {
                                     Edit Bus
                                   </DropdownMenuItem>
                                 )}
+                                <DropdownMenuItem
+                                  className="px-2 py-1.5 text-xs cursor-pointer hover:bg-slate-100 dark:hover:bg-zinc-800 focus:bg-slate-100 dark:focus:bg-zinc-800"
+                                  onClick={() => setQrStickerBus(bus as any)}
+                                >
+                                  <QrCode className="mr-2 h-3.5 w-3.5 text-cyan-400" />
+                                  Bus QR Sticker
+                                </DropdownMenuItem>
                                 {canBusDelete && (
                                   <>
                                     <DropdownMenuSeparator className="bg-zinc-200 dark:bg-zinc-800" />
@@ -780,6 +790,18 @@ export default function BusesPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Bus QR Sticker Modal */}
+      <BusQRStickerModal
+        isOpen={Boolean(qrStickerBus)}
+        onClose={() => setQrStickerBus(null)}
+        bus={qrStickerBus ? {
+          id: qrStickerBus.id,
+          busNumber: qrStickerBus.busNumber,
+          routeName: getRouteNameForBus(qrStickerBus),
+          model: qrStickerBus.model,
+        } : null}
+      />
 
       {/* Mobile Floating Action Button */}
       <MobileActionFAB

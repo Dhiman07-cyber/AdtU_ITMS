@@ -86,8 +86,8 @@ export default function GuwahatiDriverMap({
       const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
       const distanceKm = R * c;
 
-      // Convert speed from m/s to km/h, fallback to average speed if 0
-      const currentSpeedKmH = (speed || 5) * 3.6;
+      // Speed is standardized in km/h across the system
+      const currentSpeedKmH = (speed && speed > 1.5) ? speed : 18;
       const minutes = (distanceKm / Math.max(currentSpeedKmH, 12)) * 60; // 12km/h floor
       setEtaTimer(Math.max(1, Math.round(minutes)));
     };
@@ -215,7 +215,7 @@ export default function GuwahatiDriverMap({
                 <div className="flex-1 bg-blue-500/10 p-3 rounded-2xl border border-blue-500/20 flex flex-col justify-center min-w-0">
                   <p className="text-[9px] font-black uppercase text-blue-600/60 dark:text-blue-400/60 mb-0.5">Speed</p>
                   <p className="text-[13px] font-black text-blue-600 dark:text-blue-300">
-                    {speed ? `${Math.round(speed * 3.6)} km/h` : "0 km/h"}
+                    {speed && speed > 1.5 ? `${Math.round(speed)} km/h` : "0 km/h"}
                   </p>
                 </div>
               </div>

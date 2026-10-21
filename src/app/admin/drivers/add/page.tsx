@@ -327,9 +327,7 @@ export default function AddDriver() {
       newErrors.aadharNumber = "AADHAR number must be at least 8 digits";
     }
 
-    if (!formData.routeId) {
-      newErrors.routeId = "Route is required";
-    }
+    // Primary route/bus is optional for Operational Relief Pool drivers
 
     if (!formData.driverId.trim()) {
       newErrors.driverId = "Driver ID is required";
@@ -450,23 +448,7 @@ export default function AddDriver() {
       return;
     }
 
-    if (e) {
-      const existingDriver = driversList.find(d => 
-        (d.busId === formData.busId || d.busId === formData.busId) && !d.isReserved
-      );
-      
-      if (existingDriver) {
-        const eShift = (existingDriver.shift || '').toLowerCase();
-        const fShift = formData.shift.toLowerCase();
-        
-        // CONFLICT: Either already Both, or same shift
-        if (eShift === 'both' || eShift === fShift) {
-          setConflictDriver(existingDriver);
-          setShowConflictModal(true);
-          return; 
-        }
-      }
-    }
+    // In Operational Relief Pool, any driver can drive any bus dynamically via QR check-in
 
     setLoadingSubmit(true);
     setResult(null);
@@ -851,7 +833,7 @@ export default function AddDriver() {
                 {/* Route Selection */}
                 <div>
                   <Label htmlFor="routeId" className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Assigned Route <span className="text-red-500">*</span>
+                    Primary Route (Optional — leave unassigned for Relief Pool)
                   </Label>
                   <RouteSelect
                     routes={routes}
@@ -866,7 +848,7 @@ export default function AddDriver() {
                 {/* Bus Field - Auto-filled or Selectable */}
                 <div>
                   <Label htmlFor="busId" className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Bus (Auto-assigned)
+                    Primary Bus (Optional — leave unassigned for Relief Pool)
                   </Label>
                   {busOptions.length > 1 ? (
                     <Select

@@ -738,7 +738,7 @@ function TrackBusLive() {
       setDistanceToBus(distance);
 
       // Calculate ETA assuming average speed of 25 km/h in city traffic
-      const avgSpeedKmh = busLocation.speed && busLocation.speed > 5 ? busLocation.speed * 3.6 : 25; // Convert m/s to km/h or use default
+      const avgSpeedKmh = busLocation.speed && busLocation.speed > 5 ? busLocation.speed : 25;
       const timeHours = distance / avgSpeedKmh;
       const timeMinutes = Math.round(timeHours * 60);
 

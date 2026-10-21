@@ -476,7 +476,7 @@ export default function AdminStudents() {
                             </div>
                             <div className="min-w-0 flex-1 sm:order-1">
                                 <p className="text-[10px] sm:text-[11px] font-medium text-muted-foreground uppercase tracking-wider truncate">
-                                    Soft Block / Expired
+                                    Service Expired / Restricted
                                 </p>
                                 <p className="text-base sm:text-xl md:text-2xl font-black text-amber-500 mt-0.5 leading-tight">
                                     {metrics.softBlockedOrExpiredCount.toLocaleString()}
