@@ -129,24 +129,18 @@ export const POST = withSecurity<RenewServiceBody>(
         }
 
         // 2. Check if transaction ID was already submitted in active public.applications
-        const { data: existingApps } = await supabase
+        const { data: dupApps } = await supabase
           .from('applications')
-          .select('application_id, form_data')
+          .select('application_id')
           .not('state', 'in', '("rejected","cancelled","expired")')
-          .limit(100);
+          .or(`form_data->paymentInfo->>transactionId.ilike.${cleanTxId},form_data->paymentDetails->>transactionId.ilike.${cleanTxId},form_data->paymentInfo->>paymentReference.ilike.${cleanTxId},payment_info->>transactionId.ilike.${cleanTxId}`)
+          .limit(1);
 
-        if (existingApps) {
-          const match = existingApps.find(a => {
-            const fd = a.form_data || {};
-            const ref = fd.paymentInfo?.paymentReference || fd.transactionId;
-            return typeof ref === 'string' && ref.trim().toLowerCase() === cleanTxId.toLowerCase();
-          });
-          if (match) {
-            return NextResponse.json(
-              { error: 'This bank transaction reference ID has already been used.' },
-              { status: 409 }
-            );
-          }
+        if (dupApps && dupApps.length > 0) {
+          return NextResponse.json(
+            { error: 'This bank transaction reference ID has already been used.' },
+            { status: 409 }
+          );
         }
       }
 

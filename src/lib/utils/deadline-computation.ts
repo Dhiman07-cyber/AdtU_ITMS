@@ -381,9 +381,10 @@ export function shouldSoftBlockStudent(
     });
 
     // Get today's date (respect simulation mode for testing)
-    const today = simulationMode?.enabled
-        ? new Date()
-        : new Date();
+    const realNow = new Date();
+    const today = simulationMode?.enabled && simulationMode.customYear
+        ? new Date(Date.UTC(simulationMode.customYear, realNow.getUTCMonth(), realNow.getUTCDate(), realNow.getUTCHours(), realNow.getUTCMinutes(), realNow.getUTCSeconds()))
+        : realNow;
 
     // Block if today is on or after soft block date
     return isOnOrAfter(today, computed.softBlockDate);

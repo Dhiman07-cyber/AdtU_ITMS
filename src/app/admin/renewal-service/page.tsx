@@ -40,8 +40,10 @@ import {
 	TrendingUp,
 	User,
 	Wallet,
-	XCircle
+	XCircle,
+	Search
 } from 'lucide-react';
+import { useLocalAndServerSearch } from '@/hooks/useLocalAndServerSearch';
 import { useRouter } from 'next/navigation';
 import { useEffect,useMemo,useState } from 'react';
 import { toast } from 'sonner';
@@ -142,6 +144,54 @@ export default function AdminRenewalServicePage() {
   const [showRejectDialog, setShowRejectDialog] = useState(false);
   const [rejectionReason, setRejectionReason] = useState('');
   const [processing, setProcessing] = useState(false);
+
+  // Local-First + Server Fallback search for pending renewals (Fix 134)
+  const [renewalSearchQuery, setRenewalSearchQuery] = useState('');
+  const {
+    items: searchedRenewalRequests,
+    isSearching: isRenewalSearching,
+    isServerFallback: isRenewalServerFallback,
+  } = useLocalAndServerSearch<RenewalRequest>({
+    items: renewalRequests,
+    searchTerm: renewalSearchQuery,
+    localMatcher: (req, q) => {
+      const query = q.toLowerCase();
+      const name = (req.studentName || '').toLowerCase();
+      const en = (req.enrollmentId || '').toLowerCase();
+      const bus = (req.studentData?.busAssigned || '').toLowerCase();
+      const email = (req.studentEmail || req.studentData?.email || '').toLowerCase();
+      return name.includes(query) || en.includes(query) || bus.includes(query) || email.includes(query);
+    },
+    apiEndpoint: '/api/applications/all',
+    responseExtractor: (data) => {
+      const apps = data.applications || [];
+      return apps
+        .filter((row: any) => {
+          const state = row.state || '';
+          const type = row.applicationType || row.application_type || '';
+          return (state === 'submitted' || state === 'awaiting_verification' || state === 'pending') &&
+                 (type === 'renewal' || type === 'renewal_after_soft_block');
+        })
+        .map((row: any) => ({
+          id: row.applicationId || row.application_id || row.id,
+          studentId: row.applicantUid || row.applicant_uid || row.studentId,
+          enrollmentId: row.formData?.enrollmentId || row.form_data?.enrollmentId || '',
+          studentName: row.formData?.studentName || row.form_data?.studentName || row.applicantEmail || '',
+          totalFee: row.formData?.totalFee || row.form_data?.totalFee || 0,
+          durationYears: row.formData?.durationYears || row.form_data?.durationYears || 0,
+          paymentMode: row.formData?.paymentMode || row.form_data?.paymentMode || 'online',
+          paymentId: row.formData?.paymentId || row.form_data?.paymentId || row.paymentId || '',
+          receiptImageUrl: row.formData?.receiptImageUrl || row.form_data?.receiptImageUrl || '',
+          studentEmail: row.formData?.studentEmail || row.form_data?.studentEmail || row.applicantEmail || '',
+          studentPhone: row.formData?.studentPhone || row.form_data?.studentPhone || '',
+          paidAt: row.formData?.paidAt || row.form_data?.paidAt || row.createdAt || row.created_at || '',
+          status: 'pending' as const,
+          createdAt: row.createdAt || row.created_at,
+          updatedAt: row.updatedAt || row.updated_at,
+        }));
+    },
+    getId: (item) => item.id,
+  });
 
   // Transaction history states
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -388,27 +438,34 @@ export default function AdminRenewalServicePage() {
             updatedAt: row.updatedAt || row.updated_at,
           }));
 
-        // Fetch student data for each request
-        const requestsWithStudentData = await Promise.all(
-          requests.map(async (request) => {
-            try {
-              const token = await currentUser!.getIdToken();
-              const res = await fetch(`/api/students?enrollmentId=${encodeURIComponent(request.enrollmentId)}`, {
-                headers: { 'Authorization': `Bearer ${token}` }
-              });
-              if (res.ok) {
-                const students = await res.json();
-                if (Array.isArray(students) && students.length > 0) {
-                  return { ...request, studentData: students[0] as StudentData };
-                }
-              }
-              return request;
-            } catch (error) {
-              console.error(`Error fetching student data for request ${request.id?.substring(0,8)}...:`, error);
-              return request;
-            }
-          })
+        // Single batch fetch for student data across all requests (eliminating N+1 waterfall)
+        const uniqueEnrollmentIds = Array.from(
+          new Set(requests.map(r => r.enrollmentId).filter(Boolean))
         );
+        const studentMap = new Map<string, StudentData>();
+        if (uniqueEnrollmentIds.length > 0 && currentUser) {
+          try {
+            const token = await currentUser.getIdToken();
+            const res = await fetch(`/api/students?enrollmentIds=${encodeURIComponent(uniqueEnrollmentIds.join(','))}&limit=200`, {
+              headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (res.ok) {
+              const students = await res.json();
+              if (Array.isArray(students)) {
+                students.forEach((s: any) => {
+                  if (s.enrollmentId) studentMap.set(s.enrollmentId.toLowerCase().trim(), s as StudentData);
+                });
+              }
+            }
+          } catch (error) {
+            console.error('Error batch fetching student data for renewal requests:', error);
+          }
+        }
+
+        const requestsWithStudentData = requests.map(request => ({
+          ...request,
+          studentData: studentMap.get(request.enrollmentId.toLowerCase().trim())
+        }));
 
         setRenewalRequests(requestsWithStudentData);
       } catch (error) {
@@ -1078,14 +1135,38 @@ export default function AdminRenewalServicePage() {
             </TabsContent>
           )}
 
-          {/* Payment Approval Tab */}
+            {/* Payment Approval Tab */}
           <TabsContent value="approval" className="mt-0 px-0 py-4">
             <Card className="border border-zinc-800/50 shadow-xl bg-zinc-900/50 overflow-hidden p-0 max-w-[90vw] sm:max-w-full mx-auto">
               <CardHeader className="bg-gradient-to-br from-green-50 to-emerald-50 dark:from-green-950/50 dark:to-emerald-950/50 border-t-2 border-t-green-500 pb-3 pt-3 m-0 rounded-t-lg">
-                <CardTitle className="text-base text-gray-900 dark:text-gray-100">Pending Renewal Requests</CardTitle>
-                <CardDescription className="text-xs text-gray-600 dark:text-gray-400">
-                  Review and approve offline payment renewal requests
-                </CardDescription>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div>
+                    <CardTitle className="text-base text-gray-900 dark:text-gray-100">Pending Renewal Requests</CardTitle>
+                    <CardDescription className="text-xs text-gray-600 dark:text-gray-400">
+                      Review and approve offline payment renewal requests
+                    </CardDescription>
+                  </div>
+                  <div className="relative w-full sm:w-72">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-400" />
+                    <Input
+                      placeholder="Search student, enrollment, bus..."
+                      value={renewalSearchQuery}
+                      onChange={(e) => setRenewalSearchQuery(e.target.value)}
+                      className="pl-9 pr-8 h-9 text-xs bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800"
+                    />
+                    {isRenewalSearching && (
+                      <Loader2 className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 animate-spin text-zinc-400" />
+                    )}
+                  </div>
+                </div>
+                {isRenewalServerFallback && (
+                  <div className="mt-2 flex items-center gap-1.5">
+                    <span className="text-[10px] font-semibold text-emerald-600 bg-emerald-50 dark:bg-emerald-950/40 dark:text-emerald-400 px-2 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-800">
+                      Server Match
+                    </span>
+                    <span className="text-[10px] text-zinc-500">Matching remote database records</span>
+                  </div>
+                )}
               </CardHeader>
               <CardContent className="pt-4 px-4 pb-4">
                 {loadingRequests ? (
@@ -1096,9 +1177,9 @@ export default function AdminRenewalServicePage() {
                       <p className="text-[10px] text-zinc-500">Fetching pending approvals...</p>
                     </div>
                   </div>
-                ) : renewalRequests.length === 0 ? (
+                ) : searchedRenewalRequests.length === 0 ? (
                   <div className="text-center py-6 text-sm text-gray-500">
-                    No pending renewal requests
+                    {renewalSearchQuery ? 'No matching renewal requests found' : 'No pending renewal requests'}
                   </div>
                 ) : (
                   <div className="overflow-x-auto pb-2 no-scrollbar">
@@ -1116,7 +1197,7 @@ export default function AdminRenewalServicePage() {
                       </div>
 
                       {/* Data Rows */}
-                      {renewalRequests.map((request, index) => (
+                      {searchedRenewalRequests.map((request, index) => (
                         <div
                           key={request.id}
                           style={{ contentVisibility: 'auto', containIntrinsicSize: '0 48px' }}

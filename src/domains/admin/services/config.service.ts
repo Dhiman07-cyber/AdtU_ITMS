@@ -19,21 +19,23 @@ function getSupabase() {
 async function getFromPg<T>(key: string): Promise<ConfigResult<T> | null> {
   const supabase = getSupabase();
   if (!supabase || !process.env.NEXT_PUBLIC_SUPABASE_URL) return null;
-  try {
-    const { data, error } = await supabase
-      .from('system_settings')
-      .select('value, updated_at, updated_by')
-      .eq('key', key)
-      .maybeSingle();
-    if (error || !data || !data.value) return null;
-    return {
-      data: data.value as T,
-      updatedAt: data.updated_at || null,
-      updatedByUid: data.updated_by || null,
-    };
-  } catch {
+  const { data, error } = await supabase
+    .from('system_settings')
+    .select('value, updated_at, updated_by')
+    .eq('key', key)
+    .maybeSingle();
+  if (error) {
+    if (error.code !== 'PGRST116') {
+      throw new Error(`Failed to fetch system_settings[${key}]: ${error.message}`);
+    }
     return null;
   }
+  if (!data || !data.value) return null;
+  return {
+    data: data.value as T,
+    updatedAt: data.updated_at || null,
+    updatedByUid: data.updated_by || null,
+  };
 }
 
 async function saveToPg(key: string, value: Record<string, unknown>, updatedByUid?: string): Promise<void> {
@@ -155,14 +157,13 @@ export async function getSystemConfig(): Promise<ConfigResult<SystemConfig>> {
     return pgResult;
   }
 
-  // 2. In-memory default fallback
+  // 2. In-memory default fallback (no silent ₹5,000 bus fee, and do not poison memory cache on DB outage)
   const defaultFallback: ConfigResult<SystemConfig> = {
-    data: { appName: 'AdtU Bus Services', busFee: { amount: 5000, version: 1 } } as any,
+    data: { appName: 'AdtU Bus Services', busFee: undefined as any } as any,
     updatedAt: null,
     updatedByUid: null,
   };
 
-  configMemoryCache.set('config', { data: defaultFallback, expiresAt: Date.now() + CONFIG_CACHE_TTL_MS });
   return defaultFallback;
 }
 

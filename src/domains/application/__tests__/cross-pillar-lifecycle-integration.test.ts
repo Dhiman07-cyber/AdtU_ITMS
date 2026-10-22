@@ -172,10 +172,24 @@ describe('Cross-Pillar Lifecycle Integration & Zero-Redis-Load Cache Healing', (
               }),
             }),
             update: (payload: any) => ({
-              eq: (_col: string, val: any) => {
-                updatedStudentProfiles.push({ uid: val, ...payload });
-                return Promise.resolve({ error: null });
-              },
+              eq: (col: string, val: any) => ({
+                in: () => {
+                  updatedStudentProfiles.push({
+                    uid: col === 'uid' ? val : 'student_cohort_2026',
+                    session_end_year: col === 'session_end_year' ? val : 2026,
+                    ...payload,
+                  });
+                  return Promise.resolve({ error: null });
+                },
+                then: (resolve: any) => {
+                  updatedStudentProfiles.push({
+                    uid: col === 'uid' ? val : 'student_cohort_2026',
+                    session_end_year: col === 'session_end_year' ? val : 2026,
+                    ...payload,
+                  });
+                  return Promise.resolve({ error: null }).then(resolve);
+                },
+              }),
             }),
           };
         }
@@ -198,6 +212,12 @@ describe('Cross-Pillar Lifecycle Integration & Zero-Redis-Load Cache Healing', (
             update: (payload: any) => ({
               eq: (_col: string, val: any) => {
                 updatedApplications.push({ applicationId: val, ...payload });
+                return Promise.resolve({ error: null });
+              },
+              in: (_col: string, vals: any[]) => {
+                for (const v of vals) {
+                  updatedApplications.push({ applicationId: v, ...payload });
+                }
                 return Promise.resolve({ error: null });
               },
             }),

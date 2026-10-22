@@ -172,23 +172,23 @@ export async function syncSystemConfigDates(deadlineConfig: DeadlineConfig, uid:
 
     // 2. TypeScript Fallback
     try {
-        // A. Update student_profiles
+        // A. Update student_profiles (Batched by session_end_year to eliminate N+1 waterfall)
         const { data: students, error: studErr } = await supabase
             .from('student_profiles')
-            .select('uid, session_end_year, valid_until')
+            .select('session_end_year')
             .gt('session_end_year', 2000)
             .in('status', ['active', 'soft_blocked']);
 
         if (!studErr && students && students.length > 0) {
             const nowMs = Date.now();
             const ninetyDaysMs = 90 * 24 * 60 * 60 * 1000;
+            const uniqueYears = [...new Set(students.map((s) => s.session_end_year).filter(Boolean))];
 
-            for (const s of students) {
-                const lifecycle = deriveAcademicLifecycle(startMonth, startDay, s.session_end_year);
+            for (const year of uniqueYears) {
+                const lifecycle = deriveAcademicLifecycle(startMonth, startDay, year);
                 const newExpiry = lifecycle.expiry;
                 const newSoftBlock = lifecycle.softBlock;
                 const newHardBlock = lifecycle.hardDelete;
-
                 const resetReminders = newExpiry.getTime() > nowMs + ninetyDaysMs;
 
                 const updatePayload: Record<string, any> = {
@@ -206,17 +206,19 @@ export async function syncSystemConfigDates(deadlineConfig: DeadlineConfig, uid:
                 await supabase
                     .from('student_profiles')
                     .update(updatePayload)
-                    .eq('uid', s.uid);
+                    .eq('session_end_year', year)
+                    .in('status', ['active', 'soft_blocked']);
             }
         }
 
-        // B. Update applications
+        // B. Update applications (Batched by targetYear to eliminate N+1 waterfall)
         const { data: apps, error: appErr } = await supabase
             .from('applications')
             .select('application_id, session_start_year, target_session, form_data')
             .in('state', ['submitted', 'verified_upcoming', 'pending_seat_allocation']);
 
         if (!appErr && apps && apps.length > 0) {
+            const appIdsByYear = new Map<number, string[]>();
             for (const app of apps) {
                 const targetYear = app.session_start_year ||
                     (app.target_session as any)?.startYear ||
@@ -226,17 +228,28 @@ export async function syncSystemConfigDates(deadlineConfig: DeadlineConfig, uid:
                     (app.form_data as any)?.sessionInfo?.sessionStartYear ||
                     (app.form_data as any)?.sessionInfo?.startYear;
 
-                if (targetYear && Number(targetYear) > 2000) {
-                    const lifecycle = deriveAcademicLifecycle(startMonth, startDay, Number(targetYear));
-                    const newEligible = new Date(lifecycle.softBlock.getTime() + 24 * 60 * 60 * 1000);
+                const yearNum = Number(targetYear);
+                if (yearNum > 2000) {
+                    const list = appIdsByYear.get(yearNum) || [];
+                    list.push(app.application_id);
+                    appIdsByYear.set(yearNum, list);
+                }
+            }
 
+            for (const [targetYear, appIds] of appIdsByYear.entries()) {
+                const lifecycle = deriveAcademicLifecycle(startMonth, startDay, targetYear);
+                const newEligible = new Date(lifecycle.softBlock.getTime() + 24 * 60 * 60 * 1000);
+
+                // Update in batches of 100
+                for (let i = 0; i < appIds.length; i += 100) {
+                    const batchIds = appIds.slice(i, i + 100);
                     await supabase
                         .from('applications')
                         .update({
                             eligible_approval: newEligible.toISOString(),
                             updated_at: new Date().toISOString(),
                         })
-                        .eq('application_id', app.application_id);
+                        .in('application_id', batchIds);
                 }
             }
         }

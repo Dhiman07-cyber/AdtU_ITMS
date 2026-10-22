@@ -12,7 +12,7 @@ export async function GET(req: NextRequest) {
     const busFeeAmount = systemConfigResult.data?.busFee?.amount;
     if (typeof busFeeAmount !== 'number') {
       return NextResponse.json(
-        { message: 'Bus fee configuration is missing in Firestore settings. Please try again later.' },
+        { message: 'Bus fee configuration is missing in system settings. Please try again later.' },
         { status: 503 }
       );
     }
