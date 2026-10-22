@@ -57,10 +57,23 @@ export const GET = withSecurity(
           approvedByEmpId = empIdRaw ? (decryptData(empIdRaw) || empIdRaw) : '';
         }
 
-        // Decrypt legacy or double-check encryption
-        const studentId = payment.student_id ? (decryptData(payment.student_id) || payment.student_id) : '';
-        const studentName = payment.student_name ? (decryptData(payment.student_name) || payment.student_name) : '';
-        const offlineTransactionId = payment.offline_transaction_id ? (decryptData(payment.offline_transaction_id) || payment.offline_transaction_id) : '';
+        // Decrypt legacy or double-check encryption and sanitize against CSV/formula injection
+        const rawStudentId = payment.student_id ? (decryptData(payment.student_id) || payment.student_id) : '';
+        const rawStudentName = payment.student_name ? (decryptData(payment.student_name) || payment.student_name) : '';
+        const rawOfflineTxId = payment.offline_transaction_id ? (decryptData(payment.offline_transaction_id) || payment.offline_transaction_id) : '';
+
+        const sanitizeFormula = (val: string): string => {
+          if (!val) return '';
+          const trimmed = val.trim();
+          if (/^[=+\-@\t\r]/.test(trimmed)) {
+            return `'${val}`;
+          }
+          return val;
+        };
+
+        const studentId = sanitizeFormula(rawStudentId);
+        const studentName = sanitizeFormula(rawStudentName);
+        const offlineTransactionId = sanitizeFormula(rawOfflineTxId);
 
         return {
           paymentId: payment.payment_id,

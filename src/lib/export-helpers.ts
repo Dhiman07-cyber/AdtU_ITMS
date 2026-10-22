@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Export Helper Functions
  * Convert Firestore data to Excel with accurate formatting
  * 
@@ -15,6 +15,21 @@ async function loadExcelJS() {
   const runtime = await import('exceljs/dist/exceljs.min.js');
   const excelRuntime = runtime as unknown as ExcelJSRuntime & { default?: ExcelJSRuntime };
   return excelRuntime.default || excelRuntime;
+}
+
+/**
+ * Sanitizes a cell value against CSV/Excel formula injection (CWE-1236).
+ * Prepends a single quote if the string begins with =, +, -, @, \t, or \r.
+ */
+export function sanitizeCellValue(val: any): any {
+  if (val === null || val === undefined) return val;
+  if (typeof val === 'string') {
+    const trimmed = val.trim();
+    if (/^[=+\-@\t\r]/.test(trimmed)) {
+      return `'${val}`;
+    }
+  }
+  return val;
 }
 
 /**
@@ -43,12 +58,12 @@ export async function exportToExcel(data: any[] | any[][], filename: string, she
 
     if (isArray2D) {
       // Handle array of arrays format (used by management pages)
-      data.forEach((row, index) => {
+      data.forEach((row) => {
         if (Array.isArray(row)) {
-          worksheet.addRow(row);
+          worksheet.addRow(row.map(sanitizeCellValue));
         } else {
           // Convert non-array items to array
-          worksheet.addRow([row]);
+          worksheet.addRow([sanitizeCellValue(row)]);
         }
       });
 
@@ -91,7 +106,7 @@ export async function exportToExcel(data: any[] | any[][], filename: string, she
 
       // Add data rows
       data.forEach(item => {
-        const row = headers.map(header => item[header]);
+        const row = headers.map(header => sanitizeCellValue(item[header]));
         worksheet.addRow(row);
       });
     }
@@ -414,7 +429,7 @@ function addDataToWorksheet(workbook: ExcelWorkbook, sheetName: string, data: an
 
   // Add data rows
   data.forEach(item => {
-    const row = headers.map(header => item[header]);
+    const row = headers.map(header => sanitizeCellValue(item[header]));
     worksheet.addRow(row);
   });
 

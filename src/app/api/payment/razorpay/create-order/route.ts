@@ -1,6 +1,7 @@
 import { getSystemConfig, invalidateConfigCache } from '@/domains/admin';
 import { getByUid as getStudentByUid } from '@/domains/student';
 import { getCurrentBusFee } from '@/lib/bus-fee-service';
+import { calculateAcademicSessionStartYear } from '@/lib/utils/application-eligibility';
 import { createRazorpayOrder, generateReceiptId } from '@/lib/payment/razorpay.service';
 import { paymentsSupabaseService } from '@/lib/services/payments-supabase';
 import { isOriginAllowed, withSecurity } from '@/lib/security/api-security';
@@ -90,10 +91,12 @@ export const POST = withSecurity<CreateOrderBody>(
             trustedSessionStartYear = baseYear;
             trustedSessionEndYear = baseYear + trustedDurationYears;
         } else {
-            // New registration: derive from system academic year or current calendar
+            // New registration: derive from system academic year or calculated session start year
             const configAny = systemConfigResult.data as any;
             const systemStartYear = Number(configAny?.academicYear?.startYear || configAny?.busFee?.sessionStartYear || 0);
-            const baseYear = systemStartYear > 2000 ? systemStartYear : new Date().getUTCFullYear();
+            const baseYear = systemStartYear > 2000
+                ? systemStartYear
+                : calculateAcademicSessionStartYear(new Date(), configAny);
             trustedSessionStartYear = baseYear;
             trustedSessionEndYear = baseYear + trustedDurationYears;
         }

@@ -286,11 +286,14 @@ async function executeProcessCapturedPayment(paymentDetails: {
             } else {
                 const registrationAppId = notes.userId || notes.studentId;
                 if (registrationAppId) {
-                    const existingApp = await getApplicationById(registrationAppId).catch(() => null);
+                    let existingApp = await getApplicationById(registrationAppId).catch(() => null);
+                    if (!existingApp && (notes.userId || notes.studentId) && typeof getByApplicantUid === 'function') {
+                        existingApp = await getByApplicantUid(notes.userId || notes.studentId).catch(() => null);
+                    }
                     if (existingApp && existingPayment?.metadata?.entitlement_status !== 'active') {
                         await paymentsSupabaseService.updatePaymentMetadata?.(paymentId, {
                             entitlement_status: 'active',
-                            application_id: registrationAppId,
+                            application_id: existingApp.applicationId || registrationAppId,
                             activated_at: new Date().toISOString(),
                         }).catch(() => null);
                     }
@@ -318,7 +321,10 @@ async function executeProcessCapturedPayment(paymentDetails: {
             let sessionEndYear: number | undefined;
             let targetValidUntil: Date;
             if (userId) {
-                const app = await getApplicationById(userId);
+                let app = await getApplicationById(userId).catch(() => null);
+                if (!app && (notes.userId || notes.studentId) && typeof getByApplicantUid === 'function') {
+                    app = await getByApplicantUid(notes.userId || notes.studentId).catch(() => null);
+                }
                 if (app) {
                     const ts = (app as any).targetSession;
                     if (ts && Number(ts.startYear) > 0 && Number(ts.endYear) > 0) {
@@ -371,12 +377,17 @@ async function executeProcessCapturedPayment(paymentDetails: {
 
             // Save Completed online payment record to Supabase (Immutable Ledger)
             console.log(`[PAYMENT_TRACE] [${new Date().toISOString()}] PROCESS_CAPTURED[2] Supabase insert`);
-            const registrationAppId = userId || enrollmentId;
+            const registrationAppId = notes.applicationId || userId || enrollmentId;
             let initialEntitlementStatus = 'pending_registration_submission';
+            let resolvedAppId = registrationAppId;
             if (registrationAppId) {
-                const existingApp = await getApplicationById(registrationAppId).catch(() => null);
+                let existingApp = await getApplicationById(registrationAppId).catch(() => null);
+                if (!existingApp && (userId || enrollmentId) && typeof getByApplicantUid === 'function') {
+                    existingApp = await getByApplicantUid(userId || enrollmentId).catch(() => null);
+                }
                 if (existingApp) {
                     initialEntitlementStatus = 'active';
+                    resolvedAppId = existingApp.applicationId || registrationAppId;
                 }
             }
 
@@ -400,7 +411,7 @@ async function executeProcessCapturedPayment(paymentDetails: {
                 metadata: {
                     ...(notes || {}),
                     entitlement_status: initialEntitlementStatus,
-                    application_id: registrationAppId || undefined,
+                    application_id: resolvedAppId || undefined,
                     initial_captured_at: new Date().toISOString(),
                 },
             });
@@ -1090,7 +1101,8 @@ export async function approveOfflinePayment(
         // reclaiming a bus seat — must go through Renewal Approval (approve_renewal_with_seat).
         if (payment.student_uid) {
             const student = await getStudentByUid(payment.student_uid);
-            if (student && (student as any).seatReleasedAt) {
+            const seatWasReleased = Boolean((student as any)?.seatReleasedAt || (student as any)?.seat_released_at);
+            if (student && seatWasReleased) {
                 return {
                     success: false,
                     error: `Student ${payment.student_uid} seat was released during soft-block. Payment cannot be approved directly without seat allocation. Please process via Renewal Approval (approve_renewal_with_seat).`
@@ -1363,13 +1375,14 @@ export async function reconcileUnresolvedCapture(request: {
     try {
         const deadlineConfig = await getDeadlineConfig();
         const durationYears = request.sessionEndYear - request.sessionStartYear;
-        const validUntil = calculateValidUntilDate(request.sessionStartYear, durationYears, deadlineConfig);
+        const validUntilDate = calculateValidUntilDate(request.sessionStartYear, durationYears, deadlineConfig);
+        const sessionEndYear = request.sessionStartYear + durationYears;
 
         // 1. Execute durable database transition in Supabase ledger
         const reconcileRes = await paymentsSupabaseService.reconcileCapturedPendingReviewPayment({
             paymentId: request.paymentId,
             sessionStartYear: request.sessionStartYear,
-            sessionEndYear: request.sessionEndYear,
+            sessionEndYear,
             actor: {
                 userId: request.reconcilerUserId,
                 name: request.reconcilerName,
@@ -1377,7 +1390,7 @@ export async function reconcileUnresolvedCapture(request: {
                 empId: request.reconcilerEmpId,
             },
             reconciliationEvidence: request.evidence,
-            validUntil,
+            validUntil: validUntilDate,
         });
 
         if (!reconcileRes.success || !reconcileRes.payment) {
@@ -1478,6 +1491,18 @@ export async function confirmManualRefund(request: {
 
         if (!result.success) {
             return result;
+        }
+
+        // Fix 74: Invalidate Student Assignment Cache After Refund
+        try {
+            const payment = await paymentsSupabaseService.getPaymentById(request.paymentId);
+            const studentUid = payment?.student_uid;
+            if (studentUid) {
+                const { invalidateStudentAssignmentCache } = await import('@/domains/student');
+                await invalidateStudentAssignmentCache(studentUid).catch(() => {});
+            }
+        } catch (cacheErr) {
+            console.warn('[confirmManualRefund] Post-refund cache invalidation warning:', cacheErr);
         }
 
         const isPartial = !!result.isPartial;
@@ -1590,8 +1615,11 @@ export async function getPaymentsByStudent(
     const allPayments: PaymentDocument[] = [];
     const fetchedPaymentIds = new Set<string>();
 
-    // 1. Fetch by UID
-    const paymentsByUid = await paymentsSupabaseService.getPaymentsByStudentUid(studentUid, { limit: pageSize, offset: (page - 1) * pageSize });
+    const offset = (page - 1) * pageSize;
+    const fetchLimit = offset + pageSize;
+
+    // 1. Fetch by UID (fetch all up to current page boundary to avoid double-offset pagination bug)
+    const paymentsByUid = await paymentsSupabaseService.getPaymentsByStudentUid(studentUid, { limit: fetchLimit, offset: 0 });
     const mappedByUid = paymentsByUid.map(mapSupabaseToFirestoreFormat);
 
     for (const p of mappedByUid) {
@@ -1614,7 +1642,7 @@ export async function getPaymentsByStudent(
         }
 
         if (resolvedUid && resolvedUid !== studentUid) {
-            const paymentsById = await paymentsSupabaseService.getPaymentsByStudentUid(resolvedUid, { limit: pageSize, offset: (page - 1) * pageSize });
+            const paymentsById = await paymentsSupabaseService.getPaymentsByStudentUid(resolvedUid, { limit: fetchLimit, offset: 0 });
             const mappedById = paymentsById.map(mapSupabaseToFirestoreFormat);
 
             for (const p of mappedById) {
@@ -1635,7 +1663,6 @@ export async function getPaymentsByStudent(
 
     // Pagination
     const total = allPayments.length;
-    const offset = (page - 1) * pageSize;
     const paginatedPayments = allPayments.slice(offset, offset + pageSize);
 
     return { payments: paginatedPayments, total };

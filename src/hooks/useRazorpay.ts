@@ -90,40 +90,38 @@ export function useRazorpay() {
 
   // Load Razorpay script with mobile-specific handling and zombie script recovery
   useEffect(() => {
-    let script: HTMLScriptElement | null = null;
-
-    const loadScript = () => {
-      // Check if already in document
-      if (document.querySelector('script[src="https://checkout.razorpay.com/v1/checkout.js"]')) {
-        return;
-      }
-
-      script = document.createElement('script');
-      script.setAttribute('src', 'https://checkout.razorpay.com/v1/checkout.js');
-      script.async = true;
-
-      script.onload = () => {
-        setIsScriptLoaded(true);
-      };
-
-      script.onerror = () => {
-        setError('Failed to load payment gateway');
-      };
-
-      document.body.appendChild(script);
-    };
-
     if (window.Razorpay) {
       setIsScriptLoaded(true);
-    } else {
-      loadScript();
+      return;
     }
 
-    return () => {
-      if (script && script.parentNode) {
-        script.parentNode.removeChild(script);
+    const existingScript = document.querySelector('script[src="https://checkout.razorpay.com/v1/checkout.js"]') as HTMLScriptElement | null;
+    if (existingScript) {
+      if (window.Razorpay) {
+        setIsScriptLoaded(true);
+      } else {
+        existingScript.addEventListener('load', () => setIsScriptLoaded(true));
+        existingScript.addEventListener('error', () => setError('Failed to load payment gateway'));
       }
+      return;
+    }
+
+    const script = document.createElement('script');
+    script.setAttribute('src', 'https://checkout.razorpay.com/v1/checkout.js');
+    script.async = true;
+
+    script.onload = () => {
+      setIsScriptLoaded(true);
     };
+
+    script.onerror = () => {
+      setError('Failed to load payment gateway');
+    };
+
+    document.body.appendChild(script);
+
+    // Keep script mounted across step navigation (Fix 67)
+    return () => {};
   }, []);
 
   /**
@@ -316,7 +314,7 @@ export function useRazorpay() {
         };
 
         const options: RazorpayOptions = {
-          key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || '',
+          key: orderData.key_id || process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || '',
           amount: orderData.order.amount,
           currency: orderData.order.currency,
           name: 'ADTU Bus Service',

@@ -250,11 +250,20 @@ export class PaymentTransactionService {
     studentId?: string
   ): Promise<PaymentTransaction[]> {
     try {
-      const filters: { year?: number } = {};
+      if (studentId) {
+        let txs = await this.getStudentTransactions(studentId);
+        if (year) {
+          txs = txs.filter(t => new Date(t.timestamp).getFullYear() === year);
+        }
+        if (month) {
+          txs = txs.filter(t => new Date(t.timestamp).getMonth() + 1 === month);
+        }
+        return txs;
+      }
+
+      const filters: { year?: number; status?: string } = { status: 'Completed' };
       if (year) filters.year = year;
       
-      // We still need to fetch a large chunk if they really want "all"
-      // But we use the paginated endpoint to at least push some filtering to the DB
       const result = await paymentsSupabaseService.getPaginatedPayments(filters, 1, 1000);
       const payments = result.payments;
 
@@ -269,11 +278,6 @@ export class PaymentTransactionService {
         validUntil: p.valid_until || '',
         status: (p.status?.toLowerCase() === 'completed' ? 'completed' : p.status?.toLowerCase() === 'pending' ? 'pending' : 'failed') as 'completed' | 'pending' | 'failed',
       }));
-
-      // Filter by studentId if provided
-      if (studentId) {
-        transactions = transactions.filter(t => t.studentId === studentId);
-      }
 
       // In-memory filtering for month if provided
       if (month) {
@@ -305,18 +309,61 @@ export class PaymentTransactionService {
     totalPages: number;
   }> {
     // Construct filters for Supabase
-    const dbFilters: { year?: number; method?: 'Online' | 'Offline' } = {};
+    const dbFilters: { year?: number; method?: 'Online' | 'Offline'; status?: string } = {};
     if (filters?.year) dbFilters.year = filters.year;
     if (filters?.paymentMethod) {
       dbFilters.method = filters.paymentMethod === 'online' ? 'Online' : 'Offline';
     }
-    
-    // Fetch directly using getPaginatedPayments
+
+    // Filter before paginating when studentId or month is provided (Fix 94)
+    if (filters?.studentId || filters?.month) {
+      let candidateTransactions: PaymentTransaction[] = [];
+      if (filters?.studentId) {
+        candidateTransactions = await this.getStudentTransactions(filters.studentId);
+        if (filters.paymentMethod) {
+          candidateTransactions = candidateTransactions.filter(t => t.paymentMethod === filters.paymentMethod);
+        }
+        if (filters.year) {
+          candidateTransactions = candidateTransactions.filter(t => new Date(t.timestamp).getFullYear() === filters.year);
+        }
+      } else {
+        const fetchAll = await paymentsSupabaseService.getPaginatedPayments(dbFilters, 1, 1000);
+        candidateTransactions = fetchAll.payments.map(p => ({
+          studentId: p.student_id || '',
+          studentName: p.student_name || '',
+          amount: p.amount || 0,
+          paymentMethod: (p.method?.toLowerCase() === 'online' ? 'online' : 'offline') as 'online' | 'offline' | 'manual',
+          paymentId: p.payment_id,
+          timestamp: p.transaction_date || new Date().toISOString(),
+          durationYears: p.duration_years || 1,
+          validUntil: p.valid_until || '',
+          status: (p.status?.toLowerCase() === 'completed' ? 'completed' : p.status?.toLowerCase() === 'pending' ? 'pending' : 'failed') as 'completed' | 'pending' | 'failed',
+        }));
+      }
+
+      if (filters?.month) {
+        candidateTransactions = candidateTransactions.filter(t => new Date(t.timestamp).getMonth() + 1 === filters.month);
+      }
+
+      const total = candidateTransactions.length;
+      const offset = (page - 1) * limit;
+      const paginated = candidateTransactions.slice(offset, offset + limit);
+      const totalPages = Math.ceil(total / limit) || 1;
+
+      return {
+        transactions: paginated,
+        total,
+        page,
+        totalPages,
+      };
+    }
+
+    // Standard database-level pagination
     const result = await paymentsSupabaseService.getPaginatedPayments(dbFilters, page, limit);
     const payments = result.payments;
     const total = result.total;
 
-    let transactions = payments.map(p => ({
+    const transactions = payments.map(p => ({
       studentId: p.student_id || '',
       studentName: p.student_name || '',
       amount: p.amount || 0,
@@ -328,17 +375,7 @@ export class PaymentTransactionService {
       status: (p.status?.toLowerCase() === 'completed' ? 'completed' : p.status?.toLowerCase() === 'pending' ? 'pending' : 'failed') as 'completed' | 'pending' | 'failed',
     }));
 
-    // In-memory filtering for fields not supported by dbFilters (studentId, month)
-    // NOTE: This breaks exact pagination if these filters are used, but is necessary for now
-    if (filters?.studentId) {
-      transactions = transactions.filter(t => t.studentId === filters.studentId);
-      // Total count becomes inaccurate when filtering in-memory after pagination
-    }
-    if (filters?.month) {
-      transactions = transactions.filter(t => new Date(t.timestamp).getMonth() + 1 === filters.month);
-    }
-
-    const totalPages = Math.ceil(total / limit);
+    const totalPages = Math.ceil(total / limit) || 1;
 
     return {
       transactions,

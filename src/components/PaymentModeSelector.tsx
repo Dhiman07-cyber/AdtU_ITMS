@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from 'next/navigation';
 import { OptimizedInput } from '@/components/forms';
 import { PaymentStatusPanel } from '@/components/PaymentStatusPanel';
 import { Alert,AlertDescription } from '@/components/ui/alert';
@@ -98,6 +99,7 @@ export default function PaymentModeSelector({
   isReadOnly = false,
   isVerified = false
 }: PaymentModeSelectorProps) {
+  const router = useRouter();
   const { currentUser } = useAuth();
   const [paymentMode, setPaymentMode] = useState<'online' | 'offline'>('online');
   const [isProcessingPayment, _setIsProcessingPayment] = useState(false);
@@ -1403,7 +1405,7 @@ export default function PaymentModeSelector({
                             <Button
                               onClick={() => {
                                 // Navigate to dashboard as submission is already handled
-                                window.location.href = '/student';
+                                router.push('/student');
                               }}
                               className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-5 rounded-xl shadow-lg shadow-blue-500/20 transform hover:-translate-y-1 transition-all duration-300 text-xs uppercase tracking-wider"
                             >

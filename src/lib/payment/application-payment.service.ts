@@ -36,11 +36,11 @@ export interface PaymentSession {
  * Note: This is a client-side helper. Always verify with server-side calculation.
  * 
  * @param durationInYears - Number of years
- * @param yearlyFee - Fee per year (default 1200)
+ * @param yearlyFee - Fee per year (defaults to 0 if not provided; dynamically configured per route/system)
  * @returns Total fee for the duration
  */
 export function calculateFee(durationInYears: number, yearlyFee: number = 0): number {
-  return yearlyFee * durationInYears;
+  return Math.max(0, yearlyFee) * Math.max(0, durationInYears);
 }
 
 /**
@@ -253,6 +253,21 @@ export function clearAllPaymentData(userId: string): void {
     // Clear receipts
     localStorage.removeItem(`payment_receipt_${userId}_new_registration`);
     localStorage.removeItem(`payment_receipt_${userId}_renewal`);
+
+    // Fix 69: Iterate over localStorage and remove any key starting with PAYMENT_STORAGE_KEY_PREFIX
+    const PAYMENT_STORAGE_KEY_PREFIX = 'adtu_bus_payment_state';
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const keysToRemove: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && (key.startsWith(PAYMENT_STORAGE_KEY_PREFIX) || key.startsWith(`payment_receipt_${userId}`))) {
+          keysToRemove.push(key);
+        }
+      }
+      for (const k of keysToRemove) {
+        localStorage.removeItem(k);
+      }
+    }
   } catch (error) {
     console.error('Error clearing payment data:', error);
   }

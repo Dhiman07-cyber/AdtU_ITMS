@@ -83,6 +83,20 @@ export function usePaymentRecovery(opts: UsePaymentRecoveryOptions) {
         headers: { Authorization: `Bearer ${token}` },
         cache: 'no-store',
       });
+
+      // Stop polling on terminal HTTP status codes (auth expired, unauthorized, or record not found)
+      if (res.status === 401 || res.status === 403 || res.status === 404) {
+        console.warn(`[usePaymentRecovery] Aborting poll due to terminal HTTP ${res.status}`);
+        setState(prev => ({
+          ...prev,
+          status: 'failed',
+          isPolling: false,
+          attemptsDone: attemptsRef.current + 1,
+          rawApiStatus: `http_${res.status}`,
+        }));
+        return;
+      }
+
       data = await res.json();
     } catch (err) {
       console.error('[usePaymentRecovery] network error:', err);
