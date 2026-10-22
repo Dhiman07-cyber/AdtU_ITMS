@@ -18,10 +18,12 @@ interface CacheEntry<T> {
 
 const BUS_CACHE_TTL_MS = 2 * 60 * 1000; // 2 minutes TTL for fleet master data
 let allBusesCache: CacheEntry<Bus[]> | null = null;
+let inFlightAllBusesPromise: Promise<Bus[]> | null = null;
 const busByIdCache = new Map<string, CacheEntry<Bus | null>>();
 
 export function invalidateBusCache(id?: string): void {
   allBusesCache = null;
+  inFlightAllBusesPromise = null;
   if (id) {
     busByIdCache.delete(id);
   } else {
@@ -39,9 +41,19 @@ export async function getAllBuses(): Promise<Bus[]> {
   if (allBusesCache && now < allBusesCache.expiresAt) {
     return allBusesCache.data;
   }
-  const buses = await fleetRepository.findAllBuses();
-  allBusesCache = { data: buses, expiresAt: now + BUS_CACHE_TTL_MS };
-  return buses;
+  if (inFlightAllBusesPromise) {
+    return inFlightAllBusesPromise;
+  }
+  inFlightAllBusesPromise = (async () => {
+    try {
+      const buses = await fleetRepository.findAllBuses();
+      allBusesCache = { data: buses, expiresAt: Date.now() + BUS_CACHE_TTL_MS };
+      return buses;
+    } finally {
+      inFlightAllBusesPromise = null;
+    }
+  })();
+  return inFlightAllBusesPromise;
 }
 
 export async function getBusById(id: string): Promise<Bus | null> {

@@ -4,6 +4,7 @@
  */
 
 import { getByUid } from '@/domains/student';
+import { createAuditEvent } from '@/domains/audit';
 import { getTransportEntitlement } from '@/lib/entitlement/transport-entitlement';
 import { verifyApiAuth } from '@/lib/security/api-auth';
 import { checkRateLimit,createRateLimitId,RateLimits } from '@/lib/security/rate-limiter';
@@ -115,9 +116,26 @@ export async function POST(request: NextRequest) {
             message = 'Student is assigned to a different bus';
         }
 
+        // FIX 58: Log legacy scan and add warning to response
+        void createAuditEvent({
+            action: 'legacy_unencrypted_qr_scanned',
+            category: 'security',
+            severity: 'low',
+            actor_id: auth.uid,
+            actor_name: auth.name || auth.email || 'Scanner',
+            actor_role: (auth.role as any) || 'driver',
+            target_id: studentUid.trim(),
+            target_type: 'student',
+            target_name: studentData.fullName || studentData.name || studentUid.trim(),
+            summary: `Static unencrypted QR code scanned for student ${studentUid.trim()} on bus ${scannerBusId}`,
+            metadata: { scannerBusId, studentBusId: busId },
+        }).catch(() => {});
+
         return NextResponse.json({
             status,
             message,
+            isLegacyScan: true,
+            warning: 'Static unencrypted QR code scanned — pass presented without dynamic cryptographic signature',
             // PRIVACY-MINIMAL: Do not return phone, email, payment details, or admin notes.
             studentData: {
                 uid: studentUid.trim(),

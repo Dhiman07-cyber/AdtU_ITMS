@@ -11,7 +11,8 @@ import { NextResponse } from 'next/server';
 
 export async function PUT(request: Request) {
     try {
-        const authHeader = (await headers()).get('authorization');
+        const headersList = await headers();
+        const authHeader = headersList.get('authorization') || headersList.get('Authorization');
         if (!authHeader || !authHeader.startsWith('Bearer ')) {
             return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
         }
@@ -155,7 +156,10 @@ export async function PUT(request: Request) {
 
         await updateBus(busId, busUpdates);
         invalidateBusCache(busId);
+        invalidateBusCache();
         clearStudentAssignmentMemoryCache();
+        const { invalidateCapacityRouteCache } = await import('@/app/api/buses/capacity/route');
+        invalidateCapacityRouteCache();
 
         if (routeChanged) {
             try {

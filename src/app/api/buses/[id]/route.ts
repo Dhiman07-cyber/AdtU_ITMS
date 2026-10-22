@@ -63,6 +63,12 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     const ok = await updateBus(id, busData);
     if (!ok) return NextResponse.json({ error: 'Failed to update bus' }, { status: 500 });
 
+    const { invalidateBusCache } = await import('@/domains/fleet/services/fleet.service');
+    invalidateBusCache(id);
+    invalidateBusCache();
+    const { invalidateCapacityRouteCache } = await import('@/app/api/buses/capacity/route');
+    invalidateCapacityRouteCache();
+
     const updated = await getBusById(id);
     return NextResponse.json(updated);
   } catch (error: any) {
@@ -95,6 +101,9 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
 
     const { invalidateBusCache } = await import('@/domains/fleet/services/fleet.service');
     invalidateBusCache(id);
+    invalidateBusCache();
+    const { invalidateCapacityRouteCache } = await import('@/app/api/buses/capacity/route');
+    invalidateCapacityRouteCache();
 
     return NextResponse.json({ success: true, message: 'Bus deleted successfully' });
   } catch (error: any) {

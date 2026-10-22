@@ -89,7 +89,7 @@ export const POST = withSecurity(
     }
 
     const activeTrip = activeTripResult.data;
-    const isOperatedByOther = !!(activeTrip && activeTrip.driver_id !== auth.uid);
+    const canHandover = !!(activeTrip && activeTrip.driver_id !== auth.uid);
 
     return NextResponse.json({
       found: true,
@@ -99,8 +99,10 @@ export const POST = withSecurity(
       routeId: busResult.data.route_id,
       routeName: busResult.data.route_name,
       isInTrip: !!activeTrip,
-      is_operated_by_other: isOperatedByOther,
-      isOperatedByOther,
+      canHandover,
+      can_handover: canHandover,
+      is_operated_by_other: false,
+      isOperatedByOther: false,
       activeDriverId: activeTrip?.driver_id || null,
     });
   },

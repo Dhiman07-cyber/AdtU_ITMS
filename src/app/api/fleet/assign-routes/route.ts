@@ -197,6 +197,12 @@ export async function POST(req: NextRequest) {
         } catch (assignErr) {
             console.warn('[assign-routes] Wildcard student cache invalidation warning:', assignErr);
         }
+        try {
+            const { invalidateCapacityRouteCache } = await import('@/app/api/buses/capacity/route');
+            invalidateCapacityRouteCache();
+        } catch (capErr) {
+            console.warn('[assign-routes] Capacity cache invalidation warning:', capErr);
+        }
 
         return NextResponse.json({ success: true, updatedBuses });
 

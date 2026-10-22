@@ -22,7 +22,37 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Too many requests' }, { status: 429, headers: rl.headers });
     }
 
-    const drivers = await getAllDrivers();
+    const { searchParams } = new URL(request.url);
+    const search = searchParams.get('search') || searchParams.get('q');
+
+    let drivers: any[] = [];
+
+    if (search && search.trim()) {
+      const { getSupabaseServer } = await import('@/lib/supabase-server');
+      const db = getSupabaseServer();
+      const escaped = search.trim().replace(/%/g, '\\%').replace(/_/g, '\\_');
+      const pattern = `%${escaped}%`;
+      const { data, error } = await db
+        .from('driver_profiles')
+        .select('*')
+        .or(`full_name.ilike.${pattern},email.ilike.${pattern},phone.ilike.${pattern},employee_id.ilike.${pattern},license_number.ilike.${pattern},bus_id.ilike.${pattern},route_id.ilike.${pattern}`)
+        .order('full_name', { ascending: true });
+
+      if (!error && data) {
+        drivers = data.map((row: any) => ({
+          ...row,
+          id: row.uid || row.id,
+          fullName: row.full_name || row.name || '',
+          name: row.full_name || row.name || '',
+          assignedBusId: row.assigned_bus_id || row.bus_id || '',
+          assignedRouteId: row.assigned_route_id || row.route_id || '',
+        }));
+      } else {
+        drivers = await getAllDrivers();
+      }
+    } else {
+      drivers = await getAllDrivers();
+    }
 
     return NextResponse.json(drivers, { headers: rl.headers });
   } catch (error) {

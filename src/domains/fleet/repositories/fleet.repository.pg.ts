@@ -71,7 +71,8 @@ const BUS_FIELD_MAP: Record<string, string> = {
   updatedAt: 'updated_at',
 };
 
-const BUS_COLUMNS = 'id, bus_number, model, year, capacity, primary_driver_uid, driver_uid, driver_name, route_id, route_name, status, current_members, morning_load, evening_load, last_started_at, last_ended_at, created_at, updated_at';
+// FIX 20: Use '*' for resilient queries across evolving DB schemas
+const BUS_COLUMNS = '*';
 
 const VIRTUAL_BUS_FIELDS = new Set(['busId', 'currentPassengerCount', 'routeRef']);
 

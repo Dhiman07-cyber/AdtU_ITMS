@@ -210,6 +210,21 @@ export async function POST(req: NextRequest) {
 
         invalidateBusCache();
 
+        try {
+            const { invalidateBusTripSnapshot } = await import('@/lib/services/trip-snapshot-cache');
+            for (const bId of updatedBuses) {
+                invalidateBusTripSnapshot(bId);
+            }
+        } catch (tripSnapErr) {
+            console.warn('[assign-drivers] Bus snapshot invalidation warning:', tripSnapErr);
+        }
+        try {
+            const { invalidateCapacityRouteCache } = await import('@/app/api/buses/capacity/route');
+            invalidateCapacityRouteCache();
+        } catch (capErr) {
+            console.warn('[assign-drivers] Capacity cache invalidation warning:', capErr);
+        }
+
         return NextResponse.json({ success: true, updatedBuses, updatedDrivers });
 
     } catch (error: any) {

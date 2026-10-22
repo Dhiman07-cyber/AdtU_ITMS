@@ -14,6 +14,7 @@ import {
 	validateStudentScannerContext,
 } from '@/lib/security/scanner-auth';
 import { getSupabaseServer } from '@/lib/supabase-server';
+import { getBusIdVariations } from '@/lib/utils';
 import { getValidUntilDate } from '@/lib/utils/date-utils';
 import { NextRequest,NextResponse } from 'next/server';
 
@@ -84,10 +85,11 @@ export async function POST(request: NextRequest) {
         if (!activeTripId && scannerBusId && auth.role !== 'driver') {
             try {
                 const supabase = getSupabaseServer();
+                const busVariations = getBusIdVariations(scannerBusId);
                 const { data: activeTrip } = await supabase
                     .from('active_trips')
                     .select('trip_id, status, created_at, shift')
-                    .eq('bus_id', scannerBusId)
+                    .in('bus_id', busVariations)
                     .eq('status', 'active')
                     .gt('expires_at', new Date().toISOString())
                     .maybeSingle();

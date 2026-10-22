@@ -1,6 +1,7 @@
 import { withSecurity } from '@/lib/security/api-security';
 import { RateLimits } from '@/lib/security/rate-limiter';
 import { getSupabaseServer } from '@/lib/supabase-server';
+import { getBusIdVariations } from '@/lib/utils';
 import { isWaitingFlagExpired } from '@/lib/waiting-flag-helpers';
 import { NextResponse } from 'next/server';
 
@@ -101,24 +102,25 @@ export const GET = withSecurity(
 
         // 3. Fetch Bus details, Route details, Student counts, Active Waiting Flags, and Fleet Summary
         const now = new Date().toISOString();
+        const busVariations = busId ? getBusIdVariations(busId) : [];
         const [busResult, routeResult, totalStudentsRes, morningStudentsRes, eveningStudentsRes, waitingFlagsRes, allBusesRes, allActiveTripsRes] = await Promise.all([
             busId
-                ? supabase.from('buses').select('id, bus_number, status, current_members, capacity, route_id, morning_load, evening_load').eq('id', busId).maybeSingle()
+                ? supabase.from('buses').select('id, bus_number, status, current_members, capacity, route_id, morning_load, evening_load').in('id', busVariations).maybeSingle()
                 : Promise.resolve({ data: null, error: null }),
             routeId
                 ? supabase.from('routes').select('id, route_name, stops, total_stops').eq('id', routeId).maybeSingle()
                 : Promise.resolve({ data: null, error: null }),
-            busId
-                ? supabase.from('student_profiles').select('uid', { count: 'exact', head: true }).eq('bus_id', busId).eq('status', 'active')
+            busVariations.length > 0
+                ? supabase.from('student_profiles').select('uid', { count: 'exact', head: true }).in('bus_id', busVariations).eq('status', 'active')
                 : Promise.resolve({ count: 0, error: null }),
-            busId
-                ? supabase.from('student_profiles').select('uid', { count: 'exact', head: true }).eq('bus_id', busId).eq('status', 'active').eq('shift', 'Morning')
+            busVariations.length > 0
+                ? supabase.from('student_profiles').select('uid', { count: 'exact', head: true }).in('bus_id', busVariations).eq('status', 'active').eq('shift', 'Morning')
                 : Promise.resolve({ count: 0, error: null }),
-            busId
-                ? supabase.from('student_profiles').select('uid', { count: 'exact', head: true }).eq('bus_id', busId).eq('status', 'active').eq('shift', 'Evening')
+            busVariations.length > 0
+                ? supabase.from('student_profiles').select('uid', { count: 'exact', head: true }).in('bus_id', busVariations).eq('status', 'active').eq('shift', 'Evening')
                 : Promise.resolve({ count: 0, error: null }),
-            busId
-                ? supabase.from('waiting_flags').select('id, student_uid, student_name, student_profile_photo, bus_id, route_id, stop_name, stop_lat, stop_lng, status, created_at, expires_at, message').eq('bus_id', busId).in('status', ['raised', 'waiting', 'acknowledged']).order('created_at', { ascending: false })
+            busVariations.length > 0
+                ? supabase.from('waiting_flags').select('id, student_uid, student_name, student_profile_photo, bus_id, route_id, stop_name, stop_lat, stop_lng, status, created_at, expires_at, message').in('bus_id', busVariations).in('status', ['raised', 'waiting', 'acknowledged']).order('created_at', { ascending: false })
                 : Promise.resolve({ data: null, error: null }),
             // Fleet overview for available buses
             supabase.from('buses').select('id, bus_number, status').neq('status', 'inactive'),

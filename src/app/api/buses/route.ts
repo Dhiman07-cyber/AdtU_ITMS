@@ -20,10 +20,37 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = new URL(request.url);
     const routeId = searchParams.get('routeId');
+    const search = searchParams.get('search') || searchParams.get('q');
 
-    const buses = routeId
-      ? await getBusesByRouteId(routeId)
-      : await getAllBuses();
+    let buses: any[] = [];
+
+    if (search && search.trim()) {
+      const { getSupabaseServer } = await import('@/lib/supabase-server');
+      const db = getSupabaseServer();
+      const escaped = search.trim().replace(/%/g, '\\%').replace(/_/g, '\\_');
+      const pattern = `%${escaped}%`;
+      const { data, error } = await db
+        .from('buses')
+        .select('*')
+        .or(`bus_number.ilike.${pattern},id.ilike.${pattern},model.ilike.${pattern},route_name.ilike.${pattern},driver_name.ilike.${pattern}`)
+        .order('bus_number', { ascending: true });
+
+      if (!error && data) {
+        buses = data.map((b: any) => ({
+          ...b,
+          busNumber: b.bus_number,
+          routeId: b.route_id,
+          routeName: b.route_name,
+          driverName: b.driver_name,
+        }));
+      } else {
+        buses = routeId ? await getBusesByRouteId(routeId) : await getAllBuses();
+      }
+    } else {
+      buses = routeId
+        ? await getBusesByRouteId(routeId)
+        : await getAllBuses();
+    }
 
     return NextResponse.json({ buses }, { headers: rl.headers });
   } catch (error: any) {
@@ -74,6 +101,11 @@ export async function POST(request: NextRequest) {
     };
 
     await createBus(newBus);
+    const { invalidateBusCache } = await import('@/domains/fleet/services/fleet.service');
+    invalidateBusCache();
+    invalidateBusCache(newBus.id);
+    const { invalidateCapacityRouteCache } = await import('@/app/api/buses/capacity/route');
+    invalidateCapacityRouteCache();
 
     return NextResponse.json({ id: newBus.id, ...newBus }, { status: 201, headers: rl.headers });
   } catch (error: any) {

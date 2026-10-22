@@ -34,15 +34,17 @@ export const GET = withSecurity(
     const enrichedBuses = (busesRes.data || []).map((bus) => {
       const activeTrip = activeTripsMap.get(bus.id);
       const isInTrip = !!activeTrip;
-      const isOperatedByOther = isInTrip && activeTrip.driver_id !== auth.uid;
+      const canHandover = isInTrip && activeTrip.driver_id !== auth.uid;
       const isOperatedByMe = isInTrip && activeTrip.driver_id === auth.uid;
 
       return {
         ...bus,
         isInTrip,
         is_in_trip: isInTrip,
-        isOperatedByOther,
-        is_operated_by_other: isOperatedByOther,
+        canHandover,
+        can_handover: canHandover,
+        isOperatedByOther: false,
+        is_operated_by_other: false,
         isOperatedByMe,
         is_operated_by_me: isOperatedByMe,
         activeDriverId: activeTrip?.driver_id || null,
