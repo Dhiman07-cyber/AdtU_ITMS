@@ -274,22 +274,30 @@ export default function StudentDashboard() {
 
                   {/* Status Badges with Enhanced Design - Compact Grid on Mobile */}
                   <div className="flex flex-wrap items-center gap-2 md:gap-3 pl-0 md:pl-[4.5rem]">
-                    <Badge className={`px-2.5 py-1 md:px-4 md:py-1.5 text-xs md:text-sm font-semibold shadow-sm md:shadow-lg backdrop-blur-sm ${studentData?.status === 'active'
-                      ? 'bg-gradient-to-r from-green-100 to-emerald-100 text-green-700 dark:from-green-900/40 dark:to-emerald-900/40 dark:text-green-400 border border-green-200 dark:border-green-800'
-                      : studentData?.status === 'verified_upcoming'
-                      ? 'bg-gradient-to-r from-indigo-100 to-purple-100 text-indigo-700 dark:from-indigo-900/40 dark:to-purple-900/40 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800'
-                      : studentData?.status === 'pending_seat_allocation'
-                      ? 'bg-gradient-to-r from-amber-100 to-orange-100 text-amber-700 dark:from-amber-900/40 dark:to-orange-900/40 dark:text-amber-300 border border-amber-200 dark:border-amber-800'
-                      : 'bg-gradient-to-r from-yellow-100 to-orange-100 text-yellow-700 dark:from-yellow-900/40 dark:to-orange-900/40 dark:text-yellow-400 border border-yellow-200 dark:border-yellow-800'
-                      }`}>
-                      <span className={`inline-block w-1.5 h-1.5 md:w-2 md:h-2 rounded-full mr-1.5 md:mr-2 ${studentData?.status === 'active' ? 'bg-green-500 animate-pulse' : studentData?.status === 'verified_upcoming' ? 'bg-indigo-500 animate-pulse' : 'bg-yellow-500'
-                        }`} />
-                      {studentData?.status === 'active' ? 'Active' :
-                        studentData?.status === 'verified_upcoming' ? 'Verified (Upcoming Session)' :
-                        studentData?.status === 'pending_seat_allocation' ? 'Seat Queue Active' :
-                        studentData?.status === 'soft_blocked' ? 'Service Expired (Restricted)' :
-                        studentData?.status || 'Submitted'}
-                    </Badge>
+                    {loading && !studentData ? (
+                      /* Status skeleton: never show a guessed status while the DB value is in flight */
+                      <div
+                        aria-hidden="true"
+                        className="inline-flex items-center px-2.5 py-1 md:px-4 md:py-1.5 rounded-full bg-gray-200 dark:bg-gray-800 animate-pulse w-20 h-6 md:w-28 md:h-8"
+                      />
+                    ) : (
+                      <Badge className={`px-2.5 py-1 md:px-4 md:py-1.5 text-xs md:text-sm font-semibold shadow-sm md:shadow-lg backdrop-blur-sm ${studentData?.status === 'active'
+                        ? 'bg-gradient-to-r from-green-100 to-emerald-100 text-green-700 dark:from-green-900/40 dark:to-emerald-900/40 dark:text-green-400 border border-green-200 dark:border-green-800'
+                        : studentData?.status === 'verified_upcoming'
+                        ? 'bg-gradient-to-r from-indigo-100 to-purple-100 text-indigo-700 dark:from-indigo-900/40 dark:to-purple-900/40 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800'
+                        : studentData?.status === 'pending_seat_allocation'
+                        ? 'bg-gradient-to-r from-amber-100 to-orange-100 text-amber-700 dark:from-amber-900/40 dark:to-orange-900/40 dark:text-amber-300 border border-amber-200 dark:border-amber-800'
+                        : 'bg-gradient-to-r from-yellow-100 to-orange-100 text-yellow-700 dark:from-yellow-900/40 dark:to-orange-900/40 dark:text-yellow-400 border border-yellow-200 dark:border-yellow-800'
+                        }`}>
+                        <span className={`inline-block w-1.5 h-1.5 md:w-2 md:h-2 rounded-full mr-1.5 md:mr-2 ${studentData?.status === 'active' ? 'bg-green-500 animate-pulse' : studentData?.status === 'verified_upcoming' ? 'bg-indigo-500 animate-pulse' : 'bg-yellow-500'
+                          }`} />
+                        {studentData?.status === 'active' ? 'Active' :
+                          studentData?.status === 'verified_upcoming' ? 'Verified (Upcoming Session)' :
+                          studentData?.status === 'pending_seat_allocation' ? 'Seat Queue Active' :
+                          studentData?.status === 'soft_blocked' ? 'Service Expired (Restricted)' :
+                          studentData?.status || '—'}
+                      </Badge>
+                    )}
                     {studentData?.semester && (
                       <Badge variant="outline" className="px-2.5 py-1 md:px-4 md:py-1.5 text-xs md:text-sm bg-white/60 dark:bg-gray-800/60 backdrop-blur-sm border-gray-300 dark:border-gray-700 shadow-sm">
                         <BookOpen className="h-3 w-3 mr-1 md:mr-1.5" />
