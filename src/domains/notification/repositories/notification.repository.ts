@@ -43,6 +43,8 @@ import {
 	pgFindNotificationById,
 	pgFindNotificationsByUser,
 	pgInsertNotification,
+	pgMarkNotificationRead,
+	pgMarkNotificationsRead,
 	pgUpdateNotification,
 } from './notification.repository.pg';
 
@@ -196,10 +198,10 @@ export async function resolveTargetRecipients(target: NotificationTarget): Promi
           const normalizedShift = normalizeShift(target.shift);
           if (normalizedShift === 'Both') {
             const allStudents = await getAllStudents();
-            allStudents.forEach(doc => recipientIds.push(doc.id));
+            allStudents.forEach(doc => recipientIds.push(doc.uid || doc.id));
           } else {
             const students = await getStudentsByShift(normalizedShift);
-            students.forEach(doc => recipientIds.push(doc.id));
+            students.forEach(doc => recipientIds.push(doc.uid || doc.id));
           }
         }
         break;
@@ -208,7 +210,7 @@ export async function resolveTargetRecipients(target: NotificationTarget): Promi
       case 'bus_based': {
         if (target.busIds && target.busIds.length > 0) {
           const students = await getStudentsByBusIds(target.busIds);
-          students.forEach(doc => recipientIds.push(doc.id));
+          students.forEach(doc => recipientIds.push(doc.uid || doc.id));
         }
         break;
       }
@@ -216,7 +218,7 @@ export async function resolveTargetRecipients(target: NotificationTarget): Promi
       case 'route_based': {
         if (target.routeIds && target.routeIds.length > 0) {
           const students = await getStudentsByRouteIds(target.routeIds);
-          students.forEach(doc => recipientIds.push(doc.id));
+          students.forEach(doc => recipientIds.push(doc.uid || doc.id));
         }
         break;
       }
@@ -256,6 +258,16 @@ export async function insert(input: CreateNotificationInput): Promise<string> {
 export async function update(id: string, input: Record<string, any>): Promise<void> {
   return pgUpdateNotification(id, input);
 }
+
+export async function markAsRead(notificationId: string, userId: string): Promise<boolean> {
+  return pgMarkNotificationRead(notificationId, userId);
+}
+
+export async function markMultipleAsRead(notificationIds: string[], userId: string): Promise<void> {
+  return pgMarkNotificationsRead(notificationIds, userId);
+}
+
+export { pgMarkNotificationRead, pgMarkNotificationsRead };
 
 export async function remove(id: string): Promise<void> {
   return pgDeleteNotification(id);

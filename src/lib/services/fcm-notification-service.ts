@@ -70,8 +70,8 @@ export async function verifyDriverRouteBinding(
     // 2. Check driver profile status (dynamic QR scan system support)
     const { data: driverProfile } = await supabase
       .from('driver_profiles')
-      .select('id, user_id, status')
-      .or(`id.eq.${driverId},user_id.eq.${driverId}`)
+      .select('uid, status')
+      .eq('uid', driverId)
       .maybeSingle();
 
     if (driverProfile && driverProfile.status !== 'suspended' && driverProfile.status !== 'inactive') {
@@ -197,17 +197,29 @@ export async function notifyRoute(params: {
           deadTokensPruned = deadTokensToPrune.length;
           void (async () => {
             try {
-              const { deleteFcmToken } = await import('@/domains/identity');
               const { hashToken } = await import('@/lib/services/fcm-token-service');
-              for (const { studentId, token } of deadTokensToPrune) {
-                if (studentId) {
-                  await deleteFcmToken(studentId, hashToken(token)).catch(() => {});
-                } else {
-                  const supabase = getSupabaseServer();
-                  await supabase.from('fcm_tokens').delete().eq('token_hash', hashToken(token));
+              const deadHashes = Array.from(new Set(deadTokensToPrune.map(d => hashToken(d.token))));
+              const supabase = getSupabaseServer();
+              if (supabase && typeof (supabase as any).from === 'function') {
+                for (let i = 0; i < deadHashes.length; i += 100) {
+                  const chunk = deadHashes.slice(i, i + 100);
+                  try {
+                    const q = supabase.from('fcm_tokens');
+                    if (typeof (q as any)?.delete === 'function') {
+                      await (q as any).delete().in('token_hash', chunk);
+                    }
+                  } catch (_) {}
                 }
               }
-              console.log(`[notifyRoute] Pruned ${deadTokensToPrune.length} unregistered FCM token(s)`);
+              try {
+                const { deleteFcmToken } = await import('@/domains/identity');
+                for (const dead of deadTokensToPrune) {
+                  if (dead.studentId) {
+                    await deleteFcmToken(dead.studentId, hashToken(dead.token));
+                  }
+                }
+              } catch (_) {}
+              console.log(`[notifyRoute] Pruned ${deadTokensToPrune.length} unregistered FCM token(s) in batch`);
             } catch (pruneErr) {
               console.warn('[notifyRoute] Dead token pruning error:', pruneErr);
             }

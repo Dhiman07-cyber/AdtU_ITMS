@@ -223,7 +223,7 @@ export async function pgFindNotificationsByUser(
   const { data, error } = await db
     .from('notifications')
     .select(PG_NOTIFICATION_COLUMNS)
-    .or(`recipient_ids.cs.{${uid}},sender_user_id.eq.${uid}`)
+    .or(`recipient_ids.cs.{${uid}},auto_injected_recipient_ids.cs.{${uid}},sender_user_id.eq.${uid},target->>type.eq.all_users,target->>type.eq.all_role,target->>type.eq.route_based,target->>type.eq.shift_based`)
     .order('created_at', { ascending: false })
     .limit(limit);
 
@@ -416,3 +416,80 @@ export async function pgDeleteNotificationsByUser(userId: string): Promise<numbe
 
   return count || 0;
 }
+
+/**
+ * Mark notification as read atomically via PL/pgSQL RPC (INV-NOTIF-004).
+ * Prevents lost updates under concurrent student read bursts.
+ */
+export async function pgMarkNotificationRead(
+  notificationId: string,
+  userId: string
+): Promise<boolean> {
+  const db = getSupabaseServer();
+  try {
+    if (typeof (db as any).rpc === 'function') {
+      const { data, error } = await db.rpc('mark_notification_read', {
+        p_notification_id: notificationId,
+        p_user_id: userId,
+      });
+      if (!error) {
+        return Boolean(data);
+      }
+      console.warn('[pgMarkNotificationRead] RPC unavailable or returned error, falling back:', error.message);
+    }
+  } catch (err: any) {
+    console.warn('[pgMarkNotificationRead] RPC call threw, falling back:', err?.message || err);
+  }
+
+  // Fallback to read-modify-write update if RPC unavailable
+  const current = await pgFindNotificationById(notificationId);
+  if (!current) throw new Error('Notification not found');
+  const existing = Array.isArray(current.readByUserIds) ? current.readByUserIds : [];
+  if (existing.includes(userId)) return false;
+  const newRead = Array.from(new Set([...existing, userId]));
+  await pgUpdateNotification(notificationId, { readByUserIds: newRead });
+  return true;
+}
+
+/**
+ * Mark multiple notifications as read in a single batch.
+ */
+export async function pgMarkNotificationsRead(
+  notificationIds: string[],
+  userId: string
+): Promise<void> {
+  if (!notificationIds || notificationIds.length === 0) return;
+  const db = getSupabaseServer();
+
+  try {
+    if (typeof (db as any).rpc === 'function') {
+      const { error } = await db.rpc('mark_notifications_read', {
+        p_notification_ids: notificationIds,
+        p_user_id: userId,
+      });
+      if (!error) return;
+    }
+  } catch {
+    // Fallback to fetch and update
+  }
+
+  const { data, error } = await db
+    .from('notifications')
+    .select('id, read_by_user_ids')
+    .in('id', notificationIds);
+
+  if (error || !data) return;
+
+  await Promise.all(
+    data.map(async (row: any) => {
+      const existing = Array.isArray(row.read_by_user_ids) ? row.read_by_user_ids : [];
+      if (!existing.includes(userId)) {
+        await db
+          .from('notifications')
+          .update({ read_by_user_ids: [...existing, userId] })
+          .eq('id', row.id);
+      }
+    })
+  );
+}
+

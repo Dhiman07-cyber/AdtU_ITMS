@@ -8,5 +8,5 @@
 export {
 	createNotification,deleteNotificationGlobally,editNotification,findById,
 	findByUser,
-	isNotificationVisibleToUser,markAsRead
+	isNotificationVisibleToUser,markAsRead,markMultipleAsRead
 } from './services/notification.service';

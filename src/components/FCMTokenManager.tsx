@@ -90,6 +90,7 @@ export function FCMTokenManager() {
       const saved = await saveFCMToken(currentUser.uid, fcmToken, 'web', idToken);
       if (saved) {
         localStorage.setItem(lsTokenKey, fcmToken);
+        localStorage.setItem(`${LS_LAST_SYNC_PREFIX}${currentUser.uid}`, String(Date.now()));
         sessionStorage.setItem(ssSyncKey, 'true');
         if (isNewToken) {
           console.log('✅ [FCMTokenManager] FCM token registered successfully (token length:', fcmToken.length, ')');

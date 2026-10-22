@@ -178,6 +178,56 @@ function NotificationCardV2({
   };
 
   const roleTheme = roleThemes[targetRole] || roleThemes.all;
+  const ROLE_THEME_CLASSES: Record<string, {
+    badgeOutline: string;
+    dot: string;
+    ring: string;
+    badgeBg: string;
+  }> = {
+    indigo: {
+      badgeOutline: "border-indigo-200 text-indigo-600 dark:border-indigo-800 dark:text-indigo-400",
+      dot: "bg-indigo-500",
+      ring: "ring-indigo-500/5",
+      badgeBg: "bg-indigo-500 hover:bg-indigo-600",
+    },
+    emerald: {
+      badgeOutline: "border-emerald-200 text-emerald-600 dark:border-emerald-800 dark:text-emerald-400",
+      dot: "bg-emerald-500",
+      ring: "ring-emerald-500/5",
+      badgeBg: "bg-emerald-500 hover:bg-emerald-600",
+    },
+    purple: {
+      badgeOutline: "border-purple-200 text-purple-600 dark:border-purple-800 dark:text-purple-400",
+      dot: "bg-purple-500",
+      ring: "ring-purple-500/5",
+      badgeBg: "bg-purple-500 hover:bg-purple-600",
+    },
+    rose: {
+      badgeOutline: "border-rose-200 text-rose-600 dark:border-rose-800 dark:text-rose-400",
+      dot: "bg-rose-500",
+      ring: "ring-rose-500/5",
+      badgeBg: "bg-rose-500 hover:bg-rose-600",
+    },
+    blue: {
+      badgeOutline: "border-blue-200 text-blue-600 dark:border-blue-800 dark:text-blue-400",
+      dot: "bg-blue-500",
+      ring: "ring-blue-500/5",
+      badgeBg: "bg-blue-500 hover:bg-blue-600",
+    },
+    amber: {
+      badgeOutline: "border-amber-200 text-amber-600 dark:border-amber-800 dark:text-amber-400",
+      dot: "bg-amber-500",
+      ring: "ring-amber-500/5",
+      badgeBg: "bg-amber-500 hover:bg-amber-600",
+    },
+    slate: {
+      badgeOutline: "border-slate-200 text-slate-600 dark:border-slate-800 dark:text-slate-400",
+      dot: "bg-slate-500",
+      ring: "ring-slate-500/5",
+      badgeBg: "bg-slate-500 hover:bg-slate-600",
+    },
+  };
+  const themeClasses = ROLE_THEME_CLASSES[roleTheme.color] || ROLE_THEME_CLASSES.blue;
   const typeTheme = typeThemes[notification.type] || typeThemes.default;
   const ThemeIcon = typeTheme.icon;
 
@@ -302,7 +352,7 @@ function NotificationCardV2({
                     <span className={`text-[11px] font-black uppercase tracking-[0.12em] bg-clip-text text-transparent bg-gradient-to-r ${roleTheme.accent}`}>
                       {isFeedbackIssue ? "Issues" : isRenewalRequest ? "Request" : notification.type}
                     </span>
-                    <Badge variant="outline" className={`h-4.5 text-[9px] font-bold border-${roleTheme.color}-200 text-${roleTheme.color}-600 dark:border-${roleTheme.color}-800 dark:text-${roleTheme.color}-400 px-1.5`}>
+                    <Badge variant="outline" className={`h-4.5 text-[9px] font-bold px-1.5 ${themeClasses.badgeOutline}`}>
                       {displayLabel}
                     </Badge>
                   </div>
@@ -315,7 +365,7 @@ function NotificationCardV2({
 
               <div className="flex items-center gap-2">
                 {!isEffectiveRead && (
-                  <span className={`flex h-2 w-2 rounded-full bg-${roleTheme.color}-500`} />
+                  <span className={`flex h-2 w-2 rounded-full ${themeClasses.dot}`} />
                 )}
                 {(notification.canEdit || notification.canDeleteGlobally) && (
                   <DropdownMenu>
@@ -468,12 +518,12 @@ function NotificationCardV2({
               <div className="flex flex-row items-center justify-between gap-2 sm:gap-4 mb-3 sm:mb-6 pr-8">
                 {/* Left: Icon + Badges */}
                 <div className="flex items-center gap-2 sm:gap-3">
-                  <div className={`w-8 h-8 sm:w-11 sm:h-11 rounded-lg sm:rounded-[16px] bg-gradient-to-br ${roleTheme.accent} shadow-lg ${roleTheme.glow} flex items-center justify-center text-white ring-1 sm:ring-4 ring-${roleTheme.color}-500/5`}>
+                  <div className={`w-8 h-8 sm:w-11 sm:h-11 rounded-lg sm:rounded-[16px] bg-gradient-to-br ${roleTheme.accent} shadow-lg ${roleTheme.glow} flex items-center justify-center text-white ring-1 sm:ring-4 ${themeClasses.ring}`}>
                     <ThemeIcon className="h-3.5 w-3.5 sm:h-5 sm:w-5" />
                   </div>
                   <div className="space-y-0.5">
                     <div className="flex items-center gap-1.5">
-                      <Badge className={`bg-${roleTheme.color}-500 hover:bg-${roleTheme.color}-600 text-white font-black px-1.5 sm:px-1.5 py-0.5 sm:py-0.5 text-[8px] sm:text-[8px] tracking-wider border-0 shadow-sm`}>
+                      <Badge className={`${themeClasses.badgeBg} text-white font-black px-1.5 sm:px-1.5 py-0.5 sm:py-0.5 text-[8px] sm:text-[8px] tracking-wider border-0 shadow-sm`}>
                         {isFeedbackIssue ? "ISSUES" : isRenewalRequest ? "REQUEST" : notification.type.toUpperCase()}
                       </Badge>
                       {!isEffectiveRead && (

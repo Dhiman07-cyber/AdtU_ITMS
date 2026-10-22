@@ -54,7 +54,6 @@ try {
     }
 
     auth = getAuth(adminApp);
-    db = getFirestore(adminApp);
     try {
       messaging = getMessaging(adminApp);
     } catch (msgError: any) {
@@ -69,6 +68,30 @@ try {
   }
 }
 
+// Lazy-initialize adminDb via Proxy (Fix 97)
+let _firestoreInstance: any = null;
+function getLazyFirestore(): any {
+  if (!_firestoreInstance && adminApp) {
+    _firestoreInstance = getFirestore(adminApp);
+  }
+  return _firestoreInstance;
+}
+
+const adminDbProxy: any = new Proxy({} as any, {
+  get(_target, prop) {
+    const firestore = getLazyFirestore();
+    if (!firestore) return undefined;
+    const value = firestore[prop];
+    return typeof value === 'function' ? value.bind(firestore) : value;
+  },
+  apply(_target, thisArg, argArray) {
+    const firestore = getLazyFirestore();
+    return Reflect.apply(firestore, thisArg, argArray);
+  }
+});
+
+db = adminDbProxy;
+
 // Verify token function
 export async function verifyToken(token: string) {
   if (!auth) {
@@ -79,8 +102,8 @@ export async function verifyToken(token: string) {
 
 // Export with aliases for consistency - only if properly initialized
 export const adminAuth = auth || null;
-export const adminDb = db || null;
+export const adminDb = adminDbProxy;
 export const admin = adminApp || null;
 export const adminMessaging = messaging;
 
-export { adminApp,auth,db,FieldValue,messaging };
+export { adminApp, auth, db, FieldValue, messaging };

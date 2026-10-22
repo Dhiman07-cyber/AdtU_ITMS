@@ -12,6 +12,7 @@
 import {
 	cleanupStaleFcmTokens,
 	deleteFcmToken,
+	deleteFcmTokensForUser,
 	getStudentsByBusIds,
 	getStudentsByRouteIds,
 	getValidFcmTokensForUsers,
@@ -199,13 +200,8 @@ export async function cleanupStaleTokens(maxAgeDays: number = 30): Promise<{
 }
 
 /**
- * Delete all FCM tokens for a specific user.
+ * Delete all FCM tokens for a specific user in a single atomic SQL operation.
  */
 export async function deleteUserTokens(userId: string): Promise<void> {
-  // Delete all tokens by getting them first
-  const tokens = await getValidFcmTokensForUsers([userId]);
-  for (const t of tokens) {
-    const tokenHash = hashFcmToken(t.token);
-    await deleteFcmToken(userId, tokenHash);
-  }
+  await deleteFcmTokensForUser(userId);
 }

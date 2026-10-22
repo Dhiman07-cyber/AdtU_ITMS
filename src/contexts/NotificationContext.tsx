@@ -156,12 +156,21 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
             const affectedNotifications = notifications.filter(n => notificationIds.includes(n.id) && !n.isRead);
             const adjustment = affectedNotifications.length;
 
-            const promises = notificationIds.map(id =>
-                authApiFetch(currentUser, `/api/notifications/${id}/read`, {
-                    method: 'POST',
-                })
-            );
-            await Promise.all(promises);
+            const res = await authApiFetch(currentUser, '/api/notifications/mark-all-read', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ notificationIds }),
+            });
+
+            if (!res.ok) {
+                // Fallback to individual requests if batch endpoint fails
+                const promises = notificationIds.map(id =>
+                    authApiFetch(currentUser, `/api/notifications/${id}/read`, {
+                        method: 'POST',
+                    })
+                );
+                await Promise.all(promises);
+            }
 
             setUnreadCount(prev => Math.max(0, prev - adjustment));
         } catch (error) {

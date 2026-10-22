@@ -24,7 +24,7 @@ import {
 	Send
 } from 'lucide-react';
 import dynamic from 'next/dynamic';
-import { useEffect,useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import {
 	NOTIFICATION_TEMPLATES,
@@ -102,6 +102,10 @@ export default function NotificationFormV2({ open, onClose, onSuccess, mode = 'c
   // Dropoff-specific targeting
   const [dropoffTargetRole, setDropoffTargetRole] = useState<'all' | 'student' | 'driver'>('all');
   const [dropoffShift, setDropoffShift] = useState<'morning' | 'evening' | 'both'>('morning');
+
+  const userOptionsCacheRef = useRef<Record<string, UserOption[]>>({});
+  const busOptionsCacheRef = useRef<RouteOption[] | null>(null);
+  const routeOptionsCacheRef = useRef<RouteOption[] | null>(null);
 
   const userRole = userData?.role as UserRole;
 
@@ -225,62 +229,81 @@ export default function NotificationFormV2({ open, onClose, onSuccess, mode = 'c
       const headers = { 'Authorization': `Bearer ${token}` };
 
       if (targetType === 'bus_based') {
-        const res = await fetch('/api/buses', { headers });
-        if (!res.ok) throw new Error('Failed to fetch buses');
-        const data = await res.json();
-        const busData = (data.buses || []).map((bus: any) => ({
-          id: bus.busId || bus.id,
-          name: bus.busNumber || bus.plateNumber || bus.busId || bus.id,
-          studentCount: bus.currentMembers ?? bus.currentPassengerCount ?? 0
-        }));
-        setBuses(busData.sort((a: any, b: any) => a.name.localeCompare(b.name)));
+        if (busOptionsCacheRef.current) {
+          setBuses(busOptionsCacheRef.current);
+        } else {
+          const res = await fetch('/api/buses', { headers });
+          if (!res.ok) throw new Error('Failed to fetch buses');
+          const data = await res.json();
+          const busData = (data.buses || []).map((bus: any) => ({
+            id: bus.busId || bus.id,
+            name: bus.busNumber || bus.plateNumber || bus.busId || bus.id,
+            studentCount: bus.currentMembers ?? bus.currentPassengerCount ?? 0
+          }));
+          const sorted = busData.sort((a: any, b: any) => a.name.localeCompare(b.name));
+          busOptionsCacheRef.current = sorted;
+          setBuses(sorted);
+        }
       }
 
       if (targetType === 'route_based') {
-        const [routesRes, studentsRes] = await Promise.all([
-          fetch('/api/routes', { headers }),
-          fetch('/api/students', { headers })
-        ]);
-        if (!routesRes.ok) throw new Error('Failed to fetch routes');
-        const routesRaw = await routesRes.json();
-        const studentsRaw = studentsRes.ok ? await studentsRes.json() : [];
+        if (routeOptionsCacheRef.current) {
+          setRoutes(routeOptionsCacheRef.current);
+        } else {
+          const [routesRes, busesRes] = await Promise.all([
+            fetch('/api/routes', { headers }),
+            fetch('/api/buses', { headers })
+          ]);
+          if (!routesRes.ok) throw new Error('Failed to fetch routes');
+          const routesRaw = await routesRes.json();
+          const busesData = busesRes.ok ? await busesRes.json() : { buses: [] };
+          const busesList = busesData.buses || [];
 
-        const routeCounts: Record<string, number> = {};
-        if (Array.isArray(studentsRaw)) {
-          studentsRaw.forEach((s: any) => {
-            const rid = s.routeId || s.routeId || '';
-            if (rid) routeCounts[rid] = (routeCounts[rid] || 0) + 1;
+          const routeCounts: Record<string, number> = {};
+          busesList.forEach((b: any) => {
+            const rid = b.routeId || b.assignedRouteId || '';
+            if (rid) {
+              routeCounts[rid] = (routeCounts[rid] || 0) + (b.currentMembers ?? b.currentPassengerCount ?? 0);
+            }
           });
-        }
 
-        const routesData = (Array.isArray(routesRaw) ? routesRaw : []).map((r: any) => ({
-          id: r.routeId || r.id,
-          name: r.routeName || r.name || r.routeId || r.id,
-          studentCount: routeCounts[r.routeId || r.id] || 0
-        }));
-        setRoutes(routesData.sort((a: any, b: any) => a.name.localeCompare(b.name)));
+          const routesData = (Array.isArray(routesRaw) ? routesRaw : []).map((r: any) => ({
+            id: r.routeId || r.id,
+            name: r.routeName || r.name || r.routeId || r.id,
+            studentCount: routeCounts[r.routeId || r.id] || 0
+          }));
+          const sorted = routesData.sort((a: any, b: any) => a.name.localeCompare(b.name));
+          routeOptionsCacheRef.current = sorted;
+          setRoutes(sorted);
+        }
       }
 
       if (targetType === 'specific_users') {
-        const rolesToLoad = specificUserRoleFilter ? [specificUserRoleFilter] :
-          (userRole === 'driver' ? ['student'] : ['moderator', 'driver', 'student']) as UserRole[];
+        const cacheKey = specificUserRoleFilter || (userRole === 'driver' ? 'driver_students' : 'all');
+        if (userOptionsCacheRef.current[cacheKey]) {
+          setUsers(userOptionsCacheRef.current[cacheKey]);
+        } else {
+          const rolesToLoad = specificUserRoleFilter ? [specificUserRoleFilter] :
+            (userRole === 'driver' ? ['student'] : ['moderator', 'driver', 'student']) as UserRole[];
 
-        const results = await Promise.all(rolesToLoad.map(async (role) => {
-          const endpoint = role === 'student' ? '/api/students' : role === 'driver' ? '/api/drivers' : '/api/moderators';
-          const res = await fetch(endpoint, { headers });
-          if (!res.ok) return [];
-          const data = await res.json();
-          const items = Array.isArray(data) ? data : [];
-          return items.map((item: any) => ({
-            id: item.id || item.uid,
-            name: item.name || item.fullName || 'Unknown',
-            role: role,
-            email: item.email,
-            enrollmentId: item.enrollmentId || item.employeeId || item.driverId || item.staffId
+          const results = await Promise.all(rolesToLoad.map(async (role) => {
+            const endpoint = role === 'student' ? '/api/students' : role === 'driver' ? '/api/drivers' : '/api/moderators';
+            const res = await fetch(endpoint, { headers });
+            if (!res.ok) return [];
+            const data = await res.json();
+            const items = Array.isArray(data) ? data : [];
+            return items.map((item: any) => ({
+              id: item.id || item.uid,
+              name: item.name || item.fullName || 'Unknown',
+              role: role,
+              email: item.email,
+              enrollmentId: item.enrollmentId || item.employeeId || item.driverId || item.staffId
+            }));
           }));
-        }));
-        const usersData = results.flat();
-        setUsers(usersData.sort((a: any, b: any) => a.name.localeCompare(b.name)));
+          const usersData = results.flat().sort((a: any, b: any) => a.name.localeCompare(b.name));
+          userOptionsCacheRef.current[cacheKey] = usersData;
+          setUsers(usersData);
+        }
       }
     } catch (error) {
       addToast('Error loading options', 'error');

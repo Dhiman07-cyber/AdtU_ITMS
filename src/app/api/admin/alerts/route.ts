@@ -46,7 +46,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const configuredSecret = process.env.AM_WEBHOOK_SECRET;
   if (configuredSecret) {
     // Secret is configured — validate the incoming bearer/token against it.
-    const authHeader = request.headers.get("authorization") || "";
+    const authHeader = request.headers.get("authorization") || request.headers.get("Authorization") || "";
     const bearer = authHeader.startsWith("Bearer ") ? authHeader.substring(7) : "";
     const incoming = request.headers.get("X-Alertmanager-Token") || bearer || "";
     if (!incoming) {

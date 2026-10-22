@@ -46,6 +46,27 @@ async function resolveRecipientIds(
 
   switch (targetType) {
     case 'all_users': {
+      try {
+        const { getSupabaseServer } = await import('@/lib/supabase-server');
+        const supabase = getSupabaseServer();
+        const rolesToQuery = senderRole === 'admin'
+          ? ['student', 'driver', 'moderator', 'admin']
+          : ['student', 'driver', 'moderator'];
+
+        const { data: users, error } = await supabase
+          .from('users')
+          .select('uid')
+          .in('role', rolesToQuery);
+
+        if (!error && users && users.length > 0) {
+          users.forEach((u) => {
+            if (u.uid) recipientIds.push(u.uid);
+          });
+          break;
+        }
+      } catch (err) {
+        console.warn('[notifications/create] Failed to select UIDs from users table, falling back:', err);
+      }
       const promises = [
         getUsersByRole('moderator'),
         getAllDrivers(),
@@ -56,7 +77,7 @@ async function resolveRecipientIds(
       }
       const results = await Promise.all(promises);
       results.forEach(items => {
-        items.forEach((item: any) => recipientIds.push(item.uid));
+        items.forEach((item: any) => recipientIds.push(item.uid || item.id));
       });
       break;
     }
@@ -93,7 +114,7 @@ async function resolveRecipientIds(
           ]);
           students.forEach(s => recipientIds.push(s.uid));
           drivers.forEach(d => {
-            const driverShift = (d.shift || d.assignedShift || '').toLowerCase();
+            const driverShift = (d.shift || d.assignedShift || 'both').toLowerCase();
             if (driverShift === targetShift || driverShift === 'both') {
               recipientIds.push(d.uid);
             }
@@ -131,7 +152,8 @@ async function resolveRecipientIds(
           if (!recipientIds.includes(student.uid)) recipientIds.push(student.uid);
         }
         for (const driver of drivers) {
-          if (targetRouteIds.includes(driver.routeId) || targetRouteIds.includes(driver.routeId)) {
+          const dRouteId = driver.routeId || driver.assignedRouteId || (driver as any).route_id;
+          if (dRouteId && targetRouteIds.includes(dRouteId)) {
             recipientIds.push(driver.uid);
           }
         }
