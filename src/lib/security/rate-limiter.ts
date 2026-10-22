@@ -142,6 +142,7 @@ async function checkRateLimitDistributed(
                 ['EXPIRE', key, windowSec, 'NX'],
             ]),
             cache: 'no-store',
+            signal: AbortSignal.timeout(1500),
         });
         const pipelineJson = await pipelineRes.json();
         const count = Number(pipelineJson?.[0]?.result || 0);
@@ -183,6 +184,7 @@ export const RateLimits = {
     READ: { maxRequests: 100, windowMs: 60000 },    // 100 per minute
     UPDATE: { maxRequests: 30, windowMs: 60000 },   // 30 per minute
     DELETE: { maxRequests: 10, windowMs: 60000 },   // 10 per minute
+    WRITE: { maxRequests: 30, windowMs: 60000 },    // 30 per minute
 
     // Real-time tracking
     // 240/min allows a 2s GPS cadence (30/min) with headroom for retries and
@@ -209,6 +211,8 @@ export const RateLimits = {
     // General API (tightened from 60 to 40/min)
     DEFAULT: { maxRequests: 40, windowMs: 60000 },
 } as const;
+
+export const RATE_LIMITS = RateLimits;
 
 /**
  * Helper to apply rate limit and return appropriate response headers

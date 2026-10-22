@@ -69,7 +69,7 @@ function makeRequest(overrides = {}) {
   return new Request('http://localhost/api/student/waiting-flag', {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: 'Bearer test-token' },
-    body: JSON.stringify({ busId: 'b1', lat: 26.1128, lng: 91.6876, ...overrides }),
+    body: JSON.stringify({ busId: 'b1', routeId: 'route_1', lat: 26.1128, lng: 91.6876, timestamp: Date.now(), ...overrides }),
   });
 }
 
