@@ -7,6 +7,7 @@ import { invalidateCachedDeviceSession } from '@/lib/services/device-session-cac
 import { invalidateBusTripSnapshot } from '@/lib/services/trip-snapshot-cache';
 import { invalidateScannerBusCache } from '@/lib/security/scanner-auth';
 import { getSupabaseServer } from '@/lib/supabase-server';
+import { getBusIdVariations } from '@/lib/utils';
 
 /**
  * Evict all bus runtime state across all memory and distributed Redis layers.
@@ -55,25 +56,55 @@ export async function evictAllBusRuntimeState(
   }
 }
 
-export async function cleanupTrip(params: {
-  driverId: string;
-  busId: string;
-  tripId: string;
-}) {
-  const supabase = getSupabaseServer();
+export async function cleanupTrip(
+  paramsOrTripId: string | { driverId: string; busId: string; tripId: string },
+  maybeBusId?: string,
+  maybeRouteId?: string
+) {
+  let driverId = '';
+  let busId = '';
+  let tripId = '';
+  if (typeof paramsOrTripId === 'string') {
+    tripId = paramsOrTripId;
+    busId = maybeBusId || '';
+  } else {
+    driverId = paramsOrTripId.driverId;
+    busId = paramsOrTripId.busId;
+    tripId = paramsOrTripId.tripId;
+  }
 
-  // 1. Delete first, capturing what was actually removed.
-  const [{ data: deletedFlags }] = await Promise.all([
-    supabase.from('waiting_flags')
-      .delete()
-      .eq('bus_id', params.busId)
-      .in('status', ['raised', 'acknowledged', 'waiting'])
-      .select('id, student_uid, bus_id'),
-    supabase.from('device_sessions').delete().eq('user_id', params.driverId),
+  const supabase = getSupabaseServer();
+  const busVariations = getBusIdVariations(busId);
+
+  // 1. Delete waiting_flags across busId variations and trip_id (Fix 99)
+  const busDeleteQuery = supabase.from('waiting_flags').delete();
+  const busDeletePromise = typeof (busDeleteQuery as any).in === 'function' && busVariations.length > 1
+    ? (busDeleteQuery as any).in('bus_id', busVariations).select('id, student_uid, bus_id')
+    : (busDeleteQuery as any).eq('bus_id', busId).select('id, student_uid, bus_id');
+
+  const tripDeletePromise = tripId
+    ? supabase.from('waiting_flags')
+        .delete()
+        .eq('trip_id', tripId)
+        .select('id, student_uid, bus_id')
+    : Promise.resolve({ data: [] });
+
+  const [{ data: deletedByBus }, { data: deletedByTrip }] = await Promise.all([
+    busDeletePromise,
+    tripDeletePromise,
+    driverId ? supabase.from('device_sessions').delete().eq('user_id', driverId) : Promise.resolve({ data: null }),
   ]);
 
-  // 2. Atomically evict all bus runtime state across all memory and Redis layers (Fix 6)
-  await evictAllBusRuntimeState(params.busId, params.driverId, params.tripId);
+  const flagMap = new Map<string, any>();
+  for (const flag of [...(deletedByBus || []), ...(deletedByTrip || [])]) {
+    if (flag?.id) {
+      flagMap.set(flag.id, flag);
+    }
+  }
+  const deletedFlags = Array.from(flagMap.values());
+
+  // 2. Atomically evict all bus runtime state across all memory and Redis layers (Fix 6, Fix 56, Fix 99)
+  await evictAllBusRuntimeState(busId, driverId, tripId);
 
   // 3. Broadcast only the flags that were actually deleted.
   if (deletedFlags && deletedFlags.length > 0) {

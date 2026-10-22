@@ -35,15 +35,15 @@ export const POST = withSecurity(
 
     if (myTrip) {
       const nowMs = Date.now();
-      // Keep trip lock alive under temporary satellite blindness (Fix 18)
+      // Keep trip lock alive under temporary satellite blindness
       if (shouldWriteHeartbeat(myTrip.bus_id, nowMs)) {
-        const extendedExpiresAt = new Date(nowMs + 600 * 1000).toISOString();
+        const extendedExpiresAt = new Date(nowMs + 1800 * 1000).toISOString();
         setActiveTripCache(myTrip.bus_id, {
           tripId: myTrip.trip_id,
           driverId: driverUid,
           routeId: myTrip.route_id,
           shift: myTrip.shift,
-          expiresAtMs: nowMs + 600 * 1000,
+          expiresAtMs: nowMs + 1800 * 1000,
         });
         Promise.resolve(
           supabase
@@ -59,6 +59,7 @@ export const POST = withSecurity(
       const startTime = myTrip.start_time ? new Date(myTrip.start_time).getTime() : nowMs;
       return NextResponse.json({
         hasActiveTrip: true,
+        busLockedByOther: false,
         tripData: {
           tripId: myTrip.trip_id,
           startTime: startTime,
@@ -72,37 +73,13 @@ export const POST = withSecurity(
     }
 
     // 2. Driver has NO active trip.
-    // If a specific busId was explicitly queried, check whether THAT bus is currently locked by another driver.
-    const targetBusId = inputBusId;
-    if (targetBusId) {
-      const { data: activeTrip } = await supabase
-        .from('active_trips')
-        .select('trip_id, driver_id, status, start_time')
-        .eq('bus_id', targetBusId)
-        .eq('status', 'active')
-        .gt('expires_at', now)
-        .maybeSingle();
-
-      if (activeTrip && activeTrip.driver_id && activeTrip.driver_id !== driverUid) {
-        return NextResponse.json({
-          hasActiveTrip: false,
-          tripData: null,
-          busLockedByOther: true,
-          targetBusId,
-          lockInfo: {
-            lockedByDriver: activeTrip.driver_id,
-            tripId: activeTrip.trip_id,
-            since: activeTrip.start_time
-          },
-          reason: 'This specific bus is currently being operated by another driver. Please select another available bus.'
-        });
-      }
-    }
-
+    // Zero-Wait Handover Architecture: even if another driver has an unended trip on this bus,
+    // Driver 2 is NEVER blocked. They can start their shift immediately.
     return NextResponse.json({
       hasActiveTrip: false,
       tripData: null,
       busLockedByOther: false,
+      canHandover: true,
     });
   },
   {

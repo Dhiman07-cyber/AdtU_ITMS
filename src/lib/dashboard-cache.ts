@@ -46,5 +46,16 @@ export function createDashboardCache<T>(role: 'admin' | 'moderator') {
     }
   }
 
-  return { getCached, setCached };
+  function clearCached(): void {
+    try {
+      if (typeof window === 'undefined') return;
+      localStorage.removeItem(key);
+      localStorage.removeItem(expiryKey);
+    } catch {
+      // Storage failure is non-fatal
+    }
+  }
+
+  return { getCached, setCached, clearCached };
 }
+

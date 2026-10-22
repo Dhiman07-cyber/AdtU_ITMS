@@ -3,6 +3,7 @@ import { verifyApiAuth } from '@/lib/security/api-auth';
 import { applyRateLimit, createRateLimitId, RateLimits } from '@/lib/security/rate-limiter';
 import { handleApiError } from '@/lib/security/safe-error';
 import { getSupabaseServer } from '@/lib/supabase-server';
+import { getBusIdVariations } from '@/lib/utils';
 import { NextRequest, NextResponse } from 'next/server';
 
 export interface FleetBusLiveStatus {
@@ -47,8 +48,17 @@ interface FleetStatusResult {
 }
 
 const FLEET_CACHE_TTL_MS = 3000;
+const FLEET_CACHE_MAX_ENTRIES = 50;
 const fleetCache = new Map<string, { data: FleetStatusResult; expiresAtMs: number }>();
 const inFlightFleetFetches = new Map<string, Promise<FleetStatusResult>>();
+
+function setFleetCache(key: string, value: { data: FleetStatusResult; expiresAtMs: number }) {
+  if (fleetCache.size >= FLEET_CACHE_MAX_ENTRIES) {
+    const oldestKey = fleetCache.keys().next().value;
+    if (oldestKey) fleetCache.delete(oldestKey);
+  }
+  fleetCache.set(key, value);
+}
 
 async function getCoalescedFleetStatus(showAll: boolean): Promise<FleetStatusResult> {
   const cacheKey = showAll ? 'all' : 'active_only';
@@ -103,7 +113,10 @@ async function getCoalescedFleetStatus(showAll: boolean): Promise<FleetStatusRes
       for (const trip of activeTrips) {
         const isStillActive = trip.expires_at ? new Date(trip.expires_at).getTime() > now : true;
         if (isStillActive && trip.bus_id) {
-          activeTripMap.set(trip.bus_id, trip);
+          const variations = getBusIdVariations(trip.bus_id);
+          for (const v of variations) {
+            activeTripMap.set(v, trip);
+          }
         }
       }
 
@@ -117,12 +130,11 @@ async function getCoalescedFleetStatus(showAll: boolean): Promise<FleetStatusRes
       const targetBuses = showAll
         ? buses
         : buses.filter((b: any) => {
-            const busId = b.id;
-            const busNumber = b.bus_number;
-            return (
-              activeTripMap.has(busId) ||
-              activeTripMap.has(busNumber)
-            );
+            const busVariations = [
+              ...getBusIdVariations(b.id || ''),
+              ...getBusIdVariations(b.bus_number || ''),
+            ];
+            return busVariations.some((v) => activeTripMap.has(v));
           });
 
       let liveCount = 0;
@@ -131,12 +143,31 @@ async function getCoalescedFleetStatus(showAll: boolean): Promise<FleetStatusRes
 
       const enrichedBuses: FleetBusLiveStatus[] = await Promise.all(targetBuses.map(async (b: any) => {
         const busId = b.id;
-        const activeTrip = activeTripMap.get(busId) || activeTripMap.get(b.bus_number);
+        const busVariations = [
+          ...getBusIdVariations(b.id || ''),
+          ...getBusIdVariations(b.bus_number || ''),
+        ];
+        let activeTrip: any = null;
+        for (const v of busVariations) {
+          if (activeTripMap.has(v)) {
+            activeTrip = activeTripMap.get(v);
+            break;
+          }
+        }
         const resolvedDriverUid = activeTrip?.driver_id || b.driver_uid || null;
         const driverProfile = resolvedDriverUid ? driverProfileByUid.get(resolvedDriverUid) : null;
         const isTripActive = Boolean(activeTrip);
 
-        const chosenLoc: any = (await getLastLocationForBusAsync(busId)) || (await getLastLocationForBusAsync(b.bus_number)) || null;
+        let chosenLoc: any = null;
+        for (const v of busVariations) {
+          if (v) {
+            const loc = await getLastLocationForBusAsync(v);
+            if (loc && loc.lat && loc.lng) {
+              chosenLoc = loc;
+              break;
+            }
+          }
+        }
 
         let locationStatus: 'LIVE' | 'STALE' | 'NO_SIGNAL' | 'INACTIVE' = 'INACTIVE';
         let locationObj: FleetBusLiveStatus['location'] = null;
@@ -225,7 +256,7 @@ async function getCoalescedFleetStatus(showAll: boolean): Promise<FleetStatusRes
         timestamp: new Date().toISOString(),
       };
 
-      fleetCache.set(cacheKey, {
+      setFleetCache(cacheKey, {
         data: result,
         expiresAtMs: Date.now() + FLEET_CACHE_TTL_MS,
       });

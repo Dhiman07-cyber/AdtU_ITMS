@@ -155,8 +155,16 @@ export async function getSharedBusTripSnapshot(busId: string): Promise<BusTripSn
         }
       }
 
-      // Resolve live location from in-memory cache or Redis
-      const lastLoc = (await getLastLocationForBusAsync(normKey)) || getLastLocationForBus(normKey);
+      // Resolve live location from in-memory cache or Redis across bus variations
+      const orderedSearchKeys = Array.from(
+        new Set([activeRow.bus_id, normKey, ...busVariations].filter(Boolean))
+      );
+
+      let lastLoc: any = null;
+      for (const key of orderedSearchKeys) {
+        lastLoc = (await getLastLocationForBusAsync(key)) || getLastLocationForBus(key);
+        if (lastLoc) break;
+      }
 
       let currentLocation = null;
       if (lastLoc) {

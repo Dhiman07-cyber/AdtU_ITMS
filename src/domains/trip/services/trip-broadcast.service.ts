@@ -8,12 +8,15 @@ async function getTransport() {
 export async function broadcastTripEvent(params: {
   busId: string;
   tripId: string;
-  event: 'trip_started' | 'trip_ended';
+  event: 'trip_started' | 'trip_ended' | 'trip_superseded';
   driverId?: string;
   routeId?: string;
   shift?: string;
   routeName?: string;
   busNumber?: string;
+  handover?: boolean;
+  previousDriverId?: string;
+  deviceId?: string;
 }) {
   const transport = await getTransport();
   // Trip lifecycle events belong on trip-status only.
@@ -33,6 +36,9 @@ export async function broadcastTripEvent(params: {
   if (params.shift) payload.shift = params.shift;
   if (params.routeName) payload.routeName = params.routeName;
   if (params.busNumber) payload.busNumber = params.busNumber;
+  if (params.handover !== undefined) payload.handover = String(params.handover);
+  if (params.previousDriverId) payload.previousDriverId = params.previousDriverId;
+  if (params.deviceId) payload.deviceId = params.deviceId;
 
   await transport.broadcast(channel, params.event, payload);
 }

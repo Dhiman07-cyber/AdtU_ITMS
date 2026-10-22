@@ -1,4 +1,5 @@
 import { getSupabaseServer } from '@/lib/supabase-server';
+import { getBusIdVariations, normalizeBusId } from '@/lib/utils';
 
 type BusRow = { id: string; bus_number?: string | null; route_id?: string | null; route_name?: string | null; status?: string | null };
 
@@ -8,6 +9,9 @@ export interface TripPreflightResult {
   busData?: BusRow;
   conflict: boolean;
   existingTripId?: string;
+  handover?: boolean;
+  previousDriverId?: string;
+  handoverFromTripId?: string;
 }
 
 /**
@@ -18,11 +22,38 @@ export interface TripPreflightResult {
  */
 export async function tripStartPreflight(driverId: string, busId: string): Promise<TripPreflightResult> {
   const supabase = getSupabaseServer();
+  const busVariations = getBusIdVariations(busId);
 
-  const [busResult, tripResult, driverTripResult] = await Promise.all([
-    supabase.from('buses').select('id, bus_number, route_id, route_name, status').eq('id', busId).maybeSingle(),
-    supabase.from('active_trips').select('trip_id, driver_id, expires_at').eq('bus_id', busId).eq('status', 'active').maybeSingle(),
-    supabase.from('active_trips').select('trip_id, bus_id, expires_at').eq('driver_id', driverId).eq('status', 'active').maybeSingle(),
+  const busQuery = supabase.from('buses').select('id, bus_number, route_id, route_name, status, primary_driver_uid, assigned_driver_id');
+  let busBuilder: any = typeof (busQuery as any).in === 'function'
+    ? (busQuery as any).in('id', busVariations)
+    : (busQuery as any).eq('id', busId);
+  if (typeof busBuilder?.limit === 'function') {
+    busBuilder = busBuilder.limit(1);
+  }
+  const busPromise = typeof busBuilder?.maybeSingle === 'function'
+    ? busBuilder.maybeSingle()
+    : Promise.resolve({ data: null, error: null });
+
+  const tripQuery = supabase.from('active_trips').select('trip_id, driver_id, bus_id, expires_at');
+  let tripBuilder: any = typeof (tripQuery as any).in === 'function'
+    ? (tripQuery as any).in('bus_id', busVariations)
+    : (tripQuery as any).eq('bus_id', busId);
+  if (typeof tripBuilder?.eq === 'function') {
+    tripBuilder = tripBuilder.eq('status', 'active');
+  }
+  if (typeof tripBuilder?.limit === 'function') {
+    tripBuilder = tripBuilder.limit(1);
+  }
+  const tripPromise = typeof tripBuilder?.maybeSingle === 'function'
+    ? tripBuilder.maybeSingle()
+    : Promise.resolve({ data: null, error: null });
+
+  const [busResult, tripResult, driverTripResult, driverProfileResult] = await Promise.all([
+    busPromise,
+    tripPromise,
+    supabase.from('active_trips').select('trip_id, bus_id, expires_at').eq('driver_id', driverId).eq('status', 'active').limit(1).maybeSingle(),
+    supabase.from('driver_profiles').select('uid, bus_id, assigned_bus_id, status, is_reserved').eq('uid', driverId).maybeSingle(),
   ]);
 
   const busData = busResult.data;
@@ -31,9 +62,23 @@ export async function tripStartPreflight(driverId: string, busId: string): Promi
     return { authorized: false, reason: `Bus is currently ${busData.status} and cannot start a trip`, conflict: false };
   }
 
+  // Check driver assignment (compare using normalized bus IDs)
+  const driverProfile = driverProfileResult?.data;
+  if (driverProfile) {
+    const driverBusId = driverProfile.assigned_bus_id || driverProfile.bus_id;
+    if (driverBusId && !driverProfile.is_reserved && normalizeBusId(driverBusId) !== normalizeBusId(busId)) {
+      return {
+        authorized: false,
+        reason: `You are assigned to bus ${driverBusId}, but attempting to start a trip on bus ${busId}`,
+        busData,
+        conflict: false,
+      };
+    }
+  }
+
   // 1. Check if the driver is already participating in an active trip on another vehicle (Invariant 1)
   const driverActiveTrip = driverTripResult?.data;
-  if (driverActiveTrip && driverActiveTrip.bus_id !== busId) {
+  if (driverActiveTrip && normalizeBusId(driverActiveTrip.bus_id) !== normalizeBusId(busId)) {
     const isDriverExpired = driverActiveTrip.expires_at ? Date.now() > new Date(driverActiveTrip.expires_at).getTime() : false;
     if (!isDriverExpired) {
       return {
@@ -58,18 +103,14 @@ export async function tripStartPreflight(driverId: string, busId: string): Promi
     return { authorized: true, busData, conflict: false, existingTripId: activeTrip.trip_id };
   }
 
-  // Different driver — check lock expiry
-  const isExpired = activeTrip.expires_at ? Date.now() > new Date(activeTrip.expires_at).getTime() : false;
-  if (isExpired) {
-    return { authorized: true, busData, conflict: false };
-  }
-
+  // Different driver — seamless atomic handover! Driver 2 can take over the bus in 0 seconds.
   return {
-    authorized: false,
-    reason: 'This bus is currently being operated by another driver',
+    authorized: true,
     busData,
-    conflict: true,
-    existingTripId: activeTrip.trip_id,
+    conflict: false,
+    handover: true,
+    previousDriverId: activeTrip.driver_id,
+    handoverFromTripId: activeTrip.trip_id,
   };
 }
 
@@ -88,7 +129,17 @@ export async function checkNoConflict(busId: string, driverId: string): Promise<
 export async function resolveRouteId(busId: string, preferredRouteId?: string): Promise<string> {
   if (preferredRouteId) return preferredRouteId;
   const supabase = getSupabaseServer();
-  const { data: bus } = await supabase.from('buses').select('route_id').eq('id', busId).maybeSingle();
+  const busVariations = getBusIdVariations(busId);
+  let routeQuery: any = supabase.from('buses').select('route_id');
+  if (typeof routeQuery?.in === 'function') {
+    routeQuery = routeQuery.in('id', busVariations);
+  } else if (typeof routeQuery?.eq === 'function') {
+    routeQuery = routeQuery.eq('id', busId);
+  }
+  if (typeof routeQuery?.limit === 'function') {
+    routeQuery = routeQuery.limit(1);
+  }
+  const { data: bus } = typeof routeQuery?.maybeSingle === 'function' ? await routeQuery.maybeSingle() : { data: null };
   if (!bus?.route_id) {
     throw new Error(`Bus ${busId} is not assigned to a valid route.`);
   }

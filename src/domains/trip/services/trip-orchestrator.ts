@@ -114,15 +114,21 @@ export async function startTrip(params: StartTripParams): Promise<StartTripOutpu
 
   const tripId = params.tripId || crypto.randomUUID();
 
-  const lockResult = await tripLockService.startTrip(params.driverId, params.busId, effectiveRouteId, tripShift, tripId);
+  const lockResult = await tripLockService.startTrip(params.driverId, params.busId, effectiveRouteId, tripShift, tripId, params.deviceId);
   if (!lockResult.success) {
     appLogger.error('trip', 'start_failed', { ...logCtx, tripId, routeId: effectiveRouteId, reason: lockResult.reason, errorClass: ErrorClass.TRIP_LOCK_FAILED, latencyMs: Date.now() - start });
     return { success: false, reason: lockResult.reason, errorCode: lockResult.errorCode };
   }
 
+  const isHandover = Boolean(preflight.handover || lockResult.handover);
+  const previousDriverId = preflight.previousDriverId || lockResult.previousDriverId;
+
   // Drop any cached trip-lock entries and in-memory location anchors for this driver/bus —
   // ensures every new trip begins with a completely clean GPS state.
   invalidateActiveTripCache(params.busId, params.driverId);
+  if (previousDriverId) {
+    invalidateActiveTripCache(params.busId, previousDriverId);
+  }
   invalidateScannerBusCache(params.driverId);
   clearInMemoryLastLocation(params.busId);
 
@@ -139,6 +145,9 @@ export async function startTrip(params: StartTripParams): Promise<StartTripOutpu
       routeId: effectiveRouteId,
       shift: tripShift,
       busNumber,
+      handover: isHandover,
+      previousDriverId,
+      deviceId: params.deviceId,
     });
 
     // FCM off the critical path but bounded (see dispatchFcmBounded): dedup
@@ -164,7 +173,7 @@ export async function startTrip(params: StartTripParams): Promise<StartTripOutpu
     routeId: effectiveRouteId,
     shift: tripShift,
     deviceId: params.deviceId,
-    expiresAtMs: Date.now() + 600_000,
+    expiresAtMs: Date.now() + 1800_000,
   });
 
   return { success: true, tripId: activeTripId, routeId: effectiveRouteId, shift: tripShift };

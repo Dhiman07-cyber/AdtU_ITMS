@@ -58,27 +58,10 @@ export const POST = withSecurity(
       );
     }
 
-    // Seamless Device Handover / Crash Resume:
-    // If deviceId is provided (or passed via x-device-id header), immediately bind this device
-    // in device_sessions and prime the in-memory cache so GPS ticks are never rejected with ANOTHER_DEVICE_ACTIVE.
+    // Seamless Device Handover:
+    // deviceId was passed into acquire_trip_lock and persisted to public.buses.driver_device_session
+    // and active_trips.device_id atomically in 0ms. Prime the in-memory cache directly.
     if (requestDeviceId) {
-      const nowIso = new Date().toISOString();
-      const expiresAtIso = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-      const supabase = getSupabaseServer();
-      await supabase
-        .from('device_sessions')
-        .upsert({
-          user_id: driverUid,
-          device_id: requestDeviceId,
-          feature: 'driver_location_share',
-          last_active_at: nowIso,
-          last_active: nowIso,
-          expires_at: expiresAtIso,
-          created_at: nowIso,
-        }, {
-          onConflict: 'user_id,feature',
-          ignoreDuplicates: false,
-        });
       setCachedDeviceSession(driverUid, requestDeviceId, Date.now());
     }
 
@@ -90,7 +73,7 @@ export const POST = withSecurity(
         routeId: result.routeId || '',
         shift: result.shift,
         deviceId: requestDeviceId,
-        expiresAtMs: Date.now() + 600_000,
+        expiresAtMs: Date.now() + 1800_000,
       });
     }
 
