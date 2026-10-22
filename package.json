@@ -67,6 +67,7 @@
     "docker:build": "docker compose build",
     "docker:ps": "docker compose ps",
     "migrate:supabase": "supabase migration up",
+    "websocket": "NODE_ENV=production LOG_LEVEL=info tsx server/index.ts",
     "websocket:prod": "NODE_ENV=production LOG_LEVEL=info tsx server/index.ts"
   },
   "allowScripts": {
