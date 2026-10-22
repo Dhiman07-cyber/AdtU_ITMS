@@ -247,8 +247,8 @@ export function useApiCollection<T = Record<string, any>>(
 
             // Sort by orderByField client-side (API routes don't support sort params yet)
             const sorted = [...allData].sort((a: any, b: any) => {
-                const aVal = a?.[orderByField] ?? '';
-                const bVal = b?.[orderByField] ?? '';
+                const aVal = a?.[orderByField] ?? a?.updatedAt ?? a?.updated_at ?? a?.createdAt ?? a?.created_at ?? a?.id ?? '';
+                const bVal = b?.[orderByField] ?? b?.updatedAt ?? b?.updated_at ?? b?.createdAt ?? b?.created_at ?? b?.id ?? '';
                 if (orderDirection === 'asc') return aVal > bVal ? 1 : aVal < bVal ? -1 : 0;
                 return aVal < bVal ? 1 : aVal > bVal ? -1 : 0;
             });
@@ -344,6 +344,8 @@ export function useApiCollection<T = Record<string, any>>(
     };
 
     const refresh = async () => {
+        offsetRef.current = 0;
+        fetchingNextPageRef.current = false;
         await fetchPage(true);
     };
 
@@ -360,7 +362,7 @@ export function useApiCollection<T = Record<string, any>>(
                 retryTimerRef.current = null;
             }
         };
-    }, [fetchOnMount, enabled, currentUser?.uid]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [fetchOnMount, enabled, currentUser?.uid]);
 
     // Auto-refresh
     useEffect(() => {

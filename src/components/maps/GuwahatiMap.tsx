@@ -457,9 +457,14 @@ const GuwahatiMap = forwardRef<GuwahatiMapHandles, Props>(({
     };
   }, []);
 
+  const [styleVersion, setStyleVersion] = useState(0);
+
   useEffect(() => {
     if (mapRef.current && mapLoaded) {
       mapRef.current.setStyle(buildVectorStyle(pmtilesUrl, theme) as any, { diff: true } as any);
+      mapRef.current.once('style.load', () => {
+        setStyleVersion(v => v + 1);
+      });
     }
   }, [theme, pmtilesUrl, mapLoaded]);
 
@@ -501,7 +506,7 @@ const GuwahatiMap = forwardRef<GuwahatiMapHandles, Props>(({
     const rawHeading = busPosition.heading !== undefined ? Number(busPosition.heading) : 0;
     // Retain last known valid heading if heading is undefined or 0 (never snap backward or spin when stationary)
     let effectiveHeading = cumulativeHeadingRef.current;
-    if (Number.isFinite(rawHeading) && rawHeading > 0) {
+    if (Number.isFinite(rawHeading) && rawHeading >= 0 && (rawHeading > 0 || (busPosition.speed ?? 0) > 0.5)) {
       cumulativeHeadingRef.current = computeShortestRotation(cumulativeHeadingRef.current, rawHeading);
       lastValidHeadingRef.current = rawHeading;
       effectiveHeading = cumulativeHeadingRef.current;
@@ -620,7 +625,7 @@ const GuwahatiMap = forwardRef<GuwahatiMapHandles, Props>(({
         .addTo(mapRef.current!);
       markersRef.current.set(p.id, m);
     });
-  }, [points, theme, mapLoaded]);
+  }, [points, theme, mapLoaded, styleVersion]);
 
   if (fatal) return <div className="w-full h-full bg-slate-900 flex items-center justify-center text-white">Unavailable</div>;
 

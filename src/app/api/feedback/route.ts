@@ -1,4 +1,4 @@
-﻿
+
 import { getBusById } from '@/domains/fleet';
 import { getDriverById } from '@/domains/identity';
 import {
@@ -31,7 +31,7 @@ export async function POST(request: NextRequest) {
     // Get token from Authorization header or body
     let token = body.idToken;
     if (!token) {
-      const authHeader = request.headers.get('authorization');
+      const authHeader = request.headers.get('authorization') || request.headers.get('Authorization');
       if (authHeader && authHeader.startsWith('Bearer ')) {
         token = authHeader.substring(7);
       }
@@ -185,7 +185,7 @@ export async function POST(request: NextRequest) {
 export async function GET(request: NextRequest) {
   try {
     // Get token from Authorization header
-    const authHeader = request.headers.get('authorization');
+    const authHeader = request.headers.get('authorization') || request.headers.get('Authorization');
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return NextResponse.json(
         { error: 'Authentication required' },

@@ -17,7 +17,7 @@ export async function PATCH(
         const feedbackId = resolvedParams.id;
 
         // Get token from Authorization header
-        const authHeader = request.headers.get('authorization');
+        const authHeader = request.headers.get('authorization') || request.headers.get('Authorization');
         if (!authHeader || !authHeader.startsWith('Bearer ')) {
             return NextResponse.json(
                 { error: 'Authentication required' },

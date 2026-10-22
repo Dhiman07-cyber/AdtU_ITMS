@@ -16,7 +16,7 @@ export async function DELETE(
     const { id: feedbackId } = await params;
 
     // Get token from Authorization header
-    const authHeader = request.headers.get('authorization');
+    const authHeader = request.headers.get('authorization') || request.headers.get('Authorization');
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return NextResponse.json(
         { error: 'Authentication required' },

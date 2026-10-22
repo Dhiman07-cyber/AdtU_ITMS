@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, useImperativeHandle, forwardRef } from "react";
 import { toast } from "sonner";
+import { getAllBuses, getAllDrivers, getAllRoutes } from "@/lib/dataService";
 
 // Assignment components and services
 import { AssignmentFinalizeCard } from "@/components/assignment/AssignmentFinalizeCard";
@@ -169,22 +170,18 @@ export const DriverReassignmentTab = forwardRef<DriverReassignmentTabRef, Driver
       if (!currentUser) return;
       setLoading(true);
       try {
-        const token = await currentUser.getIdToken();
-        const [driversRes, busesRes, routesRes] = await Promise.all([
-          fetch("/api/drivers", { headers: { Authorization: `Bearer ${token}` } }),
-          fetch("/api/buses", { headers: { Authorization: `Bearer ${token}` } }),
-          fetch("/api/routes", { headers: { Authorization: `Bearer ${token}` } }),
+        const [driversDataRaw, busesDataRaw, routesDataRaw] = await Promise.all([
+          getAllDrivers(),
+          getAllBuses(),
+          getAllRoutes(),
         ]);
 
-        const driversJson = await driversRes.json();
-        const driversData = (Array.isArray(driversJson) ? driversJson : driversJson.drivers || []).map((d: any) => ({
+        const driversData = driversDataRaw.map((d: any) => ({
           id: d.id || d.uid,
           ...d,
         })) as DriverData[];
-        const busesJson = await busesRes.json();
-        const busesData = (busesJson.buses || []).map((b: any) => ({ ...b, id: b.busId || b.id })) as BusData[];
-        const routesJson = await routesRes.json();
-        const routesData = (Array.isArray(routesJson) ? routesJson : routesJson.routes || []).map((r: any) => ({
+        const busesData = busesDataRaw.map((b: any) => ({ ...b, id: b.busId || b.id })) as BusData[];
+        const routesData = routesDataRaw.map((r: any) => ({
           id: r.id || r.routeId,
           ...r,
         })) as RouteData[];

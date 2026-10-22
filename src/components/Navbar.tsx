@@ -149,7 +149,7 @@ const Navbar = React.memo(function Navbar({ onMenuToggle, isSidebarOpen = false 
 
   // Hide bottom nav when mobile menu is open
   useEffect(() => {
-    const bottomNavs = document.querySelectorAll('#student-bottom-nav, nav.fixed.bottom-0');
+    const bottomNavs = document.querySelectorAll('#student-bottom-nav');
     if (isMobileMenuOpen) {
       bottomNavs.forEach(nav => {
         if (nav instanceof HTMLElement) {

@@ -6,36 +6,64 @@ import type {
 	Student
 } from '@/lib/types';
 
+import { dataCache as sharedDataCache, invalidateCollectionCache as sharedInvalidateCollectionCache } from '@/hooks/usePaginatedCollection';
+
 // Re-export domain-specific client functions
 export * from './clients/driver.client';
 export * from './clients/fleet.client';
 export * from './clients/route.client';
 
 // ============================================================================
-// IN-MEMORY CACHE - Prevents redundant reads within the same session
+// SHARED IN-MEMORY CACHE & IN-FLIGHT PROMISE DEDUPLICATION (Fix 142)
 // ============================================================================
 const CACHE_TTL = 60 * 1000; // 1 minute default TTL
-const dataCache = new Map<string, { data: any, timestamp: number }>();
+const inFlightDataServiceFetches = new Map<string, Promise<any>>();
 
-const getCachedData = (key: string) => {
-  const entry = dataCache.get(key);
+const getCachedData = <T = any>(key: string): T | null => {
+  const entry = sharedDataCache.get(key);
   if (entry && (Date.now() - entry.timestamp < CACHE_TTL)) {
-    return entry.data;
+    return entry.data as T;
   }
   return null;
 };
 
 const setCachedData = (key: string, data: any) => {
-  dataCache.set(key, { data, timestamp: Date.now() });
+  sharedDataCache.set(key, { data, timestamp: Date.now() });
 };
 
 export const invalidateCache = (key?: string) => {
   if (key) {
-    dataCache.delete(key);
+    sharedDataCache.delete(key);
+    inFlightDataServiceFetches.delete(key);
   } else {
-    dataCache.clear();
+    sharedDataCache.clear();
+    inFlightDataServiceFetches.clear();
   }
 };
+
+async function dedupedFetch<T>(cacheKey: string, fetchFn: () => Promise<T>): Promise<T> {
+  const cached = getCachedData<T>(cacheKey);
+  if (cached !== null && cached !== undefined) return cached;
+
+  if (inFlightDataServiceFetches.has(cacheKey)) {
+    return inFlightDataServiceFetches.get(cacheKey) as Promise<T>;
+  }
+
+  const promise = (async () => {
+    try {
+      const data = await fetchFn();
+      if (data !== null && data !== undefined) {
+        setCachedData(cacheKey, data);
+      }
+      return data;
+    } finally {
+      inFlightDataServiceFetches.delete(cacheKey);
+    }
+  })();
+
+  inFlightDataServiceFetches.set(cacheKey, promise);
+  return promise;
+}
 
 async function getAuthHeaders(): Promise<Record<string, string>> {
   try {
@@ -56,53 +84,47 @@ async function getAuthHeaders(): Promise<Record<string, string>> {
 // ============================================================================
 export const getStudentByUid = async (uid: string): Promise<any | null> => {
   const cacheKey = `student_uid_${uid}`;
-  const cached = getCachedData(cacheKey);
-  if (cached) return cached;
-  try {
-    const headers = await getAuthHeaders();
-    const response = await fetch(`/api/students/${encodeURIComponent(uid)}`, { headers });
-    if (!response.ok) return null;
-    const data = await response.json();
-    setCachedData(cacheKey, data);
-    return data;
-  } catch (error) {
-    console.error('Error fetching student by UID:', error);
-    return null;
-  }
+  return dedupedFetch(cacheKey, async () => {
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetch(`/api/students/${encodeURIComponent(uid)}`, { headers });
+      if (!response.ok) return null;
+      return await response.json();
+    } catch (error) {
+      console.error('Error fetching student by UID:', error);
+      return null;
+    }
+  });
 };
 
 export const getAllStudents = async (): Promise<Student[]> => {
   const cacheKey = 'all_students';
-  const cached = getCachedData(cacheKey);
-  if (cached) return cached;
-  try {
-    const headers = await getAuthHeaders();
-    const response = await fetch('/api/students', { headers });
-    if (!response.ok) return [];
-    const data = await response.json();
-    setCachedData(cacheKey, data);
-    return data;
-  } catch (error) {
-    console.error('Error fetching students:', error);
-    return [];
-  }
+  return dedupedFetch(cacheKey, async () => {
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetch('/api/students', { headers });
+      if (!response.ok) return [];
+      return await response.json();
+    } catch (error) {
+      console.error('Error fetching students:', error);
+      return [];
+    }
+  });
 };
 
 export const getStudentById = async (id: string): Promise<any | null> => {
   const cacheKey = `student_id_${id}`;
-  const cached = getCachedData(cacheKey);
-  if (cached) return cached;
-  try {
-    const headers = await getAuthHeaders();
-    const response = await fetch(`/api/students/${encodeURIComponent(id)}`, { headers });
-    if (!response.ok) return null;
-    const data = await response.json();
-    setCachedData(cacheKey, data);
-    return data;
-  } catch (error) {
-    console.error('Error fetching student:', error);
-    return null;
-  }
+  return dedupedFetch(cacheKey, async () => {
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetch(`/api/students/${encodeURIComponent(id)}`, { headers });
+      if (!response.ok) return null;
+      return await response.json();
+    } catch (error) {
+      console.error('Error fetching student:', error);
+      return null;
+    }
+  });
 };
 
 export const deleteStudent = async (id: string): Promise<boolean> => {
@@ -189,34 +211,31 @@ export const updateStudent = async (id: string, data: Partial<Student>): Promise
 // ============================================================================
 export const getAllModerators = async (): Promise<Moderator[]> => {
   const cacheKey = 'all_moderators';
-  const cached = getCachedData(cacheKey);
-  if (cached) return cached;
-  try {
-    const response = await fetch('/api/moderators');
-    if (!response.ok) return [];
-    const data = await response.json();
-    setCachedData(cacheKey, data);
-    return data;
-  } catch (error) {
-    console.error('Error fetching moderators:', error);
-    return [];
-  }
+  return dedupedFetch(cacheKey, async () => {
+    try {
+      const response = await fetch('/api/moderators');
+      if (!response.ok) return [];
+      return await response.json();
+    } catch (error) {
+      console.error('Error fetching moderators:', error);
+      return [];
+    }
+  });
 };
 
 export const getModeratorById = async (id: string): Promise<Moderator | null> => {
   const cacheKey = `moderator_${id}`;
-  const cached = getCachedData(cacheKey);
-  if (cached) return cached;
-  try {
-    const response = await fetch(`/api/moderators/${id}`);
-    if (!response.ok) return null;
-    const data = await response.json();
-    if (data) setCachedData(cacheKey, data);
-    return data;
-  } catch (error) {
-    console.error('Error fetching moderator:', error);
-    return null;
-  }
+  return dedupedFetch(cacheKey, async () => {
+    try {
+      const response = await fetch(`/api/moderators/${id}`);
+      if (!response.ok) return null;
+      const data = await response.json();
+      return data || null;
+    } catch (error) {
+      console.error('Error fetching moderator:', error);
+      return null;
+    }
+  });
 };
 
 export const deleteModerator = async (id: string): Promise<boolean> => {
@@ -287,59 +306,54 @@ export const updateModerator = async (id: string, data: Partial<Moderator>): Pro
 
 export const getStudentsByBusId = async (busId: string): Promise<Student[]> => {
   const cacheKey = `students_bus_${busId}`;
-  const cached = getCachedData(cacheKey);
-  if (cached) return cached;
-  try {
-    const headers = await getAuthHeaders();
-    const response = await fetch(`/api/students?busId=${encodeURIComponent(busId)}`, { headers });
-    if (!response.ok) return [];
-    const data = await response.json();
-    setCachedData(cacheKey, data);
-    return data;
-  } catch (error) {
-    console.error('Error fetching students by bus ID:', error);
-    return [];
-  }
+  return dedupedFetch(cacheKey, async () => {
+    try {
+      const headers = await getAuthHeaders();
+      const response = await fetch(`/api/students?busId=${encodeURIComponent(busId)}`, { headers });
+      if (!response.ok) return [];
+      return await response.json();
+    } catch (error) {
+      console.error('Error fetching students by bus ID:', error);
+      return [];
+    }
+  });
 };
 
 export const getPaymentsByStudentUid = async (uid: string, enrollmentId?: string): Promise<any[]> => {
   const cacheKey = `payments_${uid}_${enrollmentId || ''}`;
-  const cached = getCachedData(cacheKey);
-  if (cached) return cached;
-
-  try {
-    const auth = getAuth();
-    const currentUser = auth.currentUser;
-    if (!currentUser) {
-      console.warn('getPaymentsByStudentUid: No authenticated user found');
-      return [];
-    }
-    const idToken = await currentUser.getIdToken();
-
-    let url = `/api/payment/transactions?studentUid=${encodeURIComponent(uid)}`;
-    if (enrollmentId) {
-      url += `&studentId=${encodeURIComponent(enrollmentId)}`;
-    }
-
-    const response = await fetch(url, {
-      headers: {
-        'Authorization': `Bearer ${idToken}`
+  return dedupedFetch(cacheKey, async () => {
+    try {
+      const auth = getAuth();
+      const currentUser = auth.currentUser;
+      if (!currentUser) {
+        console.warn('getPaymentsByStudentUid: No authenticated user found');
+        return [];
       }
-    });
+      const idToken = await currentUser.getIdToken();
 
-    if (!response.ok) {
-      console.error('getPaymentsByStudentUid: API error', response.status);
+      let url = `/api/payment/transactions?studentUid=${encodeURIComponent(uid)}`;
+      if (enrollmentId) {
+        url += `&studentId=${encodeURIComponent(enrollmentId)}`;
+      }
+
+      const response = await fetch(url, {
+        headers: {
+          'Authorization': `Bearer ${idToken}`
+        }
+      });
+
+      if (!response.ok) {
+        console.error('getPaymentsByStudentUid: API error', response.status);
+        return [];
+      }
+
+      const data = await response.json();
+      return data.transactions || [];
+    } catch (error) {
+      console.error('Error fetching student payments from Supabase API:', error);
       return [];
     }
-
-    const data = await response.json();
-    const transactions = data.transactions || [];
-    setCachedData(cacheKey, transactions);
-    return transactions;
-  } catch (error) {
-    console.error('Error fetching student payments from Supabase API:', error);
-    return [];
-  }
+  });
 };
 
 export type { Route } from '@/lib/types';

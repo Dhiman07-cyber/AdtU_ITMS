@@ -34,6 +34,7 @@ import {
   type OverloadedShift,
 } from "@/lib/utils/overload-detection";
 import { type CanonicalShift } from "@/lib/utils/shift-utils";
+import { getAllBuses, getAllDrivers, getAllRoutes } from "@/lib/dataService";
 
 export interface StudentReassignmentTabRef {
   exportData: () => void;
@@ -129,19 +130,11 @@ export const StudentReassignmentTab = forwardRef<StudentReassignmentTabRef, Stud
       if (!currentUser) return [];
       if (!silent) setLoading(true);
       try {
-        const token = await currentUser.getIdToken();
-        const [busesRes, driversRes, routesRes] = await Promise.all([
-          fetch("/api/buses", { headers: { Authorization: `Bearer ${token}` } }),
-          fetch("/api/drivers", { headers: { Authorization: `Bearer ${token}` } }),
-          fetch("/api/routes", { headers: { Authorization: `Bearer ${token}` } }),
+        const [busesRaw, driversRaw, fetchedRoutes] = await Promise.all([
+          getAllBuses(),
+          getAllDrivers(),
+          getAllRoutes(),
         ]);
-
-        const busesJson = await busesRes.json();
-        const busesRaw = busesJson.buses || (Array.isArray(busesJson) ? busesJson : []);
-        const driversJson = await driversRes.json();
-        const driversRaw = Array.isArray(driversJson) ? driversJson : driversJson.drivers || [];
-        const routesJson = await routesRes.json();
-        const fetchedRoutes = routesJson.routes || (Array.isArray(routesJson) ? routesJson : []);
 
         const driverMap = new Map<string, any>();
         for (const d of driversRaw) {

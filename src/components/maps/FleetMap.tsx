@@ -354,7 +354,7 @@ function createBusMarkerElement(bus: FleetBusLiveStatus, isSelected: boolean) {
 export default function FleetMap({ role = "admin" }: { role?: "admin" | "moderator" }) {
   const { currentUser: user } = useAuth();
   const { theme } = useTheme();
-  const isDark = theme === "dark" || true; // Always prioritize sleek dark radar
+  const isDark = theme !== "light"; // Defaults to dark radar when unspecified
 
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
@@ -362,6 +362,7 @@ export default function FleetMap({ role = "admin" }: { role?: "admin" | "moderat
   const campusMarkerRef = useRef<MapLibreMarker | null>(null);
   const fleetAlignmentStatesRef = useRef<Map<string, RouteAlignmentState>>(new Map());
   const wsRef = useRef<WebSocket | null>(null);
+  const busesRef = useRef<FleetBusLiveStatus[]>([]);
 
   const [buses, setBuses] = useState<FleetBusLiveStatus[]>([]);
   const [selectedBusId, setSelectedBusId] = useState<string | null>(null);
@@ -463,9 +464,9 @@ export default function FleetMap({ role = "admin" }: { role?: "admin" | "moderat
           setTimeout(() => {
             try {
               const data = JSON.parse(evt.data);
-              if (data.type === "authenticated") {
+              if (data.type === "authenticated" || data.type === "auth_ok") {
                 // Subscribe to all active buses
-                buses.forEach((b) => {
+                busesRef.current.forEach((b) => {
                   ws?.send(
                     JSON.stringify({
                       type: "subscribe",
@@ -473,8 +474,12 @@ export default function FleetMap({ role = "admin" }: { role?: "admin" | "moderat
                     })
                   );
                 });
-              } else if (data.event === "bus_location_update" && data.payload) {
-                const p = data.payload;
+              } else if (
+                (data.event === "bus_location_update" && data.payload) ||
+                data.type === "bus_location" ||
+                (data.type === "message" && typeof data.channel === "string" && data.channel.startsWith("bus_location_"))
+              ) {
+                const p = data.payload || data.data || data;
                 startTransition(() => {
                   setBuses((prev) =>
                     prev.map((b) => {
@@ -517,7 +522,22 @@ export default function FleetMap({ role = "admin" }: { role?: "admin" | "moderat
       if (retryTimer) clearTimeout(retryTimer);
       if (ws) ws.close();
     };
-  }, [user, buses.length]);
+  }, [user]);
+
+  // FIX 45: Subscribe to newly active buses over existing WebSocket without reconnecting
+  useEffect(() => {
+    busesRef.current = buses;
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      buses.forEach((b) => {
+        wsRef.current?.send(
+          JSON.stringify({
+            type: "subscribe",
+            channel: `bus_location_${b.busId}`,
+          })
+        );
+      });
+    }
+  }, [buses]);
 
   // Toggle map dark/light vector style
   const toggleMapTheme = useCallback(() => {
@@ -552,7 +572,7 @@ export default function FleetMap({ role = "admin" }: { role?: "admin" | "moderat
       if (isCancelled || !mapContainerRef.current) return;
 
       const pmtilesUrl = getGuwahatiPmtilesUrl();
-      const style = buildVectorStyle(pmtilesUrl, true);
+      const style = buildVectorStyle(pmtilesUrl, isDark);
 
       const map = new maplibregl.Map({
         container: mapContainerRef.current,
