@@ -30,7 +30,13 @@ const { mockGetSupabaseServer, createDefaultClient } = vi.hoisted(() => {
       let queriedId: string | null = null;
       const chain: any = {
         select: () => chain,
-        in: () => chain,
+        in: (col: string, vals: any) => {
+          if ((col === 'id' || col === 'bus_id') && Array.isArray(vals) && vals.length > 0) {
+            queriedId = vals[0];
+          }
+          return chain;
+        },
+        limit: () => chain,
         gt: () => chain,
         eq: (col: string, val: any) => {
           if (col === 'id' || col === 'bus_id') queriedId = val;

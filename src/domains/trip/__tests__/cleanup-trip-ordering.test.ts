@@ -155,17 +155,29 @@ describe('WAIT-003: cleanupTrip — broadcast/delete ordering', () => {
     ];
 
     let deleteFilterBusId: string | null = null;
-    let deleteFilterTripId: string | null = null;
+    let busDeleteChainedTripId: string | null = null;
 
     mockFrom.mockImplementation((table: string) => {
       if (table === 'waiting_flags') {
+        let isBusDelete = false;
         const chain: any = {};
         chain.eq = vi.fn((field: string, val: string) => {
-          if (field === 'bus_id') deleteFilterBusId = val;
-          if (field === 'trip_id') deleteFilterTripId = val;
+          if (field === 'bus_id') {
+            deleteFilterBusId = val;
+            isBusDelete = true;
+          }
+          if (field === 'trip_id' && isBusDelete) {
+            busDeleteChainedTripId = val;
+          }
           return chain;
         });
-        chain.in = vi.fn(() => chain);
+        chain.in = vi.fn((field: string, vals: any) => {
+          if (field === 'bus_id') {
+            deleteFilterBusId = Array.isArray(vals) ? vals[0] : vals;
+            isBusDelete = true;
+          }
+          return chain;
+        });
         chain.select = vi.fn().mockResolvedValue({ data: orphanedFlags, error: null });
         return {
           delete: vi.fn(() => chain),
@@ -178,7 +190,7 @@ describe('WAIT-003: cleanupTrip — broadcast/delete ordering', () => {
 
     // Assert that the delete filter was strictly scoped to bus_id and DID NOT filter on trip_id
     expect(deleteFilterBusId).toBe('b1');
-    expect(deleteFilterTripId).toBeNull();
+    expect(busDeleteChainedTripId).toBeNull();
 
     // Verify broadcasts were dispatched for both orphaned flags
     const removedCalls = mockEmitEvent.mock.calls.filter(
