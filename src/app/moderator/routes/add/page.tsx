@@ -9,6 +9,7 @@ import { useAuth } from '@/contexts/auth-context';
 import { useToast } from "@/contexts/toast-context";
 import AllStopsData from "@/data/All_stops.json";
 import { signalCollectionRefresh } from "@/hooks/useEventDrivenRefresh";
+import { invalidateCollectionCache } from "@/hooks/useApiCollection";
 import { useModeratorPermissions } from "@/hooks/useModeratorPermissions";
 import { getAllRoutes } from "@/lib/dataService";
 import { ArrowDown,GripVertical,MapPin,Plus,RotateCcw,X } from "lucide-react";
@@ -225,6 +226,7 @@ export default function AddRoutePage() {
       }
 
       addToast("Route created successfully!", 'success');
+      invalidateCollectionCache('routes');
       signalCollectionRefresh('routes');
 
       setTimeout(() => {

@@ -44,11 +44,11 @@ import { useAuth } from "@/contexts/auth-context";
 import { useToast } from "@/contexts/toast-context";
 import { invalidateCollectionCache, useApiCollection } from "@/hooks/useApiCollection";
 import { useEventDrivenRefresh } from "@/hooks/useEventDrivenRefresh";
+import { useLocalAndServerSearch } from "@/hooks/useLocalAndServerSearch";
 import { useModeratorPermissions } from "@/hooks/useModeratorPermissions";
 import { deleteDriver } from "@/lib/dataService";
 import { exportToExcel } from "@/lib/export-helpers";
 import { safeImageSrc } from "@/lib/security/url-sanitizer";
-import { supabase } from "@/lib/supabase-client";
 import { cn } from "@/lib/utils";
 import { formatDateDDMMYYYY } from "@/lib/utils/date-utils";
 import {
@@ -70,6 +70,7 @@ import {
   UserCog,
   Users,
   UserX,
+  X,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -254,24 +255,45 @@ export default function ModeratorDriversHub() {
     return { total, activeCount, suspendedCount, assignedCount };
   }, [drivers]);
 
+  // Local matcher for Tier 1 search (0ms, 0 network calls)
+  const driverLocalMatcher = useMemo(() => {
+    return (driver: any, term: string) => {
+      const assignedBus = busById.get(driver.busId);
+      const busText = assignedBus ? `${assignedBus.busNumber} ${assignedBus.routeNumber || ""}`.toLowerCase() : "reserved";
+      const name = (driver.name || driver.fullName || "").toLowerCase();
+      const email = (driver.email || "").toLowerCase();
+      const phone = (driver.phone || driver.phoneNumber || "");
+      const employeeId = (driver.employeeId || driver.empId || "").toLowerCase();
+      const licenseNumber = (driver.licenseNumber || "").toLowerCase();
+
+      return (
+        name.includes(term) ||
+        email.includes(term) ||
+        phone.includes(term) ||
+        employeeId.includes(term) ||
+        licenseNumber.includes(term) ||
+        busText.includes(term)
+      );
+    };
+  }, [busById]);
+
+  const {
+    results: searchedDrivers,
+    isSearchingServer,
+    isServerFallback,
+  } = useLocalAndServerSearch(
+    drivers,
+    searchTerm,
+    driverLocalMatcher,
+    "/api/drivers",
+    {
+      extractItems: (json: any) => json.drivers || json.data || [],
+    }
+  );
+
   // Filtered List
   const filteredDrivers = useMemo(() => {
-    const term = searchTerm.toLowerCase();
-    return drivers.filter((driver) => {
-      const assignedBus = busById.get(driver.busId);
-      const busText = assignedBus ? `${assignedBus.busNumber} ${assignedBus.routeNumber || ""}` : "reserved";
-
-      const matchesSearch =
-        !searchTerm ||
-        (driver.name && driver.name.toLowerCase().includes(term)) ||
-        (driver.email && driver.email.toLowerCase().includes(term)) ||
-        (driver.fullName && driver.fullName.toLowerCase().includes(term)) ||
-        (driver.phone && driver.phone.includes(searchTerm)) ||
-        (driver.employeeId && driver.employeeId.toLowerCase().includes(term)) ||
-        (driver.empId && driver.empId.toLowerCase().includes(term)) ||
-        (driver.licenseNumber && driver.licenseNumber.toLowerCase().includes(term)) ||
-        busText.toLowerCase().includes(term);
-
+    return searchedDrivers.filter((driver) => {
       const currentStatus = (driver.status || "active").toLowerCase();
       const matchesStatus =
         statusFilter === "all" ||
@@ -298,9 +320,9 @@ export default function ModeratorDriversHub() {
         }
       }
 
-      return matchesSearch && matchesStatus && matchesAssignment && matchesExperience;
+      return matchesStatus && matchesAssignment && matchesExperience;
     });
-  }, [drivers, searchTerm, statusFilter, assignmentFilter, experienceFilter, busById]);
+  }, [searchedDrivers, statusFilter, assignmentFilter, experienceFilter]);
 
   // Section Pagination & Anti-Layout-Shift State
   const PAGE_SIZE = 25;
@@ -533,13 +555,32 @@ export default function ModeratorDriversHub() {
         <CardContent className="p-4 space-y-4">
           <div className="flex flex-col md:flex-row gap-3">
             <div className="relative flex-1">
-              <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+              {isSearchingServer ? (
+                <Loader2 className="absolute left-3 top-2.5 h-4 w-4 text-blue-500 animate-spin" />
+              ) : (
+                <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+              )}
               <Input
                 placeholder="Search by name, email, phone, employee ID..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-9 h-9 text-xs bg-slate-50 dark:bg-zinc-800/70 border-zinc-200 dark:border-zinc-700/60 focus:bg-white dark:focus:bg-zinc-900 transition-colors"
+                className="pl-9 pr-24 h-9 text-xs bg-slate-50 dark:bg-zinc-800/70 border-zinc-200 dark:border-zinc-700/60 focus:bg-white dark:focus:bg-zinc-900 transition-colors"
               />
+              <div className="absolute right-2.5 top-2 flex items-center gap-1.5">
+                {isServerFallback && (
+                  <span className="text-[10px] text-blue-600 dark:text-blue-400 font-semibold bg-blue-50 dark:bg-blue-950/60 px-1.5 py-0.5 rounded border border-blue-200 dark:border-blue-900">
+                    Server Match
+                  </span>
+                )}
+                {searchTerm && (
+                  <button
+                    onClick={() => setSearchTerm("")}
+                    className="text-muted-foreground hover:text-foreground p-0.5 cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
             </div>
 
             <div className="grid grid-cols-2 md:flex items-center gap-2">

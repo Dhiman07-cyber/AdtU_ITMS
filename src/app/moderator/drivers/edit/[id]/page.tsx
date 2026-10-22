@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from '@/contexts/auth-context';
 import { useToast } from '@/contexts/toast-context';
 import { signalCollectionRefresh } from '@/hooks/useEventDrivenRefresh';
+import { invalidateCollectionCache } from '@/hooks/useApiCollection';
 import { getAllBuses,getAllRoutes,getDriverById,updateDriver } from '@/lib/dataService';
 import { Route } from '@/lib/types';
 import { Camera,Info } from "lucide-react";
@@ -303,6 +304,7 @@ export default function EditDriverPage({ params }: { params: Promise<{ id: strin
       const success = await updateDriver(driverId, updateData);
       if (success) {
         addToast('Driver updated successfully!', 'success');
+        invalidateCollectionCache('drivers');
         signalCollectionRefresh('drivers');
         router.push("/moderator/drivers");
       } else {

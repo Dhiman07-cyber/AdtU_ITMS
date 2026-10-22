@@ -44,7 +44,6 @@ import { useToast } from '@/contexts/toast-context';
 import { deleteRoute } from "@/lib/dataService";
 import { exportToExcel } from '@/lib/export-helpers';
 import { normalizeRouteStatus } from '@/lib/formatters';
-import { supabase } from '@/lib/supabase-client';
 import { cn } from '@/lib/utils';
 import {
 	Bus as BusIcon,
@@ -54,13 +53,15 @@ import {
 	Edit,
 	Eye,
 	Filter,
+	Loader2,
 	MapPin,
 	MoreHorizontal,
 	Plus,
 	RefreshCw,
 	Route as RouteIcon,
 	Search,
-	Trash2
+	Trash2,
+	X
 } from "lucide-react";
 import { MobileActionFAB } from '@/components/layout/MobileActionFAB';
 import { useRouter } from 'next/navigation';
@@ -68,8 +69,9 @@ import { useEffect, useMemo, useState } from "react";
 // Migrated: Server-side API → PostgreSQL (no Firestore client reads)
 import { useAuth } from '@/contexts/auth-context';
 import { useTheme } from '@/components/theme-provider';
-import { invalidateCollectionCache,useApiCollection } from '@/hooks/useApiCollection';
+import { invalidateCollectionCache, useApiCollection } from '@/hooks/useApiCollection';
 import { useEventDrivenRefresh } from '@/hooks/useEventDrivenRefresh';
+import { useLocalAndServerSearch } from '@/hooks/useLocalAndServerSearch';
 
 function RouteRow({
   route,
@@ -290,25 +292,47 @@ export default function RoutesPage() {
     return match ? parseInt(match[1]) : 999;
   };
 
+  // Local matcher for Tier 1 search (0ms, 0 network calls)
+  const routeLocalMatcher = useMemo(() => {
+    return (route: any, q: string) => {
+      const name = (route.routeName || route.route_name || '').toLowerCase();
+      const id = (route.id || route.routeId || '').toLowerCase();
+      const busMatch = route.assignedBuses && route.assignedBuses.some((bus: any) =>
+        (bus.busNumber && bus.busNumber.toLowerCase().includes(q))
+      );
+      const stopMatch = route.stops && route.stops.some((stop: any) =>
+        (stop.name || stop.stop_name || '').toLowerCase().includes(q)
+      );
+
+      return name.includes(q) || id.includes(q) || Boolean(busMatch) || Boolean(stopMatch);
+    };
+  }, []);
+
+  const {
+    results: searchedRoutes,
+    isSearchingServer,
+    isServerFallback,
+  } = useLocalAndServerSearch(
+    routes,
+    searchTerm,
+    routeLocalMatcher,
+    "/api/routes",
+    {
+      extractItems: (json: any) => (Array.isArray(json) ? json : json.routes || json.data || []),
+    }
+  );
+
   const filteredRoutes = useMemo(() => {
-    const q = searchTerm.toLowerCase();
     const shift = shiftFilter.toLowerCase();
-    return routes.filter((route: any) => {
-      const matchesSearch =
-        (route.routeName && route.routeName.toLowerCase().includes(q)) ||
-        (route.assignedBuses && route.assignedBuses.some((bus: any) =>
-          (bus.busNumber && bus.busNumber.toLowerCase().includes(q))
-        ));
-
+    return searchedRoutes.filter((route: any) => {
       const matchesShift = shiftFilter === "all" || (route.status && route.status.toLowerCase() === shift);
-
-      return matchesSearch && matchesShift;
+      return matchesShift;
     }).sort((a: any, b: any) => {
       const numA = extractRouteNumber(a.routeName || a.routeId || '');
       const numB = extractRouteNumber(b.routeName || b.routeId || '');
       return numA - numB;
     });
-  }, [routes, searchTerm, shiftFilter]);
+  }, [searchedRoutes, shiftFilter]);
 
   const PAGE_SIZE = 25;
   const [currentPage, setCurrentPage] = useState(1);
@@ -525,13 +549,32 @@ export default function RoutesPage() {
             <div className="flex flex-col md:flex-row gap-3">
               {/* Search Bar - Top (Full Width on Mobile) */}
               <div className="relative w-full md:flex-1">
-                <Search className={cn("absolute left-2.5 top-2.5 h-3.5 w-3.5", theme === 'dark' ? "text-gray-400" : "text-[#9CA3AF]")} />
+                {isSearchingServer ? (
+                  <Loader2 className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-blue-500 animate-spin" />
+                ) : (
+                  <Search className={cn("absolute left-2.5 top-2.5 h-3.5 w-3.5", theme === 'dark' ? "text-gray-400" : "text-[#9CA3AF]")} />
+                )}
                 <Input
                   placeholder="Search routes..."
-                  className="pl-9 h-9 text-xs w-full"
+                  className="pl-9 pr-24 h-9 text-xs w-full"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                 />
+                <div className="absolute right-2.5 top-2 flex items-center gap-1.5">
+                  {isServerFallback && (
+                    <span className="text-[10px] text-blue-600 dark:text-blue-400 font-semibold bg-blue-50 dark:bg-blue-950/60 px-1.5 py-0.5 rounded border border-blue-200 dark:border-blue-900">
+                      Server Match
+                    </span>
+                  )}
+                  {searchTerm && (
+                    <button
+                      onClick={() => setSearchTerm("")}
+                      className="text-muted-foreground hover:text-foreground p-0.5 cursor-pointer"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
               </div>
 
               {/* Filters - Side by side on Mobile in the same line */}

@@ -44,7 +44,6 @@ import { useToast } from '@/contexts/toast-context';
 import { deleteRoute } from "@/lib/dataService";
 import { exportToExcel } from '@/lib/export-helpers';
 import { normalizeRouteStatus } from '@/lib/formatters';
-import { supabase } from '@/lib/supabase-client';
 import { cn } from "@/lib/utils";
 import {
 	Bus as BusIcon,
@@ -54,21 +53,25 @@ import {
 	Edit,
 	Eye,
 	Filter,
+	Loader2,
 	MapPin,
 	MoreHorizontal,
 	Plus,
 	RefreshCw,
 	Route as RouteIcon,
 	Search,
-	Trash2
+	Trash2,
+	X
 } from "lucide-react";
 import { MobileActionFAB } from '@/components/layout/MobileActionFAB';
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from "react";
 // Migrated: Server-side API → PostgreSQL (no Firestore client reads)
 import { PermissionDeniedCard } from '@/components/PermissionDeniedCard';
-import { invalidateCollectionCache,useApiCollection } from '@/hooks/useApiCollection';
+import { useAuth } from '@/contexts/auth-context';
+import { invalidateCollectionCache, useApiCollection } from '@/hooks/useApiCollection';
 import { useEventDrivenRefresh } from '@/hooks/useEventDrivenRefresh';
+import { useLocalAndServerSearch } from '@/hooks/useLocalAndServerSearch';
 import { useModeratorPermissions } from '@/hooks/useModeratorPermissions';
 
 // Use local interfaces to avoid type conflicts
@@ -117,6 +120,7 @@ interface DriverItem {
 export default function RoutesPage() {
   const router = useRouter();
   const { addToast } = useToast();
+  const { currentUser } = useAuth();
   const { canRouteView, canRouteAdd, canRouteEdit, canRouteDelete, loading: permsLoading } = useModeratorPermissions();
 
   // Server-side API reads from PostgreSQL — no Firestore client reads
@@ -139,15 +143,37 @@ export default function RoutesPage() {
     }
   });
 
-  // Process and combine data — direct derivation in render
-  const routes = routesData.map((route: any) => {
-    // Find buses assigned to this route
-    const assignedBusesList = buses.filter((bus: any) =>
-      bus.routeId === route.id ||
-      bus.routeId === route.routeId ||
-      bus.routeRef === `routes/${route.id}` ||
-      bus.routeRef === `routes/${route.routeId}`
-    );
+  // Index buses by their route key ONCE per data change
+  const busesByRouteKey = useMemo(() => {
+    const map = new Map<string, any[]>();
+    const add = (key: string | undefined, bus: any) => {
+      if (!key) return;
+      const list = map.get(key);
+      if (list) list.push(bus);
+      else map.set(key, [bus]);
+    };
+    for (const bus of buses as any[]) {
+      add(bus.routeId, bus);
+      if (typeof bus.routeRef === 'string' && bus.routeRef.startsWith('routes/')) {
+        add(bus.routeRef.slice('routes/'.length), bus);
+      }
+    }
+    return map;
+  }, [buses]);
+
+  // Process and combine data — memoized so it only rebuilds when routes/buses change.
+  const routes = useMemo(() => routesData.map((route: any) => {
+    const seen = new Set<string>();
+    const assignedBusesList: any[] = [];
+    for (const key of [route.routeId, route.id]) {
+      const list = key && busesByRouteKey.get(key);
+      if (!list) continue;
+      for (const bus of list) {
+        if (seen.has(bus.id)) continue;
+        seen.add(bus.id);
+        assignedBusesList.push(bus);
+      }
+    }
 
     return {
       id: route.id,
@@ -158,7 +184,7 @@ export default function RoutesPage() {
       stops: route.stops || [],
       assignedBuses: assignedBusesList
     };
-  });
+  }), [routesData, busesByRouteKey]);
 
   const [searchTerm, setSearchTerm] = useState("");
   const [shiftFilter, setShiftFilter] = useState("all");
@@ -189,21 +215,47 @@ export default function RoutesPage() {
     return match ? parseInt(match[1]) : 999;
   };
 
-  const filteredRoutes = useMemo(() => routes.filter((route: any) => {
-    const matchesSearch =
-      (route.routeName && route.routeName.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      (route.assignedBuses && route.assignedBuses.some((bus: any) =>
-        (bus.busNumber && bus.busNumber.toLowerCase().includes(searchTerm.toLowerCase()))
-      ));
+  // Local matcher for Tier 1 search (0ms, 0 network calls)
+  const routeLocalMatcher = useMemo(() => {
+    return (route: any, q: string) => {
+      const name = (route.routeName || route.route_name || '').toLowerCase();
+      const id = (route.id || route.routeId || '').toLowerCase();
+      const busMatch = route.assignedBuses && route.assignedBuses.some((bus: any) =>
+        (bus.busNumber && bus.busNumber.toLowerCase().includes(q))
+      );
+      const stopMatch = route.stops && route.stops.some((stop: any) =>
+        (stop.name || stop.stop_name || '').toLowerCase().includes(q)
+      );
 
-    const matchesShift = shiftFilter === "all" || (route.status && route.status.toLowerCase() === shiftFilter.toLowerCase());
+      return name.includes(q) || id.includes(q) || Boolean(busMatch) || Boolean(stopMatch);
+    };
+  }, []);
 
-    return matchesSearch && matchesShift;
-  }).sort((a: any, b: any) => {
-    const numA = extractRouteNumber(a.routeName || '');
-    const numB = extractRouteNumber(b.routeName || '');
-    return numA - numB;
-  }), [routes, searchTerm, shiftFilter]);
+  const {
+    results: searchedRoutes,
+    isSearchingServer,
+    isServerFallback,
+  } = useLocalAndServerSearch(
+    routes,
+    searchTerm,
+    routeLocalMatcher,
+    "/api/routes",
+    {
+      extractItems: (json: any) => (Array.isArray(json) ? json : json.routes || json.data || []),
+    }
+  );
+
+  const filteredRoutes = useMemo(() => {
+    const shift = shiftFilter.toLowerCase();
+    return searchedRoutes.filter((route: any) => {
+      const matchesShift = shiftFilter === "all" || (route.status && route.status.toLowerCase() === shift);
+      return matchesShift;
+    }).sort((a: any, b: any) => {
+      const numA = extractRouteNumber(a.routeName || '');
+      const numB = extractRouteNumber(b.routeName || '');
+      return numA - numB;
+    });
+  }, [searchedRoutes, shiftFilter]);
 
   const PAGE_SIZE = 25;
   const [currentPage, setCurrentPage] = useState(1);
@@ -252,24 +304,20 @@ export default function RoutesPage() {
     }, 200);
   };
 
-  // Export routes data from Supabase
+  // Export routes data via authenticated API
   const handleExportRoutes = async () => {
     try {
-      const currentDate = new Date();
-      const dateStr = currentDate.toISOString().split('T')[0].replace(/-/g, '-');
+      const dateStr = new Date().toISOString().split('T')[0];
+      const token = await currentUser?.getIdToken();
+      const authHeaders = token ? { Authorization: `Bearer ${token}` } : {};
 
-      // Fetch all routes directly from Supabase PostgreSQL table 'routes'
-      const { data: rawRoutes, error: routesError } = await supabase
-        .from('routes')
-        .select('id, route_name, route_number, stops, start_location, total_stops, status')
-        .order('route_name', { ascending: true });
+      const [routesRes, busesRes] = await Promise.all([
+        fetch('/api/routes', { headers: authHeaders }),
+        fetch('/api/buses', { headers: authHeaders }),
+      ]);
 
-      if (routesError) throw routesError;
-
-      // Fetch buses to resolve assigned buses per route
-      const { data: rawBuses } = await supabase
-        .from('buses')
-        .select('id, bus_number, route_id');
+      const rawRoutes = routesRes.ok ? await routesRes.json() : [];
+      const rawBuses = busesRes.ok ? (await busesRes.json()).buses || [] : [];
 
       const busRouteMap = new Map<string, string[]>();
       (rawBuses || []).forEach((b: any) => {
@@ -435,13 +483,32 @@ export default function RoutesPage() {
             <div className="flex flex-col md:flex-row gap-3">
               {/* Search Bar - Top (Full Width on Mobile) */}
               <div className="relative w-full md:flex-1">
-                <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-gray-400" />
+                {isSearchingServer ? (
+                  <Loader2 className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-blue-500 animate-spin" />
+                ) : (
+                  <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-gray-400" />
+                )}
                 <Input
                   placeholder="Search routes..."
-                  className="pl-9 h-9 text-xs w-full"
+                  className="pl-9 pr-24 h-9 text-xs w-full"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                 />
+                <div className="absolute right-2.5 top-2 flex items-center gap-1.5">
+                  {isServerFallback && (
+                    <span className="text-[10px] text-blue-600 dark:text-blue-400 font-semibold bg-blue-50 dark:bg-blue-950/60 px-1.5 py-0.5 rounded border border-blue-200 dark:border-blue-900">
+                      Server Match
+                    </span>
+                  )}
+                  {searchTerm && (
+                    <button
+                      onClick={() => setSearchTerm("")}
+                      className="text-muted-foreground hover:text-foreground p-0.5 cursor-pointer"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
               </div>
 
               {/* Filters - Side by side on Mobile in the same line */}

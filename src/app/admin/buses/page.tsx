@@ -42,7 +42,6 @@ import {
 import { useToast } from '@/contexts/toast-context';
 import { deleteBus } from "@/lib/dataService";
 import { exportToExcel } from '@/lib/export-helpers';
-import { supabase } from '@/lib/supabase-client';
 import {
   Bus,
   ChevronLeft,
@@ -52,13 +51,16 @@ import {
   Edit,
   Eye,
   Filter,
+  Loader2,
   MoreHorizontal,
   Plus,
   QrCode,
+  RefreshCw,
   Route as RouteIcon,
   Search,
   Trash2,
-  Users
+  Users,
+  X
 } from "lucide-react";
 import { BusQRStickerModal } from '@/components/bus/BusQRStickerModal';
 import { MobileActionFAB } from '@/components/layout/MobileActionFAB';
@@ -69,8 +71,8 @@ import { useTheme } from '@/components/theme-provider';
 import { useAuth } from '@/contexts/auth-context';
 import { invalidateCollectionCache, useApiCollection } from '@/hooks/useApiCollection';
 import { useEventDrivenRefresh } from '@/hooks/useEventDrivenRefresh';
+import { useLocalAndServerSearch } from '@/hooks/useLocalAndServerSearch';
 import { cn } from '@/lib/utils';
-import { RefreshCw } from "lucide-react";
 
 // Use local interfaces to avoid type conflicts
 interface BusItem {
@@ -218,27 +220,55 @@ export default function BusesPage() {
     return list;
   }, [buses]);
 
+  // Local matcher for Tier 1 search (0ms, 0 network calls)
+  const busLocalMatcher = useMemo(() => {
+    return (bus: any, q: string) => {
+      const busNum = (bus.busNumber || bus.bus_number || '').toLowerCase();
+      const rName = (bus.routeName || bus.route_name || '').toLowerCase();
+      const busId = (bus.busId || bus.id || '').toLowerCase();
+      const model = (bus.model || '').toLowerCase();
+      const driver = driverIndex.byBusId.get(bus.id || bus.busId) || driverIndex.byId.get(bus.driverUID || bus.primary_driver_uid);
+      const driverName = (driver?.name || driver?.fullName || '').toLowerCase();
+
+      return (
+        busNum.includes(q) ||
+        rName.includes(q) ||
+        busId.includes(q) ||
+        model.includes(q) ||
+        driverName.includes(q)
+      );
+    };
+  }, [driverIndex]);
+
+  const {
+    results: searchedBuses,
+    isSearchingServer,
+    isServerFallback,
+  } = useLocalAndServerSearch(
+    buses,
+    searchTerm,
+    busLocalMatcher,
+    "/api/buses",
+    {
+      extractItems: (json: any) => json.buses || json.data || [],
+    }
+  );
+
   // Filtered + sorted list recomputed only when inputs actually change
   const filteredBuses = useMemo(() => {
-    const q = searchTerm.toLowerCase();
     const status = statusFilter.toLowerCase();
-    return buses.filter(bus => {
-      const matchesSearch =
-        (bus.busNumber && bus.busNumber.toLowerCase().includes(q)) ||
-        (bus.routeName && bus.routeName.toLowerCase().includes(q)) ||
-        (bus.busId && bus.busId.toLowerCase().includes(q));
-
+    return searchedBuses.filter(bus => {
       const busRouteId = bus.route_id || bus.routeId || '';
       const matchesRoute = routeFilter === "all" || busRouteId === routeFilter;
       const matchesStatus = statusFilter === "all" || (bus.status && bus.status.toLowerCase() === status);
 
-      return matchesSearch && matchesRoute && matchesStatus;
+      return matchesRoute && matchesStatus;
     }).sort((a, b) => {
       const numA = extractNumber(a.busId || a.id || '');
       const numB = extractNumber(b.busId || b.id || '');
       return parseInt(numA) - parseInt(numB);
     });
-  }, [buses, searchTerm, routeFilter, statusFilter]);
+  }, [searchedBuses, routeFilter, statusFilter]);
 
   const PAGE_SIZE = 25;
   const [currentPage, setCurrentPage] = useState(1);
@@ -511,13 +541,32 @@ export default function BusesPage() {
             <div className="flex flex-col md:flex-row gap-3">
               {/* Search Bar */}
               <div className="relative flex-1 min-w-0">
-                <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                {isSearchingServer ? (
+                  <Loader2 className="absolute left-3 top-2.5 h-4 w-4 text-blue-500 animate-spin" />
+                ) : (
+                  <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                )}
                 <Input
                   placeholder="Search buses by number, route, or bus ID..."
-                  className="pl-9 h-9 text-xs w-full bg-slate-50 dark:bg-zinc-800/70 border-zinc-200 dark:border-zinc-700/60 rounded-lg"
+                  className="pl-9 pr-24 h-9 text-xs w-full bg-slate-50 dark:bg-zinc-800/70 border-zinc-200 dark:border-zinc-700/60 rounded-lg"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                 />
+                <div className="absolute right-2.5 top-2 flex items-center gap-1.5">
+                  {isServerFallback && (
+                    <span className="text-[10px] text-blue-600 dark:text-blue-400 font-semibold bg-blue-50 dark:bg-blue-950/60 px-1.5 py-0.5 rounded border border-blue-200 dark:border-blue-900">
+                      Server Match
+                    </span>
+                  )}
+                  {searchTerm && (
+                    <button
+                      onClick={() => setSearchTerm("")}
+                      className="text-muted-foreground hover:text-foreground p-0.5 cursor-pointer"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
               </div>
 
               {/* Filters */}

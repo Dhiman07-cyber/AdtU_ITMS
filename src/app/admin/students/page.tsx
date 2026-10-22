@@ -43,10 +43,10 @@ import { useAuth } from "@/contexts/auth-context";
 import { useToast } from "@/contexts/toast-context";
 import { invalidateCollectionCache, useApiCollection } from "@/hooks/useApiCollection";
 import { useEventDrivenRefresh } from "@/hooks/useEventDrivenRefresh";
+import { useLocalAndServerSearch } from "@/hooks/useLocalAndServerSearch";
 import { deleteStudent } from "@/lib/dataService";
 import { exportToExcel } from "@/lib/export-helpers";
 import { safeImageSrc } from "@/lib/security/url-sanitizer";
-import { supabase } from "@/lib/supabase-client";
 import { cn } from "@/lib/utils";
 import {
   AlertTriangle,
@@ -150,9 +150,6 @@ export default function AdminStudentsHub() {
 
   // Search state
   const [searchTerm, setSearchTerm] = useState("");
-  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
-  const [searchResults, setSearchResults] = useState<any[] | null>(null);
-  const [isSearching, setIsSearching] = useState(false);
 
   // Filters
   const [statusFilter, setStatusFilter] = useState("all");
@@ -176,42 +173,6 @@ export default function AdminStudentsHub() {
   const [isDeleting, setIsDeleting] = useState(false);
 
   const [isRefreshing, setIsRefreshing] = useState(false);
-
-  // Debounce search term
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setDebouncedSearchTerm(searchTerm);
-    }, 450);
-    return () => clearTimeout(timer);
-  }, [searchTerm]);
-
-  // Server-side search effect
-  useEffect(() => {
-    async function performSearch() {
-      if (!debouncedSearchTerm || debouncedSearchTerm.trim() === "") {
-        setSearchResults(null);
-        return;
-      }
-
-      setIsSearching(true);
-      try {
-        const term = debouncedSearchTerm.trim();
-        const token = await currentUser?.getIdToken();
-        const res = await fetch("/api/students?q=" + encodeURIComponent(term), {
-          headers: token ? { Authorization: "Bearer " + token } : {},
-        });
-        const data = await res.json();
-        setSearchResults(data.students || []);
-      } catch (error) {
-        console.error("Search failed:", error);
-        addToast("Search failed. Please try again.", "error");
-      } finally {
-        setIsSearching(false);
-      }
-    }
-
-    performSearch();
-  }, [debouncedSearchTerm, addToast, currentUser]);
 
   // Auth routing verification
   useEffect(() => {
@@ -242,10 +203,31 @@ export default function AdminStudentsHub() {
     return `Bus ${busNum}${bus.routeNumber ? ` (R-${bus.routeNumber})` : ""}`;
   };
 
+  // Local matcher for Tier 1 search (0ms, 0 network calls)
+  const studentLocalMatcher = useMemo(() => {
+    return (student: any, term: string) => {
+      const name = (student.name || student.fullName || "").toLowerCase();
+      const email = (student.email || "").toLowerCase();
+      const phone = (student.phone || student.phoneNumber || "");
+      const altPhone = (student.alternatePhone || student.altPhone || "");
+      const enrollmentId = (student.enrollmentId || student.enrollment_id || student.studentId || "").toLowerCase();
+      const assignedBus = busById.get(student.busId);
+      const busText = assignedBus ? `${assignedBus.busNumber} ${assignedBus.routeNumber || ""}`.toLowerCase() : (student.busId || "").toLowerCase();
+
+      return (
+        name.includes(term) ||
+        email.includes(term) ||
+        phone.includes(term) ||
+        altPhone.includes(term) ||
+        enrollmentId.includes(term) ||
+        busText.includes(term)
+      );
+    };
+  }, [busById]);
+
   // Base list merged with local overrides
-  const students = useMemo(() => {
-    const base = searchResults !== null ? searchResults : rawStudents;
-    return (base || []).map((s: any) => {
+  const studentsWithOverrides = useMemo(() => {
+    return (rawStudents || []).map((s: any) => {
       const id = s.id || s.uid;
       const override = localOverrides[id];
       return {
@@ -254,7 +236,25 @@ export default function AdminStudentsHub() {
         status: override?.status || s.status || "active",
       };
     });
-  }, [rawStudents, searchResults, localOverrides]);
+  }, [rawStudents, localOverrides]);
+
+  const {
+    results: searchedStudents,
+    isSearching,
+    isSearchingServer,
+    isServerFallback,
+  } = useLocalAndServerSearch(
+    studentsWithOverrides,
+    searchTerm,
+    studentLocalMatcher,
+    "/api/students",
+    {
+      extractItems: (json: any) => json.students || json.data || [],
+    }
+  );
+
+  // Students alias for metric calculations and bus unique list
+  const students = searchedStudents;
 
   // Unique buses for filtering
   const uniqueBuses = useMemo(() => {
@@ -284,26 +284,7 @@ export default function AdminStudentsHub() {
 
   // Filtered Students
   const filteredStudents = useMemo(() => {
-    const term = searchTerm.toLowerCase();
-
-    return students.filter((student) => {
-      const name = (student.name || student.fullName || "").toLowerCase();
-      const email = (student.email || "").toLowerCase();
-      const phone = (student.phone || student.phoneNumber || "");
-      const altPhone = (student.alternatePhone || student.altPhone || "");
-      const enrollmentId = (student.enrollmentId || student.enrollment_id || student.studentId || "").toLowerCase();
-      const assignedBus = busById.get(student.busId);
-      const busText = assignedBus ? `${assignedBus.busNumber} ${assignedBus.routeNumber || ""}` : (student.busId || "");
-
-      const matchesSearch =
-        !searchTerm ||
-        name.includes(term) ||
-        email.includes(term) ||
-        phone.includes(searchTerm) ||
-        altPhone.includes(searchTerm) ||
-        enrollmentId.includes(term) ||
-        busText.toLowerCase().includes(term);
-
+    return searchedStudents.filter((student) => {
       const currentStatus = (student.status || "active").toLowerCase();
       let matchesStatus = true;
       if (statusFilter === "active") {
@@ -322,9 +303,9 @@ export default function AdminStudentsHub() {
 
       const matchesBus = busFilter === "all" || (student.busId && student.busId === busFilter);
 
-      return matchesSearch && matchesStatus && matchesShift && matchesBus;
+      return matchesStatus && matchesShift && matchesBus;
     });
-  }, [students, searchTerm, statusFilter, shiftFilter, busFilter, busById]);
+  }, [searchedStudents, statusFilter, shiftFilter, busFilter]);
 
   // Unique key safety
   const uniqueFilteredStudents = useMemo(() => {
@@ -719,22 +700,33 @@ export default function AdminStudentsHub() {
           <div className="flex flex-col md:flex-row gap-3">
             {/* Search Input */}
             <div className="relative flex-1">
-              <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+              {isSearchingServer ? (
+                <Loader2 className="absolute left-3 top-2.5 h-4 w-4 text-blue-500 animate-spin" />
+              ) : (
+                <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+              )}
               <Input
                 placeholder="Search students by name, email, phone, enrollment ID, or bus..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-9 h-9 text-xs w-full bg-slate-50 dark:bg-zinc-800/70 border-zinc-200 dark:border-zinc-700/60 rounded-lg"
+                className="pl-9 pr-24 h-9 text-xs w-full bg-slate-50 dark:bg-zinc-800/70 border-zinc-200 dark:border-zinc-700/60 rounded-lg"
               />
-              {searchTerm && (
-                <button
-                  type="button"
-                  onClick={() => setSearchTerm("")}
-                  className="absolute right-2.5 top-2.5 text-muted-foreground hover:text-foreground p-0.5 cursor-pointer"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              )}
+              <div className="absolute right-2.5 top-2 flex items-center gap-1.5">
+                {isServerFallback && (
+                  <span className="text-[10px] text-blue-600 dark:text-blue-400 font-semibold bg-blue-50 dark:bg-blue-950/60 px-1.5 py-0.5 rounded border border-blue-200 dark:border-blue-900">
+                    Server Match
+                  </span>
+                )}
+                {searchTerm && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchTerm("")}
+                    className="text-muted-foreground hover:text-foreground p-0.5 cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Filter Group */}

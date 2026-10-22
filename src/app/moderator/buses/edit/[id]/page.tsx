@@ -8,6 +8,7 @@ import { Select,SelectContent,SelectItem,SelectTrigger,SelectValue } from "@/com
 import { useAuth } from '@/contexts/auth-context';
 import { useToast } from "@/contexts/toast-context";
 import { signalCollectionRefresh } from "@/hooks/useEventDrivenRefresh";
+import { invalidateCollectionCache } from "@/hooks/useApiCollection";
 import { getAllBuses,getAllDrivers,getAllRoutes,getBusById } from "@/lib/dataService";
 import { Driver,Route } from "@/lib/types";
 import { Info } from "lucide-react";
@@ -216,6 +217,7 @@ export default function EditBusPage({ params }: { params: Promise<{ id: string }
 
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || 'Failed to update bus');
+      invalidateCollectionCache('buses');
       signalCollectionRefresh('buses');
 
       addToast('Bus updated successfully', 'success');

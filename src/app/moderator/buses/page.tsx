@@ -42,7 +42,6 @@ import {
 import { useToast } from '@/contexts/toast-context';
 import { deleteBus } from "@/lib/dataService";
 import { exportToExcel } from '@/lib/export-helpers';
-import { supabase } from '@/lib/supabase-client';
 import { cn } from "@/lib/utils";
 import {
 	Bus,
@@ -53,13 +52,16 @@ import {
 	Edit,
 	Eye,
 	Filter,
+	Loader2,
 	MoreHorizontal,
 	Plus,
 	QrCode,
+	RefreshCw,
 	Route as RouteIcon,
 	Search,
 	Trash2,
-	Users
+	Users,
+	X
 } from "lucide-react";
 import { BusQRStickerModal } from '@/components/bus/BusQRStickerModal';
 import { useRouter } from 'next/navigation';
@@ -67,10 +69,10 @@ import { useEffect, useMemo, useState } from "react";
 // Migrated: Server-side API → PostgreSQL (no Firestore client reads)
 import { PermissionDeniedCard } from '@/components/PermissionDeniedCard';
 import { useAuth } from '@/contexts/auth-context';
-import { invalidateCollectionCache,useApiCollection } from '@/hooks/useApiCollection';
+import { invalidateCollectionCache, useApiCollection } from '@/hooks/useApiCollection';
 import { useEventDrivenRefresh } from '@/hooks/useEventDrivenRefresh';
+import { useLocalAndServerSearch } from '@/hooks/useLocalAndServerSearch';
 import { useModeratorPermissions } from '@/hooks/useModeratorPermissions';
-import { RefreshCw } from "lucide-react";
 import { MobileActionFAB } from '@/components/layout/MobileActionFAB';
 
 // Use local interfaces to avoid type conflicts
@@ -176,34 +178,88 @@ export default function BusesPage() {
     return match ? match[0] : '0';
   };
 
-  // Direct derivation in render memoized
-  const filteredBuses = useMemo(() => buses.filter(bus => {
-    const matchesSearch =
-      (bus.busNumber && bus.busNumber.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      (bus.routeName && bus.routeName.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      (bus.busId && bus.busId.toLowerCase().includes(searchTerm.toLowerCase()));
+  const driverIndex = useMemo(() => {
+    const byId = new Map<string, any>();
+    const byBusId = new Map<string, any>();
+    for (const d of drivers as any[]) {
+      if (d.id) byId.set(d.id, d);
+      if (d.busId) byBusId.set(d.busId, d);
+    }
+    return { byId, byBusId };
+  }, [drivers]);
 
-    const assignedRoute = getRouteNameForBus(bus);
-    const matchesRoute = routeFilter === "all" || (assignedRoute && assignedRoute.toLowerCase() === routeFilter.toLowerCase());
-    const matchesStatus = statusFilter === "all" || (bus.status && bus.status.toLowerCase() === statusFilter.toLowerCase());
+  const routeIndex = useMemo(() => {
+    const byId = new Map<string, any>();
+    for (const r of routes as any[]) {
+      if (r.id) byId.set(r.id, r);
+      if ((r as any).routeId) byId.set((r as any).routeId, r);
+    }
+    return byId;
+  }, [routes]);
 
-    return matchesSearch && matchesRoute && matchesStatus;
-  }).sort((a, b) => {
-    const numA = extractNumber(a.busId || a.id || '');
-    const numB = extractNumber(b.busId || b.id || '');
-    return parseInt(numA) - parseInt(numB);
-  }), [buses, searchTerm, routeFilter, statusFilter, routes]);
+  // Local matcher for Tier 1 search (0ms, 0 network calls)
+  const busLocalMatcher = useMemo(() => {
+    return (bus: any, q: string) => {
+      const busNum = (bus.busNumber || bus.bus_number || '').toLowerCase();
+      const rName = (bus.routeName || bus.route_name || '').toLowerCase();
+      const busId = (bus.busId || bus.id || '').toLowerCase();
+      const model = (bus.model || '').toLowerCase();
+      const driver = driverIndex.byBusId.get(bus.id || bus.busId) || driverIndex.byId.get(bus.driverUID || bus.primary_driver_uid);
+      const driverName = (driver?.name || driver?.fullName || '').toLowerCase();
+
+      return (
+        busNum.includes(q) ||
+        rName.includes(q) ||
+        busId.includes(q) ||
+        model.includes(q) ||
+        driverName.includes(q)
+      );
+    };
+  }, [driverIndex]);
+
+  const {
+    results: searchedBuses,
+    isSearchingServer,
+    isServerFallback,
+  } = useLocalAndServerSearch(
+    buses,
+    searchTerm,
+    busLocalMatcher,
+    "/api/buses",
+    {
+      extractItems: (json: any) => json.buses || json.data || [],
+    }
+  );
+
+  const filteredBuses = useMemo(() => {
+    const status = statusFilter.toLowerCase();
+    return searchedBuses.filter(bus => {
+      const routeIdToCheck = bus.routeId || bus.route_id || '';
+      const routeObj = routeIndex.get(routeIdToCheck);
+      const assignedRoute = routeObj?.routeName || routeObj?.route_name || bus.routeName || bus.route_name || '';
+      const matchesRoute = routeFilter === "all" || (assignedRoute && assignedRoute.toLowerCase() === routeFilter.toLowerCase());
+      const matchesStatus = statusFilter === "all" || (bus.status && bus.status.toLowerCase() === status);
+
+      return matchesRoute && matchesStatus;
+    }).sort((a, b) => {
+      const numA = extractNumber(a.busId || a.id || '');
+      const numB = extractNumber(b.busId || b.id || '');
+      return parseInt(numA) - parseInt(numB);
+    });
+  }, [searchedBuses, routeFilter, statusFilter, routeIndex]);
 
   const uniqueRoutes = useMemo(() => {
     const list: string[] = [];
     buses.forEach(b => {
-      const rName = getRouteNameForBus(b);
+      const routeIdToCheck = b.routeId || b.route_id || '';
+      const routeObj = routeIndex.get(routeIdToCheck);
+      const rName = routeObj?.routeName || routeObj?.route_name || b.routeName || b.route_name;
       if (rName && rName !== 'Not Assigned' && !list.includes(rName)) {
         list.push(rName);
       }
     });
     return list.sort();
-  }, [buses, routes]);
+  }, [buses, routeIndex]);
 
   const PAGE_SIZE = 25;
   const [currentPage, setCurrentPage] = useState(1);
@@ -252,30 +308,29 @@ export default function BusesPage() {
     }, 200);
   };
 
-  // Export buses data from Supabase
+  // Export buses data via authenticated API
   const handleExportBuses = async () => {
     try {
-      const currentDate = new Date();
-      const dateStr = currentDate.toISOString().split('T')[0].replace(/-/g, '-');
+      const dateStr = new Date().toISOString().split('T')[0];
+      const token = await currentUser?.getIdToken();
+      const authHeaders = token ? { Authorization: `Bearer ${token}` } : {};
 
-      // Fetch all buses directly from Supabase PostgreSQL table 'buses'
-      const { data: rawBuses, error: busesError } = await supabase
-        .from('buses')
-        .select('id, bus_number, model, year, capacity, route_id, route_name, status, current_members, morning_load, evening_load')
-        .order('bus_number', { ascending: true });
+      const [busesRes, routesRes, driversRes] = await Promise.all([
+        fetch('/api/buses', { headers: authHeaders }),
+        fetch('/api/routes', { headers: authHeaders }),
+        fetch('/api/drivers', { headers: authHeaders }),
+      ]);
 
-      if (busesError) throw busesError;
+      const rawBuses = busesRes.ok ? (await busesRes.json()).buses || [] : [];
+      const rawRoutes = routesRes.ok ? await routesRes.json() : [];
+      const rawDrivers = driversRes.ok ? (await driversRes.json()).drivers || [] : [];
 
-      // Fetch routes and drivers for name lookup
-      const { data: rawRoutes } = await supabase.from('routes').select('id, route_name, route_number, stops');
-      const { data: rawDrivers } = await supabase.from('driver_profiles').select('uid, full_name, name');
-
-      const routeMap = new Map((rawRoutes || []).map((r: any) => [r.id, r]));
-      const driverMap = new Map((rawDrivers || []).map((d: any) => [d.uid, d.full_name || d.name]));
+      const routeMap = new Map<string, any>((rawRoutes || []).map((r: any) => [r.id || r.routeId, r]));
+      const driverMap = new Map<string, any>((rawDrivers || []).map((d: any) => [d.uid || d.id, d.full_name || d.name]));
 
       const busesData = (rawBuses || []).map((bus: any, index: number) => {
-        const routeObj = routeMap.get(bus.route_id);
-        const routeName = routeObj?.route_name || routeObj?.route_number || 'Not Assigned';
+        const routeObj: any = routeMap.get(bus.route_id || bus.routeId);
+        const routeName = routeObj?.route_name || routeObj?.routeName || routeObj?.route_number || routeObj?.routeNumber || 'Not Assigned';
 
         let stops = 'N/A';
         if (routeObj && routeObj.stops) {
@@ -307,7 +362,7 @@ export default function BusesPage() {
       ]);
 
       // Add section header
-      busesData.unshift(['ALL BUSES REPORT (SUPABASE)'], ['']);
+      busesData.unshift(['ALL BUSES REPORT'], ['']);
 
       await exportToExcel(busesData, `ADTU_Buses_Report_${dateStr}`, 'Buses');
 
@@ -316,7 +371,7 @@ export default function BusesPage() {
         'success'
       );
     } catch (error) {
-      console.error('❌ Error exporting buses from Supabase:', error);
+      console.error('Error exporting buses:', error);
       addToast(
         'Failed to export buses data. Please try again.',
         'error'
@@ -326,58 +381,20 @@ export default function BusesPage() {
 
   const commonBtnClass = "group h-8 px-3.5 bg-secondary/80 hover:bg-secondary text-secondary-foreground border border-border/50 shadow-sm font-medium text-xs rounded-lg transition-colors active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer";
 
-  // Function to get driver name for a specific bus
+  // Function to get driver name for a specific bus — O(1) via prebuilt index
   const getDriverNameForBus = (bus: any) => {
-    // Method 1: Check if bus has direct driver assignment via driverUID
-    if (bus.driverUID) {
-      const driver = drivers.find(d => d.id === bus.driverUID);
-      if (driver) {
-        return driver.fullName || driver.name || 'Unknown Driver';
-      }
-    }
-
-    // Method 2: Match by busId
-    let driver = drivers.find(d => d.busId === bus.busId);
-    if (driver) {
-      return driver.fullName || driver.name || 'Unknown Driver';
-    }
-
-    // Method 3: Match by routeId
-    driver = drivers.find(d => d.routeId === bus.routeId);
-    if (driver) {
-      return driver.fullName || driver.name || 'Unknown Driver';
-    }
-
-    // Method 4: Fallback to old logic for backwards compatibility
-    const route = routes.find(r => r.id === bus.routeId);
-    const routeName = route ? (route.routeName || route.route || '') : '';
-    const routeNumberMatch = routeName.match(/Route-(\d+)/);
-    const routeNumber = routeNumberMatch ? routeNumberMatch[1] : null;
-
-    if (routeNumber) {
-      driver = drivers.find(d => d.routeId === routeNumber);
-      if (driver) {
-        return driver.fullName || driver.name || 'Unknown Driver';
-      }
-    }
-
-    return 'No Driver Assigned';
+    const driver = driverIndex.byBusId.get(bus.id || bus.busId) || driverIndex.byId.get(bus.driverUID || bus.primary_driver_uid);
+    return driver?.fullName || driver?.name || 'No Driver Assigned';
   };
 
-
-  // Function to get route name for a specific bus
+  // Function to get route name for a specific bus — O(1) via prebuilt index
   const getRouteNameForBus = (bus: any) => {
-    // 1. Try finding in routes collection first (Canonical source)
-    const routeIdToCheck = bus.routeId || bus.routeId;
-    if (routes && routes.length > 0 && routeIdToCheck) {
-      const foundRoute = routes.find(r =>
-        r.id === routeIdToCheck ||
-        r.routeId === routeIdToCheck
-      );
+    const routeIdToCheck = bus.routeId || bus.route_id;
+    if (routeIdToCheck) {
+      const foundRoute = routeIndex.get(routeIdToCheck);
       if (foundRoute) return foundRoute.routeName || foundRoute.route || `Route ${routeIdToCheck}`;
     }
 
-    // 2. Fallback to embedded data (Legacy)
     if (bus.route && bus.route.routeName) {
       return bus.route.routeName;
     }
@@ -505,13 +522,32 @@ export default function BusesPage() {
             <div className="flex flex-col md:flex-row gap-3">
               {/* Search Bar - Top (Full Width on Mobile) */}
               <div className="relative w-full md:flex-1">
-                <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-gray-400" />
+                {isSearchingServer ? (
+                  <Loader2 className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-blue-500 animate-spin" />
+                ) : (
+                  <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-gray-400" />
+                )}
                 <Input
                   placeholder="Search buses..."
-                  className="pl-9 h-9 text-xs w-full"
+                  className="pl-9 pr-24 h-9 text-xs w-full"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                 />
+                <div className="absolute right-2.5 top-2 flex items-center gap-1.5">
+                  {isServerFallback && (
+                    <span className="text-[10px] text-blue-600 dark:text-blue-400 font-semibold bg-blue-50 dark:bg-blue-950/60 px-1.5 py-0.5 rounded border border-blue-200 dark:border-blue-900">
+                      Server Match
+                    </span>
+                  )}
+                  {searchTerm && (
+                    <button
+                      onClick={() => setSearchTerm("")}
+                      className="text-muted-foreground hover:text-foreground p-0.5 cursor-pointer"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
               </div>
 
               {/* Filters - Side by side on Mobile in the same line */}

@@ -78,8 +78,10 @@ export default function AlternativeBusPicker({
 
   // Sort alternatives: most available seats first
   const sortedAlternatives = [...alternatives].sort((a, b) => {
-    const seatsA = Math.max(0, (a.capacity || 55) - getShiftLoad(a, shift));
-    const seatsB = Math.max(0, (b.capacity || 55) - getShiftLoad(b, shift));
+    const capacityA = a.capacity && a.capacity > 0 ? a.capacity : 55;
+    const capacityB = b.capacity && b.capacity > 0 ? b.capacity : 55;
+    const seatsA = Math.max(0, capacityA - getShiftLoad(a, shift));
+    const seatsB = Math.max(0, capacityB - getShiftLoad(b, shift));
     return seatsB - seatsA;
   });
 
@@ -141,9 +143,9 @@ export default function AlternativeBusPicker({
           <div className="grid grid-cols-1 gap-4">
             {sortedAlternatives.map((bus, idx) => {
               const currentLoad = getShiftLoad(bus, shift);
-              const capacity = bus.capacity || 55;
+              const capacity = bus.capacity && bus.capacity > 0 ? bus.capacity : 55;
               const availableSeats = Math.max(0, capacity - currentLoad);
-              const loadPercent = Math.min(100, (currentLoad / capacity) * 100);
+              const loadPercent = capacity > 0 ? Math.min(100, (currentLoad / capacity) * 100) : 0;
 
               return (
                 <motion.div

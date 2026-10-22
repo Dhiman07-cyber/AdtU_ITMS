@@ -27,6 +27,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from '@/contexts/toast-context';
 import { invalidateCollectionCache,useApiCollection } from '@/hooks/useApiCollection';
+import { useLocalAndServerSearch } from '@/hooks/useLocalAndServerSearch';
 import { cn } from "@/lib/utils";
 import { isUpcomingApplication } from "@/lib/utils/application-eligibility";
 import {
@@ -210,9 +211,36 @@ export default function AdminApplicationsPage() {
   const { showToast } = useToast();
   const [activeSection, setActiveSection] = useState<'applications' | 'upcoming' | 'renewals'>('applications');
 
-  // Derive renewalRequests directly from pendingApplications dataset — zero redundant roundtrips
+  // Filter & Search States
+  const [searchQuery, setSearchQuery] = useState("");
+  const [shiftFilter, setShiftFilter] = useState<string[]>([]);
+
+  // Local-First + Server Fallback search (Fix 133)
+  const {
+    items: searchedApplications,
+    isSearching: isSearchLoading,
+    isServerFallback,
+  } = useLocalAndServerSearch<any>({
+    items: pendingApplications,
+    searchTerm: searchQuery,
+    localMatcher: (item, query) => {
+      const q = query.toLowerCase();
+      const fn = (item.formData?.fullName || item.form_data?.fullName || item.studentName || '').toLowerCase();
+      const en = (item.formData?.enrollmentId || item.form_data?.enrollmentId || item.enrollmentId || '').toLowerCase();
+      const ph = (item.formData?.phoneNumber || item.form_data?.phoneNumber || '').toLowerCase();
+      const em = (item.applicantEmail || item.email || item.formData?.studentEmail || '').toLowerCase();
+      const id = (item.applicationId || item.application_id || item.id || '').toLowerCase();
+      const bus = (item.busNumber || item.formData?.busNumber || '').toLowerCase();
+      return fn.includes(q) || en.includes(q) || ph.includes(q) || em.includes(q) || id.includes(q) || bus.includes(q);
+    },
+    apiEndpoint: '/api/applications/all',
+    responseExtractor: (data) => data.applications || data || [],
+    getId: (item) => item.applicationId || item.application_id || item.id,
+  });
+
+  // Derive renewalRequests directly from searchedApplications dataset — zero redundant roundtrips
   const renewalRequests: any[] = useMemo(() => {
-    return (pendingApplications || [])
+    return (searchedApplications || [])
       .filter((row: any) => {
         const state = row.state || '';
         const type = row.applicationType || row.application_type || '';
@@ -239,7 +267,7 @@ export default function AdminApplicationsPage() {
         busNumber: row.busNumber || row.bus_number || row.formData?.busNumber || row.form_data?.busNumber || '',
         formData: row.formData || row.form_data || {},
       }));
-  }, [pendingApplications, processedIds]);
+  }, [searchedApplications, processedIds]);
 
   // Manual refresh handler for applications page
   const handleRefresh = async () => {
@@ -260,10 +288,6 @@ export default function AdminApplicationsPage() {
     }
   };
 
-  // Filter & Search States
-  const [searchQuery, setSearchQuery] = useState("");
-  const [shiftFilter, setShiftFilter] = useState<string[]>([]);
-
   // Redirect if user is not an admin
   useEffect(() => {
     if (userData && userData.role !== "admin") {
@@ -273,17 +297,17 @@ export default function AdminApplicationsPage() {
 
   // Filter applications relevant to the admin queue:
   const applicationApplications = useMemo(
-    () => pendingApplications.filter((app: any) => {
+    () => searchedApplications.filter((app: any) => {
       const type = app.applicationType || app.application_type || '';
       const isRenewal = type === 'renewal' || type === 'renewal_after_soft_block';
       return app.state === 'submitted' && !isUpcomingApplication(app) && !isRenewal;
     }),
-    [pendingApplications]
+    [searchedApplications]
   );
 
   const upcomingApplications = useMemo(
-    () => pendingApplications.filter((app: any) => (app.state === 'submitted' && isUpcomingApplication(app)) || app.state === 'verified_upcoming' || app.state === 'pending_seat_allocation'),
-    [pendingApplications]
+    () => searchedApplications.filter((app: any) => (app.state === 'submitted' && isUpcomingApplication(app)) || app.state === 'verified_upcoming' || app.state === 'pending_seat_allocation'),
+    [searchedApplications]
   );
 
   // Trigger the canonical session-activation service. Activates ALL eligible
@@ -581,7 +605,6 @@ export default function AdminApplicationsPage() {
       });
     }
     return map;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filteredData, buses, routes, routesLoading, busesLoading, activeSection]);
 
   const handleApproveRenewal = async (requestId: string) => {
@@ -959,9 +982,19 @@ export default function AdminApplicationsPage() {
               placeholder={activeSection === 'renewals' ? "Search renewals..." : "Search by name, enrollment ID, phone..."}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10 h-10 w-full bg-[#12131A] border-white/[0.05] focus:border-indigo-500/50 transition-all text-sm"
+              className="pl-10 pr-8 h-10 w-full bg-[#12131A] border-white/[0.05] focus:border-indigo-500/50 transition-all text-sm"
             />
+            {isSearchLoading && (
+              <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-zinc-400" />
+            )}
           </div>
+          {isServerFallback && (
+            <div className="flex items-center">
+              <span className="text-[10px] font-semibold text-sky-600 bg-sky-50 dark:bg-sky-950/40 dark:text-sky-400 px-2 py-0.5 rounded-full border border-sky-200 dark:border-sky-800">
+                Server Match
+              </span>
+            </div>
+          )}
 
           <div className="flex gap-2">
             {(activeSection === 'applications' || activeSection === 'upcoming') && (

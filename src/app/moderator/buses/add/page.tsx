@@ -10,6 +10,7 @@ import { useAuth } from '@/contexts/auth-context';
 import { useToast } from "@/contexts/toast-context";
 import { useDebouncedStorage } from '@/hooks/useDebouncedStorage';
 import { signalCollectionRefresh } from "@/hooks/useEventDrivenRefresh";
+import { invalidateCollectionCache } from "@/hooks/useApiCollection";
 import { useModeratorPermissions } from "@/hooks/useModeratorPermissions";
 import { getAllBuses,getAllDrivers,getAllRoutes } from "@/lib/dataService";
 import { Driver,Route } from "@/lib/types";
@@ -210,6 +211,7 @@ export default function AddBusPage() {
 
       storage.clear();
       addToast(result.message || "Bus created!", 'success');
+      invalidateCollectionCache('buses');
       signalCollectionRefresh('buses');
       setTimeout(() => router.push("/moderator/buses"), 1500); // Updated redirect
     } catch (error) {

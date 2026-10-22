@@ -31,7 +31,35 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Too many requests' }, { status: 429, headers: rl.headers });
     }
 
-    const moderatorRows = await getAllModerators();
+    const { searchParams } = new URL(request.url);
+    const search = searchParams.get('search') || searchParams.get('q');
+
+    let moderatorRows = await getAllModerators();
+
+    if (search && search.trim()) {
+      const { getSupabaseServer } = await import('@/lib/supabase-server');
+      const db = getSupabaseServer();
+      const escaped = search.trim().replace(/%/g, '\\%').replace(/_/g, '\\_');
+      const pattern = `%${escaped}%`;
+      const { data, error } = await db
+        .from('moderator_profiles')
+        .select('*')
+        .or(`full_name.ilike.${pattern},email.ilike.${pattern},phone.ilike.${pattern},employee_id.ilike.${pattern},faculty.ilike.${pattern},team_name.ilike.${pattern}`)
+        .order('full_name', { ascending: true });
+
+      if (!error && data && data.length > 0) {
+        moderatorRows = data;
+      } else {
+        const term = search.trim().toLowerCase();
+        moderatorRows = moderatorRows.filter((row: any) =>
+          (row.fullName || row.name || '').toLowerCase().includes(term) ||
+          (row.email || '').toLowerCase().includes(term) ||
+          (row.phone || '').toLowerCase().includes(term) ||
+          (row.employeeId || '').toLowerCase().includes(term) ||
+          (row.faculty || '').toLowerCase().includes(term)
+        );
+      }
+    }
 
     const moderators: Moderator[] = moderatorRows.map((row: any) => ({
       id: row.uid,

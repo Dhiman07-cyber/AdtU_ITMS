@@ -29,10 +29,11 @@ import { useAuth } from "@/contexts/auth-context";
 import { useToast } from "@/contexts/toast-context";
 import { invalidateCollectionCache, useApiCollection } from "@/hooks/useApiCollection";
 import { useEventDrivenRefresh } from "@/hooks/useEventDrivenRefresh";
+import { useLocalAndServerSearch } from "@/hooks/useLocalAndServerSearch";
 import { deleteModerator } from "@/lib/dataService";
 import { exportToExcel } from "@/lib/export-helpers";
-import { safeImageSrc } from "@/lib/security/url-sanitizer";
 import { supabase } from "@/lib/supabase-client";
+import { safeImageSrc } from "@/lib/security/url-sanitizer";
 import {
   DEFAULT_MODERATOR_PERMISSIONS,
   FULL_MODERATOR_PERMISSIONS,
@@ -57,6 +58,7 @@ import {
   Download,
   Edit,
   Eye,
+  Loader2,
   Lock,
   MapPin,
   MoreHorizontal,
@@ -220,24 +222,42 @@ export default function ModeratorManagementHub() {
 
   const isLoading = authLoading || loadingModerators;
 
-  // Filtered list for the left column
-  const filteredModerators = useMemo(() => {
-    const term = searchTerm.toLowerCase();
-    return moderators.filter((m) => {
+  // Local matcher for Tier 1 search (0ms, 0 network calls)
+  const moderatorLocalMatcher = useMemo(() => {
+    return (m: any, term: string) => {
       const name = (m.name || m.fullName || "").toLowerCase();
       const email = (m.email || "").toLowerCase();
       const phone = m.phone || m.phoneNumber || "";
       const emp = (m.employeeId || m.empId || "").toLowerCase();
       const fac = (m.faculty || m.assignedFaculty || "").toLowerCase();
 
-      const matchesSearch =
-        !searchTerm ||
+      return (
         name.includes(term) ||
         email.includes(term) ||
-        phone.includes(searchTerm) ||
+        phone.includes(term) ||
         emp.includes(term) ||
-        fac.includes(term);
+        fac.includes(term)
+      );
+    };
+  }, []);
 
+  const {
+    results: searchedModerators,
+    isSearchingServer,
+    isServerFallback,
+  } = useLocalAndServerSearch(
+    moderators,
+    searchTerm,
+    moderatorLocalMatcher,
+    "/api/moderators",
+    {
+      extractItems: (json: any) => json.moderators || json.data || [],
+    }
+  );
+
+  // Filtered list for the left column
+  const filteredModerators = useMemo(() => {
+    return searchedModerators.filter((m) => {
       const currentStatus = (m.status || "active").toLowerCase();
       let matchesStatus = true;
       if (statusFilter === "active") matchesStatus = currentStatus === "active";
@@ -247,9 +267,9 @@ export default function ModeratorManagementHub() {
         matchesStatus = active === total && total > 0;
       }
 
-      return matchesSearch && matchesStatus;
+      return matchesStatus;
     });
-  }, [moderators, searchTerm, statusFilter]);
+  }, [searchedModerators, statusFilter]);
 
   const PAGE_SIZE = 10;
   const [currentPage, setCurrentPage] = useState(1);
@@ -679,22 +699,33 @@ export default function ModeratorManagementHub() {
 
               {/* Search Bar */}
               <div className="relative mt-2">
-                <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+                {isSearchingServer ? (
+                  <Loader2 className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-blue-500 animate-spin" />
+                ) : (
+                  <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+                )}
                 <Input
                   placeholder="Search by name, email, employee ID..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-8 h-8 text-xs w-full bg-white dark:bg-zinc-800/70 border-zinc-200 dark:border-zinc-700/60 rounded-lg"
+                  className="pl-8 pr-24 h-8 text-xs w-full bg-white dark:bg-zinc-800/70 border-zinc-200 dark:border-zinc-700/60 rounded-lg"
                 />
-                {searchTerm && (
-                  <button
-                    type="button"
-                    onClick={() => setSearchTerm("")}
-                    className="absolute right-2 top-2 text-muted-foreground hover:text-foreground p-0.5"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                )}
+                <div className="absolute right-2 top-1.5 flex items-center gap-1">
+                  {isServerFallback && (
+                    <span className="text-[9px] text-blue-600 dark:text-blue-400 font-semibold bg-blue-50 dark:bg-blue-950/60 px-1 py-0.5 rounded border border-blue-200 dark:border-blue-900">
+                      Server Match
+                    </span>
+                  )}
+                  {searchTerm && (
+                    <button
+                      type="button"
+                      onClick={() => setSearchTerm("")}
+                      className="text-muted-foreground hover:text-foreground p-0.5 cursor-pointer"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
               </div>
 
               {/* Filter Pills (Full Width with Counts) */}

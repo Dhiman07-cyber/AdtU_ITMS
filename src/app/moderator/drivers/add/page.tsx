@@ -18,6 +18,7 @@ import { useAuth } from '@/contexts/auth-context';
 import { useToast } from '@/contexts/toast-context';
 import { useDebouncedStorage } from '@/hooks/useDebouncedStorage';
 import { signalCollectionRefresh } from "@/hooks/useEventDrivenRefresh";
+import { invalidateCollectionCache } from "@/hooks/useApiCollection";
 import { getAllBuses, getAllDrivers, getAllRoutes, getModeratorById, updateDriver } from '@/lib/dataService';
 import { Route } from '@/lib/types';
 import { uploadImage } from '@/lib/upload';
@@ -508,6 +509,7 @@ export default function AddDriver() {
         }
 
         addToast('Driver created successfully!', 'success');
+        invalidateCollectionCache('drivers');
         signalCollectionRefresh('drivers');
         setTimeout(() => {
           router.push('/moderator/drivers');

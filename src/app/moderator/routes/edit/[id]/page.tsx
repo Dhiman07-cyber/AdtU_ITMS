@@ -9,6 +9,7 @@ import { useAuth } from '@/contexts/auth-context';
 import { useToast } from "@/contexts/toast-context";
 import AllStopsData from "@/data/All_stops.json";
 import { signalCollectionRefresh } from "@/hooks/useEventDrivenRefresh";
+import { invalidateCollectionCache } from "@/hooks/useApiCollection";
 import { useModeratorPermissions } from "@/hooks/useModeratorPermissions";
 import { getRouteById } from "@/lib/dataService";
 import { GripVertical,MapPin,Plus,X } from "lucide-react";
@@ -215,6 +216,7 @@ export default function EditRoutePage({ params }: { params: Promise<{ id: string
       if (!response.ok) throw new Error(result.error || 'Failed to update route');
 
       addToast("Route updated successfully!", 'success');
+      invalidateCollectionCache('routes');
       signalCollectionRefresh('routes');
       router.push("/moderator/routes");
     } catch (error: any) {

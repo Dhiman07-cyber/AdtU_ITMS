@@ -44,16 +44,16 @@ import { useToast } from '@/contexts/toast-context';
 import { deleteStudent } from '@/lib/dataService';
 import { exportToExcel } from '@/lib/export-helpers';
 import { safeImageSrc } from "@/lib/security/url-sanitizer";
-import { supabase } from '@/lib/supabase-client';
 import { cn } from '@/lib/utils';
 import { ArrowRightLeft, ChevronLeft, ChevronRight, ClipboardList, Clock, Download, Edit, Eye, Filter, GraduationCap, Loader2, MoreHorizontal, Plus, QrCode, RefreshCw, RotateCcw, Search, Trash2, UserCheck, Users, UserX } from "lucide-react";
 import { MobileActionFAB } from '@/components/layout/MobileActionFAB';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useEffect,useMemo,useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 // Migrated: Server-side API → PostgreSQL (no Firestore client reads)
-import { invalidateCollectionCache,useApiCollection } from '@/hooks/useApiCollection';
+import { invalidateCollectionCache, useApiCollection } from '@/hooks/useApiCollection';
 import { useEventDrivenRefresh } from '@/hooks/useEventDrivenRefresh';
+import { useLocalAndServerSearch } from '@/hooks/useLocalAndServerSearch';
 import { useModeratorPermissions } from '@/hooks/useModeratorPermissions';
 
 export default function AdminStudents() {
@@ -94,12 +94,6 @@ export default function AdminStudents() {
     const [busFilter, setBusFilter] = useState<string>("all");
 
 
-    // Search State
-    const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
-    const [searchResults, setSearchResults] = useState<any[] | null>(null);
-    const [isSearching, setIsSearching] = useState(false);
-
-    const isLoading = loadingStudents || loadingBuses || isSearching;
     const [isRefreshing, setIsRefreshing] = useState(false);
 
     // Manual refresh handler
@@ -111,46 +105,6 @@ export default function AdminStudents() {
         setIsRefreshing(false);
     };
 
-    // Debounce search term
-    useEffect(() => {
-        const timer = setTimeout(() => {
-            setDebouncedSearchTerm(searchTerm);
-        }, 500);
-
-        return () => clearTimeout(timer);
-    }, [searchTerm]);
-
-    // Server-side search effect
-    useEffect(() => {
-        async function performSearch() {
-            if (!debouncedSearchTerm || debouncedSearchTerm.trim() === '') {
-                setSearchResults(null);
-                return;
-            }
-
-            setIsSearching(true);
-            try {
-                const term = debouncedSearchTerm.trim();
-                const token = await currentUser?.getIdToken();
-                const res = await fetch('/api/students?q=' + encodeURIComponent(term), {
-                    headers: token ? { Authorization: 'Bearer ' + token } : {},
-                });
-                const data = await res.json();
-                setSearchResults(data.students || []);
-
-            } catch (error) {
-                console.error("Search failed:", error);
-                addToast("Search failed. Please try again.", "error");
-            } finally {
-                setIsSearching(false);
-            }
-        }
-
-        performSearch();
-    }, [debouncedSearchTerm, addToast, currentUser]);
-
-
-
     useEffect(() => {
         if (!authLoading && !currentUser) {
             router.push('/login');
@@ -161,65 +115,95 @@ export default function AdminStudents() {
         }
     }, [currentUser, userData, authLoading, router]);
 
-    // Real-time listeners handle data fetching automatically
+    // Index buses for O(1) lookups
+    const busById = useMemo(() => {
+        const map = new Map<string, any>();
+        for (const b of buses || []) {
+            if (b.busId) map.set(b.busId, b);
+            if (b.id) map.set(b.id, b);
+            if (b.busNumber) map.set(b.busNumber, b);
+        }
+        return map;
+    }, [buses]);
 
     const getBusDisplay = (busId: string) => {
         if (!busId) return 'Not Assigned';
-
-        const bus = buses.find(b => b.busId === busId || b.id === busId);
-        if (!bus) return busId;
-
-        const busNum = busId.replace(/[^0-9]/g, '') || '?';
-        return `Bus-${busNum} (${bus.busNumber || 'N/A'})`;
+        const bus = busById.get(busId);
+        if (!bus) return busId.startsWith("Bus-") ? busId : `Bus-${busId}`;
+        const busNum = bus.busNumber || busId.replace(/[^0-9]/g, '') || '?';
+        return `Bus ${busNum}${bus.routeNumber ? ` (R-${bus.routeNumber})` : ''}`;
     };
 
+    // Local matcher for Tier 1 search (0ms, 0 network calls)
+    const studentLocalMatcher = useMemo(() => {
+        return (student: any, term: string) => {
+            const name = (student.name || student.fullName || "").toLowerCase();
+            const email = (student.email || "").toLowerCase();
+            const phone = (student.phone || student.phoneNumber || "");
+            const altPhone = (student.alternatePhone || student.altPhone || "");
+            const enrollmentId = (student.enrollmentId || student.enrollment_id || student.studentId || "").toLowerCase();
+            const assignedBus = busById.get(student.busId);
+            const busText = assignedBus ? `${assignedBus.busNumber} ${assignedBus.routeNumber || ""}`.toLowerCase() : (student.busId || "").toLowerCase();
+
+            return (
+                name.includes(term) ||
+                email.includes(term) ||
+                phone.includes(term) ||
+                altPhone.includes(term) ||
+                enrollmentId.includes(term) ||
+                busText.includes(term)
+            );
+        };
+    }, [busById]);
+
+    const {
+        results: searchedStudents,
+        isSearching,
+        isSearchingServer,
+        isServerFallback,
+    } = useLocalAndServerSearch(
+        students,
+        searchTerm,
+        studentLocalMatcher,
+        "/api/students",
+        {
+            extractItems: (json: any) => json.students || json.data || [],
+        }
+    );
+
+    const isLoading = loadingStudents || loadingBuses || isSearchingServer;
+
     // Get unique values for filters with proper numeric sorting
-    const uniqueBuses = useMemo(() => Array.from(new Set(students.map(s => s.busId).filter(Boolean)))
+    const uniqueBuses = useMemo(() => Array.from(new Set(searchedStudents.map(s => s.busId).filter(Boolean)))
         .sort((a, b) => {
             const numA = parseInt(a.replace(/\D/g, '')) || 0;
             const numB = parseInt(b.replace(/\D/g, '')) || 0;
             return numA - numB;
-        }), [students]);
-
-    // Decide source: Search Results (if available) OR Paginated List
-    const sourceStudents = searchResults !== null ? searchResults : students;
+        }), [searchedStudents]);
 
     const filteredStudents = useMemo(() => {
-        return sourceStudents.filter(student => {
-            // Search filter - check both name and fullName fields
-            const matchesSearch = !searchTerm ||
-                (student.name && student.name.toLowerCase().includes(searchTerm.toLowerCase())) ||
-                (student.fullName && student.fullName.toLowerCase().includes(searchTerm.toLowerCase())) ||
-                (student.email && student.email.toLowerCase().includes(searchTerm.toLowerCase())) ||
-                (student.phone && student.phone.includes(searchTerm)) ||
-                (student.phoneNumber && student.phoneNumber.includes(searchTerm)) ||
-                (student.enrollmentId && student.enrollmentId.toLowerCase().includes(searchTerm.toLowerCase()));
-
-            // Shift filter
+        return searchedStudents.filter(student => {
             const matchesShift = shiftFilter === "all" || (student.shift && student.shift.toLowerCase() === shiftFilter.toLowerCase());
-
-            // Bus filter
             const matchesBus = busFilter === "all" || (student.busId && student.busId === busFilter);
-
-            return matchesSearch && matchesShift && matchesBus;
+            return matchesShift && matchesBus;
         });
-    }, [sourceStudents, searchTerm, shiftFilter, busFilter]);
+    }, [searchedStudents, shiftFilter, busFilter]);
 
     // Role-Specific Metrics: Top 4 Control Cards for Students
     const metrics = useMemo(() => {
-        const total = sourceStudents.length;
-        const activeCount = sourceStudents.filter(s => (s.status || "active").toLowerCase() === "active").length;
-        const softBlockedOrExpiredCount = sourceStudents.filter(s => {
+        const total = searchedStudents.length;
+        const activeCount = searchedStudents.filter(s => (s.status || "active").toLowerCase() === "active").length;
+        const softBlockedOrExpiredCount = searchedStudents.filter(s => {
             const st = (s.status || "active").toLowerCase();
             return st === "soft_blocked" || st === "expired";
         }).length;
-        const suspendedCount = sourceStudents.filter(s => {
+        const suspendedCount = searchedStudents.filter(s => {
             const st = (s.status || "active").toLowerCase();
             return st === "suspended" || st === "inactive";
         }).length;
 
         return { total, activeCount, softBlockedOrExpiredCount, suspendedCount };
-    }, [sourceStudents]);
+    }, [searchedStudents]);
 
     // Unique key safety
     const uniqueFilteredStudents = useMemo(() => filteredStudents.filter((student, index, self) =>
@@ -295,29 +279,29 @@ export default function AdminStudents() {
         }, 200);
     };
 
-    // Export students data from Supabase
+    // Export students data via authenticated API
     const handleExportStudents = async () => {
         try {
-            const currentDate = new Date();
-            const dateStr = currentDate.toISOString().split('T')[0].replace(/-/g, '-');
+            const dateStr = new Date().toISOString().split('T')[0];
+            const token = await currentUser?.getIdToken();
+            const authHeaders = token ? { Authorization: `Bearer ${token}` } : {};
 
-            // Fetch all students directly from Supabase PostgreSQL table 'student_profiles'
-            const { data: rawStudents, error: studentsError } = await supabase
-                .from('student_profiles')
-                .select('uid, full_name, email, phone, faculty, enrollment_id, bus_id, shift, session_start_year, session_end_year, session_duration, status')
-                .order('full_name', { ascending: true });
+            const [studentsRes, busesRes] = await Promise.all([
+                fetch('/api/students?limit=5000', { headers: authHeaders }),
+                fetch('/api/buses', { headers: authHeaders }),
+            ]);
 
-            if (studentsError) throw studentsError;
+            if (!studentsRes.ok) throw new Error('Failed to fetch students for export');
+            const studentsJson = await studentsRes.json();
+            const rawStudents = studentsJson.students || [];
 
-            // Fetch buses to map assigned bus IDs to bus numbers
-            const { data: rawBuses } = await supabase
-                .from('buses')
-                .select('id, bus_number, registration_number');
+            const busesJson = busesRes.ok ? await busesRes.json() : { buses: [] };
+            const rawBuses = busesJson.buses || [];
 
-            const busMap = new Map((rawBuses || []).map((b: any) => [b.id, b.bus_number || b.registration_number]));
+            const busMap = new Map((rawBuses || []).map((b: any) => [b.id || b.busId, b.bus_number || b.busNumber || b.registration_number]));
 
             const studentsData = (rawStudents || []).map((student: any, index: number) => {
-                const busId = student.bus_id || student.bus_id;
+                const busId = student.bus_id || student.busId;
                 const busDisplay = busMap.get(busId) || (busId ? `Bus-${busId}` : 'Not Assigned');
                 const status = student.status || 'N/A';
                 const sessionDuration = student.session_duration ? `${student.session_duration} year${Number(student.session_duration) > 1 ? 's' : ''}` : 'N/A';
@@ -511,13 +495,33 @@ export default function AdminStudents() {
                         <div className="flex flex-col md:flex-row gap-3">
                             {/* Search Bar - Top (Full Width on Mobile) */}
                             <div className="relative w-full md:flex-1">
-                                <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-gray-400" />
+                                {isSearchingServer ? (
+                                    <Loader2 className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-blue-500 animate-spin" />
+                                ) : (
+                                    <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-gray-400" />
+                                )}
                                 <Input
                                     placeholder="Search by name, email, or phone..."
                                     value={searchTerm}
                                     onChange={(e) => setSearchTerm(e.target.value)}
-                                    className="pl-9 h-9 text-xs w-full"
+                                    className="pl-9 pr-24 h-9 text-xs w-full"
                                 />
+                                <div className="absolute right-2.5 top-2 flex items-center gap-1.5">
+                                    {isServerFallback && (
+                                        <span className="text-[10px] text-blue-600 dark:text-blue-400 font-semibold bg-blue-50 dark:bg-blue-950/60 px-1.5 py-0.5 rounded border border-blue-200 dark:border-blue-900">
+                                            Server Match
+                                        </span>
+                                    )}
+                                    {searchTerm && (
+                                        <button
+                                            type="button"
+                                            onClick={() => setSearchTerm("")}
+                                            className="text-muted-foreground hover:text-foreground p-0.5 cursor-pointer"
+                                        >
+                                            <RotateCcw className="w-3.5 h-3.5" />
+                                        </button>
+                                    )}
+                                </div>
                             </div>
 
                             {/* Filters - Side by side on Mobile in the same line */}
@@ -596,7 +600,7 @@ export default function AdminStudents() {
                                 {uniqueFilteredStudents.length > 0 && (
                                     <TableBody>
                                         {/* Show loader inside table when refreshing/searching with existing data */}
-                                        {isLoading && (students.length > 0 || searchResults) && (
+                                        {isLoading && (students.length > 0 || searchedStudents.length > 0) && (
                                             <TableRow>
                                                 <TableCell colSpan={7} className="h-1 p-0">
                                                     <div className="w-full h-1 bg-blue-100 dark:bg-blue-900 overflow-hidden">

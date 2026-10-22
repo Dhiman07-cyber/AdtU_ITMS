@@ -179,6 +179,11 @@ export default function EnhancedModeratorDashboard() {
   const handleRefreshAll = async () => {
     setIsRefreshing(true);
     try {
+      dashboardCache.clearCached();
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('adtu_moderator_dashboard_cache');
+        localStorage.removeItem('adtu_moderator_dashboard_expiry');
+      }
       await fetchRealTotalCounts();
       setLastUpdated(new Date());
     } catch (error) {

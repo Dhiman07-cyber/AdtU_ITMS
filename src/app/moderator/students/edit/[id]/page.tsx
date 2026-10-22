@@ -10,6 +10,7 @@ import { Select,SelectContent,SelectItem,SelectTrigger,SelectValue } from "@/com
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from '@/contexts/toast-context';
 import { signalCollectionRefresh } from '@/hooks/useEventDrivenRefresh';
+import { invalidateCollectionCache } from '@/hooks/useApiCollection';
 import { getAllBuses,getAllRoutes,getStudentById,Route,updateStudent } from '@/lib/dataService';
 import { cn } from "@/lib/utils";
 import { normalizeShift } from "@/lib/utils/shift-utils";
@@ -451,7 +452,9 @@ export default function EditStudentPage({ params }: { params: Promise<{ id: stri
 
         if (updatedStudent) {
           addToast('Student updated successfully!', 'success');
-          // Signal the students list page to refresh when it's rendered
+          // Signal and invalidate collection cache
+          invalidateCollectionCache('students');
+          invalidateCollectionCache('buses');
           signalCollectionRefresh('students');
           router.push("/moderator/students");
         } else {

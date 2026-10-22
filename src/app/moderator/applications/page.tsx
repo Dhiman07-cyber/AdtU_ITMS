@@ -25,6 +25,7 @@ import {
 	DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu";
 import { invalidateCollectionCache,useApiCollection } from '@/hooks/useApiCollection';
+import { useLocalAndServerSearch } from '@/hooks/useLocalAndServerSearch';
 import { useModeratorPermissions } from '@/hooks/useModeratorPermissions';
 import { cn } from "@/lib/utils";
 import {
@@ -61,56 +62,6 @@ export default function ModeratorApplicationsPage() {
     pageSize: 50, orderByField: 'createdAt', orderDirection: 'desc',
     autoRefresh: false, // MANUAL REFRESH ONLY
   });
-  const [renewalRequests, setRenewalRequests] = useState<any[]>([]);
-  const [loadingRenewals, setLoadingRenewals] = useState(false);
-
-  const fetchRenewalRequests = async () => {
-    try {
-      setLoadingRenewals(true);
-      if (!currentUser) return;
-      const token = await currentUser.getIdToken();
-      const res = await fetch('/api/applications/all?limit=200', {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (!res.ok) throw new Error(`API error: ${res.status}`);
-      const responseData = await res.json();
-      const apps = responseData.applications || [];
-
-      const requests = apps
-        .filter((row: any) => {
-          const state = row.state || '';
-          const type = row.applicationType || row.application_type || '';
-          return (state === 'submitted' || state === 'awaiting_verification' || state === 'pending') &&
-                 (type === 'renewal' || type === 'renewal_after_soft_block');
-        })
-        .map((row: any) => ({
-          id: row.applicationId || row.application_id || row.id,
-          studentId: row.applicantUid || row.applicant_uid || row.studentId,
-          enrollmentId: row.formData?.enrollmentId || row.form_data?.enrollmentId || '',
-          studentName: row.formData?.studentName || row.form_data?.studentName || row.applicantEmail || '',
-          totalFee: row.formData?.totalFee || row.form_data?.totalFee || 0,
-          durationYears: row.formData?.durationYears || row.form_data?.durationYears || 0,
-          paymentMode: row.formData?.paymentMode || row.form_data?.paymentMode || 'online',
-          paymentId: row.formData?.paymentId || row.form_data?.paymentId || row.paymentId || '',
-          receiptImageUrl: row.formData?.receiptImageUrl || row.form_data?.receiptImageUrl || '',
-          studentEmail: row.formData?.studentEmail || row.form_data?.studentEmail || row.applicantEmail || '',
-          paidAt: row.formData?.paidAt || row.form_data?.paidAt || row.createdAt || row.created_at || '',
-          status: row.state || 'pending',
-          createdAt: row.createdAt || row.created_at,
-        }));
-      setRenewalRequests(requests);
-    } catch (error) {
-      console.error('Error fetching renewal requests:', error);
-    } finally {
-      setLoadingRenewals(false);
-    }
-  };
-
-  useEffect(() => {
-    if (currentUser) {
-      fetchRenewalRequests();
-    }
-  }, [currentUser]);
   const { data: routes, loading: routesLoading, refresh: refreshRoutes } = useApiCollection('routes', {
     pageSize: 50, orderByField: 'routeName', orderDirection: 'asc',
     autoRefresh: false,
@@ -120,7 +71,7 @@ export default function ModeratorApplicationsPage() {
     autoRefresh: false,
   });
 
-  const isDataLoading = loading || loadingRenewals || routesLoading || busesLoading;
+  const isDataLoading = loading || routesLoading || busesLoading;
 
   const [error, setError] = useState("");
   const [activeSection, setActiveSection] = useState<'applications' | 'upcoming' | 'renewals'>('applications');
@@ -330,7 +281,6 @@ export default function ModeratorApplicationsPage() {
       invalidateCollectionCache('buses');
       await Promise.all([
         refreshApplications(),
-        fetchRenewalRequests(),
         refreshRoutes(),
         refreshBuses()
       ]);
@@ -346,7 +296,59 @@ export default function ModeratorApplicationsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [shiftFilter, setShiftFilter] = useState<string[]>([]);
 
-  // Removed verification codes cleanup effect
+  // Local-First + Server Fallback search (Fix 133)
+  const {
+    items: searchedApplications,
+    isSearching: isSearchLoading,
+    isServerFallback,
+  } = useLocalAndServerSearch<any>({
+    items: pendingApplications,
+    searchTerm: searchQuery,
+    localMatcher: (item, query) => {
+      const q = query.toLowerCase();
+      const fn = (item.formData?.fullName || item.form_data?.fullName || item.studentName || '').toLowerCase();
+      const en = (item.formData?.enrollmentId || item.form_data?.enrollmentId || item.enrollmentId || '').toLowerCase();
+      const ph = (item.formData?.phoneNumber || item.form_data?.phoneNumber || '').toLowerCase();
+      const em = (item.applicantEmail || item.email || item.formData?.studentEmail || '').toLowerCase();
+      const id = (item.applicationId || item.application_id || item.id || '').toLowerCase();
+      const bus = (item.busNumber || item.formData?.busNumber || '').toLowerCase();
+      return fn.includes(q) || en.includes(q) || ph.includes(q) || em.includes(q) || id.includes(q) || bus.includes(q);
+    },
+    apiEndpoint: '/api/applications/all',
+    responseExtractor: (data) => data.applications || data || [],
+    getId: (item) => item.applicationId || item.application_id || item.id,
+  });
+
+  // Derive renewalRequests directly from searchedApplications dataset — zero redundant roundtrips
+  const renewalRequests: any[] = useMemo(() => {
+    return (searchedApplications || [])
+      .filter((row: any) => {
+        const state = row.state || '';
+        const type = row.applicationType || row.application_type || '';
+        const id = row.applicationId || row.application_id || row.id;
+        return (state === 'submitted' || state === 'awaiting_verification' || state === 'pending') &&
+               (type === 'renewal' || type === 'renewal_after_soft_block') &&
+               !processedIds.has(id);
+      })
+      .map((row: any) => ({
+        id: row.applicationId || row.application_id || row.id,
+        applicationId: row.applicationId || row.application_id || row.id,
+        studentId: row.applicantUid || row.applicant_uid || row.studentId,
+        enrollmentId: row.formData?.enrollmentId || row.form_data?.enrollmentId || '',
+        studentName: row.formData?.studentName || row.form_data?.studentName || row.applicantEmail || '',
+        totalFee: row.formData?.totalFee || row.form_data?.totalFee || 0,
+        durationYears: row.formData?.durationYears || row.form_data?.durationYears || 0,
+        paymentMode: row.formData?.paymentMode || row.form_data?.paymentMode || 'online',
+        paymentId: row.formData?.paymentId || row.form_data?.paymentId || row.paymentId || '',
+        receiptImageUrl: row.formData?.receiptImageUrl || row.form_data?.receiptImageUrl || '',
+        studentEmail: row.formData?.studentEmail || row.form_data?.studentEmail || row.applicantEmail || '',
+        paidAt: row.formData?.paidAt || row.form_data?.paidAt || row.createdAt || row.created_at || '',
+        status: row.state || 'pending',
+        createdAt: row.createdAt || row.created_at,
+        busNumber: row.busNumber || row.bus_number || row.formData?.busNumber || row.form_data?.busNumber || '',
+        formData: row.formData || row.form_data || {},
+      }));
+  }, [searchedApplications, processedIds]);
 
   useEffect(() => {
     if (userData && userData.role !== "moderator") {
@@ -354,21 +356,22 @@ export default function ModeratorApplicationsPage() {
     }
   }, [userData, router]);
 
+  // Freshers queue: submitted, current-session (non-upcoming) applications.
+  const applicationApplications = useMemo(
+    () => searchedApplications.filter((app: any) => {
+      const type = app.applicationType || app.application_type || '';
+      const isRenewal = type === 'renewal' || type === 'renewal_after_soft_block';
+      return app.state === 'submitted' && !isUpcomingApplication(app) && !isRenewal;
+    }),
+    [searchedApplications]
+  );
 
-
-  // Freshers/Renewals queue: submitted, current-session (non-upcoming) applications.
-  // Upcoming (future-session) applications are split into their own tab so they
-  // never mix with the immediately-actionable queue.
-  const applicationApplications = pendingApplications.filter((app: any) => {
-    const type = app.applicationType || app.application_type || '';
-    const isRenewal = type === 'renewal' || type === 'renewal_after_soft_block';
-    return app.state === 'submitted' && !isUpcomingApplication(app) && !isRenewal;
-  });
-
-  // Upcoming queue: submitted future-session applications. Their actionability is
-  // derived from the frozen eligibleApproval date (no extra stored state).
-  const upcomingApplications = pendingApplications.filter((app: any) =>
-    (app.state === 'submitted' && isUpcomingApplication(app)) || app.state === 'verified_upcoming' || app.state === 'pending_seat_allocation'
+  // Upcoming queue: submitted future-session applications.
+  const upcomingApplications = useMemo(
+    () => searchedApplications.filter((app: any) =>
+      (app.state === 'submitted' && isUpcomingApplication(app)) || app.state === 'verified_upcoming' || app.state === 'pending_seat_allocation'
+    ),
+    [searchedApplications]
   );
 
   const getBusDisplayFromRoute = (routeId: string) => {
@@ -784,7 +787,7 @@ export default function ModeratorApplicationsPage() {
 
       if (response.ok) {
         showToast('Renewal request approved successfully', 'success');
-        setRenewalRequests(prev => prev.filter(r => r.id !== requestId));
+        setProcessedIds(prev => new Set([...prev, requestId]));
       } else {
         const studentName = renewalItem?.studentName || 'Student';
         setReassignModalTarget({
@@ -836,7 +839,7 @@ export default function ModeratorApplicationsPage() {
           setError("");
           setShowRejectDialog(false);
           setRejectionReason("");
-          setRenewalRequests(prev => prev.filter(r => r.id !== selectedApplication));
+          setProcessedIds(prev => new Set([...prev, selectedApplication]));
           setSelectedApplication(null);
         }
       } else {
@@ -998,9 +1001,19 @@ export default function ModeratorApplicationsPage() {
                 placeholder="Search students..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-10 h-10 w-full bg-[#12131A] border-white/[0.05] focus:border-indigo-500/50 text-sm"
+                className="pl-10 pr-8 h-10 w-full bg-[#12131A] border-white/[0.05] focus:border-indigo-500/50 text-sm"
               />
+              {isSearchLoading && (
+                <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-zinc-400" />
+              )}
             </div>
+            {isServerFallback && (
+              <div className="flex items-center">
+                <span className="text-[10px] font-semibold text-sky-600 bg-sky-50 dark:bg-sky-950/40 dark:text-sky-400 px-2 py-0.5 rounded-full border border-sky-200 dark:border-sky-800">
+                  Server Match
+                </span>
+              </div>
+            )}
             <div className="flex gap-2">
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>

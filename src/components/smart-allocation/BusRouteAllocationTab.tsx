@@ -35,6 +35,7 @@ import {
   type DbRouteSnapshot,
   type StagedRouteOperation,
 } from "@/lib/services/net-route-assignment-service";
+import { getAllBuses, getAllRoutes } from "@/lib/dataService";
 
 export interface BusRouteAllocationTabRef {
   exportData: () => void;
@@ -115,20 +116,17 @@ export const BusRouteAllocationTab = forwardRef<BusRouteAllocationTabRef, BusRou
       if (!currentUser) return;
       setLoading(true);
       try {
-        const token = await currentUser.getIdToken();
-        const [busesRes, routesRes] = await Promise.all([
-          fetch("/api/buses", { headers: { Authorization: `Bearer ${token}` } }),
-          fetch("/api/routes", { headers: { Authorization: `Bearer ${token}` } }),
+        const [busesRaw, routesRaw] = await Promise.all([
+          getAllBuses(),
+          getAllRoutes(),
         ]);
 
-        const busesJson = await busesRes.json();
-        const busesData = (busesJson.buses || []).map((b: any) => ({
+        const busesData = (busesRaw || []).map((b: any) => ({
           ...b,
           id: b.busId || b.id,
         })) as BusData[];
 
-        const routesJson = await routesRes.json();
-        const routesData = (Array.isArray(routesJson) ? routesJson : routesJson.routes || []).map((r: any) => ({
+        const routesData = (routesRaw || []).map((r: any) => ({
           id: r.id || r.routeId,
           ...r,
         })) as RouteData[];

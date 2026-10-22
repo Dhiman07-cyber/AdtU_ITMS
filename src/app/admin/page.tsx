@@ -248,6 +248,11 @@ export default function EnhancedAdminDashboard() {
   const handleRefreshAll = async () => {
     setIsRefreshing(true);
     try {
+      dashboardCache.clearCached();
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('adtu_admin_dashboard_cache');
+        localStorage.removeItem('adtu_admin_dashboard_expiry');
+      }
       await fetchRealTotalCounts();
       setLastUpdated(new Date());
     } catch (error) {

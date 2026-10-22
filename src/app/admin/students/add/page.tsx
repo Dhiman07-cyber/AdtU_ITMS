@@ -315,7 +315,6 @@ export default function AddStudentForm() {
         setFormData(prev => ({ ...prev, validUntil }));
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [academicDeadline]);
 
   // Handle session duration change

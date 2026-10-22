@@ -23,6 +23,7 @@ import { startTransition, useEffect, useRef, useState } from 'react';
 
 import { OptimizedInput,OptimizedSelect,OptimizedTextarea } from '@/components/forms';
 import { useDebouncedStorage } from '@/hooks/useDebouncedStorage';
+import { invalidateCollectionCache } from '@/hooks/useApiCollection';
 
 // Define the form data type
 type StudentFormData = {
@@ -721,6 +722,8 @@ export default function AddStudentForm() {
         }
 
         addToast(result.message || 'Student created successfully!', 'success');
+        invalidateCollectionCache('students');
+        invalidateCollectionCache('buses');
 
         // Redirect to students list after successful creation
         setTimeout(() => {
