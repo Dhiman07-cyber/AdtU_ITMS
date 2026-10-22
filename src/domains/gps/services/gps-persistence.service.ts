@@ -1,4 +1,5 @@
 import { getSupabaseServer } from '@/lib/supabase-server';
+import { getBusIdVariations } from '@/lib/utils';
 import { getRedisTripLock, setRedisTripLock, clearRedisTripLock } from './gps-redis-guard';
 import { invalidateBusTripSnapshot } from '@/lib/services/trip-snapshot-cache';
 
@@ -79,48 +80,48 @@ export function invalidateActiveTripCache(busId?: string, driverId?: string): vo
 }
 
 export async function checkActiveTrip(driverId: string, busId: string, tripId: string): Promise<{ valid: boolean; reason?: string; tripId?: string; routeId?: string; shift?: string }> {
-  const cacheKey = `${driverId}:${busId}`;
+  const busVariations = getBusIdVariations(busId);
   const now = Date.now();
 
-  // Check negative cache first (if recently confirmed nonexistent, reject immediately)
-  const negativeUntil = negativeLockCache.get(cacheKey);
-  if (negativeUntil && (now < negativeUntil)) {
-    return { valid: false, reason: 'No active trip lock found for this driver/bus' };
-  }
-
-  // Check positive in-memory cache (absorbs high-frequency GPS query load during steady-state driving)
-  const positiveEntry = positiveLockCache.get(cacheKey);
-  if (positiveEntry && now < positiveEntry.cachedUntilMs) {
-    if (positiveEntry.expiresAtMs <= now) {
-      positiveLockCache.delete(cacheKey);
-      negativeLockCache.set(cacheKey, now + NEGATIVE_CACHE_TTL_MS);
-      return { valid: false, reason: 'Active trip lock has expired' };
-    }
-    if (tripId && positiveEntry.tripId !== tripId) {
-      return { valid: false, reason: 'Trip mismatch for location update' };
-    }
-    positiveEntry.cachedUntilMs = now + POSITIVE_CACHE_TTL_MS;
-    return { valid: true, tripId: positiveEntry.tripId, routeId: positiveEntry.routeId, shift: positiveEntry.shift };
-  }
-
-  // Multi-instance Redis check: Zero-DB read path across Next.js containers
-  const redisLock = await getRedisTripLock(busId);
-  if (redisLock) {
-    if (redisLock.driverId === driverId && redisLock.expiresAtMs > now) {
-      if (tripId && redisLock.tripId !== tripId) {
+  // Check positive in-memory cache for any variation
+  for (const v of busVariations) {
+    const positiveEntry = positiveLockCache.get(`${driverId}:${v}`);
+    if (positiveEntry && now < positiveEntry.cachedUntilMs) {
+      if (positiveEntry.expiresAtMs <= now) {
+        positiveLockCache.delete(`${driverId}:${v}`);
+        negativeLockCache.set(`${driverId}:${v}`, now + NEGATIVE_CACHE_TTL_MS);
+        return { valid: false, reason: 'Active trip lock has expired' };
+      }
+      if (tripId && positiveEntry.tripId !== tripId) {
         return { valid: false, reason: 'Trip mismatch for location update' };
       }
-      negativeLockCache.delete(cacheKey);
-      positiveLockCache.set(cacheKey, {
-        tripId: redisLock.tripId,
-        driverId: redisLock.driverId,
-        routeId: redisLock.routeId,
-        shift: redisLock.shift,
-        deviceId: redisLock.deviceId,
-        expiresAtMs: redisLock.expiresAtMs,
-        cachedUntilMs: now + POSITIVE_CACHE_TTL_MS,
-      });
-      return { valid: true, tripId: redisLock.tripId, routeId: redisLock.routeId, shift: redisLock.shift };
+      positiveEntry.cachedUntilMs = now + POSITIVE_CACHE_TTL_MS;
+      return { valid: true, tripId: positiveEntry.tripId, routeId: positiveEntry.routeId, shift: positiveEntry.shift };
+    }
+  }
+
+  // Multi-instance Redis check across variations
+  for (const v of busVariations) {
+    const redisLock = await getRedisTripLock(v);
+    if (redisLock) {
+      if (redisLock.driverId === driverId && redisLock.expiresAtMs > now) {
+        if (tripId && redisLock.tripId !== tripId) {
+          return { valid: false, reason: 'Trip mismatch for location update' };
+        }
+        for (const varKey of busVariations) {
+          negativeLockCache.delete(`${driverId}:${varKey}`);
+          positiveLockCache.set(`${driverId}:${varKey}`, {
+            tripId: redisLock.tripId,
+            driverId: redisLock.driverId,
+            routeId: redisLock.routeId,
+            shift: redisLock.shift,
+            deviceId: redisLock.deviceId,
+            expiresAtMs: redisLock.expiresAtMs,
+            cachedUntilMs: now + POSITIVE_CACHE_TTL_MS,
+          });
+        }
+        return { valid: true, tripId: redisLock.tripId, routeId: redisLock.routeId, shift: redisLock.shift };
+      }
     }
   }
 
@@ -129,25 +130,26 @@ export async function checkActiveTrip(driverId: string, busId: string, tripId: s
   const { data: activeTrip, error } = await supabase
     .from('active_trips')
     .select('trip_id, route_id, driver_id, shift, status, expires_at')
-    .eq('bus_id', busId)
+    .in('bus_id', busVariations)
     .eq('driver_id', driverId)
     .eq('status', 'active')
+    .limit(1)
     .maybeSingle();
 
   if (error || !activeTrip) {
-    positiveLockCache.delete(cacheKey);
-    negativeLockCache.set(cacheKey, now + NEGATIVE_CACHE_TTL_MS);
-    if (negativeLockCache.size > 5000) {
-      const firstKey = negativeLockCache.keys().next().value;
-      if (firstKey) negativeLockCache.delete(firstKey);
+    for (const v of busVariations) {
+      positiveLockCache.delete(`${driverId}:${v}`);
+      negativeLockCache.set(`${driverId}:${v}`, now + NEGATIVE_CACHE_TTL_MS);
     }
     return { valid: false, reason: 'No active trip lock found for this driver/bus' };
   }
 
   const expiresAtMs = activeTrip.expires_at ? new Date(activeTrip.expires_at).getTime() : now + 600_000;
   if (expiresAtMs <= now) {
-    positiveLockCache.delete(cacheKey);
-    negativeLockCache.set(cacheKey, now + NEGATIVE_CACHE_TTL_MS);
+    for (const v of busVariations) {
+      positiveLockCache.delete(`${driverId}:${v}`);
+      negativeLockCache.set(`${driverId}:${v}`, now + NEGATIVE_CACHE_TTL_MS);
+    }
     return { valid: false, reason: 'Active trip lock has expired' };
   }
 
@@ -156,28 +158,25 @@ export async function checkActiveTrip(driverId: string, busId: string, tripId: s
   }
 
   // Active trip confirmed from authoritative PostgreSQL.
-  // Populate Redis cache for cross-node 0-DB read path
-  setRedisTripLock(busId, {
-    tripId: activeTrip.trip_id,
-    driverId,
-    routeId: activeTrip.route_id,
-    shift: activeTrip.shift,
-    expiresAtMs,
-  }).catch(() => {});
+  // Populate Redis cache and in-memory cache across all bus variations
+  for (const v of busVariations) {
+    setRedisTripLock(v, {
+      tripId: activeTrip.trip_id,
+      driverId,
+      routeId: activeTrip.route_id,
+      shift: activeTrip.shift,
+      expiresAtMs,
+    }).catch(() => {});
 
-  // Clear any stale negative cache entry and populate short-lived positive cache.
-  negativeLockCache.delete(cacheKey);
-  positiveLockCache.set(cacheKey, {
-    tripId: activeTrip.trip_id,
-    driverId,
-    routeId: activeTrip.route_id,
-    shift: activeTrip.shift,
-    expiresAtMs,
-    cachedUntilMs: now + POSITIVE_CACHE_TTL_MS,
-  });
-  if (positiveLockCache.size > 5000) {
-    const firstKey = positiveLockCache.keys().next().value;
-    if (firstKey) positiveLockCache.delete(firstKey);
+    negativeLockCache.delete(`${driverId}:${v}`);
+    positiveLockCache.set(`${driverId}:${v}`, {
+      tripId: activeTrip.trip_id,
+      driverId,
+      routeId: activeTrip.route_id,
+      shift: activeTrip.shift,
+      expiresAtMs,
+      cachedUntilMs: now + POSITIVE_CACHE_TTL_MS,
+    });
   }
 
   return { valid: true, tripId: activeTrip.trip_id, routeId: activeTrip.route_id, shift: activeTrip.shift };

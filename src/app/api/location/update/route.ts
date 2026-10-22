@@ -22,50 +22,52 @@ export const POST = withSecurity(
     let sessionVerified = false;
     let activeLock = getPositiveTripLock(driverUid, busId);
     if (!activeLock) {
-      // Cold-start or cross-worker: Check Redis lock to populate positiveLockCache before falling back to device_sessions
+      // Cold-start or cross-worker: Check Redis lock to populate positiveLockCache
       const redisLock = await getRedisTripLock(busId);
       if (redisLock && redisLock.driverId === driverUid && redisLock.expiresAtMs > Date.now()) {
         setActiveTripCache(busId, redisLock);
         activeLock = getPositiveTripLock(driverUid, busId);
       }
     }
-    if (activeLock && activeLock.driverId === driverUid && requestDeviceId && activeLock.deviceId === requestDeviceId) {
+    if (activeLock && activeLock.driverId === driverUid) {
       sessionVerified = true;
-      setCachedDeviceSession(driverUid, requestDeviceId, Date.now());
+      if (requestDeviceId) {
+        if (activeLock.deviceId !== requestDeviceId) {
+          // Same driver logged in on new device (phone swap/spare device) -> update session cleanly
+          activeLock.deviceId = requestDeviceId;
+          writePromises.push(
+            (async () => {
+              await supabase.from('buses').update({ driver_device_session: requestDeviceId }).eq('id', busId);
+              await supabase.from('active_trips').update({ device_id: requestDeviceId }).eq('bus_id', busId).eq('driver_id', driverUid).eq('status', 'active');
+            })()
+          );
+        }
+        setCachedDeviceSession(driverUid, requestDeviceId, Date.now());
+      }
     }
 
     if (!sessionVerified) {
-      let sessionData = getCachedDeviceSession(driverUid);
-      if (!sessionData) {
-        const { data } = await supabase
-          .from('device_sessions')
-          .select('device_id, last_active_at')
-          .eq('user_id', driverUid)
-          .eq('feature', 'driver_location_share')
-          .order('last_active_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
-
-        if (data) {
-          const lastActiveAtMs = new Date(data.last_active_at).getTime();
-          setCachedDeviceSession(driverUid, data.device_id, lastActiveAtMs);
-          sessionData = { deviceId: data.device_id, lastActiveAtMs, cachedAtMs: Date.now() };
+      // Check buses table directly
+      const { data: busRow } = await supabase.from('buses').select('driver_device_session, driver_uid').eq('id', busId).maybeSingle();
+      if (busRow && (busRow.driver_uid === driverUid || !busRow.driver_uid)) {
+        sessionVerified = true;
+        if (requestDeviceId && busRow.driver_device_session !== requestDeviceId) {
+          writePromises.push(
+            (async () => {
+              await supabase.from('buses').update({ driver_device_session: requestDeviceId, driver_uid: driverUid }).eq('id', busId);
+              await supabase.from('active_trips').update({ device_id: requestDeviceId }).eq('bus_id', busId).eq('driver_id', driverUid).eq('status', 'active');
+            })()
+          );
         }
-      }
-
-      if (sessionData) {
-        const sessionAge = Date.now() - sessionData.lastActiveAtMs;
-        if (sessionAge <= 30000 && (!requestDeviceId || sessionData.deviceId !== requestDeviceId)) {
-          return NextResponse.json({
-            success: false,
-            error: 'Active session exists on another device. Location update rejected.',
-            code: 'ANOTHER_DEVICE_ACTIVE',
-            requestId,
-          }, { status: 403 });
-        }
-
-        if (requestDeviceId && sessionData.deviceId === requestDeviceId) {
+        if (requestDeviceId) {
           setCachedDeviceSession(driverUid, requestDeviceId, Date.now());
+        }
+      } else {
+        let sessionData = getCachedDeviceSession(driverUid);
+        if (sessionData && requestDeviceId && sessionData.deviceId !== requestDeviceId) {
+          // Same driver switching devices -> auto-update without error
+          setCachedDeviceSession(driverUid, requestDeviceId, Date.now());
+          sessionVerified = true;
         }
       }
     }
@@ -118,16 +120,12 @@ export const POST = withSecurity(
     }).catch((err: Error) => console.warn('Location broadcast failed:', err));
 
 
-    // Persist heartbeat to PostgreSQL active_trips and device_sessions (throttled to 1 write/bus/30s).
-    // CRITICAL: must also extend expires_at, not just last_heartbeat.
-    // trip-status filters .gt('expires_at', now) — if we only write last_heartbeat
-    // the trip lock expires 10 minutes after start and the student sees "Trip Inactive"
-    // even though GPS HTTP 200 continues. The 600s TTL matches acquire_trip_lock /
-    // extend_trip_lock RPCs (LOCK_TTL_SECONDS = 600 in trip-lock-service.ts).
+    // Persist heartbeat to PostgreSQL active_trips (throttled to 1 write/bus/45s).
+    // Rule 8: Automatically extends active_trips.last_heartbeat = NOW(), expires_at = NOW() + INTERVAL '2 hours'
     const nowMs = Date.now();
 
     if (shouldWriteHeartbeat(busId, nowMs)) {
-      const extendedExpiresAt = new Date(nowMs + 600 * 1000).toISOString();
+      const extendedExpiresAt = new Date(nowMs + 7200 * 1000).toISOString();
       const currentLock = getPositiveTripLock(driverUid, busId);
       setActiveTripCache(busId, {
         tripId: norm?.tripId || tripId || currentLock?.tripId || 'unknown_trip',
@@ -135,7 +133,7 @@ export const POST = withSecurity(
         routeId: routeId || currentLock?.routeId || norm?.routeId,
         shift: (body as any).shift || norm?.shift || currentLock?.shift,
         deviceId: requestDeviceId || currentLock?.deviceId || undefined,
-        expiresAtMs: nowMs + 600 * 1000,
+        expiresAtMs: nowMs + 7200 * 1000,
       });
       writePromises.push(
         (async () => {

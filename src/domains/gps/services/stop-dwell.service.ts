@@ -113,6 +113,10 @@ async function persistDwellRecord(dwell: ActiveDwellState, departedAtIso: string
   if (!dwell.isRoadside && recent && (Date.now() - recent.lastDepartedMs < 180_000)) {
     return;
   }
+  if (recentStopDwells.size >= 1000) {
+    const oldestKey = recentStopDwells.keys().next().value;
+    if (oldestKey) recentStopDwells.delete(oldestKey);
+  }
   recentStopDwells.set(recentKey, { lastDepartedMs: Date.now(), dwellSeconds });
 
   try {

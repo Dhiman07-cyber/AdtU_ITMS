@@ -1,6 +1,7 @@
 import { withSecurity } from '@/lib/security/api-security';
 import { RateLimits } from '@/lib/security/rate-limiter';
 import { getSupabaseServer } from '@/lib/supabase-server';
+import { getBusIdVariations } from '@/lib/utils';
 import { NextResponse } from 'next/server';
 
 /**
@@ -32,7 +33,7 @@ export const GET = withSecurity(
         query = query.eq('trip_id', tripId);
       }
       if (busId) {
-        query = query.eq('bus_id', busId);
+        query = query.in('bus_id', getBusIdVariations(busId));
       }
       if (routeId) {
         query = query.eq('route_id', routeId);

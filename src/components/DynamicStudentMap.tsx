@@ -4,9 +4,9 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card,CardContent,CardHeader,CardTitle } from '@/components/ui/card';
 import { useAuth } from '@/contexts/auth-context';
+import { supabase } from '@/lib/supabase-client';
 import { WebSocketClient } from '@/domains/realtime/ws-client';
 import { getClientWsUrl } from '@/domains/realtime';
-import { supabase } from '@/lib/supabase-client';
 import { AlertCircle,Bus,Clock,MapPin,Navigation } from 'lucide-react';
 import dynamic from 'next/dynamic';
 import React,{ useEffect,useRef,useState } from 'react';
@@ -16,8 +16,6 @@ const GuwahatiMap = dynamic(() => import('@/components/maps/GuwahatiMap'), {
   ssr: false,
   loading: () => <div className="w-full h-[500px] bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-800 dark:to-gray-900 rounded-3xl animate-pulse flex items-center justify-center text-slate-500 font-bold">Loading Guwahati Vector Map...</div>,
 });
-
-// Using shared Supabase client from @/lib/supabase-client
 
 interface BusLocation {
   bus_id: string;

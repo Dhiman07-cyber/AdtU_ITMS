@@ -36,6 +36,7 @@
 
 import * as net from 'net';
 import * as tls from 'tls';
+import { getBusIdVariations } from '@/lib/utils';
 import type { LastLocation } from './types';
 
 const KEY_PREFIX = 'gps:last:';
@@ -285,10 +286,17 @@ function sendCommand(state: GpsRedisState, args: string[]): Promise<string | nul
       },
     };
     const cmdTimer = setTimeout(() => {
-      const idx = state.pending.indexOf(entry);
-      if (idx !== -1) {
-        state.pending.splice(idx, 1);
+      // FIX 55: Destroy socket and reject all pending callbacks on command timeout after socket write
+      if (state.socket && !state.socket.destroyed) {
+        state.socket.destroy();
       }
+      state.ready = false;
+      state.buffer = Buffer.alloc(0);
+      for (const cb of state.pending) {
+        cb.resolve(null);
+      }
+      state.pending = [];
+      scheduleGpsReconnect(state);
       resolve(null);
     }, 2000);
 
@@ -429,6 +437,13 @@ interface LastLoc {
 
 const memLast = new Map<string, LastLoc>();
 
+function boundMap<K, V>(map: Map<K, V>, max: number = 500): void {
+  if (map.size >= max) {
+    const oldest = map.keys().next().value;
+    if (oldest !== undefined) map.delete(oldest);
+  }
+}
+
 const MAX_JUMP_M = 5000;
 const MAX_SPEED_MPS = 200 / 3.6;
 
@@ -494,6 +509,7 @@ function memoryGuard(
   const clampedRaw = newRawTs !== null
     ? Math.min(newRawTs, Date.now() + MAX_CLOCK_SKEW_MS)
     : 0;
+  boundMap(memLast, 500);
   memLast.set(busId, {
     lat: newLat,
     lng: newLng,
@@ -699,16 +715,22 @@ export const getRedisLastLocation = getGpsStateFromRedis;
  * Best-effort: clears both Redis and the in-memory fallback.
  */
 export async function clearGpsState(busId: string): Promise<void> {
-  memLast.delete(busId);
-  memActiveFlags.delete(busId);
-  memFlagsHydrated.delete(busId);
+  const variations = getBusIdVariations(busId);
+  for (const v of variations) {
+    memLast.delete(v);
+    memActiveFlags.delete(v);
+    memFlagsHydrated.delete(v);
+  }
   const state = getState();
   if (state.ready && state.socket && !state.socket.destroyed) {
     try {
-      await sendCommand(state, ['DEL', `${KEY_PREFIX}${busId}`]);
-      await sendCommand(state, ['DEL', `${FLAGS_ACTIVE_PREFIX}${busId}`]);
-      await sendCommand(state, ['DEL', `${DWELL_ACTIVE_PREFIX}${busId}`]);
-      await sendCommand(state, ['DEL', `${FLAGS_HYDRATED_PREFIX}${busId}`]);
+      const keysToDelete = variations.flatMap((v) => [
+        `${KEY_PREFIX}${v}`,
+        `${FLAGS_ACTIVE_PREFIX}${v}`,
+        `${DWELL_ACTIVE_PREFIX}${v}`,
+        `${FLAGS_HYDRATED_PREFIX}${v}`,
+      ]);
+      await sendCommand(state, ['DEL', ...keysToDelete]);
     } catch { /* best-effort */ }
   }
 }
@@ -778,6 +800,7 @@ export async function setRedisTripLock(busId: string, data: RedisTripLockData): 
     deviceId: data.deviceId || existing?.deviceId,
     expiresAtMs: data.expiresAtMs,
   };
+  boundMap(memTripLocks, 500);
   memTripLocks.set(busId, merged);
 
   const state = getState();
@@ -813,6 +836,7 @@ export async function getRedisActiveDwell(busId: string): Promise<any | null> {
 }
 
 export async function setRedisActiveDwell(busId: string, data: any): Promise<void> {
+  boundMap(memActiveDwells, 500);
   memActiveDwells.set(busId, data);
   const state = getState();
   if (!state.ready || !state.socket || state.socket.destroyed) return;
@@ -934,12 +958,14 @@ export async function setRedisActiveFlag(busId: string, flag: ActiveWaitingFlag)
   // Update in-memory fallback
   let busMap = memActiveFlags.get(busId);
   if (!busMap) {
+    boundMap(memActiveFlags, 500);
     busMap = new Map();
     memActiveFlags.set(busId, busMap);
   }
   busMap.set(flag.flagId, flag);
 
   memFlagsHydrated.add(busId);
+  boundMap(lastFlagSyncMs, 500);
   lastFlagSyncMs.set(busId, Date.now());
 
   const state = getState();
