@@ -851,7 +851,11 @@ function TrackBusLive() {
               {
                 enableHighAccuracy: false, // Network/WiFi location (faster, less battery)
                 timeout: 15000, // 15 second timeout
-                maximumAge: 300000 // Allow 5 minute cached position (very lenient)
+                // Cap cached fixes at 30s. The server rejects coordinates whose
+                // timestamp is > 60s from server time (FIX 40). A 5-minute cache
+                // produced stale fixes that failed that gate ("clock drifted").
+                // 30s keeps geolocation fast yet guarantees the fix passes with headroom.
+                maximumAge: 30000
               }
             );
           });
@@ -923,19 +927,34 @@ function TrackBusLive() {
         stopLat: currentLocation.lat,
         stopLng: currentLocation.lng,
         accuracy: position?.coords.accuracy || 50,
+        // FIX: send the GPS fix time. Without it, the server's freshness gate (FIX 40)
+        // treats coords-without-timestamp as stale and rejects with "clock drifted > 60s".
+        // position.timestamp is the real fix time and is guaranteed <= 30s old thanks to
+        // the maximumAge cap above, so it always clears the 60s check.
+        timestamp: position.timestamp,
       };
 
 
 
-      // Call API to raise waiting flag
-      const response = await fetch('/api/student/waiting-flag', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${idToken}`
-        },
-        body: JSON.stringify(flagData)
-      });
+      // Call API to raise waiting flag.
+      // Abort after 25s so a slow serverless cold start can never leave the
+      // button stuck on "Processing..." indefinitely.
+      const raiseController = new AbortController();
+      const raiseTimeout = setTimeout(() => raiseController.abort(), 25000);
+      let response: Response;
+      try {
+        response = await fetch('/api/student/waiting-flag', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${idToken}`
+          },
+          body: JSON.stringify(flagData),
+          signal: raiseController.signal
+        });
+      } finally {
+        clearTimeout(raiseTimeout);
+      }
 
       let result;
       try {
@@ -961,6 +980,10 @@ function TrackBusLive() {
         addToast(result.error || result.message || `Failed to raise waiting flag (${response.status})`, "error");
       }
     } catch (error: any) {
+      if (error?.name === 'AbortError') {
+        addToast("⏱️ The request timed out. Please check your connection and try again.", "error");
+        return;
+      }
       console.error("❌ Error raising waiting flag:", error);
       console.error("❌ Error details:", {
         message: error.message,
