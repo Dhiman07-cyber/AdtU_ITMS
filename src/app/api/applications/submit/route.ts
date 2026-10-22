@@ -1,16 +1,11 @@
 import { getById, submit } from '@/domains/application';
-import { adminAuth } from '@/lib/firebase-admin';
-import { NextRequest, NextResponse } from 'next/server';
+import { withSecurity } from '@/lib/security/api-security';
+import { RateLimits } from '@/lib/security/rate-limiter';
+import { NextResponse } from 'next/server';
 
-export async function POST(request: NextRequest) {
-  try {
-    const token = request.headers.get('Authorization')?.replace('Bearer ', '');
-    if (!token) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
-    const decodedToken = await adminAuth.verifyIdToken(token);
-    const uid = decodedToken.uid;
+export const POST = withSecurity(
+  async (request, { auth }) => {
+    const uid = auth.uid;
 
     const body = await request.json();
     const { applicationId } = body;
@@ -19,16 +14,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid application ID' }, { status: 400 });
     }
 
-    // FIX-01 (IDOR-01): Verify the authenticated user owns this application.
-    // Without this check, any authenticated user can force-submit another
-    // student's verified application by supplying their applicationId.
-    // The transition_application_state RPC accepts any application_id without
-    // comparing it to p_actor_uid; ownership must be enforced at the HTTP layer.
+    // FIX-01 (IDOR-01): Verify the authenticated user owns this application or is admin/moderator
     const existingApp = await getById(applicationId);
     if (!existingApp) {
       return NextResponse.json({ error: 'Application not found' }, { status: 404 });
     }
-    if (existingApp.applicantUid !== uid) {
+    if (existingApp.applicantUid !== uid && !['admin', 'moderator'].includes(auth.role)) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
@@ -43,12 +34,9 @@ export async function POST(request: NextRequest) {
       applicationId,
       message: 'Application submitted successfully',
     });
-  } catch (error: any) {
-    console.error('Error submitting application:', error);
-    return NextResponse.json(
-      { error: 'Failed to submit application' },
-      { status: 500 }
-    );
+  },
+  {
+    requiredRoles: ['student', 'applicant', 'unauthenticated', 'admin', 'moderator'],
+    rateLimit: RateLimits.WRITE,
   }
-}
-
+);

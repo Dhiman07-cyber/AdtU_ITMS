@@ -60,7 +60,8 @@ export async function GET(request: NextRequest) {
 
     const busId = searchParams.get('busId');
     const enrollmentId = searchParams.get('enrollmentId');
-    const q = searchParams.get('q');
+    const rawEnrollmentIds = searchParams.get('enrollmentIds');
+    const q = searchParams.get('search') || searchParams.get('q');
     const limit = Math.min(parseInt(searchParams.get('limit') || String(DEFAULT_LIMIT), 10), MAX_LIMIT);
     const offset = parseInt(searchParams.get('offset') || '0', 10);
 
@@ -69,7 +70,18 @@ export async function GET(request: NextRequest) {
 
     const STUDENT_FIELDS = 'uid, full_name, email, phone, alt_phone, enrollment_id, gender, dob, faculty, department, parent_name, parent_phone, bus_id, route_id, stop_name, status, shift, semester, profile_photo_url, session_start_year, session_end_year';
 
-    if (enrollmentId) {
+    if (rawEnrollmentIds) {
+      const ids = rawEnrollmentIds.split(',').map((id: string) => id.trim()).filter(Boolean);
+      const db = getSupabaseServer();
+      const { data, error, count } = await db
+        .from('student_profiles')
+        .select(STUDENT_FIELDS, { count: 'exact' })
+        .in('enrollment_id', ids);
+
+      if (error) throw error;
+      studentRows = data || [];
+      totalCount = count ?? studentRows.length;
+    } else if (enrollmentId) {
       const db = getSupabaseServer();
       const { data, error, count } = await db
         .from('student_profiles')
@@ -87,7 +99,7 @@ export async function GET(request: NextRequest) {
         studentRows = studentRows.slice(offset, offset + limit);
       }
     } else if (q) {
-      // Server-side search via ILIKE instead of loading all rows
+      // Server-side search via PostgreSQL ILIKE (Fix 122)
       const db = getSupabaseServer();
 
       // Escape ILIKE wildcards to prevent abuse
@@ -96,7 +108,7 @@ export async function GET(request: NextRequest) {
       const { data, error, count } = await db
         .from('student_profiles')
         .select(STUDENT_FIELDS, { count: 'exact' })
-        .or(`full_name.ilike.${pattern},email.ilike.${pattern},enrollment_id.ilike.${pattern}`)
+        .or(`full_name.ilike.${pattern},email.ilike.${pattern},enrollment_id.ilike.${pattern},phone.ilike.${pattern},bus_id.ilike.${pattern},route_id.ilike.${pattern},stop_name.ilike.${pattern},department.ilike.${pattern},faculty.ilike.${pattern}`)
         .order('full_name', { ascending: true })
         .range(offset, offset + limit - 1);
 

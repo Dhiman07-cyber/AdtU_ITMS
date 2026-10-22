@@ -52,7 +52,7 @@ export default function Step1Personal({
         <div className="relative group cursor-pointer" onClick={() => setShowProfileUpdateModal(true)}>
           {finalImageUrl ? (
             <div className="relative h-24 w-24 sm:h-28 sm:w-28 rounded-full overflow-hidden border-4 border-[#0c0e1a] shadow-xl ring-2 ring-indigo-900/50">
-              <Image src={finalImageUrl} alt="Profile" fill className="object-cover" />
+              <Image src={finalImageUrl} alt="Profile" fill unoptimized className="object-cover" />
             </div>
           ) : (
             <div className="h-24 w-24 sm:h-28 sm:w-28 rounded-full bg-slate-900 flex items-center justify-center border-4 border-[#0c0e1a] ring-2 ring-slate-800 shadow-xl group-hover:bg-slate-800 transition-colors">

@@ -316,8 +316,34 @@ export default function DriverLiveTrackingPage() {
         setWaitRequestTimer(10);
         try {
           const audio = new Audio('/sounds/notification.mp3');
-          audio.play().catch(e => console.log('Audio play failed', e));
-        } catch (e) { }
+          audio.play().catch(() => {
+            try {
+              const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+              const osc = ctx.createOscillator();
+              const gain = ctx.createGain();
+              osc.connect(gain);
+              gain.connect(ctx.destination);
+              osc.type = 'sine';
+              osc.frequency.setValueAtTime(880, ctx.currentTime);
+              gain.gain.setValueAtTime(0.1, ctx.currentTime);
+              osc.start();
+              osc.stop(ctx.currentTime + 0.2);
+            } catch {}
+          });
+        } catch {
+          try {
+            const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(880, ctx.currentTime);
+            gain.gain.setValueAtTime(0.1, ctx.currentTime);
+            osc.start();
+            osc.stop(ctx.currentTime + 0.2);
+          } catch {}
+        }
       });
     }
 
@@ -403,8 +429,8 @@ export default function DriverLiveTrackingPage() {
           console.log("💡 Network location unavailable - using default location");
 
           // Use default location as last resort (ADTU Campus UI display placeholder)
-          const defaultLat = 26.1445;
-          const defaultLng = 91.7362;
+          const defaultLat = 26.2019;
+          const defaultLng = 91.8615;
           setCurrentLocation({ lat: defaultLat, lng: defaultLng, accuracy: 500, isFallback: true } as any);
           setAccuracy(500);
           addToast("⚠️ Location access denied or unavailable. UI showing campus placeholder. Real GPS required to start broadcast.", "warning");
@@ -487,8 +513,8 @@ export default function DriverLiveTrackingPage() {
         } else {
           // Use default location (ADTU Campus)
           console.log(" GPS unavailable, using default location");
-          const defaultLat = 26.1445;
-          const defaultLng = 91.7362;
+          const defaultLat = 26.2019;
+          const defaultLng = 91.8615;
           setCurrentLocation({ lat: defaultLat, lng: defaultLng, accuracy: 500, isFallback: true } as any);
           setAccuracy(500);
           addToast(" GPS timeout. Map updated to campus default.", "warning");
@@ -779,205 +805,56 @@ export default function DriverLiveTrackingPage() {
     return () => { };
   }, [currentUser, busData?.busId, startLocationTracking, stopLocationTracking]);
 
-  // Periodic active-trip poll: arms/disarms as state changes so the interval is
-  // always correct regardless of when the trip starts relative to mount.
-  useEffect(() => {
-    if (!currentUser || (!tripActive && !busLockedByOther)) return;
-    const interval = setInterval(() => {
-      if (typeof document !== 'undefined' && document.visibilityState === 'hidden' && !tripActiveRef.current) {
-        return;
-      }
-      // Re-use the same checkActiveTrip defined in the effect above by calling
-      // the driver check-active-trip API directly here (tiny duplication is
-      // better than hoisting the whole async function out of its scope).
-      if (!currentUser?.uid) return;
-      (async () => {
-        try {
-          const idToken = await currentUser.getIdToken();
-          const res = await fetch('/api/driver/check-active-trip', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
-            body: JSON.stringify({ idToken, busId: tripActiveRef.current ? (busData?.busId || busData?.id || undefined) : undefined }),
-          });
-          if (!res.ok) return;
-          const result = await res.json();
-          if (!result.hasActiveTrip && tripActiveRef.current) {
-            setTripActive(false);
-            setTripId(null);
-            stopLocationTracking();
-          }
-        } catch { /* network blip — keep state */ }
-      })();
-    }, 15000);
-    return () => clearInterval(interval);
-  }, [currentUser, busData?.busId, tripActive, busLockedByOther, stopLocationTracking]);
-
   // ==========================================
-  // DEVICE SESSION MANAGEMENT (Multi-Device Conflict Detection)
+  // WEBSOCKET-BASED ZERO-WAIT TRIP HANDOVER & SUPERSESSION LISTENER (Fix 111)
+  // Replaces 3 redundant HTTP polling loops: 15s check-active-trip, 10s device-session, and 60s heartbeat.
   // ==========================================
-  // This prevents location sharing confusion when the same driver account
-  // is accessed from multiple devices simultaneously.
-  // Track tripActive in a ref for cleanup access without triggering re-renders
   const tripActiveRef = useRef(tripActive);
   useEffect(() => {
     tripActiveRef.current = tripActive;
+    if (wsClientRef.current) {
+      wsClientRef.current.setKeepAliveInBackground(tripActive);
+    }
   }, [tripActive]);
 
-  // Keep the checkActiveTrip refs in sync on every render (cheap ref assignments).
+  // Keep refs in sync for handlers without triggering re-renders
   useEffect(() => {
     tripIdRef.current = tripId;
     busLockedByOtherRef.current = busLockedByOther;
     currentLocationRef.current = currentLocation;
   });
 
-  // Check for existing sessions when page loads
+  // Listen for trip handover / supersession over WebSocket
   useEffect(() => {
-    if (!currentUser?.uid) return;
+    const targetBus = busData?.busId || busData?.id || selectedBusId;
+    if (!targetBus || !currentUser || !wsClientReady) return;
 
-    // Initialize device ID on mount
-    currentDeviceId.current = getOrCreateDeviceId();
-    console.log('📱 Current device ID:', currentDeviceId.current.substring(0, 8) + '...');
+    const wsClient = wsClientRef.current;
+    if (!wsClient) return;
 
-    const checkExistingSession = async () => {
-      // Don't check if we already have an active trip locally (prevent self-conflict)
-      if (tripActiveRef.current) return;
+    const channel = `trip-status-${targetBus}`;
+    const handleTripStatusEvent = (payload: any) => {
+      if (!payload) return;
+      const isSuperSeded = (payload.event === 'trip_started' || payload.event === 'trip_superseded') &&
+        payload.driverUid &&
+        payload.driverUid !== currentUser.uid;
 
-      const sessionCheck = await checkDeviceSession(currentUser.uid, 'driver_location_share');
-      console.log('🔍 Device session check:', sessionCheck);
-
-      if (sessionCheck.hasActiveSession && !sessionCheck.isCurrentDevice) {
-        if (sessionCheck.serviceUnavailable) {
-          console.warn('⚠️ Device session service unavailable during background check; ignoring conflict.');
-          setDeviceConflict({ hasConflict: false });
-          return;
-        }
-        // Another device is actively sharing location
-        setDeviceConflict({
-          hasConflict: true,
-          otherDeviceId: sessionCheck.otherDeviceId,
-          sessionAge: sessionCheck.sessionAge
-        });
-        console.warn('⚠️ Another device is currently sharing location for this account');
-      } else {
-        setDeviceConflict({ hasConflict: false });
+      if (isSuperSeded && tripActiveRef.current) {
+        console.log('🔄 Trip superseded by another driver:', payload);
+        manuallyEndedTripRef.current = true;
+        setTripActive(false);
+        setTripId(null);
+        stopLocationTracking();
+        addToast('Bus handed over to next shift driver', 'info');
       }
     };
 
-    checkExistingSession();
-
-    // Cleanup on unmount
-    return () => {
-      // If this device was broadcasting, release the session
-      // Use ref here to get latest value without re-running effect
-      if (tripActiveRef.current) {
-        console.log('🧹 Releasing device session on unmount...');
-        releaseDeviceSession(currentUser.uid, 'driver_location_share');
-      }
-      if (deviceSessionHeartbeatRef.current) {
-        clearInterval(deviceSessionHeartbeatRef.current);
-        deviceSessionHeartbeatRef.current = null;
-      }
-    };
-  }, [currentUser?.uid]); // Removed tripActive dependency to prevent re-runs on trip start/end
-
-  // Start/Stop device session heartbeat when trip is active
-  useEffect(() => {
-    if (!currentUser?.uid) return;
-
-    if (tripActive) {
-      // Register this device as the active broadcaster
-      registerDeviceSession(currentUser.uid, 'driver_location_share')
-        .then((result) => {
-          if (result.success) {
-            console.log('✅ Device session registered for location sharing');
-            setDeviceConflict({ hasConflict: false });
-          }
-        });
-
-      // Start heartbeat every 10 seconds to keep session alive within 30s timeout
-      deviceSessionHeartbeatRef.current = setInterval(async () => {
-        const success = await heartbeatDeviceSession(currentUser.uid, 'driver_location_share');
-        if (!success) {
-          console.warn('⚠️ Device session heartbeat failed');
-        }
-      }, 10000);
-    } else {
-      // Trip ended - release session
-      if (deviceSessionHeartbeatRef.current) {
-        clearInterval(deviceSessionHeartbeatRef.current);
-        deviceSessionHeartbeatRef.current = null;
-      }
-      releaseDeviceSession(currentUser.uid, 'driver_location_share');
-    }
+    const unsub = wsClient.subscribe(channel, handleTripStatusEvent);
 
     return () => {
-      if (deviceSessionHeartbeatRef.current) {
-        clearInterval(deviceSessionHeartbeatRef.current);
-        deviceSessionHeartbeatRef.current = null;
-      }
+      unsub();
     };
-  }, [currentUser?.uid, tripActive]);
-
-  // ==========================================
-  // TRIP LOCK HEARTBEAT
-  // ==========================================
-  // Keep the trip's Firestore activeTripLock (TTL 300s) and active_trips.last_heartbeat
-  // alive for the FULL duration of the trip. The live-tracking page previously never
-  // sent heartbeats, so 5 minutes into a legitimate trip the lock expired — weakening
-  // exclusive-operation guarantees (another assigned driver could take over) and letting
-  // the nightly stale-lock cleanup treat the trip as orphaned. A 60s cadence leaves a
-  // wide margin under the 300s TTL. Failures are non-fatal: checkActiveTrip re-validates
-  // state, and the lock is re-extended on the next tick.
-  useEffect(() => {
-    if (!tripActive || !tripId || !busData?.busId || !currentUser) return;
-
-    let cancelled = false;
-
-    const sendTripHeartbeat = async () => {
-      try {
-        const idToken = await currentUser.getIdToken();
-        await fetch('/api/driver/heartbeat', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${idToken}`,
-          },
-          body: JSON.stringify({ tripId, busId: busData?.busId }),
-        });
-      } catch (err) {
-        console.warn('⚠️ Trip heartbeat failed (will retry next tick):', err);
-      }
-    };
-
-    // Send one immediately so the lock is extended as soon as the trip is known,
-    // then refresh every 60s.
-    sendTripHeartbeat();
-    const interval = setInterval(() => {
-      if (!cancelled) sendTripHeartbeat();
-    }, 60000);
-
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
-  }, [tripActive, tripId, busData?.busId, currentUser]);
-
-  // Function to take over location sharing from another device
-  const handleTakeOverSession = async () => {
-    if (!currentUser?.uid) return;
-
-    console.log('🔄 Taking over location sharing from another device...');
-
-    // Force register this device (will override the other device's session)
-    const result = await registerDeviceSession(currentUser.uid, 'driver_location_share');
-    if (result.success) {
-      setDeviceConflict({ hasConflict: false });
-      addToast('Location sharing transferred to this device', 'success');
-      console.log('✅ Successfully took over location sharing');
-    } else {
-      addToast('Failed to take over session: ' + result.error, 'error');
-    }
-  };
+  }, [busData?.busId, busData?.id, selectedBusId, currentUser, wsClientReady, stopLocationTracking, addToast]);
 
   // NOTE: mapCenter is set directly inside watchPosition/getCurrentPosition callbacks above.
   // It must NOT be reset to a hardcoded constant here — doing so would override the
@@ -1112,27 +989,7 @@ export default function DriverLiveTrackingPage() {
     broadcastInputsRef.current = { currentLocation, accuracy, speed, busData, routeData, tripId, currentUser };
   });
 
-  // Send location to /api/location/update every 3s.
-  // The API route validates via Redis Lua guard, updates memory cache, and emits to WS server.
-  useEffect(() => {
-    if (!tripActive) return;
 
-    console.log("🚀 Starting location broadcasting for active trip");
-
-    // Send immediately
-    broadcastLocation();
-
-    // Throttled interval — 3s cadence (evaluated for optimal mobile battery & network efficiency)
-    locationIntervalRef.current = setInterval(broadcastLocation, 3000);
-
-    return () => {
-      if (locationIntervalRef.current) {
-        clearInterval(locationIntervalRef.current);
-        locationIntervalRef.current = null;
-        console.log("🛑 Location broadcasting stopped");
-      }
-    };
-  }, [tripActive]);
 
   const isFlushingRef = useRef(false);
 
@@ -1241,15 +1098,27 @@ export default function DriverLiveTrackingPage() {
     const inputs = broadcastInputsRef.current;
     if (!inputs) return;
     const { currentLocation, accuracy, speed, busData, routeData, tripId, currentUser } = inputs;
-    if (!currentLocation || (currentLocation as any).isFallback || !busData || !routeData) {
-      if ((currentLocation as any)?.isFallback) {
-        console.log("⏳ Skipping location broadcast — waiting for real device GPS fix");
+    let loc = currentLocation;
+    if (!loc || (loc as any).isFallback) {
+      if (lastValidLocationRef.current && tripActiveRef.current) {
+        // Fix 113: stationary / phone call heartbeat fallback
+        loc = {
+          lat: lastValidLocationRef.current.lat,
+          lng: lastValidLocationRef.current.lng,
+          accuracy: accuracy || 10,
+        } as any;
+      } else {
+        if ((currentLocation as any)?.isFallback) {
+          console.log("⏳ Skipping location broadcast — waiting for real device GPS fix");
+        }
+        return;
       }
-      return;
+    } else {
+      lastValidLocationRef.current = { lat: loc.lat, lng: loc.lng };
     }
 
     const resolvedBus = busData?.busId || busData?.id || selectedBusId;
-    const currentHeading = (currentLocation as any).heading ?? 0;
+    const currentHeading = (loc as any).heading ?? 0;
     const currentIsoTimestamp = new Date().toISOString();
     const currentRouteId = routeData?.routeId || routeData?.id || busData?.route_id || 'unassigned';
 
@@ -1282,12 +1151,10 @@ export default function DriverLiveTrackingPage() {
           deviceId,
           busId: resolvedBus,
           routeId: currentRouteId,
-          lat: currentLocation.lat,
-          lng: currentLocation.lng,
+          lat: loc.lat,
+          lng: loc.lng,
           accuracy: accuracy,
           speed: speed,
-          // Prefer real GPS heading from device; falls back to 0 when unavailable
-          // (e.g. stationary or desktop browser). Never fabricate a heading.
           heading: currentHeading,
           timestamp: currentIsoTimestamp,
           tripId: tripId,
@@ -1368,6 +1235,79 @@ export default function DriverLiveTrackingPage() {
     }
   }, [selectedBusId]);
 
+  const workerRef = useRef<Worker | null>(null);
+
+  // Send location to /api/location/update every 3s via Web Worker background ticker (Fix 112).
+  // Web Worker timers are not throttled to 1-minute or frozen by mobile browsers when the driver switches to WhatsApp or takes a phone call.
+  useEffect(() => {
+    if (!tripActive) {
+      if (workerRef.current) {
+        workerRef.current.terminate();
+        workerRef.current = null;
+      }
+      if (locationIntervalRef.current) {
+        clearInterval(locationIntervalRef.current);
+        locationIntervalRef.current = null;
+      }
+      return;
+    }
+
+    console.log("🚀 Starting background-resilient location broadcasting for active trip");
+
+    // Send immediately
+    broadcastLocation();
+
+    let workerStarted = false;
+    if (typeof window !== 'undefined' && typeof Worker !== 'undefined' && typeof Blob !== 'undefined') {
+      try {
+        const workerCode = `
+          let timer = null;
+          self.onmessage = function(e) {
+            if (e.data === 'start') {
+              if (timer) clearInterval(timer);
+              timer = setInterval(function() {
+                self.postMessage('tick');
+              }, 3000);
+            } else if (e.data === 'stop') {
+              if (timer) clearInterval(timer);
+              timer = null;
+            }
+          };
+        `;
+        const blob = new Blob([workerCode], { type: 'application/javascript' });
+        const workerUrl = URL.createObjectURL(blob);
+        const worker = new Worker(workerUrl);
+        worker.onmessage = (e) => {
+          if (e.data === 'tick') {
+            broadcastLocation();
+          }
+        };
+        worker.postMessage('start');
+        workerRef.current = worker;
+        workerStarted = true;
+      } catch (err) {
+        console.warn('⚠️ Web Worker ticker unavailable, falling back to setInterval:', err);
+      }
+    }
+
+    if (!workerStarted) {
+      locationIntervalRef.current = setInterval(broadcastLocation, 3000);
+    }
+
+    return () => {
+      if (workerRef.current) {
+        workerRef.current.postMessage('stop');
+        workerRef.current.terminate();
+        workerRef.current = null;
+      }
+      if (locationIntervalRef.current) {
+        clearInterval(locationIntervalRef.current);
+        locationIntervalRef.current = null;
+      }
+      console.log("🛑 Location broadcasting stopped");
+    };
+  }, [tripActive, broadcastLocation]);
+
   // Comprehensive Mobile App Resume & Lock/Unlock Auto-Recovery
   useEffect(() => {
     const handleResume = () => {
@@ -1406,6 +1346,9 @@ export default function DriverLiveTrackingPage() {
       console.log("🌐 [Network] Connectivity restored — flushing buffered location");
       setIsNetworkOffline(false);
       if (tripActiveRef.current) {
+        if (tripIdRef.current) {
+          flushOfflineQueue(tripIdRef.current).catch(() => {});
+        }
         broadcastLocation();
       }
     };
@@ -1436,36 +1379,9 @@ export default function DriverLiveTrackingPage() {
   const handleConfirmInitiateTrip = async () => {
     if (!currentUser || !selectedBusId || initiatingTrip) return;
 
-    const chosenBus = availableBuses.find((b: any) => b.id === selectedBusId);
-    if (chosenBus?.is_operated_by_other) {
-      addToast(`Bus ${chosenBus.bus_number || chosenBus.id} is currently operated by another driver. Please select another available bus.`, 'error');
-      fetchAvailableBusesForSelection();
-      return;
-    }
-
     setInitiatingTrip(true);
 
     try {
-      // Session check
-      const sessionCheck = await checkDeviceSession(currentUser.uid, 'driver_location_share');
-      if (sessionCheck.hasActiveSession && !sessionCheck.isCurrentDevice) {
-        if (sessionCheck.serviceUnavailable) {
-          setInitiatingTrip(false);
-          addToast('Could not verify device session due to network issue. Please retry.', 'error');
-          return;
-        }
-        setDeviceConflict({
-          hasConflict: true,
-          otherDeviceId: sessionCheck.otherDeviceId,
-          sessionAge: sessionCheck.sessionAge
-        });
-        setInitiatingTrip(false);
-        addToast('Another device is currently sharing location. Take over or go back.', 'warning');
-        return;
-      }
-
-      await registerDeviceSession(currentUser.uid, 'driver_location_share');
-
       const res = await authApiFetch(currentUser, '/api/driver/initiate-trip', {
         method: 'POST',
         body: JSON.stringify({
@@ -1491,8 +1407,8 @@ export default function DriverLiveTrackingPage() {
           if (dashData.route) setRouteData(dashData.route);
         }
 
-        const defaultLat = 26.1445;
-        const defaultLng = 91.7362;
+        const defaultLat = 26.2019;
+        const defaultLng = 91.8615;
         if (!currentLocation) {
           setCurrentLocation({ lat: defaultLat, lng: defaultLng, accuracy: 500, isFallback: true } as any);
           setAccuracy(500);
@@ -1733,180 +1649,8 @@ export default function DriverLiveTrackingPage() {
 
 
 
-  // =====================================================
-  // MULTI-DRIVER LOCK BLOCKING UI
-  // Show blocking message if bus is locked by another driver
-  // =====================================================
-  if (busLockedByOther) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-red-50 via-orange-50 to-amber-50 dark:from-gray-950 dark:via-red-950/30 dark:to-orange-950/20 flex items-center justify-center p-4">
-        <Card className="max-w-lg w-full border-0 shadow-2xl bg-white/90 dark:bg-gray-900/90 backdrop-blur-xl rounded-3xl overflow-hidden pt-0">
-          {/* Header with gradient */}
-          <div className="relative p-6 pb-8 bg-gradient-to-r from-red-500 via-orange-500 to-amber-500">
-            <div className="absolute inset-0 bg-[url('/noise.png')] opacity-10" />
-            <div className="relative flex flex-col items-center text-center">
-              {/* Icon */}
-              <div className="mb-4 p-4 bg-white/20 backdrop-blur-md rounded-2xl border border-white/30 shadow-lg">
-                <AlertCircle className="w-10 h-10 text-white" />
-              </div>
-              <h1 className="text-2xl font-bold text-white tracking-tight">
-                Bus Currently In Use
-              </h1>
-              <p className="text-sm mt-1 font-medium text-red-100">
-                Another driver is operating this bus
-              </p>
-            </div>
-          </div>
-
-          <CardContent className="p-6 -mt-4">
-            {/* Main Info Card */}
-            <div className="rounded-2xl p-5 border shadow-sm bg-gradient-to-br from-red-50 to-orange-50 dark:from-gray-800 dark:to-red-900/20 border-red-200 dark:border-red-800/50">
-              <div className="text-center mb-4">
-                <p className="text-gray-600 dark:text-gray-400 text-sm">
-                  This bus is currently being operated by another driver assigned to the same bus.
-                  Please wait until they complete their trip.
-                </p>
-              </div>
-
-              <div className="flex items-center justify-center gap-4 py-4 border-t border-red-200 dark:border-red-800/50">
-                <div className="text-center">
-                  <Bus className="w-12 h-12 mx-auto text-red-500 mb-2" />
-                  <p className="text-lg font-bold text-red-600 dark:text-red-400">
-                    {busData?.busNumber || busData?.busId || 'Bus'}
-                  </p>
-                  <p className="text-xs text-gray-500">Currently Active</p>
-                </div>
-              </div>
-
-              {lockInfo?.since && (
-                <div className="text-center mt-4 p-3 bg-red-100 dark:bg-red-900/30 rounded-xl">
-                  <p className="text-xs text-red-600 dark:text-red-400">
-                    Trip started at: {new Date(lockInfo.since).toLocaleString('en-IN', {
-                      hour: '2-digit',
-                      minute: '2-digit',
-                      hour12: true,
-                      day: 'numeric',
-                      month: 'short'
-                    })}
-                  </p>
-                </div>
-              )}
-            </div>
-
-            {/* Info Box */}
-            <div className="mt-4 p-4 bg-amber-50 dark:bg-amber-900/20 rounded-xl border border-amber-200 dark:border-amber-800/50">
-              <div className="flex items-start gap-3">
-                <Clock className="w-5 h-5 text-amber-500 mt-0.5 flex-shrink-0" />
-                <div>
-                  <p className="text-sm font-medium text-amber-700 dark:text-amber-300">
-                    Auto-Refresh Enabled
-                  </p>
-                  <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
-                    This page will automatically check every 10 seconds. Once the other driver ends their trip,
-                    you&apos;ll be able to start yours.
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {/* Action Buttons */}
-            <div className="mt-6 flex flex-col sm:flex-row gap-3">
-              <Button
-                onClick={() => {
-                  setBusLockedByOther(false);
-                  setShowStartTripModal(true);
-                  fetchAvailableBusesForSelection();
-                }}
-                className="flex-1 h-12 font-bold rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white shadow-lg shadow-emerald-500/20"
-              >
-                <PlayCircle className="w-4 h-4 mr-2" />
-                Select Another Bus
-              </Button>
-              <Button
-                onClick={() => router.push('/driver')}
-                variant="outline"
-                className="h-12 font-bold rounded-xl border-2 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800"
-              >
-                Go Back to Dashboard
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
-  // Show warning if another device is actively sharing location
-  if (deviceConflict.hasConflict && tripActive) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-red-50 dark:from-gray-950 dark:via-amber-950 dark:to-red-950 flex items-center justify-center p-4">
-        <Card className="max-w-2xl w-full border-0 shadow-2xl bg-white/80 dark:bg-gray-900/80 backdrop-blur-xl">
-          <CardHeader className="text-center space-y-4 pb-6">
-            <div className="flex justify-center">
-              <div className="relative">
-                <div className="absolute inset-0 bg-gradient-to-r from-amber-400 to-orange-600 rounded-full blur-2xl opacity-30 animate-pulse"></div>
-                <div className="relative p-6 bg-gradient-to-br from-amber-500 to-orange-600 rounded-full shadow-xl">
-                  <AlertCircle className="w-16 h-16 text-white" />
-                </div>
-              </div>
-            </div>
-            <div className="space-y-2">
-              <CardTitle className="text-3xl font-bold bg-gradient-to-r from-amber-600 to-orange-600 bg-clip-text text-transparent">
-                Multi-Device Conflict Detected
-              </CardTitle>
-              <p className="text-lg text-muted-foreground">
-                Location is being shared from another device
-              </p>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <div className="p-6 bg-gradient-to-br from-amber-50 to-orange-50 dark:from-amber-900/20 dark:to-orange-900/20 rounded-2xl border border-amber-200 dark:border-amber-800">
-              <div className="flex items-start gap-4">
-                <div className="p-3 bg-amber-100 dark:bg-amber-900/40 rounded-xl">
-                  <Bus className="h-6 w-6 text-amber-600 dark:text-amber-400" />
-                </div>
-                <div className="space-y-2 flex-1">
-                  <h3 className="font-semibold text-foreground">Another Device is Active</h3>
-                  <p className="text-sm text-muted-foreground">
-                    Your account is currently sharing live location from <strong className="text-amber-600 dark:text-amber-400">another device</strong>.
-                    To prevent sending conflicting location data to students, only one device can broadcast at a time.
-                  </p>
-                  {deviceConflict.sessionAge && (
-                    <p className="text-xs text-muted-foreground mt-2">
-                      Session age: {Math.round((deviceConflict.sessionAge || 0) / 1000)}s ago
-                    </p>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            <div className="space-y-3">
-              <p className="text-sm text-muted-foreground text-center">
-                You can either go back to the dashboard, or take over location sharing on this device (the other device will stop broadcasting).
-              </p>
-
-              <div className="flex flex-col gap-3">
-                <Button
-                  onClick={handleTakeOverSession}
-                  className="w-full bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700"
-                >
-                  <Activity className="w-4 h-4 mr-2" />
-                  Take Over on This Device
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => router.push('/driver')}
-                  className="w-full"
-                >
-                  Go Back to Dashboard
-                </Button>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
+  // Zero-Wait Handover Architecture:
+  // Drivers are never locked out by stale locks or multi-device conflicts. Broadcaster authority hands over cleanly.
 
 
 
@@ -2188,11 +1932,11 @@ export default function DriverLiveTrackingPage() {
                       className="w-full px-3 py-2.5 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-sm font-medium text-gray-900 dark:text-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
                     >
                       {availableBuses.map((bus: any) => {
-                        const isOccupied = !!bus.is_operated_by_other;
+                        const isInTrip = !!bus.isInTrip || !!bus.is_in_trip;
                         return (
-                          <option key={bus.id} value={bus.id} disabled={isOccupied}>
+                          <option key={bus.id} value={bus.id}>
                             Bus {bus.bus_number || bus.busNumber} — {bus.route_name || bus.routeName || 'Standard Route'}
-                            {isOccupied ? ' 🔒 (In Trip - Occupied)' : ''}
+                            {isInTrip ? ' 🔄 (Ready for Handover)' : ''}
                           </option>
                         );
                       })}

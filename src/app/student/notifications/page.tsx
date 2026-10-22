@@ -26,6 +26,7 @@ export default function StudentNotificationsPage() {
     unreadCount,
     loading,
     markAsRead,
+    markAllAsRead,
     refresh
   } = useNotifications();
 
@@ -49,9 +50,7 @@ export default function StudentNotificationsPage() {
 
       if (unreadReceived.length > 0) {
         try {
-          // Mark each as read
-          const promises = unreadReceived.map(n => markAsRead(n.id));
-          await Promise.all(promises);
+          await markAllAsRead(unreadReceived.map(n => n.id));
         } catch (err) {
           console.error('Error auto-marking notifications as read:', err);
         }
@@ -59,7 +58,7 @@ export default function StudentNotificationsPage() {
     };
 
     markAllVisibleAsRead();
-  }, [loading, allNotifications, currentUser, markAsRead]);
+  }, [loading, allNotifications, currentUser, markAllAsRead]);
 
   // Filter notifications by type
   const filteredNotifications = activeTab === 'all'

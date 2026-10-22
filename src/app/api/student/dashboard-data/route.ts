@@ -6,7 +6,7 @@ import { withSecurity } from '@/lib/security/api-security';
 import { RateLimits } from '@/lib/security/rate-limiter';
 import { getSharedBusTripSnapshot } from '@/lib/services/trip-snapshot-cache';
 import { getSupabaseServer } from '@/lib/supabase-server';
-import { isShiftCompatible } from '@/lib/utils';
+import { isShiftCompatible, getBusIdVariations } from '@/lib/utils';
 import { isWaitingFlagExpired } from '@/lib/waiting-flag-helpers';
 import { NextResponse } from 'next/server';
 
@@ -80,50 +80,62 @@ export const GET = withSecurity(
             getByUid(uid).catch(() => null),
             supabase
                 .from('applications')
-                .select('application_id, state, applicant_email, form_data, target_session, bus_id, route_id, stop_name, shift, created_at')
+                .select('application_id, application_type, state, applicant_email, form_data, target_session, bus_id, route_id, stop_name, shift, created_at')
                 .eq('applicant_uid', uid)
                 .order('created_at', { ascending: false })
                 .limit(1)
                 .maybeSingle(),
         ]);
 
-        const studentData = studentDataRes as Record<string, any> | null;
+        let studentData = studentDataRes as Record<string, any> | null;
+        const appRow = appRes?.data;
 
-        if (!studentData) {
-            const appRow = appRes?.data;
-
-            if (appRow) {
-                const appState = appRow.state;
-                let reason: any = 'application_submitted';
-                if (appState === 'verified_upcoming') reason = 'verified_upcoming';
-                else if (appState === 'pending_seat_allocation') reason = 'pending_seat_allocation';
-
-                return NextResponse.json({
-                    student: {
-                        uid,
-                        fullName: appRow.form_data?.fullName || appRow.applicant_email,
-                        status: appState,
-                        state: appState,
-                        applicationId: appRow.application_id,
-                        targetSession: appRow.target_session || appRow.form_data?.sessionInfo,
-                        busId: appRow.bus_id || appRow.form_data?.busId,
-                        routeId: appRow.route_id || appRow.form_data?.routeId,
-                        stop_name: appRow.stop_name || appRow.form_data?.stop_name || appRow.form_data?.stop_name || appRow.form_data?.stop_name,
-                        shift: appRow.shift || appRow.form_data?.shift || 'Morning',
-                    },
-                    application: appRow,
-                    bus: null,
-                    route: null,
-                    driver: null,
-                    tripActive: false,
-                    tripData: null,
-                    entitled: false,
-                    entitlementReason: reason,
-                });
+        // FIX 19: Prioritize Active student_profiles Over Stale applications
+        // If student_profiles exists and is active (or has bus/route assigned), treat as active student.
+        // NEVER overwrite student.status with leftover applications.state!
+        let renewalApplication: any = null;
+        if (studentData) {
+            const hasActiveMarkers = studentData.status === 'active' || !!studentData.busId || !!studentData.bus_id;
+            if (hasActiveMarkers && studentData.status !== 'soft_blocked' && studentData.status !== 'hard_blocked') {
+                studentData.status = 'active';
             }
+            if (appRow && (appRow.application_type === 'renewal' || appRow.form_data?.isRenewal) &&
+                ['submitted', 'awaiting_verification', 'pending_seat_allocation'].includes(appRow.state)) {
+                renewalApplication = appRow;
+            }
+        } else if (appRow) {
+            const appState = appRow.state;
+            let reason: any = 'application_submitted';
+            if (appState === 'verified_upcoming') reason = 'verified_upcoming';
+            else if (appState === 'pending_seat_allocation') reason = 'pending_seat_allocation';
 
             return NextResponse.json({
+                student: {
+                    uid,
+                    fullName: appRow.form_data?.fullName || appRow.applicant_email,
+                    status: appState,
+                    state: appState,
+                    applicationId: appRow.application_id,
+                    targetSession: appRow.target_session || appRow.form_data?.sessionInfo,
+                    busId: appRow.bus_id || appRow.form_data?.busId,
+                    routeId: appRow.route_id || appRow.form_data?.routeId,
+                    stop_name: appRow.stop_name || appRow.form_data?.stop_name || appRow.form_data?.stopName,
+                    shift: appRow.shift || appRow.form_data?.shift || 'Morning',
+                },
+                application: appRow,
+                renewalApplication: null,
+                bus: null,
+                route: null,
+                driver: null,
+                tripActive: false,
+                tripData: null,
+                entitled: false,
+                entitlementReason: reason,
+            });
+        } else {
+            return NextResponse.json({
                 student: null,
+                renewalApplication: null,
                 bus: null,
                 route: null,
                 driver: null,
@@ -134,13 +146,12 @@ export const GET = withSecurity(
             });
         }
 
-        // CANONICAL entitlement gate (Phase 3): never serve live transport data
-        // (bus / route / driver / trip) to a student who does not currently own
-        // transport access.
+        // CANONICAL entitlement gate (Phase 3)
         const entitlement = getTransportEntitlement(studentData);
         if (!entitlement.entitled) {
             return NextResponse.json({
                 student: studentData,
+                renewalApplication,
                 bus: null,
                 route: null,
                 driver: null,
@@ -151,18 +162,76 @@ export const GET = withSecurity(
             });
         }
 
-        const busId = studentData.busId || studentData.busId;
-        const routeId = studentData.routeId || studentData.routeId;
+        // FIX 21: Bus Lookup Across ID Variations & bus_number
+        const rawBusId = studentData.busId || studentData.bus_id || studentData.assignedBusId;
+        let busData: any = null;
+        if (rawBusId) {
+            const busVariations = getBusIdVariations(rawBusId);
+            const { data: busesById } = await supabase
+                .from('buses')
+                .select('*')
+                .in('id', busVariations.length > 0 ? busVariations : [rawBusId])
+                .limit(1);
+            busData = busesById?.[0] || null;
 
-        // 2. Parallelize core metadata reads:
-        // - bus via L1-cached fleetService.getBusById
-        // - route via routeService.getById
-        // - live active trip via coalesced Singleflight shared snapshot (absorbs 60 concurrent student queries)
-        // - waiting flag for this specific student
-        const [busData, dbRoute, tripSnapshot, waitingFlagRes] = await Promise.all([
-            busId ? getBusById(busId) : Promise.resolve(null),
-            routeId ? routeService.getById(routeId) : Promise.resolve(null),
-            busId ? getSharedBusTripSnapshot(busId) : Promise.resolve(null),
+            if (!busData && busVariations.length > 0) {
+                const { data: busesByNum } = await supabase
+                    .from('buses')
+                    .select('*')
+                    .in('bus_number', busVariations)
+                    .limit(1);
+                busData = busesByNum?.[0] || null;
+            }
+            if (!busData) {
+                busData = await getBusById(rawBusId).catch(() => null);
+            }
+            if (busData?.id) {
+                studentData.busId = busData.id;
+                studentData.bus_id = busData.id;
+            }
+        }
+        const canonicalBusId = busData?.id || rawBusId;
+
+        // FIX 22: Route Lookup Fallback to bus.route_id & Route ID Variations
+        const rawRouteId = studentData.routeId || studentData.route_id || studentData.assignedRouteId || busData?.routeId || busData?.route_id;
+        let dbRoute: any = null;
+        if (rawRouteId) {
+            const cleanRoute = String(rawRouteId).replace(/^route_/i, '').trim();
+            const routeVariations = Array.from(new Set([
+                String(rawRouteId).trim(),
+                `route_${cleanRoute}`,
+                cleanRoute,
+                `Route-${cleanRoute}`,
+                `Route ${cleanRoute}`
+            ]));
+
+            const { data: routesById } = await supabase
+                .from('routes')
+                .select('*')
+                .in('id', routeVariations)
+                .limit(1);
+            dbRoute = routesById?.[0] || null;
+
+            if (!dbRoute) {
+                const { data: routesByName } = await supabase
+                    .from('routes')
+                    .select('*')
+                    .in('route_name', routeVariations)
+                    .limit(1);
+                dbRoute = routesByName?.[0] || null;
+            }
+            if (!dbRoute) {
+                dbRoute = await routeService.getById(rawRouteId).catch(() => null);
+            }
+            if (dbRoute?.id) {
+                studentData.routeId = dbRoute.id;
+                studentData.route_id = dbRoute.id;
+            }
+        }
+
+        // 2. Parallelize trip snapshot and waiting flag reads:
+        const [tripSnapshot, waitingFlagRes] = await Promise.all([
+            canonicalBusId ? getSharedBusTripSnapshot(canonicalBusId) : Promise.resolve(null),
             supabase.from('waiting_flags').select('id, student_uid, bus_id, status, trip_id, stop_name, created_at, expires_at').eq('student_uid', uid).in('status', ['raised', 'acknowledged', 'waiting']).limit(1)
         ]);
 
@@ -268,6 +337,7 @@ export const GET = withSecurity(
 
         return NextResponse.json({
             student: studentData,
+            renewalApplication,
             bus,
             route,
             driver,

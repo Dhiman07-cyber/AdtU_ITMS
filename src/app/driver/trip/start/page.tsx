@@ -65,10 +65,6 @@ export default function StartTripPage() {
   }, [currentUser]);
 
   const selectBus = (bus: BusInfo) => {
-    if (bus.is_operated_by_other) {
-      setError(`Bus ${formatIdForDisplay(bus.bus_number || bus.id)} is currently operated by another driver. Please choose an available bus.`);
-      return;
-    }
     if (bus.status === "inactive" || bus.status === "maintenance") {
       setError(`Bus ${formatIdForDisplay(bus.bus_number || bus.id)} is currently ${bus.status} and cannot start a trip.`);
       return;
@@ -93,10 +89,6 @@ export default function StartTripPage() {
 
       if (res.ok) {
         const data = await res.json();
-        if (data.is_operated_by_other || data.isOperatedByOther) {
-          setError(`Bus ${formatIdForDisplay(data.busNumber || data.busId)} is currently being operated by another driver.`);
-          return;
-        }
         if (data.status === "inactive" || data.status === "maintenance") {
           setError(`Bus ${formatIdForDisplay(data.busNumber || data.busId)} is currently ${data.status} and cannot start a trip.`);
           return;
@@ -108,7 +100,7 @@ export default function StartTripPage() {
           route_id: data.routeId,
           route_name: data.routeName,
           is_in_trip: data.isInTrip,
-          is_operated_by_other: data.isOperatedByOther,
+          is_operated_by_other: false,
         });
         const now = new Date();
         const istHours = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" })).getHours();
@@ -261,9 +253,8 @@ export default function StartTripPage() {
               </div>
             ) : (
               buses.map((bus) => {
-                const isOccupied = !!bus.is_operated_by_other;
-                const isInactive = bus.status === "inactive";
-                const isDisabled = isOccupied || isInactive;
+                const isUnavailable = bus.status === "inactive" || bus.status === "maintenance" || (bus.status && bus.status.toLowerCase() !== "active");
+                const isDisabled = isUnavailable;
                 return (
                   <button
                     key={bus.id}
@@ -286,9 +277,9 @@ export default function StartTripPage() {
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
-                        {isOccupied ? (
-                          <Badge className="bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300 border-amber-300">
-                            In Trip (In Use)
+                        {bus.is_in_trip ? (
+                          <Badge className="bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300 border-blue-300">
+                            Ready for Handover
                           </Badge>
                         ) : (
                           <Badge className={bus.status === "active" ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" : "bg-gray-100 text-gray-500"}>
@@ -515,19 +506,25 @@ function QRScanner({
     if (code) {
       const qrData = code.data.trim();
       const bus = findBusByQR(qrData, buses);
+      stopCamera();
       if (bus) {
-        stopCamera();
         onResult(bus.id);
-        return;
+      } else {
+        onResult(qrData);
       }
+      return;
     }
     animationRef.current = requestAnimationFrame(scanFrame);
   };
 
   const handleManualSubmit = () => {
-    const bus = findBusByQR(manualInput, buses);
+    const input = manualInput.trim();
+    if (!input) return;
+    const bus = findBusByQR(input, buses);
     if (bus) {
       onResult(bus.id);
+    } else {
+      onResult(input);
     }
   };
 

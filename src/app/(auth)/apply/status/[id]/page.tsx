@@ -44,28 +44,35 @@ export default function ApplicationStatusPage() {
       const token = await currentUser?.getIdToken();
       if (!token) return;
 
-      // Automatically trigger payment recovery on status load (Phase 4)
-      try {
-        const recRes = await fetch(`/api/payment/recover?studentUid=${applicationId}`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        if (recRes.ok) {
-          const recData = await recRes.json();
-          const { status } = recData;
-          console.log(`[Status[id] Recovery] status=${status}`);
-          // Only log — UI state is managed by PaymentModeSelector
-        }
-      } catch (recErr) {
-        console.error('Failed to run payment recovery on status load:', recErr);
-      }
-
       const response = await fetch(`/api/applications/${applicationId}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
 
       if (response.ok) {
         const data = await response.json();
-        setApplication(data.application);
+        const app = data.application;
+        setApplication(app);
+
+        // Automatically trigger payment recovery ONLY if online payment is pending/verifying
+        const isOnlinePending = app?.paymentMode === 'online' && (
+          app?.paymentStatus === 'pending' ||
+          app?.paymentStatus === 'verifying' ||
+          app?.status === 'awaiting_payment'
+        );
+
+        if (isOnlinePending) {
+          try {
+            const recRes = await fetch(`/api/payment/recover?studentUid=${applicationId}`, {
+              headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (recRes.ok) {
+              const recData = await recRes.json();
+              console.log(`[Status[id] Recovery] status=${recData?.status}`);
+            }
+          } catch (recErr) {
+            console.error('Failed to run payment recovery on status load:', recErr);
+          }
+        }
       } else {
         showToast('Application not found', 'error');
         router.push('/apply');
@@ -178,6 +185,38 @@ export default function ApplicationStatusPage() {
   }
 
   const statusInfo = getStatusMessage(application.state);
+  const STATUS_THEME_CLASSES: Record<string, {
+    card: string;
+    title: string;
+    message: string;
+  }> = {
+    blue: {
+      card: "bg-blue-50 dark:bg-blue-950 border-blue-200 dark:border-blue-800",
+      title: "text-blue-900 dark:text-blue-100",
+      message: "text-blue-700 dark:text-blue-300",
+    },
+    amber: {
+      card: "bg-amber-50 dark:bg-amber-950 border-amber-200 dark:border-amber-800",
+      title: "text-amber-900 dark:text-amber-100",
+      message: "text-amber-700 dark:text-amber-300",
+    },
+    emerald: {
+      card: "bg-emerald-50 dark:bg-emerald-950 border-emerald-200 dark:border-emerald-800",
+      title: "text-emerald-900 dark:text-emerald-100",
+      message: "text-emerald-700 dark:text-emerald-300",
+    },
+    red: {
+      card: "bg-red-50 dark:bg-red-950 border-red-200 dark:border-red-800",
+      title: "text-red-900 dark:text-red-100",
+      message: "text-red-700 dark:text-red-300",
+    },
+    gray: {
+      card: "bg-gray-50 dark:bg-gray-950 border-gray-200 dark:border-gray-800",
+      title: "text-gray-900 dark:text-gray-100",
+      message: "text-gray-700 dark:text-gray-300",
+    },
+  };
+  const statusTheme = STATUS_THEME_CLASSES[statusInfo.color] || STATUS_THEME_CLASSES.gray;
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-950 py-12 px-4 sm:px-6 lg:px-8">
@@ -205,15 +244,15 @@ export default function ApplicationStatusPage() {
         </div>
 
         {/* Status Header */}
-        <Card className={`bg-${statusInfo.color}-50 dark:bg-${statusInfo.color}-950 border-${statusInfo.color}-200 dark:border-${statusInfo.color}-800`}>
+        <Card className={statusTheme.card}>
           <CardContent className="pt-6">
             <div className="flex items-center gap-4">
               {getStatusIcon(application.state)}
               <div className="flex-1">
-                <h2 className={`text-2xl font-bold text-${statusInfo.color}-900 dark:text-${statusInfo.color}-100`}>
+                <h2 className={`text-2xl font-bold ${statusTheme.title}`}>
                   {statusInfo.title}
                 </h2>
-                <p className={`text-${statusInfo.color}-700 dark:text-${statusInfo.color}-300 mt-1`}>
+                <p className={`${statusTheme.message} mt-1`}>
                   {statusInfo.message}
                 </p>
               </div>

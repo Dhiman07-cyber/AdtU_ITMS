@@ -29,7 +29,30 @@ export async function GET(request: NextRequest) {
     const limit = Number.isNaN(rawLimit) ? DEFAULT_LIMIT : Math.min(rawLimit, MAX_LIMIT);
     const offset = Number.isNaN(rawOffset) ? 0 : rawOffset;
 
-    const applications = await getAllPaginated(limit, offset);
+    const search = searchParams.get('search') || searchParams.get('q');
+
+    let applications: any[] = [];
+
+    if (search && search.trim()) {
+      const { getSupabaseServer } = await import('@/lib/supabase-server');
+      const db = getSupabaseServer();
+      const escaped = search.trim().replace(/%/g, '\\%').replace(/_/g, '\\_');
+      const pattern = `%${escaped}%`;
+      const { data, error } = await db
+        .from('applications')
+        .select('*')
+        .or(`application_id.ilike.${pattern},applicant_uid.ilike.${pattern},email.ilike.${pattern},form_data->>fullName.ilike.${pattern},form_data->>enrollmentId.ilike.${pattern},form_data->>phoneNumber.ilike.${pattern}`)
+        .order('created_at', { ascending: false })
+        .range(offset, offset + limit - 1);
+
+      if (!error && data) {
+        applications = data;
+      } else {
+        applications = await getAllPaginated(limit, offset);
+      }
+    } else {
+      applications = await getAllPaginated(limit, offset);
+    }
     const hasMore = applications.length === limit;
 
     return NextResponse.json(

@@ -54,21 +54,18 @@ export default function StudentBusPassPage() {
           let bus: any = null;
           let route: any = null;
 
-          if (studentBusId) {
-            try {
-              bus = await getBusById(studentBusId);
-            } catch (error) {
-              console.warn('Failed to fetch bus data:', error);
-            }
-          }
-
-          if (studentRouteId) {
-            try {
-              route = await getRouteById(studentRouteId);
-            } catch (error) {
-              console.warn('Failed to fetch route data:', error);
-            }
-          }
+          const [busRes, routeRes] = await Promise.all([
+            studentBusId ? getBusById(studentBusId).catch((err) => {
+              console.warn('Failed to fetch bus data:', err);
+              return null;
+            }) : Promise.resolve(null),
+            studentRouteId ? getRouteById(studentRouteId).catch((err) => {
+              console.warn('Failed to fetch route data:', err);
+              return null;
+            }) : Promise.resolve(null),
+          ]);
+          bus = busRes;
+          route = routeRes;
 
           startTransition(() => {
             setStudentData({

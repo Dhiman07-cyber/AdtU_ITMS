@@ -41,40 +41,26 @@ export default function StudentWaitingPage() {
         const student = await getStudentByUid(currentUser.uid);
         if (student) {
           setStudentData(student);
-          console.log('Student data fetched in waiting page:', student);
+          const routeId = student.routeId;
+          const busId = student.busId;
 
-          // Fetch route data first
-          const routeId = student.routeId || student.routeId;
-          if (routeId) {
-            console.log('Fetching route data for routeId:', routeId);
-            const route = await getRouteById(routeId);
-            if (route) {
-              setRouteData(route);
-              console.log('Route data fetched:', route);
+          const [route, bus] = await Promise.all([
+            routeId ? getRouteById(routeId).catch(() => null) : Promise.resolve(null),
+            busId ? getBusById(busId).catch(() => null) : Promise.resolve(null),
+          ]);
 
-              // Fetch buses for this route
-              const buses = await getBusesByRouteId(routeId);
-              if (buses.length > 0) {
-                // Use the first bus or find the one matching student's shift
-                const assignedBus = buses.find(bus =>
-                  bus.shift === student.shift ||
-                  bus.shift === 'both' ||
-                  !bus.shift
-                ) || buses[0];
-                setBusData(assignedBus);
-                console.log('Bus data fetched:', assignedBus);
-              }
-            }
-          }
-
-          // Also try direct bus ID if available (fallback)
-          const busId = student.busId || student.busId;
-          if (busId && !busData) {
-            console.log('Fetching direct bus data for busId:', busId);
-            const bus = await getBusById(busId);
-            if (bus) {
-              setBusData(bus);
-              console.log('Direct bus data fetched:', bus);
+          if (route) setRouteData(route);
+          if (bus) {
+            setBusData(bus);
+          } else if (routeId) {
+            const buses = await getBusesByRouteId(routeId).catch(() => []);
+            if (buses.length > 0) {
+              const assignedBus = buses.find((b: any) =>
+                b.shift === student.shift ||
+                b.shift === 'both' ||
+                !b.shift
+              ) || buses[0];
+              setBusData(assignedBus);
             }
           }
         }

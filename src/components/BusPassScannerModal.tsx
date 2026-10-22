@@ -65,6 +65,10 @@ export default function BusPassScannerModal({ isOpen, onClose, onScanSuccess }: 
             setCameraStream(null);
         }
 
+        if (videoRef.current) {
+            videoRef.current.srcObject = null;
+        }
+
         if (animationRef.current) {
             cancelAnimationFrame(animationRef.current);
             animationRef.current = null;

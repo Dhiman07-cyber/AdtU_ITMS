@@ -148,33 +148,46 @@ export default function DriverStudentsPage() {
 
       try {
         const token = await currentUser.getIdToken();
-        const [manifestRes, driverRes] = await Promise.all([
-          fetch('/api/driver/students', {
-            headers: { 'Authorization': `Bearer ${token}` }
-          }).catch(() => null),
-          getDriverByUid(currentUser.uid).catch(() => null),
-        ]);
+        const manifestRes = await fetch('/api/driver/students', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        }).catch(() => null);
 
         let manifestData: any = null;
         if (manifestRes && manifestRes.ok) {
           manifestData = await manifestRes.json();
         }
 
-        const driver = driverRes || { uid: currentUser.uid, fullName: userData?.name || 'Driver' };
-        const resolvedBusId = manifestData?.busId || driver.busId || null;
-        const effectiveDriver = {
-          ...driver,
-          busId: resolvedBusId,
-          routeId: manifestData?.routeId || driver.routeId,
-          isReliefPool: manifestData?.isReliefPool ?? !resolvedBusId,
-          isLiveTrip: manifestData?.isLiveTrip ?? false,
-          activeShift: manifestData?.shift || null,
-        };
+        let driver: any = null;
+        let busStudents: any[] = [];
 
-        const busStudents = manifestData?.students || (resolvedBusId ? await getStudentsByBusId(resolvedBusId) : []);
+        if (manifestData) {
+          const resolvedBusId = manifestData.busId || null;
+          driver = {
+            uid: currentUser.uid,
+            fullName: userData?.name || 'Driver',
+            busId: resolvedBusId,
+            routeId: manifestData.routeId || null,
+            isReliefPool: manifestData.isReliefPool ?? !resolvedBusId,
+            isLiveTrip: manifestData.isLiveTrip ?? false,
+            activeShift: manifestData.shift || null,
+          };
+          busStudents = manifestData.students || [];
+        } else {
+          // Fallback if manifest endpoint is unreachable
+          driver = await getDriverByUid(currentUser.uid).catch(() => null);
+          const resolvedBusId = driver?.busId || null;
+          driver = {
+            ...(driver || { uid: currentUser.uid, fullName: userData?.name || 'Driver' }),
+            busId: resolvedBusId,
+            isReliefPool: !resolvedBusId,
+            isLiveTrip: false,
+            activeShift: null,
+          };
+          busStudents = resolvedBusId ? await getStudentsByBusId(resolvedBusId).catch(() => []) : [];
+        }
 
         startTransition(() => {
-          setDriverData(effectiveDriver);
+          setDriverData(driver);
           setStudents(busStudents);
         });
       } catch (error) {

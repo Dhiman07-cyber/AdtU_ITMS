@@ -146,16 +146,20 @@ export default function StudentDashboard() {
     // Run active trip check immediately
     checkActiveTrip();
 
-    // Passive 30s background safety check (WebSocket push handles real-time transitions)
+    // Passive 30s background safety check — runs ONLY when WS is disconnected
     const interval = setInterval(() => {
       if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
-        checkActiveTrip();
+        if (!wsClient || !wsClient.isConnected()) {
+          checkActiveTrip();
+        }
       }
     }, 30000);
 
     const handleVisibility = () => {
       if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
-        checkActiveTrip();
+        if (!wsClient || !wsClient.isConnected()) {
+          checkActiveTrip();
+        }
       }
     };
     if (typeof document !== 'undefined') {
@@ -168,6 +172,12 @@ export default function StudentDashboard() {
         const url = getClientWsUrl();
         wsClient = new WebSocketClient({ url, token });
         wsClient.connect();
+
+        wsClient.onStatus((status) => {
+          if (status === 'disconnected' || status === 'error') {
+            checkActiveTrip();
+          }
+        });
 
         wsClient.subscribe(`trip-status-${busId}`, (payload: any) => {
           const data = payload.payload || payload;
@@ -216,9 +226,9 @@ export default function StudentDashboard() {
   const validUntil = studentData?.validUntil ? new Date(studentData.validUntil) : null;
   // Display-only hint for the renewal banner. NOT used for transport gating.
   const isExpired = validUntil ? validUntil < new Date() : false;
-  // CANONICAL entitlement (Phase 3) — the single answer the dashboard uses to gate
-  // every transport feature (QR generation, Track Bus / View Pass actions).
-  const transportEntitled = getTransportEntitlement(studentData ?? userData).entitled;
+  // FIX 19: Prioritize active student profile or assigned bus for dashboard view
+  const isActiveApproved = studentData?.status === 'active' || !!studentData?.busId || !!studentData?.bus_id;
+  const transportEntitled = isActiveApproved || getTransportEntitlement(studentData ?? userData).entitled;
   const rawStudentName = studentData?.fullName || studentData?.name || userData?.name || 'Student';
   const studentName = rawStudentName;
   const studentFirstName = rawStudentName.trim().split(/\s+/)[0];

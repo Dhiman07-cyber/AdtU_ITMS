@@ -85,6 +85,7 @@ function TrackBusLive() {
   const [countdown, setCountdown] = useState(5);
 
   const handleRaiseWaitingFlagRef = useRef<(() => Promise<void>) | null>(null);
+  const isSubmittingFlagRef = useRef(false);
 
   // Exit full screen mode automatically when trip ends
   useEffect(() => {
@@ -563,6 +564,10 @@ function TrackBusLive() {
         setIsFullScreenMap(false);
         setIsWaiting(false);
         setCurrentFlagId(null);
+        setPendingRaise(false);
+        setCountdown(5);
+        isSubmittingFlagRef.current = false;
+        setSubmittingFlag(false);
         if (typeof window !== 'undefined') {
           (window as any).__itmsLastBusLocation = null;
           (window as any).__itmsMarkerPosition = null;
@@ -808,6 +813,8 @@ function TrackBusLive() {
 
   // Raise waiting flag
   const handleRaiseWaitingFlag = async () => {
+    if (isSubmittingFlagRef.current) return;
+
     if (!currentUser || !busData) {
       addToast("Unable to raise flag - missing data", "error");
       return;
@@ -819,6 +826,7 @@ function TrackBusLive() {
       return;
     }
 
+    isSubmittingFlagRef.current = true;
     setSubmittingFlag(true);
 
     try {
@@ -974,6 +982,7 @@ function TrackBusLive() {
         addToast("Failed to raise waiting flag. Please try again.", "error");
       }
     } finally {
+      isSubmittingFlagRef.current = false;
       setSubmittingFlag(false);
     }
   };

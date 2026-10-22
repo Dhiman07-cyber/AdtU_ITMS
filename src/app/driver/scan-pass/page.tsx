@@ -135,6 +135,9 @@ export default function DriverScanPassPage() {
       if (stream) {
         stream.getTracks().forEach(track => track.stop());
       }
+      if (videoRef.current) {
+        videoRef.current.srcObject = null;
+      }
       if (animationRef.current) {
         cancelAnimationFrame(animationRef.current);
       }

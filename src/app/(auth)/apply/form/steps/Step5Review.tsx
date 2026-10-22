@@ -43,8 +43,10 @@ export default function Step5Review({
       try {
         const getLogoBase64 = (): Promise<string> => {
           return new Promise((resolve) => {
+            const timer = setTimeout(() => resolve(''), 3000);
             const img = new window.Image();
             img.onload = () => {
+              clearTimeout(timer);
               const canvas = document.createElement('canvas');
               canvas.width = 515; canvas.height = 204;
               const ctx = canvas.getContext('2d');
@@ -53,7 +55,10 @@ export default function Step5Review({
                 resolve(canvas.toDataURL('image/png'));
               } else resolve('');
             };
-            img.onerror = () => resolve('');
+            img.onerror = () => {
+              clearTimeout(timer);
+              resolve('');
+            };
             img.src = '/adtu-new-logo.svg';
           });
         };
@@ -94,9 +99,11 @@ export default function Step5Review({
         try {
           const getCircularBase64 = (url: string): Promise<string> => {
             return new Promise((resolve, reject) => {
+              const timer = setTimeout(() => reject(new Error('Image fetch timeout')), 3000);
               const img = new window.Image();
               if (!url.startsWith('blob:') && !url.startsWith('data:')) img.setAttribute('crossOrigin', 'anonymous');
               img.onload = () => {
+                clearTimeout(timer);
                 const canvas = document.createElement('canvas');
                 const size = Math.min(img.width, img.height);
                 canvas.width = size; canvas.height = size;
@@ -111,7 +118,10 @@ export default function Step5Review({
                   resolve(canvas.toDataURL('image/png', 0.95));
                 } else reject(new Error('Canvas Error'));
               };
-              img.onerror = () => reject(new Error('Img Load Error'));
+              img.onerror = () => {
+                clearTimeout(timer);
+                reject(new Error('Img Load Error'));
+              };
               img.src = url;
             });
           };
@@ -326,6 +336,7 @@ export default function Step5Review({
                   src={finalImageUrl}
                   alt="Student Photo"
                   fill
+                  unoptimized
                   className="object-cover transition-transform duration-300 group-hover:scale-105"
                 />
               ) : (

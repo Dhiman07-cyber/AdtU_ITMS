@@ -13,7 +13,6 @@ import { useToast } from "@/contexts/toast-context";
 import { useFCMToken } from "@/hooks/useFCMToken";
 import { useGeolocation } from "@/hooks/useGeolocation";
 import { authApiFetch } from "@/lib/secure-api-client";
-import { supabase } from "@/lib/supabase-client";
 import {
 	AlertCircle,
 	Bell,

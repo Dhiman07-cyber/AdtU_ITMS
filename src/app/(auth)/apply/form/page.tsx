@@ -1031,7 +1031,7 @@ function ApplicationFormContent() {
       stop_name: '',
       busId: '',
       busAssigned: '',
-      shift: 'morning',
+      shift: 'Morning',
       sessionInfo: {
         sessionStartYear: new Date().getFullYear(),
         durationYears: 1,
@@ -1112,8 +1112,8 @@ function ApplicationFormContent() {
         shift: '',
         sessionInfo: {
           sessionStartYear: new Date().getFullYear(),
-          durationYears: 0,
-          sessionEndYear: new Date().getFullYear(),
+          durationYears: 1,
+          sessionEndYear: new Date().getFullYear() + 1,
           feeEstimate: 0
         },
         paymentInfo: currentPaymentInfo, // Key: Preserve this!
@@ -1138,9 +1138,9 @@ function ApplicationFormContent() {
 
       // Clear localStorage BUT preserve payment keys
       localStorage.removeItem('applicationDraft');
-      localStorage.removeItem('');
+      localStorage.removeItem('formData');
       localStorage.removeItem('verificationExpiry');
-      localStorage.removeItem('');
+      localStorage.removeItem('profilePhotoPreview');
 
       // Do NOT remove paymentSessions, currentPaymentSession, etc.
 

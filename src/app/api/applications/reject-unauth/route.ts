@@ -1,17 +1,13 @@
 import { rejectUnauth } from '@/domains/application';
-import { adminAuth } from '@/lib/firebase-admin';
 import { requireModeratorPermission } from '@/lib/security/moderator-permissions';
-import { resolveUserRole } from '@/lib/security/role-cache';
+import { withSecurity } from '@/lib/security/api-security';
+import { RateLimits } from '@/lib/security/rate-limiter';
 import { getUpdaterInfo } from '@/lib/utils/updatedBy';
-import { NextRequest,NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 
-export async function POST(request: NextRequest) {
-  try {
-    const token = request.headers.get('Authorization')?.replace('Bearer ', '');
-    if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-
-    const decodedToken = await adminAuth.verifyIdToken(token);
-    const moderatorUid = decodedToken.uid;
+export const POST = withSecurity(
+  async (request, { auth }) => {
+    const moderatorUid = auth.uid;
 
     const body = await request.json();
     const applicationId = body.applicationId || body.studentUid;
@@ -21,17 +17,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Missing required field: applicationId' }, { status: 400 });
     }
 
-    const userRole = await resolveUserRole(moderatorUid);
-    if (!userRole.role) {
-      return NextResponse.json({ error: 'Insufficient permissions' }, { status: 403 });
-    }
     const updaterInfo = await getUpdaterInfo(moderatorUid);
 
     const permissionDenied = await requireModeratorPermission(
       {
         uid: moderatorUid,
-        email: decodedToken.email || '',
-        role: userRole.role,
+        email: auth.email || '',
+        role: auth.role,
         name: updaterInfo.name,
       },
       'applications',
@@ -44,7 +36,7 @@ export async function POST(request: NextRequest) {
       {
         uid: moderatorUid,
         name: updaterInfo.name || 'Moderator',
-        role: userRole.role,
+        role: auth.role,
       },
       reason
     );
@@ -54,11 +46,9 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json({ success: true, message: 'Application rejected' });
-  } catch (error: any) {
-    console.error('Error rejecting application:', error);
-    return NextResponse.json(
-      { error: 'Failed to reject application' },
-      { status: 500 }
-    );
+  },
+  {
+    requiredRoles: ['admin', 'moderator'],
+    rateLimit: RateLimits.WRITE,
   }
-}
+);

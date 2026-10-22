@@ -1,7 +1,7 @@
 import { withSecurity } from '@/lib/security/api-security';
 import { RateLimits } from '@/lib/security/rate-limiter';
 import { getSupabaseServer } from '@/lib/supabase-server';
-import { isShiftCompatible } from '@/lib/utils';
+import { getBusIdVariations, isShiftCompatible } from '@/lib/utils';
 import { NextResponse } from 'next/server';
 
 /**
@@ -93,11 +93,12 @@ export const GET = withSecurity(
       });
     }
 
-    // 3. Query active students for the resolved bus
+    // 3. Query active students for the resolved bus (with prefix variation support)
+    const busVariations = getBusIdVariations(busId);
     const { data: studentRows, error: studentErr } = await supabase
       .from('student_profiles')
       .select('uid, full_name, email, phone, stop_name, shift, profile_photo_url, enrollment_id, faculty, department, status')
-      .eq('bus_id', busId)
+      .in('bus_id', busVariations)
       .eq('status', 'active');
 
     if (studentErr) {

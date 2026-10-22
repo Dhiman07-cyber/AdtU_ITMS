@@ -22,6 +22,7 @@ export default function DriverNotificationsPage() {
     unreadCount,
     loading,
     markAsRead,
+    markAllAsRead,
     refresh
   } = useNotifications();
 
@@ -39,9 +40,7 @@ export default function DriverNotificationsPage() {
 
       if (unreadReceived.length > 0) {
         try {
-          // Mark each as read
-          const promises = unreadReceived.map(n => markAsRead(n.id));
-          await Promise.all(promises);
+          await markAllAsRead(unreadReceived.map(n => n.id));
         } catch (err) {
           console.error('Error auto-marking notifications as read:', err);
         }
@@ -49,7 +48,7 @@ export default function DriverNotificationsPage() {
     };
 
     markAllVisibleAsRead();
-  }, [loading, allNotifications, currentUser, markAsRead]);
+  }, [loading, allNotifications, currentUser, markAllAsRead]);
 
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [activeSection, setActiveSection] = useState<'notifications' | 'notice' | 'pickup' | 'dropoff'>('notifications');
