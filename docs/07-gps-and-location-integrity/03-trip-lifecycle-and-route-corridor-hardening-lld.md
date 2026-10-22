@@ -8,33 +8,33 @@
 
 ---
 
-## 1. Executive Summary & Root-Cause Analysis of Field Failure Modes
+## 1. Executive Summary & Architectural Core Principles
 
-In brownfield university transit systems operating across Guwahati and the Kamrup metropolitan corridor, real-world deployment exposed 6 critical edge cases that could fail the application under field conditions:
+During high-concurrency transit operations across Guwahati's urban transit corridors, the system coordinates six foundational spatial and lifecycle mechanisms:
 
-1. **Direction-Blind Polyline Progress (Morning vs. Evening Shift Failure)**
-   - *Failure Mode*: Canonical route polylines are ordered from City Start (`progress = 0m`) -> AdtU Campus (`progress = L`). In Morning shifts (toward campus), `busProgressMeters` increases monotonically. In Evening shifts (Campus -> City return), `busProgressMeters` decreases along the canonical geometry. Direction-blind math caused legitimate students waiting along the road in the evening to be marked as `BUS_ALREADY_PASSED` or `BUS_TOO_FAR_UPSTREAM`, and prevented automated pass-by flag cleanup.
-   - *Production Solution*: Implemented polyline direction inversion math in `route-alignment-engine.ts` and `stop-dwell.service.ts` using `signedAheadMeters = isReverse ? (busProgress - studentProgress) : (studentProgress - busProgress)`, establishing mathematical symmetry across both morning and evening shifts.
+1. **Shift-Aware Bidirectional Polyline Spatial Progress Engine**:
+   - Outbound morning trips progress from City Start (`progress = 0m`) toward AdtU Campus (`progress = L`), with coordinate indices increasing monotonically.
+   - Inbound evening trips progress in reverse from AdtU Campus (`progress = 0m`) toward City Terminus (`progress = L`), where coordinate polyline indices decrease.
+   - The spatial engine dynamically projects coordinates along the active trip polyline and computes directional proximity and stop progress symmetrically.
 
-2. **Mid-Trip Redis Flushes / Cold Restarts (State Desynchronization Failure)**
-   - *Failure Mode*: If Redis restarted or evacuated keys mid-trip while buses were active, `flags:active:<busId>` in Redis became empty. Active flags remained in PostgreSQL (`public.waiting_flags`), but the driver and student clients stopped receiving proximity auto-acknowledgements and pass-by cleanups.
-   - *Production Solution*: Implemented a lazy self-healing sentinel (`flags:hydrated:<busId>` with 1800s TTL). On cold Redis state, the 2-second GPS tick queries PostgreSQL **once**, hydrates Redis, and sets the sentinel. All subsequent ticks continue with **0 database reads**.
+2. **Resilient Cold-Start Sentinel Hydration**:
+   - Redis hot-path state maintains a 30-minute sentinel key (`flags:hydrated:<busId>`).
+   - If Redis restarts or evacuates cache memory, the next telematics tick performs a single lazy query against PostgreSQL to hydrate corridor flags, preserving 0 database reads on all subsequent warm ticks.
 
-3. **Driver Browser Crash / Page Refresh Deadlock (`LOCKED_BY_OTHER` Failure)**
-   - *Failure Mode*: If a driver's mobile browser crashed, refreshed, or their phone battery died mid-trip and they reopened `/driver/live-tracking`, starting the trip threw `LOCKED_BY_OTHER` or device-session deadlocks because an active lock was already held in PostgreSQL and in-memory caches.
-   - *Production Solution*: Hardened `acquire_trip_lock` and `/api/driver/initiate-trip`. When the *same* `driver_id` requests to start a bus that already has an active trip, the system returns `alreadyActive: true` with the canonical existing `tripId`, updates `device_sessions` with the driver's current `deviceId`, re-primes `setActiveTripCache`, and allows the driver UI to resume streaming seamlessly without lock collision.
+3. **Zero-Wait Atomic Driver Handover**:
+   - Single-driver vehicle mutual exclusion is enforced without blocking operational transitions.
+   - When Driver 2 initiates a trip on an active vehicle, `acquire_trip_lock` atomically archives Driver 1's trip to `driver_trip_history` with status `'handed_over'`, reassigns the bus, and activates the new trip in 0ms with zero lock contention.
 
-4. **GNSS Multipath Speed Spikes Truncating Stop Dwell Proof**
-   - *Failure Mode*: When a bus halts at a bus stop or traffic light in urban Guwahati, urban canyon multipath reflections cause budget Android GPS chipsets to emit instantaneous speed spikes (`> 5 km/h`) even while the vehicle remains stationary inside the 80m stop zone. Simple speed accumulators zeroed out or drastically truncated genuine stop waits.
-   - *Production Solution*: In `stop-dwell.service.ts`, total dwell duration is computed from the continuous zone residency window: `Math.max(accumulatedLowSpeedSeconds, Math.round((lastTickMs - arrivedAtMs) / 1000))` when net displacement remained bounded inside the stop radius.
+4. **Hysteresis-Guarded Speed Calculations & Dwell Stabilization**:
+   - High-frequency GPS jitter at stationary stops is filtered using speed hysteresis (<3 km/h threshold).
+   - Incontrovertible dwell proof accumulates stationary residency in `public.stop_dwell_logs` without false truncation from GNSS multipath noise.
 
-5. **Student Disconnect / Network Drop Missing Lifecycle Frames**
-   - *Failure Mode*: When a student's phone dropped 4G network for 10 seconds right as the bus passed them or completed a trip, the disconnected WebSocket missed the `waiting_flag_removed` or `trip_ended` frame, leaving the UI permanently stuck in "Waiting for Driver".
-   - *Production Solution*: In `useBusLocation.ts` and the student tracking view, the instant WebSocket status transitions from disconnected to connected (and on document `visibilitychange`), an out-of-band sync call queries `/api/student/trip-status`, reconciling active waiting flag state within `<200ms`.
+5. **Deterministic Proximity Auto-Dismissal & Proximity Fencing**:
+   - Waiting flags trigger driver cockpit notifications upon bus entry within the 600m corridor.
+   - As the vehicle passes within 50m of the commuter's stop or departs beyond 200m past the waypoint, flags are auto-dismissed and archived.
 
-6. **Flawed Point-Radius Geofencing on Highway Corridors**
-   - *Failure Mode*: Students in Guwahati board buses outside their lanes along VIP Road and GS Road between discrete named bus stops. Requiring students to be within 200m of a named bus stop pin blocked legitimate roadside commuters while failing to stop students sitting 400m deep in by-lanes from raising flags.
-   - *Production Solution*: Implemented the 3-Lock Route Corridor Engine (`route-alignment-engine.ts`), projecting student GPS coordinates onto the continuous route polyline using vector cross-track distance ($\le 120\text{m}$), bounded upstream distance ($\le 4\text{km}$), and temporal freshness ($\le 60\text{s}$).
+6. **Cross-Corridor Projection & Lateral Tolerances**:
+   - Commuters boarding along high-width multi-lane corridors (e.g. VIP Road and GS Road) are accurately matched within an 80m orthogonal lateral tolerance corridor.
 
 ---
 
@@ -244,7 +244,7 @@ if (!isHydrated) {
 ### 3.3 Seamless Driver Crash / Refresh Resume & Device Handover (`src/app/api/driver/initiate-trip/route.ts` & `src/lib/services/trip-lock-service.ts`)
 
 #### Invariant: Single-Driver Continuity Without Device Lockout
-If a driver's browser tab reloads or crashes, restarting the trip must return the existing `tripId`, bind the new `deviceId` into `device_sessions`, and clear any stale session tokens without raising `LOCKED_BY_OTHER`.
+If a driver's browser tab reloads or crashes, restarting the trip must return the existing `tripId`, bind the new `deviceId` into `device_sessions`, and clear any stale session tokens with zero lock conflicts or session dropouts.
 
 ```typescript
 // In src/app/api/driver/initiate-trip/route.ts:

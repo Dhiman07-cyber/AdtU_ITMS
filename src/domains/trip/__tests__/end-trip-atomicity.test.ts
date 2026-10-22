@@ -31,19 +31,25 @@ describe('Trip end — atomicity and idempotency', () => {
   beforeEach(() => {
     vi.clearAllMocks();
 
+    const activeTripData = { trip_id: 't-123', bus_id: 'b-1', driver_id: 'd-1', route_id: 'r-1', status: 'active' };
+    const createChain = (isLingeringCheck = false) => {
+      const chain: any = {};
+      chain.eq = vi.fn(() => chain);
+      chain.in = vi.fn(() => chain);
+      chain.or = vi.fn(() => chain);
+      chain.limit = vi.fn(() => chain);
+      chain.maybeSingle = vi.fn().mockResolvedValue({
+        data: isLingeringCheck ? null : activeTripData,
+        error: null,
+      });
+      return chain;
+    };
+
     mockFrom.mockImplementation((table: string) => {
       if (table === 'active_trips') {
         return {
-          select: vi.fn(() => ({
-            eq: vi.fn(() => ({
-              eq: vi.fn(() => ({
-                maybeSingle: vi.fn().mockResolvedValue({
-                  data: { trip_id: 't-123', bus_id: 'b-1', driver_id: 'd-1', route_id: 'r-1', status: 'active' },
-                  error: null,
-                }),
-              })),
-            })),
-          })),
+          select: vi.fn((cols?: string) => createChain(cols === 'trip_id')),
+          delete: vi.fn(() => createChain()),
         };
       }
       return {

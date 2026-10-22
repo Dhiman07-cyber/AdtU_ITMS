@@ -32,6 +32,15 @@ graph TD
 
 ---
 
+## 2.1 Singleflight In-Flight Promise Deduplication & L1 Memory Caches
+
+To eliminate redundant database wire traffic during peak commute hours, client-side data services (`dataService.ts`, `fleet.client.ts`, `route.client.ts`) implement singleflight request coalescing:
+1. **In-Flight Promise Coalescing:** If multiple dashboard widgets or page sections request bus or route data concurrently, only one HTTP request is dispatched. All subsequent callers attach to the in-flight Promise.
+2. **L1 Memory Cache:** Successfully resolved responses are cached in memory with a 60-second TTL.
+3. **Manual Purge & Invalidation:** Calling `clearCached()` on pull-to-refresh or explicit refresh buttons immediately purges the L1 cache. Any administrative entity mutation (creating, updating, or deleting a bus or route) automatically invalidates cached records.
+
+---
+
 ## 3. Cache Invalidation Contracts Across Domains
 
 ### 3.1 Role & Permission Invalidation (`INV-AUTH-003`)

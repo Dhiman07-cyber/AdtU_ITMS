@@ -15,6 +15,7 @@ vi.mock('../repositories/notification.repository', () => ({
   insert: (...args: any[]) => mockInsert(...args),
   findById: (...args: any[]) => mockFindById(...args),
   update: (...args: any[]) => mockUpdate(...args),
+  markAsRead: undefined,
 }));
 
 import {

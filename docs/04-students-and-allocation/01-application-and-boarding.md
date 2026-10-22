@@ -309,7 +309,7 @@ export async function POST(request: NextRequest) {
 
       // Check if user should be deleted (45+ days old with no activity)
       if (lastLoginAt < fortyFiveDaysAgo) {
-        // FIX 1: Protect users with active/pending/upcoming applications or completed/pending payments
+        // Application Safety Guard: Protect users with active/pending/upcoming applications or completed/pending payments
         const [{ data: apps }, { data: payments }] = await Promise.all([
           supabase
             .from('applications')
@@ -364,7 +364,7 @@ export async function POST(request: NextRequest) {
               console.error(`PG delete failed for already migrated unauth user ${userId}:`, pgErr.message);
             }
           } else {
-            // FIX 6: If user is approved but does NOT yet exist in public.users,
+            // User Record Synchronization: If user is approved but does NOT yet exist in public.users,
             // do NOT create a broken skeleton student profile without bus/shift/validUntil/capacity!
             // Leave the record for Application.approve / session-activation to activate properly with full bus capacity.
             cleanupResults.push({ userId, action: 'skipped', reason: 'awaiting_proper_session_activation' });

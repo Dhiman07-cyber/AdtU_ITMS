@@ -653,6 +653,12 @@ function enqueueOfflinePoint(point: QueuedGpsPoint) {
 
 ### 6.1 Sub-Domain Architecture & Exact Execution Pipeline
 
+4. **Local-First Search Architecture & 100% Admin/Moderator Parity (`useLocalAndServerSearch`):**
+   - Standardized across all 7 administrative and moderation management workbenches: `/admin/students`, `/admin/drivers`, `/admin/buses`, `/admin/routes`, `/admin/moderators`, `/admin/applications`, and `/admin/renewal-service`.
+   - **Tier 1 (Instant 0ms In-Memory Filter):** Every keystroke immediately filters currently loaded records in process memory with zero network delay or layout shift.
+   - **Tier 2 (Debounced Server Fallback):** If local search yields fewer matches, a debounced (350ms) server query executes against `?search=` with an integrated `AbortController` that cancels in-flight requests on new keystrokes.
+   - Full parity between `/admin/*` and `/moderator/*` portals ensures consistent operational latency and UX.
+
 The admin dashboard splits complex analytical interfaces into modular islands:
 1. **Dynamic Island Slicing:**
    Loads 9 dashboard panels asynchronously via `next/dynamic` with `ssr: false`:

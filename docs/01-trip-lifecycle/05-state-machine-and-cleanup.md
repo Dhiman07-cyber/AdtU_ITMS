@@ -450,7 +450,7 @@ export async function cleanupTrip(params: {
     clearRedisActiveFlags(params.busId).catch(() => {}),
   ]);
 
-  // 2. Atomically evict all bus runtime state across all memory and Redis layers (Fix 6)
+  // 2. Atomically evict all bus runtime state across all memory and Redis layers 
   await evictAllBusRuntimeState(params.busId, params.driverId, params.tripId);
 
   // 3. Broadcast only the flags that were actually deleted.
@@ -518,7 +518,7 @@ export async function GET(request: Request) {
 
                 const cleanupResults = await Promise.allSettled(
                     cleanedLocks.map(async (lock: any) => {
-                        // Atomically evict all bus runtime state across all memory and Redis layers (Fix 6)
+                        // Atomically evict all bus runtime state across all memory and Redis layers 
                         await evictAllBusRuntimeState(lock.cleaned_bus_id, lock.cleaned_driver_id, lock.cleaned_trip_id);
                         emitEvent(`trip-status-${lock.cleaned_bus_id}`, 'trip_ended', {
                             busId: lock.cleaned_bus_id,
@@ -646,7 +646,7 @@ Following the forensic code inspection of the live `.ts` implementations, 7 conc
 
 ### 14.1 Forensic Code Defect Remediations
 
-#### Fix 1: Preserve `shift` and `routeId` Across All `setActiveTripCache` Calls & Heartbeat Refreshes
+#### Architectural Specification 1: Preserve `shift` and `routeId` Across All `setActiveTripCache` Calls & Heartbeat Refreshes
 * **Locations:** [`src/domains/gps/services/gps-persistence.service.ts`](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/src/domains/gps/services/gps-persistence.service.ts), [`src/domains/gps/services/gps-redis-guard.ts`](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/src/domains/gps/services/gps-redis-guard.ts), [`src/app/api/location/update/route.ts`](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/src/app/api/location/update/route.ts), [`src/app/api/driver/initiate-trip/route.ts`](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/src/app/api/driver/initiate-trip/route.ts), [`src/domains/trip/services/trip-orchestrator.ts`](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/src/domains/trip/services/trip-orchestrator.ts)
 * **Defect Caught:** In `location/update/route.ts`, when `shouldWriteHeartbeat` ran every 30s, it called `setActiveTripCache` without passing `shift`, wiping out `shift` from `positiveLockCache` and Redis `trip:active:<busId>`. After 30s, evening reverse-direction waiting-flag calculations degraded.
 * **Hardened Verbatim Solution:**
@@ -655,7 +655,7 @@ Following the forensic code inspection of the live `.ts` implementations, 7 conc
   - Heartbeat refreshes in `location/update/route.ts` pass `shift: (body as any).shift || norm?.shift || currentLock?.shift`.
   - `initiate-trip/route.ts` and `trip-orchestrator.ts` pass `shift` explicitly on trip start and resume.
 
-#### Fix 2: Move Waiting-Flag Cooldown Increment (`incrementStudentTripFlagCount`) AFTER Validation
+#### Architectural Specification 2: Move Waiting-Flag Cooldown Increment (`incrementStudentTripFlagCount`) AFTER Validation
 * **Locations:** [`src/domains/gps/services/gps-redis-guard.ts`](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/src/domains/gps/services/gps-redis-guard.ts), [`src/app/api/student/waiting-flag/route.ts`](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/src/app/api/student/waiting-flag/route.ts)
 * **Defect Caught:** Lock 3 (`incrementStudentTripFlagCount`) executed before Lock 1 (Corridor) and Lock 2 (Approaching Bus). Students attempting to raise a flag while the bus was 4.2 km away burned their 2-flag quota on `400 BUS_TOO_FAR_UPSTREAM` rejections, blocking legitimate flags later with `429 FLAG_COOLDOWN_ACTIVE`.
 * **Hardened Verbatim Solution:**
@@ -663,14 +663,14 @@ Following the forensic code inspection of the live `.ts` implementations, 7 conc
   - In `waiting-flag/route.ts`, evaluated `const currentTripFlagCount = await getStudentTripFlagCount(tripId, studentUid); if (currentTripFlagCount >= 2) return 429;` before geofencing.
   - Moved `incrementStudentTripFlagCount(tripId, studentUid)` strictly **after** geofence validation and successful PostgreSQL `waiting_flags` insertion.
 
-#### Fix 3: Enforce Permanent Shift Compatibility in `POST /api/student/waiting-flag/route.ts`
+#### Architectural Specification 3: Enforce Permanent Shift Compatibility in `POST /api/student/waiting-flag/route.ts`
 * **Location:** [`src/app/api/student/waiting-flag/route.ts`](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/src/app/api/student/waiting-flag/route.ts)
 * **Defect Caught:** While `trip-status/route.ts` and `socket-router.ts` enforced shift isolation, `waiting-flag/route.ts` allowed students assigned to Morning shifts to raise waiting flags during an Evening trip.
 * **Hardened Verbatim Solution:**
   - Verifies `isShiftCompatible(studentData.shift, activeTripRes.data?.shift)`.
   - Rejects cross-shift attempts with HTTP `403 Forbidden` (`code: 'SHIFT_MISMATCH'`, `error: 'You cannot raise a waiting flag for a trip outside your assigned shift.'`).
 
-#### Fix 4: Canonical Bus ID Matching Across Endpoints & WebSockets
+#### Architectural Specification 4: Canonical Bus ID Matching Across Endpoints & WebSockets
 * **Locations:** [`src/lib/utils.ts`](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/src/lib/utils.ts), [`server/socket-router.ts`](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/server/socket-router.ts), [`src/app/api/student/waiting-flag/route.ts`](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/src/app/api/student/waiting-flag/route.ts), [`src/app/api/student/trip-status/route.ts`](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/src/app/api/student/trip-status/route.ts), [`src/app/api/driver/ack-flag/route.ts`](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/src/app/api/driver/ack-flag/route.ts), [`src/app/api/driver/mark-boarded/route.ts`](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/src/app/api/driver/mark-boarded/route.ts)
 * **Defect Caught:** Strict inequality `studentBusId !== busId` caused false rejections when student profiles stored `'01'` while route/bus hardware reported `'bus_01'`. Active trip queries with `.eq('bus_id', busId)` missed prefix-normalized active trips.
 * **Hardened Verbatim Solution:**
@@ -678,14 +678,14 @@ Following the forensic code inspection of the live `.ts` implementations, 7 conc
   - Converted `active_trips` lookups to `.in('bus_id', getBusIdVariations(busId))`.
   - Replaced strict string comparisons with `isMatchingBusId(...)` across all student, driver, and WebSocket presence handlers.
 
-#### Fix 5: Graceful Redis Blip Fallback & HTTP 503 Status Code on Ingress Outage
+#### Architectural Specification 5: Graceful Redis Blip Fallback & HTTP 503 Status Code on Ingress Outage
 * **Locations:** [`src/domains/gps/services/gps-redis-guard.ts`](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/src/domains/gps/services/gps-redis-guard.ts), [`src/app/api/location/update/route.ts`](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/src/app/api/location/update/route.ts)
 * **Defect Caught:** In `location/update/route.ts`, `!result.accepted` returned HTTP 400 for all rejections. On transient Redis timeouts, returning 400 caused the driver HUD's offline queue to discard GPS packets as client validation errors rather than retrying.
 * **Hardened Verbatim Solution:**
   - In `atomicGpsGuardAndUpdate`, when Redis throws a connection or timeout error after `checkActiveTrip` has already validated the trip, execution gracefully falls back to `memoryGuard(busId, newLat, newLng, newTs, newRawTs, speed, heading, accuracy)` with a warning log, preserving monotonicity and speed checks in process memory without blinding the vehicle.
   - In `location/update/route.ts`, if `result.errorClass === 'DATABASE_UNAVAILABLE'` or `result.reason?.includes('unavailable')`, the endpoint returns HTTP `503 Service Unavailable`, correctly triggering the driver client's retry and offline queue preservation.
 
-#### Fix 6: Throttled Stop-Dwell Redis Writes & Unified Bus Runtime State Teardown
+#### Architectural Specification 6: Throttled Stop-Dwell Redis Writes & Unified Bus Runtime State Teardown
 * **Locations:** [`src/domains/gps/services/stop-dwell.service.ts`](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/src/domains/gps/services/stop-dwell.service.ts), [`src/domains/trip/services/trip-cleanup.service.ts`](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/src/domains/trip/services/trip-cleanup.service.ts), [`src/app/api/cron/cleanup-stale-locks/route.ts`](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/src/app/api/cron/cleanup-stale-locks/route.ts)
 * **Defect Caught:** While stationary in an 80m stop zone, `setRedisActiveDwell` was invoked on every 2s tick. In addition, runtime cache invalidation on trip completion was fragmented across 6 distinct files, risking stale memory state if an invalidation step was omitted.
 * **Hardened Verbatim Solution:**
@@ -732,7 +732,7 @@ Following the forensic code inspection of the live `.ts` implementations, 7 conc
     ```
   - Executed in both `cleanupTrip` (driver journey end) and `cleanup-stale-locks` (automated cron recovery).
 
-#### Fix 7: Route Handlers Verification & Truth Synchronization
+#### Architectural Specification 7: Route Handlers Verification & Truth Synchronization
 * **Locations:** [`src/app/api/driver/ack-flag/route.ts`](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/src/app/api/driver/ack-flag/route.ts), [`src/app/api/driver/mark-boarded/route.ts`](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/src/app/api/driver/mark-boarded/route.ts), [`src/app/api/cron/cleanup-stale-locks/route.ts`](file:///c:/Users/ADMIN/Desktop/Projects/ITMS/src/app/api/cron/cleanup-stale-locks/route.ts)
 * **Hardened Verbatim Solution:**
   - `ack-flag/route.ts`: Sets `status: 'acknowledged'`, `ack_sent: true`, updates Redis flag, invalidates bus trip snapshot, and emits to both `waiting_flags_<busId>` and `student_<uid>`.

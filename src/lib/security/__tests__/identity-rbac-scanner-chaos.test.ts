@@ -66,8 +66,11 @@ vi.mock('@/lib/supabase-server', () => ({
         in: () => chain,
         eq: () => chain,
         gt: () => chain,
+        update: () => chain,
+        delete: () => chain,
         limit: () => Promise.resolve({ data: mockActiveTripsReturn, error: null }),
         maybeSingle: () => Promise.resolve({ data: mockActiveTripsReturn[0] || null, error: null }),
+        then: (resolve: any) => Promise.resolve({ data: [], error: null }).then(resolve),
       };
       return chain;
     },

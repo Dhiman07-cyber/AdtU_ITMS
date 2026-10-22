@@ -10,6 +10,12 @@
 
 ### 7.1 Sub-Domain Architecture & Exact Execution Pipeline
 
+#### Batch Mark-All-Read & Pre-Aggregated Recipient Counting
+1. **Batch Mark-All-Read (`POST /api/notifications/mark-all-read`):**
+   - Updates all unread notifications for the authenticated user in a single atomic SQL query (`id = ANY($1)`), eliminating N+1 round-trip latency.
+2. **Pre-Aggregated Recipient Derivation:**
+   - When administrators prepare route-wide or system announcements, recipient commuter counts are derived directly from pre-aggregated bus capacity summaries (`morning_load + evening_load`), eliminating full student table downloads.
+
 The notification subsystem delivers in-app and push notifications across 4 recipient strategies:
 1. `all_users`: Broadcast to every user.
 2. `all_role`: Role-specific broadcast (`student`, `driver`, `moderator`).

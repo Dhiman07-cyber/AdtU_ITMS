@@ -15,6 +15,7 @@ const makeQueryChain = vi.hoisted(() => {
     const chain: any = {};
     chain.maybeSingle = vi.fn().mockResolvedValue({ data });
     chain.eq = vi.fn(() => chain);
+    chain.in = vi.fn(() => chain);
     chain.select = vi.fn(() => chain);
     chain.delete = vi.fn(() => chain);
     chain.update = vi.fn(() => chain);

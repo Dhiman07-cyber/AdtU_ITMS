@@ -294,7 +294,7 @@ CREATE TABLE IF NOT EXISTS notifications (
 );
 
 CREATE OR REPLACE FUNCTION public.acquire_trip_lock(
-    p_trip_id TEXT, p_bus_id TEXT, p_driver_id TEXT, p_route_id TEXT, p_shift TEXT, p_ttl_seconds INTEGER DEFAULT 600
+    p_trip_id TEXT, p_bus_id TEXT, p_driver_id TEXT, p_route_id TEXT, p_shift TEXT, p_device_id TEXT DEFAULT NULL
 )
 RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE
@@ -344,7 +344,7 @@ BEGIN
         SELECT trip_id, bus_id, driver_id, route_id, shift, start_time
         FROM active_trips
         WHERE status = 'active' AND (bus_id = p_bus_id OR driver_id = p_driver_id)
-          AND last_heartbeat < v_now - INTERVAL '600 seconds'
+          AND last_heartbeat < v_now - INTERVAL '1800 seconds'
     LOOP
         INSERT INTO driver_trip_history (
             trip_id, bus_id, driver_id, route_id, shift, status, ended_reason, start_time, end_time, duration_seconds
@@ -376,7 +376,7 @@ BEGIN
         IF FOUND AND v_existing.driver_id = p_driver_id THEN
             RETURN jsonb_build_object('success', true, 'tripId', v_existing.trip_id::text, 'alreadyActive', true);
         END IF;
-        RETURN jsonb_build_object('success', false, 'error', 'LOCKED_BY_OTHER', 'activeDriverId', COALESCE(v_existing.driver_id, 'unknown'));
+        RETURN jsonb_build_object('success', true, 'tripId', p_trip_id, 'alreadyActive', false, 'handover', true);
     END;
 END;
 $$;

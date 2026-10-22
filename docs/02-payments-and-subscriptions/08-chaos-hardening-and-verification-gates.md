@@ -50,7 +50,7 @@
 
 Following the comprehensive forensic audit of the ADTU ITMS Payment, Financial Ledger, Subscription Renewal, Seat Quota Allocation, QR Pass, and Entitlement Lifecycle, all 16 identified defects, signature mismatches, race conditions, and real-world failure modes have been permanently resolved in verbatim code.
 
-### 11.1 Fix 1: Canonical `approve_renewal_with_seat` RPC Signature & Column Alignment
+### 11.1 Specification 1: Canonical `approve_renewal_with_seat` RPC Signature & Column Alignment
 - **Root Cause:** Parameter name mismatch (`p_approver_uid` vs `p_approved_by`), column type mismatches (`p_soft_block`/`p_hard_block` as boolean vs `TIMESTAMPTZ`, `p_session_duration` as integer vs `TEXT`), and nonexistent column references on `public.applications` (`id` instead of `application_id`, `reviewed_by`/`reviewed_at` instead of `approved_by`/`approved_at`).
 - **Remediation:** In `supabase/migrations/20261019_payment_ledger_and_renewal_hardening.sql` and `supabase/COMPLETE_SCHEMA.sql`, all overloaded RPC variants were dropped and recreated as a canonical function accepting unified parameters:
   ```sql
@@ -73,30 +73,30 @@ Following the comprehensive forensic audit of the ADTU ITMS Payment, Financial L
   ```
   The RPC handles `COALESCE(p_approver_uid, p_approved_by)`, deterministically locks `buses` and `student_profiles` via `FOR UPDATE`, increments capacity, updates `student_profiles` (`seat_released_at = NULL`, `status = 'active'`), and updates `public.applications` using canonical schema columns. Callers in `src/domains/application/services/application.service.ts` match this signature 100%.
 
-### 11.2 Fix 2: Pre-Checkout `Pending` Promotion & Elimination of Orphaned Records
+### 11.2 Specification 2: Pre-Checkout `Pending` Promotion & Elimination of Orphaned Records
 - **Root Cause:** `POST /api/payment/razorpay/create-order` created a pre-checkout row with `payment_id = order.id` (`status = 'Pending'`). When Razorpay captured the payment, `createPayment` inserted a second row with `payment_id = pay_...`, leaving an orphaned `Pending` row permanently in the ledger for every successful payment.
 - **Remediation:** In `src/lib/services/payments-supabase.ts` (`createPayment`), an atomic transition detects if a `Pending` row exists for `input.razorpayOrderId` or `payment_id = input.razorpayOrderId`. If found, it promotes that existing record to `payment_id = input.paymentId`, `status = 'Completed'`, `valid_until`, `document_signature`, and merged metadata. In `src/app/api/student/renew-service-v2/route.ts`, the pre-checkout `Pending` row is durably persisted with server-derived session years.
 
-### 11.3 Fix 3: Multi-Worker `23505` Constraint Disambiguation & Idempotency Resolution
+### 11.3 Specification 3: Multi-Worker `23505` Constraint Disambiguation & Idempotency Resolution
 - **Root Cause:** When webhook and browser callbacks hit different Node processes at the exact same millisecond, process-local in-memory maps were bypassed, causing PostgreSQL unique constraint violation `23505` on insert.
 - **Remediation:** In `src/lib/services/payments-supabase.ts` (`createPayment`), `23505` errors are disambiguated by querying the conflicting ledger entry:
   - If the conflicting row represents the same transaction (`payment_id` or `razorpay_payment_id` match), it throws `ALREADY_PROCESSED` (resulting in clean HTTP 200 idempotent success).
   - If the conflicting row represents a different payment for the same covered session, it throws `DUPLICATE_SESSION_PAYMENT` (routing secondary captures to `Duplicate_Pending_Refund`).
   - If the error detail matches `idx_payments_unique_offline_tx_id`, it throws `DUPLICATE_OFFLINE_TRANSACTION_ID`.
 
-### 11.4 Fix 4: Online Renewal Session Year Alignment & Deduplication
+### 11.4 Specification 4: Online Renewal Session Year Alignment & Deduplication
 - **Root Cause:** `processCapturedPayment` calculated `newSessionStartYear` from a student's historic start year instead of `baseYear`. Subsequently, `postCommitApprovalSideEffects` failed to resolve `app.form_data?.paymentId`, falling back to generating a duplicate fake `pay_${Date.now()}` record.
 - **Remediation:** In `src/lib/payment/payment.service.ts`, renewal `newSessionStartYear` is aligned to `baseYear` and passed within `formData.paymentInfo` and `formData.paymentId`. In `src/domains/application/services/application.service.ts` (`postCommitApprovalSideEffects`), the payment ID is resolved from `app.payment_id || app.form_data?.paymentId || app.form_data?.paymentInfo?.razorpayPaymentId || application_id.replace(/^online_/, '')`, updating existing `Completed` records without generating duplicate rows.
 
-### 11.5 Fix 5: Offline Payment Ledger Creation Atomicity & Anti-Replay Guard
+### 11.5 Specification 5: Offline Payment Ledger Creation Atomicity & Anti-Replay Guard
 - **Root Cause:** Bank challan / UTR references were not uniquely constrained, allowing students to submit duplicate transaction IDs. Furthermore, offline approval created ledger entries asynchronously in a catch block.
 - **Remediation:** Added partial unique index `idx_payments_unique_offline_tx_id` on `LOWER(TRIM(offline_transaction_id))` in `supabase/migrations/20261019_payment_ledger_and_renewal_hardening.sql`. Added preflight duplicate validation in `submitFinal` and `renew-service-v2` returning `409 Conflict`. In `Application.approve`, offline fee calculation defaults reliably to `getCurrentBusFee() * durationYears` and verifies ledger creation with retry.
 
-### 11.6 Fix 6: Full Refund Entitlement Revocation & Realtime Seat Release
+### 11.6 Specification 6: Full Refund Entitlement Revocation & Realtime Seat Release
 - **Root Cause:** When a `Completed` session payment was fully refunded, `student_profiles` remained `active` and retained bus seats without entitlement.
 - **Remediation:** In `supabase/migrations/20261019_payment_ledger_and_renewal_hardening.sql`, `process_payment_refund_atomic` checks if any other active completed payment covers the session. If not, it transitions `student_profiles.status = 'soft_blocked'`, releases the seat via `bus_decrement_capacity`, and stamps `seat_released_at = NOW()`. `confirmManualRefundRecord` immediately invokes `invalidateStudentAssignmentCache(studentUid)` and broadcasts Redis invalidation.
 
-### 11.7 Fix 7: Ubiquitous Entitlement Cache Invalidation
+### 11.7 Specification 7: Ubiquitous Entitlement Cache Invalidation
 - **Root Cause:** Entitlement mutations across approvals, refunds, crons, and profile edits left stale cache entries in L1 memory and L2 Redis (`student:assign:<uid>`) for up to 300 seconds.
 - **Remediation:** Standardized `await invalidateStudentAssignmentCache(studentUid)` alias across `src/domains/student/services/student-assignment-cache.ts`, integrating it into:
   1. `Application.approve` and `Application.approveUnauth`
@@ -106,39 +106,39 @@ Following the comprehensive forensic audit of the ADTU ITMS Payment, Financial L
   5. `confirmManualRefundRecord`
   6. Admin student reassignment (`/api/admin/reassign-students`)
 
-### 11.8 Fix 8: Deadline Config Dependency Query & Admin Route Security
+### 11.8 Specification 8: Deadline Config Dependency Query & Admin Route Security
 - **Root Cause:** `/api/settings/deadline-config` executed `.select('id')` on `student_profiles` (throwing `42703` since PK is `uid`). `/api/renewal-requests/approve-v2` and `reject` had manual string manipulation on authorization headers.
 - **Remediation:** Corrected query to `.select('uid', { count: 'exact', head: true })`. Standardized Bearer token extraction and security wrappers across all renewal admin routes.
 
-### 11.9 Fix 9: Self-Healing Abandoned Checkout Recovery
+### 11.9 Specification 9: Self-Healing Abandoned Checkout Recovery
 - **Root Cause:** Students whose phone battery died or whose network dropped after bank deduction remained with unconfirmed `Pending` rows if Razorpay webhooks were delayed.
 - **Remediation:** In `src/app/api/payment/recover/route.ts`, pending payments created within the last 72 hours are queried against Razorpay's API (`fetchOrderPayments` / `fetchOrderDetails`). Captured orders are promoted to `Completed` via `processCapturedPayment`, automatically issuing transit entitlements.
 
-### 11.10 Fix 10: Structured 409 Conflict & Bus Override on Full Capacity
+### 11.10 Specification 10: Structured 409 Conflict & Bus Override on Full Capacity
 - **Root Cause:** When an admin approved a renewal for a student on a bus that reached 100% capacity, the RPC returned `CAPACITY_FULL` and threw an unhandled 500 error.
 - **Remediation:** In `src/domains/application/services/application.service.ts` (`Application.approve`), `CAPACITY_FULL` errors return structured `status: 409`, `needsCapacityReview: true`. `/api/renewal-requests/approve-v2` accepts an optional `overrideBusId` parameter to assign alternative vehicles.
 
-### 11.11 Fix 11: Cloudinary Proof Preservation on Approval
+### 11.11 Specification 11: Cloudinary Proof Preservation on Approval
 - **Root Cause:** Approving an offline renewal immediately deleted the bank receipt image from Cloudinary, destroying financial audit trail evidence.
 - **Remediation:** In `src/app/api/renewal-requests/approve-v2/route.ts`, Cloudinary receipt assets are preserved permanently upon approval for audit compliance. Deletion is restricted to rejected applications (`reject/route.ts`).
 
-### 11.12 Fix 12: Cryptographic Timing-Safe QR Verification
+### 11.12 Specification 12: Cryptographic Timing-Safe QR Verification
 - **Root Cause:** Scanned QR tokens with corrupted hex lengths threw uncaught `RangeError` in `crypto.timingSafeEqual`. Pass scanners failed to validate active trip shifts against student shifts.
 - **Remediation:** In `src/lib/security/encryption.service.ts`, buffer length equality guards protect all `timingSafeEqual` calls. In `src/app/api/bus-pass/verify-secure-qr/route.ts`, structured rejection codes are returned: `EXPIRED_PASS`, `SOFT_BLOCKED`, `WRONG_BUS`, and `SHIFT_MISMATCH`.
 
-### 11.13 Fix 13: Anti-N+1 Batching & LRU Caching in Exports
+### 11.13 Specification 13: Anti-N+1 Batching & LRU Caching in Exports
 - **Root Cause:** Financial exports querying thousands of payments triggered N+1 profile queries or URL length overflow errors on PostgREST `.in()` filters.
 - **Remediation:** In `src/lib/services/payments-supabase.ts` (`enrichPaymentsWithStudentProfiles`), student profile queries are batched in deterministic 200-item chunks. Decryption utilizes the 5,000-entry LRU `derivedKeyCache` (<0.01ms per record).
 
-### 11.14 Fix 14: Bus Load Recalculation Parity with Shift Normalization
+### 11.14 Specification 14: Bus Load Recalculation Parity with Shift Normalization
 - **Root Cause:** `adminReconcileBusLoads` counted soft-blocked students whose seats were released, and did not increment both morning and evening loads for students with shift `'Both'`.
 - **Remediation:** In `src/lib/services/admin-reconcile-bus-loads.ts`, only active students without a stamped `seatReleasedAt` are counted. Students with shift `'Both'` increment both `morningLoad` and `eveningLoad`, preserving invariant `currentMembers = morningLoad + eveningLoad`.
 
-### 11.15 Fix 15: Session Activation Atomic Capacity Acquisition
+### 11.15 Specification 15: Session Activation Atomic Capacity Acquisition
 - **Root Cause:** `/api/cron/session-activation` could fail the entire batch if a single student's assigned bus reached capacity on the activation date.
 - **Remediation:** In `src/lib/services/session-activation.service.ts`, students are activated atomically. If a bus reaches full capacity, the application transitions gracefully to `pending_seat_allocation` without failing the cron sweep, followed by real-time cache invalidation.
 
-### 11.16 Fix 16: Database Trigger Permission for Atomic Promotion
+### 11.16 Specification 16: Database Trigger Permission for Atomic Promotion
 - **Root Cause:** Trigger `protect_completed_payments` prevented updating pre-checkout `Pending` rows (`payment_id = 'order_...'`) to `Completed` (`payment_id = 'pay_...'`).
 - **Remediation:** Updated `protect_completed_payments` in `supabase/migrations/20261019_payment_ledger_and_renewal_hardening.sql` to explicitly allow updating identity and session columns when `OLD.status = 'Pending'`, locking columns only once the payment reaches a terminal status.
 

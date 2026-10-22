@@ -307,7 +307,7 @@ export const POST = withSecurity(
             }, { status: 409 });
         }
 
-        // Permanent Shift Compatibility Validation (Fix 3)
+        // Permanent Shift Compatibility Validation (Invariant: Shift Compatibility)
         if (studentData.shift && activeTripRes.data?.shift && !isShiftCompatible(studentData.shift, activeTripRes.data.shift)) {
             return NextResponse.json({
                 success: false,
@@ -354,7 +354,7 @@ export const POST = withSecurity(
             return NextResponse.json({ error: 'Location is required', code: 'LOCATION_REQUIRED' }, { status: 400 });
         }
 
-        // Lock 3: Per-Trip Anti-Spam Cooldown Guard (max 2 flag raises per trip) (Fix 2)
+        // Lock 3: Per-Trip Anti-Spam Cooldown Guard (max 2 flag raises per trip) (Invariant: Anti-Spam Cooldown)
         const currentTripFlagCount = await getStudentTripFlagCount(tripId, studentUid);
         if (currentTripFlagCount >= 2) {
             return NextResponse.json({
@@ -450,7 +450,7 @@ export const POST = withSecurity(
             return NextResponse.json({ error: 'Failed to create waiting flag' }, { status: 500 });
         }
 
-        // Increment student trip flag count ONLY after successful insertion (Fix 2)
+        // Increment student trip flag count ONLY after successful insertion (Invariant: Anti-Spam Cooldown)
         await incrementStudentTripFlagCount(tripId, studentUid);
 
         await setRedisActiveFlag(busId, {
@@ -705,7 +705,7 @@ export const POST = withSecurity(
       );
     }
 
-    // Synchronize Redis active waiting flags and bus snapshot cache (Fix 5)
+    // Synchronize Redis active waiting flags and bus snapshot cache (Invariant: Redis State Sync)
     await updateRedisActiveFlag(flagData.bus_id, flagId, { ackSent: true }).catch(() => {});
     invalidateBusTripSnapshot(flagData.bus_id);
 

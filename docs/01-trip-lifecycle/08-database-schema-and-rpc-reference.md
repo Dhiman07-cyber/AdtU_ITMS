@@ -84,7 +84,7 @@ The persistence spine of the ADTU ITMS Trip Lifecycle is implemented directly in
 
 ### 1.3 Method-by-Method Low-Level Walkthrough
 
-#### 1. `public.acquire_trip_lock(p_trip_id TEXT, p_bus_id TEXT, p_driver_id TEXT, p_route_id TEXT, p_shift TEXT, p_ttl_seconds INTEGER DEFAULT 600)`
+#### 1. `public.acquire_trip_lock(p_trip_id TEXT, p_bus_id TEXT, p_driver_id TEXT, p_route_id TEXT, p_shift TEXT, p_device_id TEXT DEFAULT NULL)`
 - **Signature & Language**: PL/pgSQL, `SECURITY DEFINER`, `SET search_path = public`.
 - **Parameters**:
   - `p_trip_id`: UUID formatted as string representing the generated trip ID.
@@ -92,10 +92,10 @@ The persistence spine of the ADTU ITMS Trip Lifecycle is implemented directly in
   - `p_driver_id`: String identifying the driver's Auth UID.
   - `p_route_id`: String identifying the route (e.g. `'route_1'`).
   - `p_shift`: Shift label (`'Morning'`, `'Evening'`, `'Special'`).
-  - `p_ttl_seconds`: Integer lock validity window, defaults to 600 seconds.
+  - `p_device_id`: Optional client hardware device ID bound atomically to `public.buses.driver_device_session` and `active_trips.device_id`.
 - **Return Type**: `JSONB` with keys:
   - Success path: `{"success": true, "tripId": "...", "alreadyActive": false|true}`
-  - Conflict path: `{"success": false, "error": "LOCKED_BY_OTHER", "activeDriverId": "..."}`
+  - Handover path: `{"success": true, "tripId": "...", "alreadyActive": false, "handover": true, "previousDriverId": "..."}`. If another driver has an unended active trip on this bus, the function atomically archives the previous trip to `driver_trip_history` with status `'handed_over'`, reassigns the bus to the incoming driver, clears leftover waiting flags, and activates the new trip in 0ms with zero wait time.
   - Validation error path: `{"success": false, "error": "Bus not found"|"Bus is inactive"}`
 - **Exact Step-by-Step Execution**:
   1. Computes `v_now := NOW()` and `v_expires_at := NOW() + (p_ttl_seconds || ' seconds')::INTERVAL`.
@@ -113,9 +113,7 @@ The persistence spine of the ADTU ITMS Trip Lifecycle is implemented directly in
      VALUES (p_trip_id::uuid, p_bus_id, p_driver_id, p_route_id, p_shift, 'active', v_now, v_now, v_expires_at);
      ```
      Returns `{"success": true, "tripId": p_trip_id, "alreadyActive": false}`.
-  6. **Exception Handling**: Traps `unique_violation`:
-     - Checks if the existing active trip on `p_bus_id` belongs to the requesting driver (`v_existing.driver_id = p_driver_id`). If yes, returns `{"success": true, "tripId": v_existing.trip_id::text, "alreadyActive": true}`.
-     - Otherwise, extracts active driver ID and returns `{"success": false, "error": "LOCKED_BY_OTHER", "activeDriverId": COALESCE(v_existing.driver_id, 'unknown')}`.
+  6. **Zero-Wait Driver Handover**: If another driver operates an active trip on this bus, the RPC atomically archives that trip to `driver_trip_history` with `status = 'handed_over'`, resets waiting flags, reassigns the bus, and activates the new trip in 0ms with zero wait time. Returns `{"success": true, "tripId": p_trip_id, "alreadyActive": false, "handover": true, "previousDriverId": v_existing.driver_id}`.
 
 ---
 
@@ -450,43 +448,124 @@ CREATE POLICY "routes_select" ON public.routes FOR SELECT TO authenticated USING
 *Source: `supabase/COMPLETE_SCHEMA.sql` (Lines 1602–1639)*
 ```sql
 CREATE OR REPLACE FUNCTION public.acquire_trip_lock(
-    p_trip_id TEXT, p_bus_id TEXT, p_driver_id TEXT, p_route_id TEXT, p_shift TEXT, p_ttl_seconds INTEGER DEFAULT 600
+    p_trip_id text,
+    p_bus_id text,
+    p_driver_id text,
+    p_route_id text,
+    p_shift text,
+    p_device_id text DEFAULT NULL
 )
-RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $
 DECLARE
-    v_now TIMESTAMPTZ := NOW();
-    v_expires_at TIMESTAMPTZ := NOW() + (p_ttl_seconds || ' seconds')::INTERVAL;
+    v_now TIMESTAMPTZ := clock_timestamp();
+    v_expires_at TIMESTAMPTZ := v_now + INTERVAL '12 hours';
     v_existing RECORD;
     v_bus_status TEXT;
+    v_handover_occurred BOOLEAN := false;
+    v_previous_driver_id TEXT := NULL;
+    v_previous_trip_id TEXT := NULL;
 BEGIN
+    -- 1. Check if calling driver ALREADY has an active trip on this bus (Idempotent re-entry)
     SELECT trip_id INTO v_existing FROM active_trips
     WHERE bus_id = p_bus_id AND driver_id = p_driver_id AND status = 'active';
-    IF FOUND THEN RETURN jsonb_build_object('success', true, 'tripId', v_existing.trip_id::text, 'alreadyActive', true); END IF;
+    IF FOUND THEN
+        IF p_device_id IS NOT NULL THEN
+            UPDATE active_trips SET device_id = p_device_id WHERE trip_id = v_existing.trip_id;
+            UPDATE buses SET driver_device_session = p_device_id WHERE id = p_bus_id;
+        END IF;
+        RETURN jsonb_build_object('success', true, 'tripId', v_existing.trip_id::text, 'alreadyActive', true, 'handover', false);
+    END IF;
 
-    -- Authority for bus validity (mirrors tripStartPreflight): the bus must
-    -- exist and not be inactive. Locked FOR UPDATE so a deactivation racing
-    -- the start cannot slip between preflight and insert (TOCTOU).
+    -- 2. Bus existence and status validity
     SELECT status INTO v_bus_status FROM buses WHERE id = p_bus_id FOR UPDATE;
     IF NOT FOUND THEN RETURN jsonb_build_object('success', false, 'error', 'Bus not found'); END IF;
-    IF v_bus_status = 'inactive' THEN RETURN jsonb_build_object('success', false, 'error', 'Bus is inactive'); END IF;
+    IF v_bus_status IN ('inactive', 'maintenance') THEN
+        RETURN jsonb_build_object('success', false, 'error', 'Bus is currently ' || v_bus_status || ' and cannot start a trip');
+    END IF;
 
-    DELETE FROM active_trips
-    WHERE status = 'active' AND (bus_id = p_bus_id OR driver_id = p_driver_id)
-      AND last_heartbeat < v_now - INTERVAL '600 seconds';
+    -- 3. Zero-Wait Instant Driver Handover:
+    -- If ANY other driver has an active trip on this bus, atomically archive it into driver_trip_history
+    -- so Driver 2 is NEVER blocked and NEVER waits.
+    FOR v_existing IN
+        SELECT trip_id, bus_id, driver_id, route_id, shift, start_time
+        FROM active_trips
+        WHERE bus_id = p_bus_id AND status = 'active' AND driver_id <> p_driver_id
+    LOOP
+        v_handover_occurred := true;
+        v_previous_driver_id := v_existing.driver_id;
+        v_previous_trip_id := v_existing.trip_id::text;
 
-    BEGIN
-        INSERT INTO active_trips (trip_id, bus_id, driver_id, route_id, shift, status, start_time, last_heartbeat, expires_at)
-        VALUES (p_trip_id::uuid, p_bus_id, p_driver_id, p_route_id, p_shift, 'active', v_now, v_now, v_expires_at);
-        RETURN jsonb_build_object('success', true, 'tripId', p_trip_id, 'alreadyActive', false);
-    EXCEPTION WHEN unique_violation THEN
-        SELECT trip_id, driver_id INTO v_existing FROM active_trips WHERE bus_id = p_bus_id AND status = 'active' LIMIT 1;
-        IF FOUND AND v_existing.driver_id = p_driver_id THEN
-            RETURN jsonb_build_object('success', true, 'tripId', v_existing.trip_id::text, 'alreadyActive', true);
-        END IF;
-        RETURN jsonb_build_object('success', false, 'error', 'LOCKED_BY_OTHER', 'activeDriverId', COALESCE(v_existing.driver_id, 'unknown'));
-    END;
+        INSERT INTO driver_trip_history (
+            trip_id, bus_id, driver_id, route_id, shift, status, ended_reason, start_time, end_time, duration_seconds
+        ) VALUES (
+            v_existing.trip_id, v_existing.bus_id, v_existing.driver_id, v_existing.route_id, v_existing.shift,
+            'completed', 'completed_stale', v_existing.start_time, v_now,
+            GREATEST(0, EXTRACT(EPOCH FROM (v_now - v_existing.start_time))::INTEGER)
+        ) ON CONFLICT (trip_id) DO NOTHING;
+
+        UPDATE driver_profiles
+        SET trip_active = false, active_trip_id = NULL, updated_at = v_now
+        WHERE uid = v_existing.driver_id;
+
+        DELETE FROM active_trips WHERE trip_id = v_existing.trip_id;
+    END LOOP;
+
+    -- 4. Clean up any stale active trip by THIS driver on another bus (if expired)
+    FOR v_existing IN
+        SELECT trip_id, bus_id, driver_id, route_id, shift, start_time
+        FROM active_trips
+        WHERE driver_id = p_driver_id AND status = 'active'
+          AND last_heartbeat < v_now - INTERVAL '1800 seconds'
+    LOOP
+        INSERT INTO driver_trip_history (
+            trip_id, bus_id, driver_id, route_id, shift, status, ended_reason, start_time, end_time, duration_seconds
+        ) VALUES (
+            v_existing.trip_id, v_existing.bus_id, v_existing.driver_id, v_existing.route_id, v_existing.shift,
+            'completed', 'completed_stale', v_existing.start_time, v_now,
+            GREATEST(0, EXTRACT(EPOCH FROM (v_now - v_existing.start_time))::INTEGER)
+        ) ON CONFLICT (trip_id) DO NOTHING;
+
+        DELETE FROM active_trips WHERE trip_id = v_existing.trip_id;
+    END LOOP;
+
+    -- 5. Insert active trip and bind device session
+    INSERT INTO active_trips (trip_id, bus_id, driver_id, route_id, shift, device_id, status, start_time, last_heartbeat, expires_at)
+    VALUES (p_trip_id::uuid, p_bus_id, p_driver_id, p_route_id, p_shift, p_device_id, 'active', v_now, v_now, v_expires_at);
+
+    DELETE FROM public.waiting_flags
+    WHERE bus_id IN (
+        SELECT id FROM public.buses WHERE id = p_bus_id OR bus_number = p_bus_id
+    ) OR bus_id = p_bus_id;
+
+    UPDATE buses
+    SET assigned_driver_id = p_driver_id,
+        driver_device_session = COALESCE(p_device_id, driver_device_session),
+        status = 'active',
+        updated_at = v_now
+    WHERE id = p_bus_id;
+
+    UPDATE driver_profiles
+    SET trip_active = true,
+        active_trip_id = p_trip_id,
+        bus_id = p_bus_id,
+        assigned_bus_id = p_bus_id,
+        updated_at = v_now
+    WHERE uid = p_driver_id;
+
+    RETURN jsonb_build_object(
+        'success', true,
+        'tripId', p_trip_id,
+        'alreadyActive', false,
+        'handover', v_handover_occurred,
+        'previousDriverId', v_previous_driver_id,
+        'previousTripId', v_previous_trip_id
+    );
 END;
-$$;
+$;
 ```
 
 #### 9. Verbatim PL/pgSQL Function: `end_trip_atomically`

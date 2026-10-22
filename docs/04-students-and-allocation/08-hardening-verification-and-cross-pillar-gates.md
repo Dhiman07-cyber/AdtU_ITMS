@@ -99,22 +99,22 @@ Following comprehensive codebase inspection and distributed systems analysis, th
 
 Following the line-by-line forensic extraction across Parts 1–8, 6 deep lifecycle logic flaws were remediated and verified with automated test suites:
 
-1. **Fix 1 (`session-activation.service.ts` Financial Ledger Integration):**
+1. **Hardening Specification 1 (`session-activation.service.ts` Financial Ledger Integration):**
    - *Flaw:* `activateOne` deleted the application without recording offline challan payments in `public.payments` or updating online entitlement metadata.
    - *Fix:* Idempotently records payment via `createOfflinePaymentAtApproval` (with dynamic bus-fee lookup fallback) or updates online payment metadata (`entitlement_status: 'active'`, `activated_at: NOW()`) immediately upon successful student capacity reservation.
-2. **Fix 2 (`application-eligibility.ts` "Forever Future" Trap):**
+2. **Hardening Specification 2 (`application-eligibility.ts` "Forever Future" Trap):**
    - *Flaw:* Stored `application_type: 'future'` permanently trapped applications in future mode even after July 1st session start arrived.
    - *Fix:* Dynamically checks `startYear <= currentSessionStartYear && eligibleApproval <= now`. Once target session starts, submitted applications resolve to `'fresh'`, allowing immediate approval and activation.
-3. **Fix 3 (`session-activation.service.ts` Late-Verified Cron Resilience):**
+3. **Hardening Specification 3 (`session-activation.service.ts` Late-Verified Cron Resilience):**
    - *Flaw:* Cron aborted if `activation_{year}` marker existed without checking for late-verified applications.
    - *Fix:* Pre-fetches `verified_upcoming` applications and only skips if zero eligible applications remain for the current session.
-4. **Fix 4 (`expiry-check.ts` Self-Healing Date Windows):**
+4. **Hardening Specification 4 (`expiry-check.ts` Self-Healing Date Windows):**
    - *Flaw:* Exact single-day equality (`currentMonth === reminder.month && currentDay === reminder.day`) caused missed reminders if cron was delayed.
    - *Fix:* Implements contiguous UTC timestamp windows (`inR1Window`, `inR2Window`, `inFinalWindow`) paired with atomic daily CAS lock `increment_expiry_reminder_count`.
-5. **Fix 5 (`application-eligibility.ts` 8-Argument `new Date` UTC Fix):**
+5. **Hardening Specification 5 (`application-eligibility.ts` 8-Argument `new Date` UTC Fix):**
    - *Flaw:* 8 arguments passed to local `new Date(...)` with timezone skew.
    - *Fix:* Replaced with strict `new Date(Date.UTC(targetStartYear, anchorMonth, anchorDay, 23, 59, 59, 999)).toISOString()`.
-6. **Fix 6 (`unauth-users/cleanup` & `cleanup-expired-students` Safety Rails):**
+6. **Hardening Specification 6 (`unauth-users/cleanup` & `cleanup-expired-students` Safety Rails):**
    - *Flaw:* Unauth cleanup created broken skeleton student profiles with NULL bus/shift/validUntil; hard-delete used `updatedAt` as a proxy for student login activity.
    - *Fix:* Unauth cleanup skips approved users without a `users` row (`'awaiting_proper_session_activation'`) to let `Application.approve`/`session-activation` allocate capacity properly; hard-delete verifies actual login activity via `users.last_login_at` and never falls back to `updatedAt`.
 

@@ -132,6 +132,7 @@ The test battery comprises 80 test suites (672 assertions) spanning all domains:
 78. `src/app/api/health/__tests__/health.test.ts`: Next.js database and external gateway health checks.
 79. `server/__tests__/health-service.test.ts`: WebSocket liveness, readiness, and event loop lag sampling.
 80. `src/app/api/cron/__tests__/integrity-sweep.test.ts`: Scheduled production integrity sweep and audit reporting.
+81. `src/domains/notification/__tests__/preprod-final-10-fixes.test.ts`: Pre-production final remediations test suite (atomic markAsRead, driver field mappings, and RLS).
 
 ---
 
@@ -149,13 +150,14 @@ npm run lint
 # Exit Code: 0 (Zero errors)
 
 # Gate 3: Vitest Automated Regression Battery
-npx vitest run --run
-# Test Files: 80 passed (80)
-# Tests:      672 passed (672)
-# Duration:   ~11.3s
+npm run test:run
+# Test Files: 81 passed (81)
+# Tests:      683 passed (683)
+# Duration:   ~15.5s
 # Exit Code:  0 (100% pass rate)
 
 # Gate 4: Production Build
 npm run build
-# Compiled 224 routes cleanly via Turbopack
+# Compiled all 184 static & dynamic routes cleanly via Next.js 16 (Turbopack)
+# Exit Code:  0
 ```

@@ -28,6 +28,7 @@ vi.mock('@/lib/services/payments-supabase', () => ({
 const mockSubmitFinal = vi.fn().mockResolvedValue({ success: true });
 vi.mock('@/domains/application', () => ({
   getById: vi.fn().mockResolvedValue(null),
+  getByApplicantUid: vi.fn().mockResolvedValue(null),
   submitFinal: (...args: any[]) => mockSubmitFinal(...args),
 }));
 

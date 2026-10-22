@@ -10,6 +10,9 @@
 
 ### 4.1 Sub-Domain Architecture & Exact Execution Pipeline
 
+#### Web Worker 3-Second Precision Ticker & Resilient Background Ingestion
+Driver telematics streaming utilizes a background Web Worker (`public/workers/driver-tracker-worker.js`) running on an isolated thread. Mobile browsers aggressively throttle `setInterval` in inactive tabs or during incoming voice calls; the Web Worker ticker maintains an uninterrupted 3,000ms transmission cadence. Heartbeats are unified directly into the `/api/location/update` HTTP/WebSocket payload, eliminating auxiliary heartbeat polling loops entirely.
+
 The Driver Live Tracking interface is the mobile sensory endpoint of the ITMS telemetry pipeline. It runs in the driver's mobile browser, acquires high-precision satellite positioning frames, shields execution against aggressive mobile OS background throttling (screen sleep, incoming phone calls, tab suspension), buffers coordinates through cellular dead zones along the Brahmaputra corridor, and visualizes route waypoints and waiting student flags on an interactive vector map.
 
 #### Driver Telemetry Acquisition & Resiliency Pipeline
@@ -19,7 +22,7 @@ The Driver Live Tracking interface is the mobile sensory endpoint of the ITMS te
                  +-------------------------------------------------------------+
                  | 1. Initialize WebSocketClient(url, jwtToken)                |
                  | 2. Check Device Session: checkDeviceSession('driver_loc...')|
-                 | 3. Check Active Trip: POST /api/driver/check-active-trip    |
+                 | 3. Piggybacked Telematics: POST /api/location/update (Heartbeat Included) |
                  +-------------------------------------------------------------+
                                  |
                      [ Active Trip Verified? ]
@@ -193,9 +196,9 @@ The operations executed by the driver tracking client during steady-state drivin
 | :--- | :--- | :--- | :--- | :--- |
 | **GPS Fix Acquisition** | Continuous OS Watch | `navigator.geolocation.watchPosition` | 1 watcher registered | 0 network (OS satellite/radio) |
 | **Location Ingress POST** | Every 3,000ms | `POST /api/location/update` | 1 HTTP request | 20 HTTP requests / min |
-| **Device Session Heartbeat** | Every 10,000ms | `POST /api/driver/device-session` | 1 HTTP request | 6 HTTP requests / min |
-| **Active Trip Safety Check** | Every 15,000ms | `POST /api/driver/check-active-trip` | 1 HTTP request | 4 HTTP requests / min |
-| **Waiting Flags Poll Fallback**| Every 30,000ms | `GET /api/driver/dashboard-data` | 1 HTTP request | 2 HTTP requests / min |
+| **Web Worker Telematics Ticker** | Every 3,000ms | `POST /api/location/update` (Piggybacked Heartbeat + Geolocation) |
+| **Realtime Trip State Push** | Event-Driven (0ms) | WebSocket channel `trip-status-<busId>` (Instant termination/handover push) |
+| **Database Write Throttler** | Every 45,000ms | In-memory throttle in `location-write-throttle.ts` for DB persistence | 1 HTTP request | 2 HTTP requests / min |
 | **Screen WakeLock Request** | On Mount & Foreground Resume | Browser Native WakeLock API | 1 call | 0 ongoing |
 | **WebSocket Subscriptions** | On Mount | Channels: `waiting_flags_<busId>`, `driver_wait_request_<busId>` | 2 subscriptions | 0 polling (push events only) |
 

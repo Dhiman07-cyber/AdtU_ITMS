@@ -1348,7 +1348,7 @@ export function isUpcomingApplication(
 ): boolean {
   if (!app) return false;
 
-  // SEAM FIX 1: Renewals are for existing students extending service.
+  // Renewal Service Verification: Renewals are for existing students extending service.
   // They must NEVER be hijacked into verified_upcoming!
   const formData = (app.formData || app.form_data || {}) as Record<string, any>;
   const explicitType = app.applicationType || app.application_type || formData.applicationType || formData.application_type;
