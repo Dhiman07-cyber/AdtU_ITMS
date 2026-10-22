@@ -361,6 +361,16 @@ async function activateOne(
     // 3. Delete application from PG (activation = consume the application).
     await applicationRepo.remove(appId);
 
+    // Invalidate student assignment and bus capacity caches
+    invalidateStudentAssignment(app.applicantUid);
+    fleetService.invalidateBusCache(targetBusId);
+    try {
+      const { invalidateCapacityCache } = await import('@/app/api/buses/capacity/route');
+      invalidateCapacityCache();
+    } catch {
+      // cache invalidation is best-effort
+    }
+
     // 4. Ledger recording: create or update payment entry for the activated student
     const paymentMode =
       appAny.payment_mode ||

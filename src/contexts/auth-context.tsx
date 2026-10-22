@@ -14,6 +14,7 @@ interface AuthContextType {
   isExpired: boolean; // Derived from validUntil - no Firestore writes!
   signInWithGoogle: () => Promise<{ success: boolean; error?: string; user?: FirebaseUser; needsApplication?: boolean }>;
   signOut: () => Promise<{ success: boolean; error?: string }>;
+  refreshUserData: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -72,50 +73,44 @@ function setCachedUserData(data: User | null): void {
 
 /**
  * Check if service is expired based on validUntil
- * This is a FRONTEND-ONLY check - no Firestore writes!
+ * FIX 87: Prevent false positives when validUntil is missing or user is non-student
  */
-function checkIfExpired(validUntil: any): boolean {
-  if (!validUntil) {
+function checkIfExpired(userDataOrValidUntil: any): boolean {
+  if (!userDataOrValidUntil) return false;
 
-    return true;
+  // If user object passed
+  if (typeof userDataOrValidUntil === 'object' && 'role' in userDataOrValidUntil) {
+    if (userDataOrValidUntil.role && userDataOrValidUntil.role !== 'student') return false;
+    const rawExpiry = userDataOrValidUntil.validUntil ?? userDataOrValidUntil.valid_until;
+    if (!rawExpiry) return false;
+    return checkDateExpired(rawExpiry);
   }
 
+  // If validUntil timestamp passed directly
+  return checkDateExpired(userDataOrValidUntil);
+}
+
+function checkDateExpired(validUntil: any): boolean {
+  if (!validUntil) return false;
+
   try {
-
     let expiryDate: Date;
-
-    // Handle Firestore Timestamp
     if (validUntil?.toDate && typeof validUntil.toDate === 'function') {
       expiryDate = validUntil.toDate();
-
-    }
-    // Handle Firebase Timestamp seconds/nanoseconds
-    else if (validUntil?.seconds) {
+    } else if (validUntil?.seconds) {
       expiryDate = new Date(validUntil.seconds * 1000);
-
-    }
-    // Handle Date object
-    else if (validUntil instanceof Date) {
+    } else if (validUntil instanceof Date) {
       expiryDate = validUntil;
-
-    }
-    // Handle string
-    else if (typeof validUntil === 'string') {
+    } else if (typeof validUntil === 'string') {
       expiryDate = new Date(validUntil);
-
-    }
-    else {
-
-      return true;
+    } else {
+      return false;
     }
 
-    const now = new Date();
-    const isExpired = expiryDate < now;
-
-    return isExpired;
-  } catch (error) {
-
-    return true;
+    if (isNaN(expiryDate.getTime())) return false;
+    return expiryDate < new Date();
+  } catch {
+    return false;
   }
 }
 
@@ -192,34 +187,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 setIsExpired(false);
               }
               setLoading(false);
-            } else {
-              // User not found in PostgreSQL — needs to apply
+            } else if (result.exists === false && !result.hasPendingApp) {
+              // FIX 24: User confirmed non-existent in database — needs to apply
               setUserData(null);
               setCachedUserData(null);
               setNeedsApplication(true);
               setIsExpired(false);
               setLoading(false);
+            } else {
+              // Pending app exists or ambiguous exists flag
+              setUserData(null);
+              setNeedsApplication(false);
+              setIsExpired(false);
+              setLoading(false);
             }
           } else {
-            // API error — treat as "needs to apply" for new users
-            setUserData(null);
-            setNeedsApplication(true);
-            setIsExpired(false);
+            // FIX 24: API error (e.g. 500, 502, 503, 429) — keep cached user, do NOT redirect to /apply
+            if (cachedData && cachedData.uid === user.uid) {
+              setUserData(cachedData);
+            }
+            setNeedsApplication(false);
             setLoading(false);
           }
         } catch (error: any) {
           if (!isMounted) return;
 
-          // Network error — use cached data if available
+          // FIX 24: Network error — use cached data if available, do NOT redirect to /apply
           if (cachedData && cachedData.uid === user.uid) {
-            // Already set from cache above
-            setLoading(false);
-          } else {
-            setUserData(null);
-            setNeedsApplication(true);
-            setIsExpired(false);
-            setLoading(false);
+            setUserData(cachedData);
           }
+          setNeedsApplication(false);
+          setLoading(false);
         }
       } else {
         // No user logged in
@@ -313,6 +311,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const refreshUserData = useCallback(async () => {
+    if (!currentUser) return;
+    try {
+      const token = await getSafeIdToken(currentUser);
+      const response = await fetch('/api/auth/user', {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        if (result.exists && result.user) {
+          const data = result.user as User;
+          setUserData(data);
+          setCachedUserData(data);
+          setNeedsApplication(false);
+          if (data.role === 'student') {
+            setIsExpired(checkIfExpired(data.validUntil));
+          } else {
+            setIsExpired(false);
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Failed to refresh user data:', err);
+    }
+  }, [currentUser]);
+
   const value = useMemo(() => ({
     currentUser,
     userData,
@@ -320,8 +345,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     needsApplication,
     isExpired,
     signInWithGoogle: signInWithGoogleContext,
-    signOut
-  }), [currentUser, userData, loading, needsApplication, isExpired, signInWithGoogleContext, signOut]);
+    signOut,
+    refreshUserData
+  }), [currentUser, userData, loading, needsApplication, isExpired, signInWithGoogleContext, signOut, refreshUserData]);
 
   return (
     <AuthContext.Provider value={value}>

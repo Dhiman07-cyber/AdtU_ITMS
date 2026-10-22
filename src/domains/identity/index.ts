@@ -8,7 +8,7 @@
 //   delete*    — remove entity
 //   check*     — boolean permission/authorization guard
 export {
-	activateStudentWithCapacity,cleanupStaleFcmTokens,createAdmin,createDriver,createModerator,createStudent,createUnauthUser,createUser,deleteAdmin,deleteDriver,deleteFcmToken,deleteModerator,deleteStudent,deleteUnauthUser,deleteUser,
+	activateStudentWithCapacity,cleanupStaleFcmTokens,createAdmin,createDriver,createModerator,createStudent,createUnauthUser,createUser,deleteAdmin,deleteDriver,deleteFcmToken,deleteFcmTokensForUser,deleteModerator,deleteStudent,deleteUnauthUser,deleteUser,
 	// Admin Profiles
 	getAdminById,getAllDrivers,
 	getAllDriversPaginated,getAllModerators,getAllStudents,getAllUnauthUsers,getAllUsers,getBusOccupancyStats,

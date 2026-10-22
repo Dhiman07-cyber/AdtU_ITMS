@@ -5,7 +5,7 @@ import crypto from 'crypto';
  * Verifies Authorization: Bearer <CRON_SECRET> header against process.env.CRON_SECRET.
  */
 export function verifyCronAuth(request: Request): boolean {
-  const authHeader = request.headers.get('authorization');
+  const authHeader = request.headers.get('authorization') || request.headers.get('Authorization');
   const cronSecret = process.env.CRON_SECRET;
 
   // SECURITY: Fail-closed — if CRON_SECRET is not configured, deny all

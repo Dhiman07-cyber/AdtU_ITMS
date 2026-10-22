@@ -89,7 +89,12 @@ async function callDeviceSessionAPI(
         })
     });
 
-    return response.json();
+    const text = await response.text();
+    try {
+        return JSON.parse(text);
+    } catch {
+        return { success: false, error: `Unexpected status ${response.status}` };
+    }
 }
 
 export interface DeviceSessionCheckResult {

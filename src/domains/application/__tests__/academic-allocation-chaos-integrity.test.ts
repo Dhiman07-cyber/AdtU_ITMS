@@ -119,6 +119,7 @@ vi.mock('@/domains/application', () => ({
 vi.mock('@/domains/fleet/services/fleet.service', () => ({
   getAllBuses: vi.fn().mockResolvedValue([{ id: 'bus_1', capacity: 40, morningLoad: 10, eveningLoad: 10 }]),
   getBusById: vi.fn().mockResolvedValue({ id: 'bus_1', busNumber: 'AS-01-1234', routeId: 'route_1', capacity: 40, morningLoad: 10, eveningLoad: 10 }),
+  invalidateBusCache: vi.fn(),
 }));
 
 vi.mock('@/domains/route', () => ({

@@ -47,24 +47,30 @@ export async function upsertToken(
 ): Promise<{ success: boolean; error?: string }> {
   const db = getSupabaseServer();
   const tokenHash = hashToken(token);
+  const payload = {
+    id: crypto.randomUUID(),
+    user_id: userId,
+    token_hash: tokenHash,
+    token,
+    platform,
+    last_seen: new Date().toISOString(),
+    valid: true,
+  };
 
   const { error } = await db
     .from('fcm_tokens')
-    .upsert(
-      {
-        user_id: userId,
-        token_hash: tokenHash,
-        token,
-        platform,
-        last_seen: new Date().toISOString(),
-        valid: true,
-      },
-      { onConflict: 'user_id,token_hash' }
-    );
+    .upsert(payload, { onConflict: 'user_id,token_hash' });
 
   if (error) {
-    console.error('FCM token upsert failed:', error.message);
-    return { success: false, error: error.message };
+    // If conflict occurs on the primary key `token` or constraint differs, fallback to upsert on `token`
+    const fallback = await db
+      .from('fcm_tokens')
+      .upsert(payload, { onConflict: 'token' });
+
+    if (fallback.error) {
+      console.error('FCM token upsert failed:', fallback.error.message || error.message);
+      return { success: false, error: fallback.error.message || error.message };
+    }
   }
   return { success: true };
 }
@@ -83,6 +89,22 @@ export async function deleteToken(userId: string, tokenHash: string): Promise<vo
 
   if (error) {
     console.error('FCM token delete failed:', error.message);
+  }
+}
+
+/**
+ * Delete all tokens for a user in a single atomic SQL operation.
+ */
+export async function deleteTokensForUser(userId: string): Promise<void> {
+  const db = getSupabaseServer();
+
+  const { error } = await db
+    .from('fcm_tokens')
+    .delete()
+    .eq('user_id', userId);
+
+  if (error) {
+    console.error('FCM user tokens delete failed:', error.message);
   }
 }
 
@@ -151,7 +173,7 @@ export async function cleanupStaleTokens(maxAgeDays: number = 30): Promise<{
     .from('fcm_tokens')
     .delete({ count: 'exact' })
     .lt('last_seen', cutoffIso)
-    .select('id');
+    .select('token');
 
   if (error) {
     console.error('FCM token cleanup failed:', error.message);

@@ -166,7 +166,7 @@ async function pgCountTable(table: string, statusFilter?: string): Promise<numbe
 export async function pgFindUserById(uid: string): Promise<IdentityUser | null> {
   const db = getSupabaseServer();
 
-  const { data, error } = await db
+  let { data, error } = await db
     .from('users')
     .select(USER_COLUMNS)
     .eq('uid', uid)
@@ -176,17 +176,66 @@ export async function pgFindUserById(uid: string): Promise<IdentityUser | null> 
     throw new Error(`IdentityRepository (PG) read failed: ${error.message}`);
   }
 
-  if (!data) return null;
+  // FIX 23: Self-heal missing public.users row if profile exists in any role table
+  if (!data) {
+    const { data: sp } = await db.from('student_profiles').select('*').eq('uid', uid).maybeSingle();
+    const { data: dp } = !sp ? await db.from('driver_profiles').select('*').eq('uid', uid).maybeSingle() : { data: null };
+    const { data: mp } = !sp && !dp ? await db.from('moderator_profiles').select('*').eq('uid', uid).maybeSingle() : { data: null };
+    const { data: ap } = !sp && !dp && !mp ? await db.from('admin_profiles').select('*').eq('uid', uid).maybeSingle() : { data: null };
+
+    const nowIso = new Date().toISOString();
+    let selfRole: UserRole = 'student';
+    let selfName = '';
+    let selfEmail = '';
+
+    if (sp) {
+      selfRole = 'student';
+      selfName = sp.full_name || '';
+      selfEmail = sp.email || '';
+    } else if (dp) {
+      selfRole = 'driver';
+      selfName = dp.full_name || '';
+      selfEmail = dp.email || '';
+    } else if (mp) {
+      selfRole = 'moderator';
+      selfName = mp.full_name || '';
+      selfEmail = mp.email || '';
+    } else if (ap) {
+      selfRole = 'admin';
+      selfName = ap.full_name || '';
+      selfEmail = ap.email || '';
+    }
+
+    if (selfEmail) {
+      await db.from('users').upsert({
+        uid,
+        email: selfEmail,
+        name: selfName,
+        role: selfRole,
+        created_at: nowIso,
+        updated_at: nowIso,
+      }, { onConflict: 'uid' });
+
+      data = {
+        uid,
+        email: selfEmail,
+        name: selfName,
+        role: selfRole,
+        created_at: nowIso,
+        last_login_at: null,
+      };
+    } else {
+      return null;
+    }
+  }
 
   const user = pgRowToUser(data as PgUser);
 
-  // NOTE: select only columns that exist in student_profiles (see
-  // supabase/migrations/Firestore_to_supabase_migration.sql). Selecting
-  // nonexistent columns makes PostgREST return 400 and breaks login.
+  // FIX 20 & FIX 88: Select '*' for resilient column hydration across DB migrations
   if (user.role === 'student') {
     const { data: studentProfile } = await db
       .from('student_profiles')
-      .select('status, soft_block, valid_until, bus_id, route_id, shift, enrollment_id')
+      .select('*')
       .eq('uid', uid)
       .maybeSingle();
 
@@ -194,17 +243,23 @@ export async function pgFindUserById(uid: string): Promise<IdentityUser | null> 
       user.status = studentProfile.status || 'active';
       user.softBlock = studentProfile.soft_block;
       user.validUntil = studentProfile.valid_until;
-      user.busId = studentProfile.bus_id;
-      user.routeId = studentProfile.route_id;
+      user.busId = studentProfile.bus_id || studentProfile.assigned_bus_id;
+      user.routeId = studentProfile.route_id || studentProfile.assigned_route_id;
+      user.stopName = studentProfile.stop_name || studentProfile.stop_id;
       user.shift = studentProfile.shift;
       user.enrollmentId = studentProfile.enrollment_id;
+      user.fullName = studentProfile.full_name || user.name;
+      user.phone = studentProfile.phone;
+      user.profilePhotoUrl = studentProfile.profile_photo_url;
+      user.sessionStartYear = studentProfile.session_start_year;
+      user.sessionEndYear = studentProfile.session_end_year;
     } else {
       user.status = 'active';
     }
   } else if (user.role === 'moderator') {
     const { data: modProfile } = await db
       .from('moderator_profiles')
-      .select('status, permissions, employee_id, phone, faculty')
+      .select('*')
       .eq('uid', uid)
       .maybeSingle();
 
@@ -220,7 +275,7 @@ export async function pgFindUserById(uid: string): Promise<IdentityUser | null> 
   } else if (user.role === 'driver') {
     const { data: driverProfile } = await db
       .from('driver_profiles')
-      .select('status, employee_id, phone, license_number')
+      .select('status, employee_id, phone, license_number, bus_id, assigned_bus_id, route_id, assigned_route_id, shift, trip_active, active_trip_id')
       .eq('uid', uid)
       .maybeSingle();
 
@@ -229,6 +284,11 @@ export async function pgFindUserById(uid: string): Promise<IdentityUser | null> 
       user.employeeId = driverProfile.employee_id;
       user.phone = driverProfile.phone;
       user.licenseNumber = driverProfile.license_number;
+      user.busId = driverProfile.bus_id || driverProfile.assigned_bus_id;
+      user.routeId = driverProfile.route_id || driverProfile.assigned_route_id;
+      user.shift = driverProfile.shift;
+      user.tripActive = driverProfile.trip_active;
+      user.activeTripId = driverProfile.active_trip_id;
     } else {
       user.status = 'active';
     }
@@ -532,11 +592,20 @@ const DRIVER_FIELD_MAP: Record<string, string> = {
   isReserved: 'is_reserved',
   approvedBy: 'approved_by',
   dob: 'dob',
+  busId: 'bus_id',
+  assignedBusId: 'bus_id',
+  routeId: 'route_id',
+  assignedRouteId: 'route_id',
+  shift: 'shift',
+  assignedShift: 'shift',
+  tripActive: 'trip_active',
+  activeTripId: 'active_trip_id',
   createdAt: 'created_at',
   updatedAt: 'updated_at',
 };
 
-const DRIVER_COLUMNS = 'uid, email, full_name, phone, alternate_phone, license_number, aadhar_number, employee_id, address, profile_photo_url, joining_date, status, is_reserved, approved_by, dob, created_at, updated_at';
+// FIX 20: Use '*' for resilient queries
+const DRIVER_COLUMNS = '*';
 
 /** Known Firestore fields that map to typed PostgreSQL columns */
 const KNOWN_DRIVER_FIELDS = new Set(Object.keys(DRIVER_FIELD_MAP));
@@ -646,7 +715,8 @@ const MODERATOR_FIELD_MAP: Record<string, string> = {
   updatedAt: 'updated_at',
 };
 
-const MODERATOR_COLUMNS = 'uid, email, full_name, phone, employee_id, team_name, status, profile_photo_url, role, created_by, faculty, permissions, permissions_updated_at, permissions_updated_by, created_at, updated_at';
+// FIX 20: Use '*' for resilient queries
+const MODERATOR_COLUMNS = '*';
 
 const KNOWN_MODERATOR_FIELDS = new Set(Object.keys(MODERATOR_FIELD_MAP));
 

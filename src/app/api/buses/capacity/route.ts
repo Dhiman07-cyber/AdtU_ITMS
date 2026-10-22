@@ -53,6 +53,12 @@ let cachedRoutes: CacheEntry<any[]> | null = null;
 let cachedBuses: CacheEntry<any[]> | null = null;
 const CACHE_TTL_MS = 30_000;
 
+export function invalidateCapacityCache(): void {
+  cachedRoutes = null;
+  cachedBuses = null;
+}
+export const invalidateCapacityRouteCache = invalidateCapacityCache;
+
 async function getCachedRoutes(): Promise<any[]> {
   const now = Date.now();
   if (cachedRoutes && cachedRoutes.expiresAt > now) {

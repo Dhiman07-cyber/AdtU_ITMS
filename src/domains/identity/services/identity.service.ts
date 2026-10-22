@@ -223,6 +223,7 @@ export async function getDriverById(uid: string): Promise<Record<string, any> | 
         fullName: user.name || 'Driver',
         shift: 'Both',
         status: 'active',
+        isReserved: true,
       };
       // Auto-insert into driver_profiles so it exists permanently
       await repoInsertDriver(fallbackDriver).catch(() => {});
@@ -348,6 +349,7 @@ export async function getAllUnauthUsers(): Promise<Record<string, any>[]> {
 import {
 	cleanupStaleTokens as repoCleanupStaleTokens,
 	deleteToken as repoDeleteToken,
+	deleteTokensForUser as repoDeleteTokensForUser,
 	getValidTokensForUsers as repoGetValidTokensForUsers,
 	hashToken as repoHashToken,
 	upsertToken as repoUpsertToken,
@@ -363,6 +365,10 @@ export async function saveFcmToken(
 
 export async function deleteFcmToken(userId: string, tokenHash: string): Promise<void> {
   return repoDeleteToken(userId, tokenHash);
+}
+
+export async function deleteFcmTokensForUser(userId: string): Promise<void> {
+  return repoDeleteTokensForUser(userId);
 }
 
 export async function getValidFcmTokensForUsers(userIds: string[]) {

@@ -1,4 +1,4 @@
-import { createUser, getUserById } from '@/domains/identity';
+import { createAdmin, createUser, getUserById } from '@/domains/identity';
 import { getSupabaseServer } from '@/lib/supabase-server';
 import { checkRateLimit } from '@/lib/security/rate-limiter';
 import crypto from 'crypto';
@@ -60,12 +60,12 @@ export async function POST(request: Request) {
       });
     }
 
-    // Enforce the actual "first admin" invariant: the users table must be
+    // Enforce the actual "first admin" invariant: the users and admin_profiles tables must be
     // empty. Checking only the supplied uid would let a leaked bootstrap
     // secret mint unlimited admin rows.
     try {
       const supabase = getSupabaseServer();
-      const { count, error: countError } = await supabase
+      const { count: usersCount, error: countError } = await supabase
         .from('users')
         .select('uid', { count: 'exact', head: true });
       if (countError) {
@@ -78,7 +78,15 @@ export async function POST(request: Request) {
           headers: { 'Content-Type': 'application/json' },
         });
       }
-      if ((count || 0) > 0) {
+
+      const { count: adminProfilesCount } = await supabase
+        .from('admin_profiles')
+        .select('uid', { count: 'exact', head: true });
+
+      const { getUsersByRole } = await import('@/domains/identity');
+      const existingAdmins = await getUsersByRole('admin').catch(() => []);
+
+      if ((usersCount || 0) > 0 || (adminProfilesCount || 0) > 0 || existingAdmins.length > 0) {
         return new Response(JSON.stringify({
           success: false,
           error: 'First admin already exists'
@@ -108,13 +116,26 @@ export async function POST(request: Request) {
       });
     }
 
+    const now = new Date().toISOString();
     // Create user in PostgreSQL
     await createUser({
       uid,
       email,
       name,
       role: 'admin',
-      createdAt: new Date().toISOString(),
+      createdAt: now,
+    });
+
+    // Populate corresponding admin_profiles row (INV-AUTH-ADMIN)
+    await createAdmin({
+      uid,
+      email,
+      fullName: name,
+      name,
+      role: 'admin',
+      phone: '',
+      createdAt: now,
+      updatedAt: now,
     });
 
     return new Response(JSON.stringify({

@@ -169,13 +169,29 @@ const STATIC_EXTENSIONS = [
 // HELPER FUNCTIONS
 // ============================================================================
 
+function isPrivateIp(ip: string): boolean {
+    return /^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[0-1])\.|127\.|::1|fd[0-9a-f]{2}:)/i.test(ip);
+}
+
 function getClientIp(request: NextRequest): string {
-    const realIp = request.headers.get('x-real-ip') || request.headers.get('cf-connecting-ip');
+    const cfRay = request.headers.get('cf-ray');
+    const cfConnectingIp = request.headers.get('cf-connecting-ip');
+    if (cfRay && cfConnectingIp) {
+        return cfConnectingIp.trim();
+    }
+
+    const realIp = request.headers.get('x-real-ip');
     if (realIp) return realIp.trim();
 
     const xff = request.headers.get('x-forwarded-for');
     if (xff) {
         const parts = xff.split(',').map(s => s.trim()).filter(Boolean);
+        for (let i = parts.length - 1; i >= 0; i--) {
+            const ip = parts[i];
+            if (!isPrivateIp(ip)) {
+                return ip;
+            }
+        }
         if (parts.length > 0) return parts[parts.length - 1];
     }
     return '127.0.0.1';

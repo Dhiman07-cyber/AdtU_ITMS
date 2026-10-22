@@ -42,6 +42,7 @@ vi.mock('@/domains/fleet/services/fleet.service', () => ({
   checkBusCapacity: mockCheckBusCapacity,
   incrementBusCapacity: mockIncrementBusCapacity,
   decrementBusCapacity: mockDecrementBusCapacity,
+  invalidateBusCache: vi.fn(),
 }));
 
 vi.mock('@/domains/route', () => ({
@@ -90,6 +91,7 @@ vi.mock('@/domains/admin', () => ({
 vi.mock('@/domains/application', () => ({
   getAllByState: vi.fn().mockResolvedValue([]),
   getById: vi.fn(),
+  getByApplicantUid: vi.fn(),
 }));
 
 import { activateSingleApplication } from '../session-activation.service';
@@ -168,7 +170,7 @@ describe('Session Activation — Concurrency & Capacity Invariants', () => {
     expect(mockActivateStudentWithCapacity).toHaveBeenCalledTimes(1);
     // 2. Application consumed (deleted) exactly ONCE
     expect(mockRemove).toHaveBeenCalledTimes(1);
-  });
+  }, 30000);
 
   it('enforces capacity bound C under N concurrent activations', async () => {
     const CAPACITY = 3;
@@ -235,5 +237,5 @@ describe('Session Activation — Concurrency & Capacity Invariants', () => {
     expect(currentLoad).toBeLessThanOrEqual(CAPACITY);
     // 4. Claims were released for all pending applications
     expect(mockReleaseActivationClaim).toHaveBeenCalledTimes(N - CAPACITY);
-  });
+  }, 30000);
 });

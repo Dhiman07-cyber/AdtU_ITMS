@@ -26,7 +26,7 @@ function getAdminServices() {
 }
 
 async function getAuthenticatedUserId(request: NextRequest) {
-  const authHeader = request.headers.get('authorization');
+  const authHeader = request.headers.get('authorization') || request.headers.get('Authorization');
   if (!authHeader?.startsWith('Bearer ')) {
     return {
       response: NextResponse.json({ error: 'No authorization token provided' }, { status: 401 }),

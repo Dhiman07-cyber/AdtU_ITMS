@@ -421,6 +421,7 @@ export function withSecurity<T = any>(
                     );
                 }
                 validatedBody = (validation as { success: true; data: T }).data;
+                (request as any).validatedData = validatedBody;
             }
 
             // ── 7. Execute handler ──
