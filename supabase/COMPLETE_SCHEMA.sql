@@ -142,6 +142,7 @@ CREATE TABLE IF NOT EXISTS driver_profiles (
     approved_by        TEXT,
     bus_id             TEXT,
     route_id           TEXT,
+    shift              TEXT,
     status             TEXT CHECK (status IN ('active', 'inactive', 'suspended', 'reserved')),
     is_reserved        BOOLEAN DEFAULT FALSE,
     trip_active        BOOLEAN DEFAULT FALSE,
@@ -219,6 +220,7 @@ CREATE TABLE IF NOT EXISTS buses (
     last_started_at TIMESTAMPTZ,
     last_ended_at   TIMESTAMPTZ,
     status          TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'maintenance')),
+    driver_device_session TEXT,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -500,6 +502,7 @@ CREATE TABLE IF NOT EXISTS public.active_trips (
   driver_id TEXT NOT NULL UNIQUE,
   route_id TEXT NOT NULL,
   shift TEXT NOT NULL,
+  device_id TEXT,
   status TEXT NOT NULL DEFAULT 'active' CHECK (status = 'active'),
   start_time TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   last_heartbeat TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -635,7 +638,7 @@ CREATE TABLE IF NOT EXISTS public.fcm_tokens (
     user_id     TEXT NOT NULL,
     role        TEXT,
     device_type TEXT,
-    id          TEXT,
+    id          TEXT DEFAULT gen_random_uuid()::text,
     token_hash  TEXT,
     platform    TEXT,
     last_seen   TIMESTAMPTZ,
@@ -1033,6 +1036,7 @@ CREATE INDEX IF NOT EXISTS idx_reassignment_logs_operation_id ON reassignment_lo
 CREATE INDEX IF NOT EXISTS idx_reassignment_logs_logged_at ON reassignment_logs(logged_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_fcm_tokens_user_id ON fcm_tokens(user_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_fcm_tokens_user_token_hash ON public.fcm_tokens (user_id, token_hash);
 CREATE INDEX IF NOT EXISTS idx_notifications_recipient_ids ON notifications USING gin(recipient_ids);
 CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON notifications(created_at DESC);
 
@@ -1669,7 +1673,13 @@ END;
 $$;
 
 CREATE OR REPLACE FUNCTION public.acquire_trip_lock(
-    p_trip_id TEXT, p_bus_id TEXT, p_driver_id TEXT, p_route_id TEXT, p_shift TEXT, p_ttl_seconds INTEGER DEFAULT 600
+    p_trip_id TEXT,
+    p_bus_id TEXT,
+    p_driver_id TEXT,
+    p_route_id TEXT,
+    p_shift TEXT,
+    p_ttl_seconds INTEGER DEFAULT 1800,
+    p_device_id TEXT DEFAULT NULL
 )
 RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE
@@ -1677,28 +1687,40 @@ DECLARE
     v_expires_at TIMESTAMPTZ := NOW() + (p_ttl_seconds || ' seconds')::INTERVAL;
     v_existing RECORD;
     v_bus_status TEXT;
+    v_handover_occurred BOOLEAN := false;
+    v_previous_driver_id TEXT := NULL;
+    v_previous_trip_id TEXT := NULL;
 BEGIN
+    -- 1. Check if the calling driver ALREADY has an active trip on this bus (Idempotent re-entry)
     SELECT trip_id INTO v_existing FROM active_trips
     WHERE bus_id = p_bus_id AND driver_id = p_driver_id AND status = 'active';
-    IF FOUND THEN RETURN jsonb_build_object('success', true, 'tripId', v_existing.trip_id::text, 'alreadyActive', true); END IF;
+    IF FOUND THEN
+        IF p_device_id IS NOT NULL THEN
+            UPDATE active_trips SET device_id = p_device_id WHERE trip_id = v_existing.trip_id;
+            UPDATE buses SET driver_device_session = p_device_id WHERE id = p_bus_id;
+        END IF;
+        RETURN jsonb_build_object('success', true, 'tripId', v_existing.trip_id::text, 'alreadyActive', true, 'handover', false);
+    END IF;
 
-    -- Authority for bus validity: must exist and not be inactive or maintenance
+    -- 2. Authority for bus validity: must exist and not be inactive or maintenance
     SELECT status INTO v_bus_status FROM buses WHERE id = p_bus_id FOR UPDATE;
     IF NOT FOUND THEN RETURN jsonb_build_object('success', false, 'error', 'Bus not found'); END IF;
     IF v_bus_status IN ('inactive', 'maintenance') THEN
         RETURN jsonb_build_object('success', false, 'error', 'Bus is currently ' || v_bus_status || ' and cannot start a trip');
     END IF;
 
-    -- Automatic Shift Handover on Stale Opposite-Shift Locks:
-    -- If Driver A drove Morning shift and left active trip 4+ hours ago,
-    -- Driver B scanning for Evening shift archives stale trip and acquires the lock.
+    -- 3. Zero-Wait Instant Driver Handover:
+    -- If ANY other driver has an unended active trip on this bus, atomically archive it into driver_trip_history
+    -- so Driver 2 is NEVER blocked and NEVER waits.
     FOR v_existing IN
         SELECT trip_id, bus_id, driver_id, route_id, shift, start_time
         FROM active_trips
-        WHERE bus_id = p_bus_id AND status = 'active'
-          AND LOWER(shift) <> LOWER(p_shift)
-          AND start_time < v_now - INTERVAL '4 hours'
+        WHERE bus_id = p_bus_id AND status = 'active' AND driver_id <> p_driver_id
     LOOP
+        v_handover_occurred := true;
+        v_previous_driver_id := v_existing.driver_id;
+        v_previous_trip_id := v_existing.trip_id::text;
+
         INSERT INTO driver_trip_history (
             trip_id, bus_id, driver_id, route_id, shift, status, ended_reason, start_time, end_time, duration_seconds
         ) VALUES (
@@ -1714,12 +1736,12 @@ BEGIN
         DELETE FROM active_trips WHERE trip_id = v_existing.trip_id;
     END LOOP;
 
-    -- Clean up and archive heartbeat-expired stale locks for bus or driver (600s timeout)
+    -- 4. Clean up any stale active trip by THIS driver on another bus (if expired)
     FOR v_existing IN
         SELECT trip_id, bus_id, driver_id, route_id, shift, start_time
         FROM active_trips
-        WHERE status = 'active' AND (bus_id = p_bus_id OR driver_id = p_driver_id)
-          AND last_heartbeat < v_now - INTERVAL '600 seconds'
+        WHERE driver_id = p_driver_id AND status = 'active'
+          AND last_heartbeat < v_now - INTERVAL '1800 seconds'
     LOOP
         INSERT INTO driver_trip_history (
             trip_id, bus_id, driver_id, route_id, shift, status, ended_reason, start_time, end_time, duration_seconds
@@ -1728,28 +1750,48 @@ BEGIN
             'completed', 'completed_stale', v_existing.start_time, v_now,
             GREATEST(0, EXTRACT(EPOCH FROM (v_now - v_existing.start_time))::INTEGER)
         ) ON CONFLICT (trip_id) DO NOTHING;
-
-        UPDATE driver_profiles
-        SET trip_active = false, active_trip_id = NULL, updated_at = v_now
-        WHERE uid = v_existing.driver_id;
 
         DELETE FROM active_trips WHERE trip_id = v_existing.trip_id;
     END LOOP;
 
     BEGIN
-        INSERT INTO active_trips (trip_id, bus_id, driver_id, route_id, shift, status, start_time, last_heartbeat, expires_at)
-        VALUES (p_trip_id::uuid, p_bus_id, p_driver_id, p_route_id, p_shift, 'active', v_now, v_now, v_expires_at);
+        INSERT INTO active_trips (trip_id, bus_id, driver_id, route_id, shift, device_id, status, start_time, last_heartbeat, expires_at)
+        VALUES (p_trip_id::uuid, p_bus_id, p_driver_id, p_route_id, p_shift, p_device_id, 'active', v_now, v_now, v_expires_at);
+
+        -- Purge leftover public.waiting_flags inside public.acquire_trip_lock
+        DELETE FROM public.waiting_flags
+        WHERE bus_id IN (
+            p_bus_id,
+            REPLACE(p_bus_id, 'bus_', ''),
+            'bus_' || REPLACE(p_bus_id, 'bus_', '')
+        )
+        AND (trip_id IS NULL OR trip_id <> p_trip_id);
 
         -- Update driver_profiles active trip pointer
         UPDATE driver_profiles
         SET trip_active = true, active_trip_id = p_trip_id, updated_at = v_now
         WHERE uid = p_driver_id;
 
-        RETURN jsonb_build_object('success', true, 'tripId', p_trip_id, 'alreadyActive', false);
+        -- Update buses record with active driver and device session
+        UPDATE buses
+        SET driver_device_session = COALESCE(p_device_id, driver_device_session),
+            driver_uid = p_driver_id,
+            last_started_at = v_now,
+            updated_at = v_now
+        WHERE id = p_bus_id;
+
+        RETURN jsonb_build_object(
+            'success', true,
+            'tripId', p_trip_id,
+            'alreadyActive', false,
+            'handover', v_handover_occurred,
+            'previousDriverId', v_previous_driver_id,
+            'previousTripId', v_previous_trip_id
+        );
     EXCEPTION WHEN unique_violation THEN
         SELECT trip_id, driver_id INTO v_existing FROM active_trips WHERE bus_id = p_bus_id AND status = 'active' LIMIT 1;
         IF FOUND AND v_existing.driver_id = p_driver_id THEN
-            RETURN jsonb_build_object('success', true, 'tripId', v_existing.trip_id::text, 'alreadyActive', true);
+            RETURN jsonb_build_object('success', true, 'tripId', v_existing.trip_id::text, 'alreadyActive', true, 'handover', false);
         END IF;
         RETURN jsonb_build_object('success', false, 'error', 'LOCKED_BY_OTHER', 'activeDriverId', COALESCE(v_existing.driver_id, 'unknown'));
     END;
@@ -1760,12 +1802,26 @@ CREATE OR REPLACE FUNCTION public.extend_trip_lock(
     p_trip_id TEXT, p_driver_id TEXT, p_bus_id TEXT, p_ttl_seconds INTEGER DEFAULT 600
 )
 RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
-DECLARE v_expires_at TIMESTAMPTZ := NOW() + (p_ttl_seconds || ' seconds')::INTERVAL; v_updated INTEGER;
+DECLARE
+    v_expires_at TIMESTAMPTZ := NOW() + (p_ttl_seconds || ' seconds')::INTERVAL;
+    v_updated INTEGER;
+    v_is_valid_uuid BOOLEAN;
 BEGIN
-    UPDATE active_trips SET last_heartbeat = NOW(), expires_at = v_expires_at
-    WHERE trip_id = p_trip_id::uuid AND driver_id = p_driver_id AND bus_id = p_bus_id AND status = 'active';
+    v_is_valid_uuid := (p_trip_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$');
+
+    -- FIX 15: Match bus_id variations
+    UPDATE active_trips
+    SET last_heartbeat = NOW(), expires_at = v_expires_at
+    WHERE (trip_id::text = p_trip_id OR (v_is_valid_uuid AND trip_id = p_trip_id::uuid))
+      AND driver_id = p_driver_id
+      AND bus_id IN (
+          p_bus_id,
+          REPLACE(p_bus_id, 'bus_', ''),
+          'bus_' || REPLACE(p_bus_id, 'bus_', '')
+      )
+      AND status = 'active';
     GET DIAGNOSTICS v_updated = ROW_COUNT;
-    IF v_updated = 1 THEN RETURN jsonb_build_object('success', true);
+    IF v_updated >= 1 THEN RETURN jsonb_build_object('success', true);
     ELSE RETURN jsonb_build_object('success', false, 'error', 'Active trip not found'); END IF;
 END;
 $$;
@@ -1976,28 +2032,41 @@ RETURNS TABLE(
 ) AS $$
 DECLARE
   v_trip RECORD;
+  v_now TIMESTAMPTZ := NOW();
 BEGIN
+  -- FIX 8: Add FOR UPDATE SKIP LOCKED
   FOR v_trip IN
     SELECT at.trip_id, at.bus_id, at.driver_id, at.route_id, at.shift, at.start_time
     FROM public.active_trips at
     WHERE at.status = 'active'
-      AND at.last_heartbeat < NOW() - (p_heartbeat_timeout_seconds || ' seconds')::INTERVAL
+      AND at.last_heartbeat < (v_now - make_interval(secs => p_heartbeat_timeout_seconds))
+    ORDER BY at.trip_id ASC
+    FOR UPDATE SKIP LOCKED
   LOOP
     INSERT INTO public.driver_trip_history (
       trip_id, bus_id, driver_id, route_id, shift, status, ended_reason, start_time, end_time, duration_seconds
     ) VALUES (
       v_trip.trip_id, v_trip.bus_id, v_trip.driver_id, v_trip.route_id, v_trip.shift,
-      'completed', 'completed_stale', v_trip.start_time, NOW(),
-      GREATEST(0, EXTRACT(EPOCH FROM (NOW() - v_trip.start_time))::INTEGER)
+      'completed', 'completed_stale', v_trip.start_time, v_now,
+      GREATEST(0, EXTRACT(EPOCH FROM (v_now - v_trip.start_time))::INTEGER)
     )
     ON CONFLICT (trip_id) DO NOTHING;
 
     UPDATE driver_profiles
-    SET trip_active = false, active_trip_id = NULL, updated_at = NOW()
+    SET trip_active = false, active_trip_id = NULL, updated_at = v_now
     WHERE uid = v_trip.driver_id;
 
     DELETE FROM public.active_trips
     WHERE active_trips.trip_id = v_trip.trip_id;
+
+    -- FIX 3: Purge public.waiting_flags inside public.cleanup_stale_locks
+    DELETE FROM public.waiting_flags
+    WHERE bus_id IN (
+        v_trip.bus_id,
+        REPLACE(v_trip.bus_id, 'bus_', ''),
+        'bus_' || REPLACE(v_trip.bus_id, 'bus_', '')
+    )
+    OR trip_id = v_trip.trip_id::text;
     
     RETURN QUERY SELECT v_trip.trip_id, v_trip.bus_id, v_trip.driver_id;
   END LOOP;
@@ -2010,30 +2079,40 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public;
 
 -- end_trip_atomically: deletes active_trips lock and records history in a single atomic transaction
 -- with short-trip discard guard (p_min_duration_seconds).
-DROP FUNCTION IF EXISTS public.end_trip_atomically(TEXT, TEXT, TEXT);
+-- FIX 1: Explicitly drop any legacy overloaded signatures first
+DROP FUNCTION IF EXISTS public.end_trip_atomically(text, text, text);
+DROP FUNCTION IF EXISTS public.end_trip_atomically(text, text, text, integer);
+DROP FUNCTION IF EXISTS public.end_trip_atomically(text, text, text, integer, text);
+
 CREATE OR REPLACE FUNCTION public.end_trip_atomically(
-  p_trip_id TEXT,
-  p_bus_id  TEXT,
-  p_driver_id TEXT DEFAULT NULL,
-  p_min_duration_seconds INTEGER DEFAULT 0,
-  p_ended_reason TEXT DEFAULT 'completed'
+    p_trip_id text,
+    p_bus_id text,
+    p_driver_id text DEFAULT NULL,
+    p_min_duration_seconds integer DEFAULT 0,
+    p_ended_reason text DEFAULT 'completed'
 )
-RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE
-  v_trip    RECORD;
-  v_now     TIMESTAMPTZ := NOW();
-  v_dur_sec INTEGER;
-  v_status  TEXT := 'completed';
-  v_reason  TEXT := COALESCE(NULLIF(p_ended_reason, ''), 'completed');
+  v_trip         RECORD;
+  v_now          TIMESTAMPTZ := NOW();
+  v_dur_sec      INTEGER;
+  v_status       TEXT := 'completed';
+  v_reason       TEXT := COALESCE(NULLIF(p_ended_reason, ''), 'completed');
+  v_is_valid_uuid BOOLEAN;
 BEGIN
-  SELECT trip_id, bus_id, driver_id, route_id, shift, start_time
-    INTO v_trip
-    FROM active_trips
-   WHERE trip_id    = p_trip_id::uuid
-     AND bus_id     = p_bus_id
-     AND (p_driver_id IS NULL OR p_driver_id = '' OR driver_id = p_driver_id)
-     AND status     = 'active'
-     FOR UPDATE;
+  v_is_valid_uuid := (p_trip_id ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$');
+
+  -- FIX 5: Match bus_id variations in lookup
+  SELECT * INTO v_trip FROM active_trips
+  WHERE (trip_id::text = p_trip_id OR (v_is_valid_uuid AND trip_id = p_trip_id::uuid))
+     OR bus_id IN (
+         p_bus_id,
+         REPLACE(p_bus_id, 'bus_', ''),
+         'bus_' || REPLACE(p_bus_id, 'bus_', '')
+     )
+  ORDER BY (trip_id::text = p_trip_id) DESC
+  LIMIT 1
+  FOR UPDATE;
 
   IF NOT FOUND THEN
     RETURN jsonb_build_object('success', true, 'alreadyEnded', true);
@@ -2043,6 +2122,19 @@ BEGIN
 
   -- Remove the active lock atomically within the single transaction
   DELETE FROM active_trips WHERE trip_id = v_trip.trip_id;
+
+  -- FIX 2: Purge public.waiting_flags inside public.end_trip_atomically
+  DELETE FROM public.waiting_flags
+  WHERE bus_id IN (
+      v_trip.bus_id,
+      p_bus_id,
+      REPLACE(v_trip.bus_id, 'bus_', ''),
+      'bus_' || REPLACE(v_trip.bus_id, 'bus_', ''),
+      REPLACE(p_bus_id, 'bus_', ''),
+      'bus_' || REPLACE(p_bus_id, 'bus_', '')
+  )
+  OR trip_id = v_trip.trip_id::text
+  OR trip_id = p_trip_id;
 
   -- Sync driver_profiles active trip pointer
   UPDATE driver_profiles
@@ -2384,6 +2476,7 @@ DECLARE
     v_student_updated  INTEGER;
     v_app_updated      INTEGER;
     v_effective_actor  TEXT;
+    v_skip_increment   BOOLEAN := false;
 BEGIN
     v_effective_actor := COALESCE(p_approver_uid, p_approved_by, 'system');
 
@@ -2394,7 +2487,7 @@ BEGIN
     END IF;
 
     -- 2. Lock student profile row to preserve exact original state for rollback compensation
-    SELECT uid, status, valid_until, session_end_year, session_duration, soft_block, hard_block, seat_released_at, last_processed_application_id
+    SELECT uid, status, valid_until, session_end_year, session_duration, soft_block, hard_block, seat_released_at, last_processed_application_id, bus_id, shift
     INTO v_student
     FROM student_profiles
     WHERE uid = p_student_uid
@@ -2416,34 +2509,48 @@ BEGIN
         RETURN jsonb_build_object('success', false, 'error', 'Bus ' || p_bus_id || ' not found');
     END IF;
 
-    -- 4. Verify capacity has room
-    IF v_normalized_shift = 'morning' THEN
-        IF v_bus.morning_load >= v_bus.capacity THEN
-            RETURN jsonb_build_object('success', false, 'error', 'CAPACITY_FULL', 'busId', p_bus_id, 'shift', p_shift);
-        END IF;
-        v_new_morning := v_bus.morning_load + 1;
-        v_new_evening := v_bus.evening_load;
-    ELSIF v_normalized_shift = 'evening' THEN
-        IF v_bus.evening_load >= v_bus.capacity THEN
-            RETURN jsonb_build_object('success', false, 'error', 'CAPACITY_FULL', 'busId', p_bus_id, 'shift', p_shift);
-        END IF;
+    -- FIX 16: Check whether the student already holds an unreleased active seat on the target bus and shift
+    IF (
+        v_student.status = 'active'
+        AND v_student.seat_released_at IS NULL
+        AND (v_student.bus_id = v_bus.id OR v_student.bus_id = p_bus_id)
+        AND LOWER(COALESCE(v_student.shift, 'morning')) = v_normalized_shift
+    ) THEN
+        v_skip_increment := true;
         v_new_morning := v_bus.morning_load;
-        v_new_evening := v_bus.evening_load + 1;
-    ELSE -- 'both'
-        IF v_bus.morning_load >= v_bus.capacity OR v_bus.evening_load >= v_bus.capacity THEN
-            RETURN jsonb_build_object('success', false, 'error', 'CAPACITY_FULL', 'busId', p_bus_id, 'shift', p_shift);
-        END IF;
-        v_new_morning := v_bus.morning_load + 1;
-        v_new_evening := v_bus.evening_load + 1;
+        v_new_evening := v_bus.evening_load;
     END IF;
 
-    -- 5. Increment bus capacity
-    UPDATE buses
-    SET morning_load = v_new_morning,
-        evening_load = v_new_evening,
-        current_members = v_new_morning + v_new_evening,
-        updated_at = NOW()
-    WHERE id = v_bus.id;
+    IF NOT v_skip_increment THEN
+        -- 4. Verify capacity has room
+        IF v_normalized_shift = 'morning' THEN
+            IF v_bus.morning_load >= v_bus.capacity THEN
+                RETURN jsonb_build_object('success', false, 'error', 'CAPACITY_FULL', 'busId', p_bus_id, 'shift', p_shift);
+            END IF;
+            v_new_morning := v_bus.morning_load + 1;
+            v_new_evening := v_bus.evening_load;
+        ELSIF v_normalized_shift = 'evening' THEN
+            IF v_bus.evening_load >= v_bus.capacity THEN
+                RETURN jsonb_build_object('success', false, 'error', 'CAPACITY_FULL', 'busId', p_bus_id, 'shift', p_shift);
+            END IF;
+            v_new_morning := v_bus.morning_load;
+            v_new_evening := v_bus.evening_load + 1;
+        ELSE -- 'both'
+            IF v_bus.morning_load >= v_bus.capacity OR v_bus.evening_load >= v_bus.capacity THEN
+                RETURN jsonb_build_object('success', false, 'error', 'CAPACITY_FULL', 'busId', p_bus_id, 'shift', p_shift);
+            END IF;
+            v_new_morning := v_bus.morning_load + 1;
+            v_new_evening := v_bus.evening_load + 1;
+        END IF;
+
+        -- 5. Increment bus capacity
+        UPDATE buses
+        SET morning_load = v_new_morning,
+            evening_load = v_new_evening,
+            current_members = v_new_morning + v_new_evening,
+            updated_at = NOW()
+        WHERE id = v_bus.id;
+    END IF;
 
     -- 6. Update student profile (re-activate, extend validity, clear seat_released_at)
     UPDATE student_profiles SET
@@ -2460,13 +2567,15 @@ BEGIN
     GET DIAGNOSTICS v_student_updated = ROW_COUNT;
 
     IF v_student_updated <> 1 THEN
-        -- Compensate bus capacity
-        UPDATE buses
-        SET morning_load = v_bus.morning_load,
-            evening_load = v_bus.evening_load,
-            current_members = v_bus.morning_load + v_bus.evening_load,
-            updated_at = NOW()
-        WHERE id = v_bus.id;
+        IF NOT v_skip_increment THEN
+            -- Compensate bus capacity
+            UPDATE buses
+            SET morning_load = v_bus.morning_load,
+                evening_load = v_bus.evening_load,
+                current_members = v_bus.morning_load + v_bus.evening_load,
+                updated_at = NOW()
+            WHERE id = v_bus.id;
+        END IF;
         RETURN jsonb_build_object('success', false, 'error', 'Student profile not found or not updated: ' || p_student_uid);
     END IF;
 
@@ -2499,12 +2608,14 @@ BEGIN
             updated_at                    = NOW()
         WHERE uid = p_student_uid;
 
-        UPDATE buses
-        SET morning_load = v_bus.morning_load,
-            evening_load = v_bus.evening_load,
-            current_members = v_bus.morning_load + v_bus.evening_load,
-            updated_at = NOW()
-        WHERE id = v_bus.id;
+        IF NOT v_skip_increment THEN
+            UPDATE buses
+            SET morning_load = v_bus.morning_load,
+                evening_load = v_bus.evening_load,
+                current_members = v_bus.morning_load + v_bus.evening_load,
+                updated_at = NOW()
+            WHERE id = v_bus.id;
+        END IF;
 
         RETURN jsonb_build_object('success', false, 'error', 'Application not found or update failed: ' || p_application_id);
     END IF;
@@ -2514,6 +2625,7 @@ BEGIN
         'studentUid',     p_student_uid,
         'busId',          v_bus.id,
         'shift',          p_shift,
+        'skippedIncrement', v_skip_increment,
         'newMorningLoad', v_new_morning,
         'newEveningLoad', v_new_evening,
         'capacity',       v_bus.capacity
@@ -2641,10 +2753,12 @@ BEGIN
           )
         FOR UPDATE
     LOOP
+        -- FIX 17: Safe JSONB Extraction
         v_app_year := COALESCE(
             v_app.session_start_year,
-            (v_app.target_session->>'startYear')::INTEGER,
-            (v_app.target_session->>'start_year')::INTEGER,
+            CASE WHEN v_app.target_session IS NOT NULL AND jsonb_typeof(v_app.target_session) = 'object'
+                 THEN COALESCE((v_app.target_session->>'startYear')::INTEGER, (v_app.target_session->>'start_year')::INTEGER)
+                 ELSE NULL END,
             (v_app.form_data->>'sessionStartYear')::INTEGER,
             (v_app.form_data->>'startYear')::INTEGER,
             (v_app.form_data->'sessionInfo'->>'sessionStartYear')::INTEGER,
@@ -2843,6 +2957,36 @@ REVOKE EXECUTE ON FUNCTION public.delete_student_cascade_v1(TEXT) FROM public;
 REVOKE EXECUTE ON FUNCTION public.delete_student_cascade_v1(TEXT) FROM authenticated;
 REVOKE EXECUTE ON FUNCTION public.delete_student_cascade_v1(TEXT) FROM anon;
 GRANT  EXECUTE ON FUNCTION public.delete_student_cascade_v1(TEXT) TO service_role;
+
+-- ── 8.5.5b mark_notification_read ───────────────────────────────────────────
+-- Atomic mark as read (INV-NOTIF-004) to eliminate read-modify-write race condition.
+CREATE OR REPLACE FUNCTION public.mark_notification_read(
+    p_notification_id TEXT,
+    p_user_id TEXT
+)
+RETURNS BOOLEAN LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+    v_updated INTEGER;
+BEGIN
+    UPDATE public.notifications
+    SET read_by_user_ids = CASE
+            WHEN COALESCE(read_by_user_ids, '{}') @> ARRAY[p_user_id] THEN read_by_user_ids
+            ELSE array_append(COALESCE(read_by_user_ids, '{}'), p_user_id)
+        END,
+        read_by = CASE
+            WHEN COALESCE(read_by, '{}') @> ARRAY[p_user_id] THEN read_by
+            ELSE array_append(COALESCE(read_by, '{}'), p_user_id)
+        END,
+        updated_at = NOW()
+    WHERE id = p_notification_id
+      AND NOT (COALESCE(read_by_user_ids, '{}') @> ARRAY[p_user_id]);
+    GET DIAGNOSTICS v_updated = ROW_COUNT;
+    RETURN v_updated > 0;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.mark_notification_read(TEXT, TEXT) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.mark_notification_read(TEXT, TEXT) TO authenticated, service_role;
 
 
 -- ── 8.5.6 delete_route_cascade_v1 ───────────────────────────────────────────
@@ -3059,21 +3203,33 @@ DECLARE
     v_evening_load   INTEGER;
     v_bus_capacity   INTEGER;
 BEGIN
-    -- 1. Pre-lock all affected buses in strict ascending lexical order (ORDER BY id ASC FOR UPDATE)
-    -- This guarantees a global lock acquisition hierarchy, eliminating PostgreSQL 40P01 deadlocks!
+    -- FIX 6: Standardize on global lock hierarchy student_profiles (ORDER BY uid ASC FOR UPDATE) -> buses (ORDER BY id ASC FOR UPDATE)
+    PERFORM 1 FROM public.student_profiles
+    WHERE uid IN (
+        SELECT DISTINCT COALESCE(elem->>'studentUid', elem->>'studentId', elem->>'student_id')
+        FROM jsonb_array_elements(p_plans) AS elem
+        WHERE COALESCE(elem->>'studentUid', elem->>'studentId', elem->>'student_id') IS NOT NULL
+    )
+    ORDER BY uid ASC
+    FOR UPDATE;
+
     SELECT ARRAY_AGG(id ORDER BY id ASC)
     INTO v_affected_buses
     FROM buses
     WHERE id IN (
-        SELECT DISTINCT COALESCE(plan->>'fromBusId', plan->>'from_bus_id')
-        FROM jsonb_array_elements(p_plans) AS plan
-        WHERE COALESCE(plan->>'fromBusId', plan->>'from_bus_id') IS NOT NULL
-          AND COALESCE(plan->>'fromBusId', plan->>'from_bus_id') <> ''
-        UNION
         SELECT DISTINCT COALESCE(plan->>'toBusId', plan->>'to_bus_id')
         FROM jsonb_array_elements(p_plans) AS plan
         WHERE COALESCE(plan->>'toBusId', plan->>'to_bus_id') IS NOT NULL
           AND COALESCE(plan->>'toBusId', plan->>'to_bus_id') <> ''
+        UNION
+        SELECT DISTINCT bus_id
+        FROM public.student_profiles
+        WHERE uid IN (
+            SELECT DISTINCT COALESCE(elem->>'studentUid', elem->>'studentId', elem->>'student_id')
+            FROM jsonb_array_elements(p_plans) AS elem
+            WHERE COALESCE(elem->>'studentUid', elem->>'studentId', elem->>'student_id') IS NOT NULL
+        )
+        AND bus_id IS NOT NULL
     )
     FOR UPDATE;
 
@@ -3290,7 +3446,18 @@ BEGIN
         END IF;
     END LOOP;
 
-    -- 3. Pre-lock all affected buses in strict ascending order (ORDER BY id ASC FOR UPDATE)
+    -- FIX 7: Step 3 (Lock Students First): Lock all affected student_profiles rows in ascending uid order
+    PERFORM uid
+    FROM public.student_profiles
+    WHERE uid IN (
+        SELECT DISTINCT elem->>'docId'
+        FROM jsonb_array_elements(v_changes_array) AS elem
+        WHERE elem->>'collection' = 'students' AND elem->>'docId' IS NOT NULL
+    )
+    ORDER BY uid ASC
+    FOR UPDATE;
+
+    -- FIX 7: Step 4 (Lock Buses Second): Lock all affected buses rows in ascending id order
     IF v_affected_buses IS NOT NULL AND array_length(v_affected_buses, 1) > 0 THEN
         PERFORM id
         FROM buses
@@ -3607,8 +3774,13 @@ DROP POLICY IF EXISTS "fcm_tokens_service_role" ON public.fcm_tokens;
 CREATE POLICY "fcm_tokens_service_role" ON public.fcm_tokens FOR ALL TO service_role USING (true) WITH CHECK (true);
 
 DROP POLICY IF EXISTS "notifications_select_own" ON public.notifications;
-CREATE POLICY "notifications_select_own" ON public.notifications FOR SELECT TO authenticated
-USING (sender_user_id = auth.uid()::text OR recipient_ids @> ARRAY[auth.uid()::text] OR user_has_role(auth.uid()::text, 'admin') OR user_has_role(auth.uid()::text, 'moderator'));
+CREATE POLICY "notifications_select_own" ON public.notifications FOR SELECT USING (
+    sender_user_id = auth.uid()::text
+    OR recipient_ids @> ARRAY[auth.uid()::text]
+    OR auto_injected_recipient_ids @> ARRAY[auth.uid()::text]
+    OR target->>'type' IN ('all_users', 'all_role', 'route_based', 'shift_based')
+    OR public.is_faculty()
+);
 
 -- Bypass policies for service_role across all domains
 DO $$
@@ -3990,5 +4162,5 @@ REVOKE EXECUTE ON FUNCTION public.process_payment_refund_atomic(TEXT, TEXT, BIGI
 REVOKE EXECUTE ON FUNCTION public.process_payment_refund_atomic(TEXT, TEXT, BIGINT, JSONB, TEXT) FROM authenticated;
 GRANT EXECUTE ON FUNCTION public.process_payment_refund_atomic(TEXT, TEXT, BIGINT, JSONB, TEXT) TO service_role;
 
-
-
+-- FIX 18: Reload schema cache on migration/sync
+NOTIFY pgrst, 'reload schema';
