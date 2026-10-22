@@ -168,9 +168,27 @@ export const POST = withSecurity(
         // 4. Determine coordinates
         let studentLat: number | null = null;
         let studentLng: number | null = null;
-        if (lat !== undefined && lng !== undefined) {
+        const hasCoords = lat !== undefined && lng !== undefined && Number.isFinite(parseFloat(lat as any)) && Number.isFinite(parseFloat(lng as any));
+
+        if (hasCoords) {
+            // FIX 40: Enforce timestamp freshness whenever live coordinates are sent
+            const parsedTs = Number(timestamp);
+            if (!timestamp || !Number.isFinite(parsedTs) || Math.abs(Date.now() - parsedTs) > 60_000) {
+                return NextResponse.json(
+                    { error: 'GPS coordinate timestamp expired or clock drifted > 60s from server time.', code: 'STALE_LOCATION' },
+                    { status: 400 }
+                );
+            }
             studentLat = parseFloat(lat as any);
             studentLng = parseFloat(lng as any);
+
+            // FIX 39: Enforce Assam/NE India regional bounding box
+            if (studentLat < 25.0 || studentLat > 28.5 || studentLng < 89.5 || studentLng > 96.5) {
+                return NextResponse.json(
+                    { error: 'Coordinates are outside the operating region.', code: 'OUT_OF_OPERATING_REGION' },
+                    { status: 400 }
+                );
+            }
         } else if (stopLat !== undefined && stopLng !== undefined) {
             studentLat = parseFloat(stopLat as any);
             studentLng = parseFloat(stopLng as any);
@@ -190,7 +208,14 @@ export const POST = withSecurity(
             }, { status: 429 });
         }
 
-        const targetRouteId = routeId || studentData.route_id || studentData.routeId || activeTripRes.data?.route_id || 'route_1';
+        // FIX 38: Remove silent route_1 fallback
+        const targetRouteId = routeId || studentData.route_id || studentData.routeId || activeTripRes.data?.route_id;
+        if (!targetRouteId) {
+            return NextResponse.json(
+                { error: 'Unable to resolve assigned route for waiting flag verification.', code: 'ROUTE_UNRESOLVED' },
+                { status: 400 }
+            );
+        }
         const targetStopName = stop_name || studentData.stop_name || studentData.stopName;
 
         // Lock 1 — Continuous Route Corridor Geofence (<= 120m from Road Polyline OR <= 200m from Named Stop)

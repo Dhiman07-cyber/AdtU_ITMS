@@ -17,7 +17,38 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Too many requests' }, { status: 429, headers: rl.headers });
     }
 
-    const routes = await routeService.getAll();
+    const { searchParams } = new URL(request.url);
+    const search = searchParams.get('search') || searchParams.get('q');
+
+    let routes = await routeService.getAll();
+
+    if (search && search.trim()) {
+      const { getSupabaseServer } = await import('@/lib/supabase-server');
+      const db = getSupabaseServer();
+      const escaped = search.trim().replace(/%/g, '\\%').replace(/_/g, '\\_');
+      const pattern = `%${escaped}%`;
+      const { data, error } = await db
+        .from('routes')
+        .select('*')
+        .or(`route_name.ilike.${pattern},id.ilike.${pattern}`)
+        .order('route_name', { ascending: true });
+
+      if (!error && data && data.length > 0) {
+        routes = data.map((r: any) => ({
+          ...r,
+          routeName: r.route_name || r.name,
+          stops: r.stops || [],
+        }));
+      } else {
+        const term = search.trim().toLowerCase();
+        routes = routes.filter(r =>
+          (r.routeName || r.route_name || '').toLowerCase().includes(term) ||
+          (r.id || '').toLowerCase().includes(term) ||
+          (r.stops || []).some((s: any) => (s.name || s.stopName || s.stop_name || '').toLowerCase().includes(term))
+        );
+      }
+    }
+
     const mappedRoutes = routes.map(r => ({
       ...r,
       active: r.status === 'active'
@@ -55,6 +86,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'At least 2 stops are required' }, { status: 400 });
     }
 
+    const stopsValidation = routeService.validateRouteStops(newRouteData.stops);
+    if (!stopsValidation.valid) {
+      return NextResponse.json({ error: stopsValidation.error }, { status: 400 });
+    }
+
     // Determine status from active or status field
     let mappedStatus: 'active' | 'inactive' = 'active';
     if (newRouteData.status !== undefined) {
@@ -73,6 +109,7 @@ export async function POST(request: NextRequest) {
     };
 
     const docId = await routeService.create(newRoute);
+    routeService.invalidateRouteCache();
 
     return NextResponse.json({ id: docId, ...newRoute, active: mappedStatus === 'active' }, { status: 201, headers: rl.headers });
   } catch (error) {

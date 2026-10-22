@@ -33,35 +33,72 @@ export const useWaitingFlags = (busId: string, getToken: () => Promise<string | 
 
     console.log(`[useWaitingFlags] Subscribing to waiting_flags_${busId} via WS`);
 
-    // Fetch initial flags via supabase (ponytail: one-time query, add dedicated API endpoint if needed)
+    // Fetch initial flags via authenticated API with Supabase fallback
     const fetchInitial = async () => {
       try {
-        const { data, error } = await supabase
-          .from('waiting_flags')
-          .select('id, student_uid, student_name, bus_id, route_id, stop_name, stop_lat, stop_lng, status, created_at, expires_at')
-          .eq('bus_id', busId)
-          .in('status', ['raised', 'waiting', 'acknowledged'])
-          .order('created_at', { ascending: false });
+        let fetchedFromApi = false;
+        try {
+          const token = await getToken();
+          if (token) {
+            const res = await fetch(`/api/driver/dashboard-data?busId=${encodeURIComponent(busId)}`, {
+              headers: {
+                Authorization: `Bearer ${token}`,
+              },
+            });
+            if (res.ok) {
+              const json = await res.json();
+              if (isMountedRef.current && Array.isArray(json.waitingFlags)) {
+                const formatted: WaitingFlag[] = json.waitingFlags.map((f: any) => ({
+                  id: f.id,
+                  studentUid: f.studentUid || f.student_uid,
+                  studentName: f.studentName || f.student_name || 'Unknown Student',
+                  busId: f.busId || f.bus_id,
+                  routeId: f.routeId || f.route_id,
+                  stop_name: f.stop_name || 'Pickup Point',
+                  stopLat: f.stopLat ?? f.stop_lat ?? f.lat ?? 0,
+                  stopLng: f.stopLng ?? f.stop_lng ?? f.lng ?? 0,
+                  status: f.status,
+                  createdAt: f.createdAt || f.created_at || new Date().toISOString(),
+                  expiresAt: f.expiresAt || f.expires_at || new Date(new Date(f.createdAt || f.created_at || Date.now()).getTime() + 20 * 60 * 1000).toISOString(),
+                  ackByDriverUid: f.ackByDriverUid || f.ack_by_driver_uid,
+                }));
+                setFlags(formatted);
+                fetchedFromApi = true;
+              }
+            }
+          }
+        } catch (apiErr) {
+          console.warn('[useWaitingFlags] Authenticated API fetch failed, falling back to direct query:', apiErr);
+        }
 
-        if (!isMountedRef.current) return;
+        if (!fetchedFromApi) {
+          const { data, error } = await supabase
+            .from('waiting_flags')
+            .select('id, student_uid, student_name, bus_id, route_id, stop_name, stop_lat, stop_lng, status, created_at, expires_at')
+            .eq('bus_id', busId)
+            .in('status', ['raised', 'waiting', 'acknowledged'])
+            .order('created_at', { ascending: false });
 
-        if (error) throw new Error(error.message);
+          if (!isMountedRef.current) return;
 
-        const formatted: WaitingFlag[] = (data || []).map((f: any) => ({
-          id: f.id,
-          studentUid: f.student_uid,
-          studentName: f.student_name || 'Unknown Student',
-          busId: f.bus_id,
-          routeId: f.route_id,
-          stop_name: f.stop_name,
-          stopLat: f.stop_lat,
-          stopLng: f.stop_lng,
-          status: f.status,
-          createdAt: f.created_at,
-          expiresAt: f.expires_at || new Date(new Date(f.created_at).getTime() + 20 * 60 * 1000).toISOString(),
-        }));
+          if (error) throw new Error(error.message);
 
-        setFlags(formatted);
+          const formatted: WaitingFlag[] = (data || []).map((f: any) => ({
+            id: f.id,
+            studentUid: f.student_uid,
+            studentName: f.student_name || 'Unknown Student',
+            busId: f.bus_id,
+            routeId: f.route_id,
+            stop_name: f.stop_name,
+            stopLat: f.stop_lat,
+            stopLng: f.stop_lng,
+            status: f.status,
+            createdAt: f.created_at,
+            expiresAt: f.expires_at || new Date(new Date(f.created_at).getTime() + 20 * 60 * 1000).toISOString(),
+          }));
+
+          setFlags(formatted);
+        }
       } catch (err: any) {
         console.error('[useWaitingFlags] Error fetching initial flags:', err);
         if (isMountedRef.current) setError(err.message || 'Failed to fetch waiting flags');

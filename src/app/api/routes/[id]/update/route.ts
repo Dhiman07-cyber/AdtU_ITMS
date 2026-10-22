@@ -20,6 +20,13 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
 
     const updatedRouteData = await request.json();
 
+    if (updatedRouteData.stops) {
+      const stopsValidation = routeService.validateRouteStops(updatedRouteData.stops);
+      if (!stopsValidation.valid) {
+        return NextResponse.json({ error: stopsValidation.error }, { status: 400 });
+      }
+    }
+
     const updated = {
       ...updatedRouteData,
       totalStops: Array.isArray(updatedRouteData.stops) ? updatedRouteData.stops.length : 0,
@@ -33,6 +40,8 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     }
 
     clearRouteCache(id);
+    routeService.invalidateRouteCache(id);
+    routeService.invalidateRouteCache();
 
     return NextResponse.json(updated);
   } catch (error) {
