@@ -46,6 +46,8 @@ jobs:
   quality-gate:
     name: 1. Code Quality & Type Verification
     runs-on: ubuntu-latest
+    env:
+      PUPPETEER_SKIP_DOWNLOAD: 'true'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -64,6 +66,8 @@ jobs:
   unit-tests:
     name: 2. Unit & Integration Tests
     runs-on: ubuntu-latest
+    env:
+      PUPPETEER_SKIP_DOWNLOAD: 'true'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
