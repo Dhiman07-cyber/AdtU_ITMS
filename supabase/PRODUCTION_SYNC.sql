@@ -4,6 +4,67 @@
 -- Idempotent, Zero-Downtime Migration Script for Live Supabase PostgreSQL
 -- =============================================================================
 
+-- ── 0. Schema Drift Normalization & Missing Helpers (Pre-flight) ─────────────
+--
+-- ROOT CAUSE OF "operator does not exist: jsonb @> text[]" (SQLSTATE 42883):
+-- In the live database the following notifications columns were created as JSONB,
+-- but every consumer (COMPLETE_SCHEMA.sql, docs, GIN array index, the TypeScript
+-- repository types `string[]`, and its PostgREST array-literal filters such as
+-- `auto_injected_recipient_ids.cs.{uid}`) treats them as TEXT[].
+--   auto_injected_recipient_ids  -> jsonb  (should be text[])
+--   read_by_user_ids             -> jsonb  (should be text[])
+--   hidden_for_user_ids          -> jsonb  (should be text[])
+-- That drift makes `col @> ARRAY[...]` and `array_append(col, ...)` fail with 42883
+-- in both the RLS policy (Section 3) and mark_notification_read (Section 6).
+-- We normalize the columns back to their intended TEXT[] type here so that all
+-- downstream DDL/RPCs in this script (and the app's runtime queries) are correct.
+-- Idempotent: only converts columns that are still jsonb. The table is empty, so
+-- the conversion is lossless and instantaneous (no rewrite lock concern).
+-- NOTE: ALTER COLUMN ... TYPE disallows a subquery in its USING transform, so we
+-- create a small IMMUTABLE helper to perform the jsonb-array -> text[] conversion.
+CREATE OR REPLACE FUNCTION public._itms_jsonb_to_text_array(j jsonb)
+RETURNS text[] LANGUAGE sql IMMUTABLE AS $$
+    SELECT COALESCE(array_agg(e), '{}'::text[])
+    FROM jsonb_array_elements_text(COALESCE(j, '[]'::jsonb)) AS e;
+$$;
+
+DO $$
+DECLARE
+    v_col RECORD;
+BEGIN
+    FOR v_col IN
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name   = 'notifications'
+          AND column_name  IN ('auto_injected_recipient_ids', 'read_by_user_ids', 'hidden_for_user_ids')
+          AND data_type    = 'jsonb'
+    LOOP
+        EXECUTE format(
+            'ALTER TABLE public.notifications ALTER COLUMN %I TYPE text[] USING public._itms_jsonb_to_text_array(%I)',
+            v_col.column_name, v_col.column_name
+        );
+        RAISE NOTICE 'Normalized public.notifications.% from jsonb to text[]', v_col.column_name;
+    END LOOP;
+END $$;
+
+-- Drop the temporary helper (no longer needed once columns are text[]).
+DROP FUNCTION IF EXISTS public._itms_jsonb_to_text_array(jsonb);
+
+-- is_faculty(): referenced by the notifications SELECT policy (Section 3) but was
+-- never defined anywhere (neither in the live DB nor in COMPLETE_SCHEMA.sql), which
+-- would abort CREATE POLICY with "function public.is_faculty() does not exist".
+-- Mirrors the existing public.user_has_role() helper. The current role model is
+-- student/driver/moderator/admin (no 'faculty' role exists yet), so this is a safe
+-- no-op today that becomes active if a 'faculty' role is ever provisioned.
+CREATE OR REPLACE FUNCTION public.is_faculty()
+RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+    SELECT EXISTS (
+        SELECT 1 FROM public.users
+        WHERE uid = auth.uid()::text AND role = 'faculty'
+    );
+$$;
+
 -- ── 1. DDL: Table Columns & Defaults (Fixes 10, 12, 13, 14) ─────────────────
 
 -- Student Profiles Lifecycle Columns (Fix 14)
@@ -173,6 +234,12 @@ BEGIN
 END;
 $$;
 
+-- Drop the legacy 6-param overload (no p_device_id). Leaving it alongside the 7-param
+-- version makes PostgREST fail to disambiguate when p_device_id is omitted, returning
+-- HTTP 300 PGRST203 ("Could not choose the best candidate function"). The 7-param
+-- version below replaces it and keeps p_device_id DEFAULT NULL.
+DROP FUNCTION IF EXISTS public.acquire_trip_lock(text, text, text, text, text, integer);
+
 -- acquire_trip_lock: zero-wait driver handover, per-bus driver_device_session, device_id (Fixes 101, 102)
 CREATE OR REPLACE FUNCTION public.acquire_trip_lock(
     p_trip_id TEXT,
@@ -189,26 +256,42 @@ DECLARE
     v_expires_at TIMESTAMPTZ := NOW() + (p_ttl_seconds || ' seconds')::INTERVAL;
     v_existing RECORD;
     v_bus_status TEXT;
+    v_bus_id TEXT;
     v_handover_occurred BOOLEAN := false;
     v_previous_driver_id TEXT := NULL;
     v_previous_trip_id TEXT := NULL;
 BEGIN
-    -- 1. Check if the calling driver ALREADY has an active trip on this bus (Idempotent re-entry)
-    SELECT trip_id INTO v_existing FROM active_trips
-    WHERE bus_id = p_bus_id AND driver_id = p_driver_id AND status = 'active';
-    IF FOUND THEN
-        IF p_device_id IS NOT NULL THEN
-            UPDATE active_trips SET device_id = p_device_id WHERE trip_id = v_existing.trip_id;
-            UPDATE buses SET driver_device_session = p_device_id WHERE id = p_bus_id;
-        END IF;
-        RETURN jsonb_build_object('success', true, 'tripId', v_existing.trip_id::text, 'alreadyActive', true, 'handover', false);
-    END IF;
-
-    -- 2. Authority for bus validity: must exist and not be inactive or maintenance
-    SELECT status INTO v_bus_status FROM buses WHERE id = p_bus_id FOR UPDATE;
+    -- 0. Resolve the CANONICAL buses.id from whatever bus identifier was passed in.
+    --    The app's preflight (tripStartPreflight) resolves the bus via the tolerant
+    --    getBusIdVariations() helper, so callers legitimately send 'bus_6', bare '6',
+    --    or a padded form. This RPC previously matched WHERE id = p_bus_id EXACTLY, so
+    --    preflight would authorize the trip but this function then returned
+    --    "Bus not found" — the root cause of the production "Bus not found" toast on
+    --    trip start. Resolve once here and use the canonical id for every lookup/write.
+    SELECT b.id, b.status INTO v_bus_id, v_bus_status
+    FROM buses b
+    WHERE b.id IN (
+        p_bus_id,
+        REPLACE(p_bus_id, 'bus_', ''),
+        'bus_' || REPLACE(p_bus_id, 'bus_', '')
+    )
+    ORDER BY (b.id = p_bus_id) DESC
+    LIMIT 1
+    FOR UPDATE;
     IF NOT FOUND THEN RETURN jsonb_build_object('success', false, 'error', 'Bus not found'); END IF;
     IF v_bus_status IN ('inactive', 'maintenance') THEN
         RETURN jsonb_build_object('success', false, 'error', 'Bus is currently ' || v_bus_status || ' and cannot start a trip');
+    END IF;
+
+    -- 1. Check if the calling driver ALREADY has an active trip on this bus (Idempotent re-entry)
+    SELECT trip_id INTO v_existing FROM active_trips
+    WHERE bus_id = v_bus_id AND driver_id = p_driver_id AND status = 'active';
+    IF FOUND THEN
+        IF p_device_id IS NOT NULL THEN
+            UPDATE active_trips SET device_id = p_device_id WHERE trip_id = v_existing.trip_id;
+            UPDATE buses SET driver_device_session = p_device_id WHERE id = v_bus_id;
+        END IF;
+        RETURN jsonb_build_object('success', true, 'tripId', v_existing.trip_id::text, 'alreadyActive', true, 'handover', false);
     END IF;
 
     -- 3. Zero-Wait Instant Driver Handover:
@@ -217,7 +300,7 @@ BEGIN
     FOR v_existing IN
         SELECT trip_id, bus_id, driver_id, route_id, shift, start_time
         FROM active_trips
-        WHERE bus_id = p_bus_id AND status = 'active' AND driver_id <> p_driver_id
+        WHERE bus_id = v_bus_id AND status = 'active' AND driver_id <> p_driver_id
     LOOP
         v_handover_occurred := true;
         v_previous_driver_id := v_existing.driver_id;
@@ -258,14 +341,14 @@ BEGIN
 
     BEGIN
         INSERT INTO active_trips (trip_id, bus_id, driver_id, route_id, shift, device_id, status, start_time, last_heartbeat, expires_at)
-        VALUES (p_trip_id::uuid, p_bus_id, p_driver_id, p_route_id, p_shift, p_device_id, 'active', v_now, v_now, v_expires_at);
+        VALUES (p_trip_id::uuid, v_bus_id, p_driver_id, p_route_id, p_shift, p_device_id, 'active', v_now, v_now, v_expires_at);
 
         -- FIX 4: Purge leftover public.waiting_flags inside public.acquire_trip_lock
         DELETE FROM public.waiting_flags
         WHERE bus_id IN (
-            p_bus_id,
-            REPLACE(p_bus_id, 'bus_', ''),
-            'bus_' || REPLACE(p_bus_id, 'bus_', '')
+            v_bus_id,
+            REPLACE(v_bus_id, 'bus_', ''),
+            'bus_' || REPLACE(v_bus_id, 'bus_', '')
         )
         AND (trip_id IS NULL OR trip_id <> p_trip_id);
 
@@ -280,7 +363,7 @@ BEGIN
             driver_uid = p_driver_id,
             last_started_at = v_now,
             updated_at = v_now
-        WHERE id = p_bus_id;
+        WHERE id = v_bus_id;
 
         RETURN jsonb_build_object(
             'success', true,
@@ -291,7 +374,7 @@ BEGIN
             'previousTripId', v_previous_trip_id
         );
     EXCEPTION WHEN unique_violation THEN
-        SELECT trip_id, driver_id INTO v_existing FROM active_trips WHERE bus_id = p_bus_id AND status = 'active' LIMIT 1;
+        SELECT trip_id, driver_id INTO v_existing FROM active_trips WHERE bus_id = v_bus_id AND status = 'active' LIMIT 1;
         IF FOUND AND v_existing.driver_id = p_driver_id THEN
             RETURN jsonb_build_object('success', true, 'tripId', v_existing.trip_id::text, 'alreadyActive', true, 'handover', false);
         END IF;
