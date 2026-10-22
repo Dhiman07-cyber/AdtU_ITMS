@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 import path from "path";
 
-const isDev = process.env.NODE_ENV !== 'production';
+const isDev = process.env.NODE_ENV === 'development';
 
 const customOrigins = (process.env.ALLOWED_ORIGINS || '')
   .split(',')
@@ -23,11 +23,11 @@ const devOnlyAllowedOrigins = [
   'https://2g747pzk-3000.inc1.devtunnels.ms',
 ];
 
-const resolvedAllowedDevOrigins = [
+const resolvedAllowedDevOrigins = isDev ? [
   ...baseProductionOrigins,
-  ...(isDev ? devOnlyAllowedOrigins : []),
+  ...devOnlyAllowedOrigins,
   ...customOrigins,
-];
+] : undefined;
 
 const resolvedServerActionOrigins = [
   'adtu-itms.vercel.app',

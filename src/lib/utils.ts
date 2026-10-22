@@ -23,15 +23,21 @@ export function isShiftCompatible(studentShift?: string | null, tripShift?: stri
 }
 
 /**
+ * Normalizes a bus identifier by stripping any 'bus_' prefix.
+ */
+export function normalizeBusId(id?: string | null): string {
+  if (!id) return '';
+  return id.replace(/^bus_/i, '').trim();
+}
+
+/**
  * Checks whether two bus identifiers match, tolerating canonical 'bus_' prefixes.
  * Examples: isMatchingBusId('bus_01', '01') => true, isMatchingBusId('04', 'bus_04') => true
  */
 export function isMatchingBusId(a?: string | null, b?: string | null): boolean {
   if (!a || !b) return false;
   if (a === b) return true;
-  const normA = a.startsWith('bus_') ? a.slice(4) : a;
-  const normB = b.startsWith('bus_') ? b.slice(4) : b;
-  return normA === normB;
+  return normalizeBusId(a) === normalizeBusId(b);
 }
 
 /**
@@ -39,7 +45,8 @@ export function isMatchingBusId(a?: string | null, b?: string | null): boolean {
  */
 export function getBusIdVariations(busId: string): string[] {
   if (!busId) return [];
-  return busId.startsWith('bus_') ? [busId, busId.replace(/^bus_/, '')] : [busId, `bus_${busId}`];
+  const clean = busId.replace(/^bus_/i, '');
+  return Array.from(new Set([busId, clean, `bus_${clean}`]));
 }
 
 

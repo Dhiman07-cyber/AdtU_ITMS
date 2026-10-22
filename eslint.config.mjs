@@ -2,14 +2,13 @@ import nextVitals from "eslint-config-next/core-web-vitals";
 import nextTs from "eslint-config-next/typescript";
 
 const eslintConfig = [
-  ...nextVitals,
-  ...nextTs,
   {
     ignores: [
-      "node_modules/**",
+      "**/node_modules/**",
       ".next/**",
       "out/**",
       "build/**",
+      "dist/**",
       "next-env.d.ts",
       // Non-application code — tooling, skills, scripts, infra. Not app source.
       ".agent/**",
@@ -21,8 +20,12 @@ const eslintConfig = [
       "audits/**",
       "docs/**",
       "supabase/**",
+      "coverage/**",
+      "public/**",
     ],
   },
+  ...nextVitals,
+  ...nextTs,
   {
     rules: {
       "@typescript-eslint/no-explicit-any": "off",
