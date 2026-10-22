@@ -30,6 +30,9 @@ export interface RouteCorridorProjection {
   nearestStopLat?: number;
   nearestStopLng?: number;
   isInCorridor: boolean;
+  nearestSegmentIndex?: number;
+  snappedPoint?: LatLng;
+  segmentBearingDeg?: number;
 }
 
 export interface ApproachingBusWindowResult {
@@ -155,10 +158,20 @@ export function projectPointToRouteCorridor(
 
   // If no detailed polyline exists, fallback to sequential stop coordinates as polyline
   if (!polyline || polyline.length < 2) {
-    if (stops.length >= 2) {
+    if (stops && stops.length >= 2) {
       polyline = stops.map((s) => ({ lat: s.lat, lng: s.lng }));
     } else {
-      polyline = getCanonicalRouteGeometry('route_1') || [];
+      return {
+        isInCorridor: false,
+        crossTrackDistanceMeters: Number.POSITIVE_INFINITY,
+        routeProgressMeters: 0,
+        totalRouteLengthMeters: 0,
+        nearestStopDistanceMeters: Number.POSITIVE_INFINITY,
+        nearestStopName: null,
+        nearestSegmentIndex: -1,
+        snappedPoint: point,
+        segmentBearingDeg: 0,
+      };
     }
   }
 

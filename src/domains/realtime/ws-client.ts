@@ -28,6 +28,7 @@ export interface WsClientConfig {
   reconnectBaseDelay?: number;
   pingInterval?: number;
   getNewToken?: () => Promise<string>;
+  keepAliveInBackground?: boolean;
 }
 
 export class WebSocketClient {
@@ -40,6 +41,7 @@ export class WebSocketClient {
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   private destroyed = false;
   private paused = false;
+  private keepAliveInBackground = false;
   private pendingSubscriptions = new Set<string>();
   private confirmedSubscriptions = new Set<string>();
   private currentPresence: Record<string, unknown> | null = null;
@@ -55,12 +57,23 @@ export class WebSocketClient {
       ...config,
     };
     this.currentToken = config.token;
+    this.keepAliveInBackground = !!config.keepAliveInBackground;
   }
 
   getToken(): string { return this.currentToken; }
 
   setToken(token: string): void {
     this.currentToken = token;
+  }
+
+  setKeepAliveInBackground(keepAlive: boolean): void {
+    this.keepAliveInBackground = keepAlive;
+    if (keepAlive && this.paused) {
+      this.paused = false;
+      if (this.isConnected()) {
+        this.startPing();
+      }
+    }
   }
 
   connect(): void {
@@ -73,6 +86,9 @@ export class WebSocketClient {
     if (this.visibilityHandler) return;
     const handler = () => {
       if (document.hidden) {
+        if (this.config.keepAliveInBackground || this.keepAliveInBackground) {
+          return;
+        }
         this.paused = true;
         this.stopPing();
         if (this.reconnectTimer) {
