@@ -99,6 +99,18 @@ export const POST = withSecurity<RollbackBody>(
         }
       }
       invalidateBusCache();
+      try {
+        const { invalidateCapacityRouteCache } = await import('@/app/api/buses/capacity/route');
+        invalidateCapacityRouteCache();
+      } catch (capErr) {
+        console.warn('[rollback-reassignment] Capacity cache invalidation warning:', capErr);
+      }
+      try {
+        const { invalidateBusTripSnapshot } = await import('@/lib/services/trip-snapshot-cache');
+        invalidateBusTripSnapshot();
+      } catch (snapErr) {
+        console.warn('[rollback-reassignment] Snapshot cache invalidation warning:', snapErr);
+      }
 
       // 4. Create audit event (non-blocking: the rollback already committed;
       // an audit failure must not misreport success as failure).

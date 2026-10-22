@@ -101,9 +101,18 @@ export async function saveDraft(
       return { success: false, error: 'Cannot edit application in current state' };
     }
 
+    const draftStartYear = Number(
+      formData?.sessionInfo?.sessionStartYear ||
+      formData?.sessionInfo?.startYear ||
+      formData?.sessionStartYear ||
+      formData?.startYear ||
+      new Date().getUTCFullYear()
+    );
+
     await repository.update(applicationId, {
       formData: formData as any,
       state: 'draft',
+      sessionStartYear: draftStartYear,
       updatedAt: now,
     });
 
@@ -111,12 +120,20 @@ export async function saveDraft(
   }
 
   // Create new draft
+  const draftStartYear = Number(
+    formData?.sessionInfo?.sessionStartYear ||
+    formData?.sessionInfo?.startYear ||
+    formData?.sessionStartYear ||
+    formData?.startYear ||
+    new Date().getUTCFullYear()
+  );
   const newId = `app_${Date.now()}_${randomUUID().replace(/-/g, '').slice(0, 12)}`;
   await repository.insert({
     applicationId: newId,
     applicantUid: uid,
     formData: formData as any,
     state: 'draft',
+    sessionStartYear: draftStartYear,
     stateHistory: [{ state: 'draft', timestamp: now, actor: uid }],
     verificationAttempts: 0,
     createdAt: now,
@@ -176,8 +193,18 @@ export async function submitFinal(
   ];
 
   const existing = await repository.findByApplicantUid(uid);
-  if (existing && LIVE_STATES.includes(existing.state)) {
-    if (!isRenewal || existing.state === 'submitted') {
+  if (isRenewal) {
+    if (existing && existing.applicationId !== (body.applicationId || uid) &&
+        ['submitted', 'awaiting_verification', 'pending_seat_allocation', 'verified'].includes(existing.state)) {
+      return { success: false, error: 'A renewal application is already in progress' };
+    }
+  } else {
+    // FIX 25: Check student_profiles first; active students must renew rather than submit duplicate fresh app
+    const student = await Student.getByUid(uid).catch(() => null);
+    if (student && student.status === 'active') {
+      return { success: false, error: 'Active students must submit a renewal application instead of a fresh application.' };
+    }
+    if (existing && ['submitted', 'verified', 'awaiting_verification', 'verified_upcoming', 'pending_seat_allocation'].includes(existing.state)) {
       return { success: false, error: 'An application is already in progress' };
     }
   }
@@ -198,13 +225,13 @@ export async function submitFinal(
 
   if (paymentMode === 'offline' && offlineTxId) {
     const db = getSupabaseServer();
-    const normalizedTx = offlineTxId.toLowerCase();
+    const cleanTxId = offlineTxId.trim();
 
     // 1. Check existing payments
     const { data: existingPay } = await db
       .from('payments')
       .select('payment_id, offline_transaction_id')
-      .ilike('offline_transaction_id', normalizedTx)
+      .ilike('offline_transaction_id', cleanTxId)
       .in('status', ['Completed', 'Pending'])
       .limit(1);
 
@@ -216,33 +243,29 @@ export async function submitFinal(
       };
     }
 
-    // 2. Check existing active/pending applications
-    const { data: existingApps } = await db
+    // 2. FIX 63: Direct SQL query across all non-rejected applications
+    const targetAppId = body.applicationId || uid;
+    const { data: dupApps } = await db
       .from('applications')
-      .select('application_id, form_data')
+      .select('application_id')
       .not('state', 'in', '("rejected","cancelled","expired")')
-      .limit(300);
+      .neq('application_id', targetAppId)
+      .or(`form_data->paymentInfo->>transactionId.ilike.${cleanTxId},form_data->paymentDetails->>transactionId.ilike.${cleanTxId},form_data->>transactionId.ilike.${cleanTxId},payment_info->>transactionId.ilike.${cleanTxId}`)
+      .limit(1);
 
-    if (existingApps) {
-      const isDup = existingApps.some(a => {
-        const fd = (a.form_data || {}) as any;
-        const tx = String(fd.transactionId || fd.paymentInfo?.paymentReference || '').trim().toLowerCase();
-        return tx === normalizedTx && a.application_id !== (body.applicationId || uid);
-      });
-      if (isDup) {
-        return {
-          success: false,
-          error: 'This bank transaction reference ID has already been used.',
-          status: 409,
-        };
-      }
+    if (dupApps && dupApps.length > 0) {
+      return {
+        success: false,
+        error: 'This bank transaction reference ID has already been used.',
+        status: 409,
+      };
     }
   }
 
   const currentYear = new Date().getFullYear();
   const startYear = Number(
     formData.sessionStartYear || formData.startYear || formData.session_start_year || formData.start_year ||
-    body.sessionStartYear || body.startYear || 0
+    body.sessionStartYear || body.startYear || currentYear
   );
 
   let appType: ApplicationType = (body.applicationType || body.application_type) as ApplicationType;

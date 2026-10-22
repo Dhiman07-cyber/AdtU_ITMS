@@ -17,7 +17,7 @@
  *   single source of "seat was released" (see capacity-flags.ts).
  */
 
-import { getAllBuses,updateBus } from '@/domains/fleet';
+import { getAllBuses, invalidateBusCache, updateBus } from '@/domains/fleet';
 import { getSeatOccupyingStudents,getUsersByRole } from '@/domains/identity';
 import { pgInsertNotification } from '@/domains/notification/repositories/notification.repository.pg';
 import { getShiftDeltas } from '@/lib/utils/shift-utils';
@@ -212,10 +212,23 @@ export async function adminReconcileBusLoads(options: ReconcileOptions = {}): Pr
     }
   }
 
+  const busesWithDiscrepancies = reports.filter((r) => r.hadDiscrepancy).length;
+  const busesCorrected = reports.filter((r) => r.corrected).length;
+
+  if (busesCorrected > 0 && !dryRun) {
+    try {
+      invalidateBusCache();
+      const { invalidateCapacityCache } = await import('@/app/api/buses/capacity/route');
+      invalidateCapacityCache();
+    } catch {
+      // cache invalidation is best-effort
+    }
+  }
+
   return {
     totalBuses: targetBuses.length,
-    busesWithDiscrepancies: reports.filter((r) => r.hadDiscrepancy).length,
-    busesCorrected: reports.filter((r) => r.corrected).length,
+    busesWithDiscrepancies,
+    busesCorrected,
     totalSeatsCounted,
     invalidShiftStudents: invalidShiftTotal,
     largeDeltaBuses,

@@ -199,6 +199,7 @@ export interface Application {
 
   // Supabase Ledger tracking
   paymentId?: string;
+  sessionStartYear?: number;
 
   // ── Phase 2: application categorisation & future-session eligibility ──
   /**

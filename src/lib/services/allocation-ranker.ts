@@ -48,15 +48,16 @@ export class AllocationRanker {
     // Students being reassigned have a specific shift — gate against that trip only.
     const studentShift = students.length > 0 ? students[0].shift : undefined;
     const shiftLoad = getShiftLoad(bus as any, studentShift);
-    const availableSeats = bus.capacity - shiftLoad;
+    const capacity = bus.capacity > 0 ? bus.capacity : 55;
+    const availableSeats = capacity - shiftLoad;
 
     // Calculate new load after reassignment (shift-specific)
     const newMemberCount = shiftLoad + students.length;
-    const newLoad = (newMemberCount / bus.capacity) * 100;
+    const newLoad = (newMemberCount / capacity) * 100;
 
     // 1. Seat Availability Score (0-1)
     const seatScore = availableSeats >= students.length
-      ? availableSeats / bus.capacity
+      ? availableSeats / capacity
       : 0;
 
     // 2. Stop Proximity Score (0-1)
@@ -179,21 +180,24 @@ export class AllocationRanker {
     );
     const targetShiftLoad = getShiftLoad(bus as any, 'Morning');
 
+    const sourceCap = sourceBus.capacity > 0 ? sourceBus.capacity : 55;
+    const targetCap = bus.capacity > 0 ? bus.capacity : 55;
+
     // Calculate current overload of source bus
     const sourceOverload = Math.max(
       0,
-      (sourceShiftLoad / sourceBus.capacity) - 0.9
+      (sourceShiftLoad / sourceCap) - 0.9
     );
 
     // Calculate reduction in overload after moving students
     const newSourceMembers = sourceShiftLoad - studentCount;
-    const newSourceLoad = newSourceMembers / sourceBus.capacity;
+    const newSourceLoad = newSourceMembers / sourceCap;
     const newSourceOverload = Math.max(0, newSourceLoad - 0.9);
 
     // Calculate increase in target bus load
-    const targetCurrentLoad = targetShiftLoad / bus.capacity;
+    const targetCurrentLoad = targetShiftLoad / targetCap;
     const targetNewMembers = targetShiftLoad + studentCount;
-    const targetNewLoad = targetNewMembers / bus.capacity;
+    const targetNewLoad = targetNewMembers / targetCap;
 
     // Penalize if target bus would become overloaded
     if (targetNewLoad > 0.9) {
@@ -309,7 +313,8 @@ export class AllocationRanker {
       // Use the larger of morning/evening as the representative load for metrics.
       const shiftLoad = getShiftLoad(bus as any, 'Morning');
       const newMembers = shiftLoad + change;
-      const load = (newMembers / bus.capacity) * 100;
+      const capacity = bus.capacity > 0 ? bus.capacity : 55;
+      const load = (newMembers / capacity) * 100;
 
       totalLoad += load;
       busCount++;
@@ -322,7 +327,7 @@ export class AllocationRanker {
     return {
       totalStudentsMoved: plans.length,
       busesAffected: busChanges.size,
-      averageLoadAfter: totalLoad / busCount,
+      averageLoadAfter: busCount > 0 ? totalLoad / busCount : 0,
       overloadedBusesAfter: overloadedCount
     };
   }

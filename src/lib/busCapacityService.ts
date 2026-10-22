@@ -302,7 +302,8 @@ export async function validateAndSuggestBus(params: {
 }> {
   try {
     const { routeId, stop_name, shift } = params;
-    const busId = routeId.replace('route_', 'bus_');
+    const assignedBuses = await fleetService.getBusesByRouteId(routeId);
+    const busId = assignedBuses[0]?.id || (routeId.startsWith('route_') ? routeId.replace('route_', 'bus_') : routeId);
 
     const capacityCheck = await checkBusCapacity(busId, shift);
 

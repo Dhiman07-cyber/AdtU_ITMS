@@ -40,13 +40,22 @@ export async function findAlternatives(
   const allBuses = preFetchedBuses || await fleetService.getAllBuses();
   const allRoutes = preFetchedRoutes || await routeService.getAll();
 
+  const targetStop = (typeof stop_name === 'string' ? stop_name : (stop_name as any)?.name || (stop_name as any)?.stop_name || '').toLowerCase().trim();
+  if (!targetStop) {
+    return {
+      success: false,
+      message: 'No stop name provided to find alternative buses.',
+      adminAlert: false,
+    };
+  }
+
   const matchingRouteIds = allRoutes
     .filter(route => {
       const stops = route.stops || [];
       return stops.some((stop: any) => {
-        const id = (stop.stop_name || stop.id || stop.name || '').toLowerCase().trim();
-        const name = (stop.name || '').toLowerCase().trim();
-        return id === stop_name.toLowerCase().trim() || name === stop_name.toLowerCase().trim();
+        const id = (stop.stop_name || stop.id || stop.name || stop.stopName || '').toLowerCase().trim();
+        const name = (stop.name || stop.stopName || '').toLowerCase().trim();
+        return id === targetStop || name === targetStop;
       });
     })
     .map(route => route.routeId || route.id)

@@ -217,6 +217,21 @@ export const POST = withSecurity<ReassignStudentsBody>(
                 console.warn('[reassign-students] Post-reassign cache invalidation warning:', cacheErr);
             }
 
+            try {
+                const { invalidateBusTripSnapshot } = await import('@/lib/services/trip-snapshot-cache');
+                for (const bId of busIdsToLoad) {
+                    invalidateBusTripSnapshot(bId);
+                }
+            } catch (tripSnapErr) {
+                console.warn('[reassign-students] Bus snapshot invalidation warning:', tripSnapErr);
+            }
+            try {
+                const { invalidateCapacityRouteCache } = await import('@/app/api/buses/capacity/route');
+                invalidateCapacityRouteCache();
+            } catch (capErr) {
+                console.warn('[reassign-students] Capacity cache invalidation warning:', capErr);
+            }
+
             // ── Phase 4: PostgreSQL student profile updates (now handled by RPC) ──
             // The RPC already updated student_profiles (bus_id, route_id, shift).
             // No further student updates needed here.

@@ -140,6 +140,14 @@ function pgApplicationToRow(data: Partial<Application>): Record<string, any> {
     }
   }
 
+  // FIX 26: Always populate session_start_year on applications rows
+  if (row.session_start_year === undefined || row.session_start_year === null) {
+    const fd = (data.formData || {}) as any;
+    const ts = (data.targetSession || fd.sessionInfo || {}) as any;
+    const sy = data.sessionStartYear || ts.startYear || ts.sessionStartYear || fd.sessionStartYear || fd.startYear;
+    row.session_start_year = sy ? Number(sy) : new Date().getUTCFullYear();
+  }
+
   return row;
 }
 

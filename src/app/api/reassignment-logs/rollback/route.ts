@@ -310,6 +310,18 @@ export const POST = withSecurity(
                 }
             }
             invalidateBusCache();
+            try {
+                const { invalidateCapacityRouteCache } = await import('@/app/api/buses/capacity/route');
+                invalidateCapacityRouteCache();
+            } catch (capErr) {
+                console.warn('[reassignment-logs/rollback] Capacity cache invalidation warning:', capErr);
+            }
+            try {
+                const { invalidateBusTripSnapshot } = await import('@/lib/services/trip-snapshot-cache');
+                invalidateBusTripSnapshot();
+            } catch (snapErr) {
+                console.warn('[reassignment-logs/rollback] Snapshot cache invalidation warning:', snapErr);
+            }
         } catch (err: unknown) {
             const message = err instanceof RollbackConflictError
                 ? err.message

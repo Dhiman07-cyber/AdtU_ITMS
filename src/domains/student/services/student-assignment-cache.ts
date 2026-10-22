@@ -19,6 +19,7 @@
 import { getSupabaseServer } from '@/lib/supabase-server';
 import { executeGpsRedisCommand } from '@/domains/gps/services/gps-redis-guard';
 import { publishRoleInvalidation } from '@/lib/security/role-cache-redis';
+import { getBusIdVariations } from '@/lib/utils';
 
 export interface CachedStudentAssignment {
   uid: string;
@@ -83,6 +84,10 @@ export async function getCachedStudentAssignment(rawUid: string): Promise<Cached
               data: parsed,
               expiresAtMs: Date.now() + L1_TTL_MS,
             });
+            if (assignmentL1Cache.size > MAX_L1_ENTRIES) {
+              const oldestKey = assignmentL1Cache.keys().next().value;
+              if (oldestKey) assignmentL1Cache.delete(oldestKey);
+            }
             return parsed;
           }
         }
@@ -94,7 +99,7 @@ export async function getCachedStudentAssignment(rawUid: string): Promise<Cached
       const supabase = getSupabaseServer();
       const { data, error } = await supabase
         .from('student_profiles')
-        .select('uid, full_name, enrollment_id, gender, profile_photo_url, bus_id, route_id, shift, stop_name, status, soft_block, valid_until, hard_block')
+        .select('*')
         .or(`uid.eq.${uid},enrollment_id.eq.${uid}`)
         .maybeSingle();
 
@@ -183,8 +188,11 @@ export async function cancelStudentActiveWaitingFlags(
 
     for (const flag of activeFlags) {
       if (flag.bus_id) {
-        await removeRedisActiveFlag(flag.bus_id, flag.id).catch(() => {});
-        invalidateBusTripSnapshot(flag.bus_id);
+        const busVars = getBusIdVariations(flag.bus_id);
+        for (const v of (busVars.length > 0 ? busVars : [flag.bus_id])) {
+          await removeRedisActiveFlag(v, flag.id).catch(() => {});
+          invalidateBusTripSnapshot(v);
+        }
         emitEvent(`waiting_flags_${flag.bus_id}`, 'waiting_flag_removed', {
           flagId: flag.id,
           studentUid: uid,

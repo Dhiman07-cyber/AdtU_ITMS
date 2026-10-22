@@ -91,7 +91,8 @@ const STUDENT_FIELD_MAP: Record<string, string> = {
   updatedAt: 'updated_at',
 };
 
-const PG_STUDENT_COLUMNS = 'uid, email, full_name, phone, alt_phone, parent_name, parent_phone, faculty, department, gender, dob, enrollment_id, blood_group, address, profile_photo_url, bus_id, route_id, stop_name, shift, status, session_duration, session_start_year, session_end_year, semester, valid_until, soft_block, hard_block, approved_by, approved_at, last_processed_application_id, seat_released_at, pending_profile_update, expiry_reminder_count, last_expiry_reminder_sent_at, created_at, updated_at';
+// FIX 20: Use '*' for resilient queries across evolving DB schemas
+const PG_STUDENT_COLUMNS = '*';
 
 // ─── Mappers ─────────────────────────────────────────────────────────────────
 

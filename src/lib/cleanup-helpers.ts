@@ -328,6 +328,9 @@ export async function deleteBusAndData(
         fleetService.invalidateBusCache(bVar);
         invalidateBusTripSnapshot(bVar);
       }
+      fleetService.invalidateBusCache();
+      const { invalidateCapacityRouteCache } = await import('@/app/api/buses/capacity/route');
+      invalidateCapacityRouteCache();
       console.log('Deleted bus from PostgreSQL:', busId);
     } catch (pgBusErr) {
       console.error('Error deleting bus from PostgreSQL:', pgBusErr);
@@ -360,6 +363,8 @@ export async function deleteRouteAndData(
     const { invalidateRouteCache } = await import('@/domains/route');
     invalidateRouteCache(routeId);
     fleetService.invalidateBusCache();
+    const { invalidateCapacityRouteCache } = await import('@/app/api/buses/capacity/route');
+    invalidateCapacityRouteCache();
 
     console.log(`Route ${routeId} deleted: ${data.busesCleaned} buses, ${data.studentsCleaned} students cleaned`);
     return { success: true };
